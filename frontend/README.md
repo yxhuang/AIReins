@@ -41,7 +41,8 @@ frontend/
     useStore.ts         useSyncExternalStore 订阅 hook
     App.tsx             布局骨架、hash 路由、错误提示条
     components/
-      Sidebar.tsx       会话列表（身份色脊 / 状态点 / 闸门徽标）+ 新建会话表单
+      Sidebar.tsx       会话列表（身份色脊 / 状态点 / 闸门徽标）+ 新建会话表单 + 底部设置入口
+      SettingsMenu.tsx  设置齿轮 + 锚定浮层（分组/条目结构）；主题三选一写 <html data-theme>、localStorage 持久化（读写均 try/catch）
       SessionView.tsx   会话头（usage 分家渲染 / 中断）+ 事件流 + 输入框 + 未决闸门贴条
       StreamItems.tsx   用户消息 / 文本块 / 思考折叠块 / 工具卡片 / 闸门块 / 系统行
     styles.css          设计令牌（深浅两套）与全部样式
@@ -98,6 +99,20 @@ frontend/
 - [x] **18. 主题换 Claude 网页版风格底色。** 浅色象牙白 `#FAF9F5` / 深色暖深灰 `#1F1E1D`（非纯黑），深浅两套令牌整体替换（`--ok/--dead/--busy/--danger/--diff-*` 与字体栈不动）；claude 珊瑚橙作文字一律用 `-ink` 变体（浅 `#A8471F` / 深 `#E08B6F`，原色在象牙白上对比度仅 2.96），命中 `.new-agent.agent-claude.selected` 与会话头/会话行的 `.agent-name`，身份脊与选中边框保留原色；未决 `.gate-block` 边框加粗为 `2px solid var(--gate-border)`（已处理/失效态维持 1px；相邻块各有 10px 间隔、不共边，无需补偿对齐）。证据：构建 + 双 tsc 通过；配色视觉效果未在浏览器人工确认。
 - [x] **19. 左栏会话行压成两行 ≤44px。** 第 1 行标题（14px / `--text` / 单行省略）+ 待审批徽标钉最右（`margin-left: auto`、`flex: 0 0 auto`）；第 2 行 `agent · 状态 · 相对时间`（12px / `--text-muted`），状态点保留行首；删除独立 row-status 行。盒模型：padding 4 + 标题行 line-height 18 + 行距 margin-top 2 + 元信息行 line-height 16 + padding 4 = **44px**（3px 身份脊是水平边，不占高度）。3px 身份脊、dead 行 opacity 0.55、active/hover 背景、收起态总徽标逻辑不变。证据：构建 + 双 tsc 通过；视觉未人工确认。
 - [x] **20. 会话标题派生规则收紧。** `sessionTitle`：`\s+` 压成单空格后 trim；按显示宽度截断（CJK/全角计 2、其余计 1，上限 30，超出加 `…`）；首条 user_message 未到时返回占位「新会话」，不再用 cwd + 短 id 兜底。证据：tsx 单测 8 例（无事件 / 空事件 / 纯空白 / 换行压缩 / 40 个 ASCII / 20 个汉字 / 短标题 / 中英混合）输出全部符合预期；构建 + 双 tsc 通过。
+
+### M3 设置入口与主题切换（2026-08-21）
+
+左栏底部固定区新增设置齿轮（内联 SVG 自画，无图标库），点击弹出锚定在按钮上方的非模态浮层：「外观」组 →「主题」条目，三选一「跟随系统 / 浅色 / 深色」，默认跟随系统。主题写 `<html data-theme>`（跟随系统 = 移除该属性），localStorage key `workbench-theme` 持久化（读写均 try/catch）；`index.html` `<head>` 顶部内联脚本在样式生效前先打 `data-theme` 防首屏闪烁。CSS 三态：浅色令牌留在 `:root`；原 `@media (prefers-color-scheme: dark)` 块内选择器改为 `:root:not([data-theme="light"])`；另增 `:root[data-theme="dark"]` 块。深色令牌在两处**逐字重复**（块间注释要求同步改），理由：纯 CSS 无法用一条规则同时表达「媒体查询命中」与「属性选择器命中」两个条件，又不想引入构建期处理；两份内容已用脚本校验逐字一致。
+
+- [x] **21. 三态可切且立即生效。** React state → `document.documentElement` 属性操作，不刷新页面。证据：代码复核（`SettingsMenu.tsx` 的 `applyTheme`/`chooseTheme`）+ 构建通过；浏览器端未人工确认。
+- [x] **22. 系统深色 + 用户选浅色 → 界面浅色（选择器层面复核）。** 系统深色时命中 `@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) }`，用户选浅色后 `<html>` 带 `data-theme="light"`，`:not(...)` 不再命中，回落 `:root` 浅色令牌；`:root[data-theme="dark"]` 也不命中。证据：CSS 选择器层面复核；两份深色令牌内容经脚本比对逐字一致（IDENTICAL）。
+- [x] **23. 刷新保持选择；localStorage 不可用不白屏。** 读写两处均 try/catch，读不到一律按「跟随系统」渲染（移除 `data-theme`）。证据：代码复核；隐私模式未实测。
+- [x] **24. 首屏无闪烁。** `index.html` 内联脚本位于 `<head>` 最前（构建后产物中确认仍排在 CSS `<link>` 之前），同步执行、在样式生效前设置 `data-theme`。证据：构建产物 `frontend/dist/index.html` 人工核对；未启浏览器实测。
+- [x] **25. 收起态齿轮可见可点。** 底部区在 `!collapsed` 条件块之外渲染，52px 收起态下居中显示图标。证据：代码复核 + 构建通过；视觉未人工确认。
+- [x] **26. Esc 关面板、焦点回齿轮。** 打开时焦点进面板第一个控件；Esc 或点浮层外关闭（齿轮在容器内，`pointerdown` 目标判断不会与齿轮自身 click 打架）；关闭后焦点回齿轮按钮；`prefers-reduced-motion: reduce` 时浮层无动画；所有可聚焦元素走全局 `:focus-visible` 描边。证据：代码复核；未人工过键盘流。
+- [x] **27. 构建与类型检查全绿。** 实测：`npm run build`（vite 8.2.2，25 modules，无警告退出码 0）、`npx tsc --noEmit -p frontend` 与根 `npx tsc --noEmit` 均退出码 0。
+
+已知取舍（本轮新增）：浮层宽度固定 224px、只向上展开，后续条目变多时需要加 `max-height` + 滚动；`role="radiogroup"` 未实现方向键在选项间移动的完整 radio 键盘模式（Tab 可达各选项）。
 
 ## 已知取舍
 

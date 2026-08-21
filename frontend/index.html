@@ -2,6 +2,16 @@
 <html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
+    <script>
+      /* 首屏防闪烁：在样式生效前把已保存的主题打到 <html data-theme>；
+         隐私模式下 localStorage 访问器会抛异常，脚本整体 try/catch，失败按跟随系统。 */
+      try {
+        var t = localStorage.getItem("workbench-theme");
+        if (t === "light" || t === "dark") {
+          document.documentElement.setAttribute("data-theme", t);
+        }
+      } catch (e) { /* 按跟随系统渲染 */ }
+    </script>
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>workbench</title>
   </head>

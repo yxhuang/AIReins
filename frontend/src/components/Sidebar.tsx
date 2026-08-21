@@ -3,6 +3,7 @@ import type { AgentKind } from "../types";
 import { relativeTime, sessionTitle } from "../format";
 import { store } from "../store";
 import { useStore } from "../useStore";
+import { SettingsMenu } from "./SettingsMenu";
 
 const AGENT_LABELS: Record<AgentKind, string> = {
   claude: "claude",
@@ -101,6 +102,9 @@ export function Sidebar({ collapsed, onToggle, newOpen, onNewOpenChange }: Sideb
           </ul>
         </>
       )}
+      <div className="sidebar-foot">
+        <SettingsMenu />
+      </div>
     </aside>
   );
 }

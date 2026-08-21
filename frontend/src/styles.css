@@ -43,8 +43,12 @@
                "Noto Sans Mono CJK SC", monospace;
 }
 
+/* 深色令牌出现两处，内容必须逐字保持一致（改一处务必同步另一处）：
+   1) 系统深色且用户未显式选浅色 → 跟随系统生效；
+   2) 用户显式选深色（data-theme="dark"）→ 任何系统设置下生效。
+   用户显式选浅色（data-theme="light"）时两处都不命中，回落到上方 :root 浅色令牌。 */
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     --bg:               #1F1E1D;
     --surface:          #262624;
     --surface-sunk:     #191817;
@@ -72,6 +76,36 @@
     --diff-del:    #D9708A;
     --diff-del-bg: #291720;
   }
+}
+
+/* 与上方 @media 块内的深色令牌逐字一致，两处必须同步改 */
+:root[data-theme="dark"] {
+  --bg:               #1F1E1D;
+  --surface:          #262624;
+  --surface-sunk:     #191817;
+  --border:           #3A3936;
+  --border-strong:    #55534E;
+  --text:             #F2F0EA;
+  --text-muted:       #A8A59D;
+  --text-faint:       #8C8981;
+  --agent-claude:     #E08B6F;
+  --agent-claude-ink: #EDA88E;   /* 比身份脊亮 1.35×，让文字与色脊分层 */
+  --agent-codex:      #2BC49C;
+  --agent-codex-ink:  #2BC49C;
+  --agent-kimi:       #5AA9FF;
+  --agent-kimi-ink:   #5AA9FF;
+  --gate:             #F2B32C;
+  --gate-bg:          #3A2E10;
+  --gate-border:      #8A6A1C;
+  --gate-on:          #1A1204;
+  --ok:      #2BA88C;
+  --dead:    #78829A;
+  --busy:    #4FA8D0;
+  --danger:  #EE7093;
+  --diff-add:    #2BA88C;
+  --diff-add-bg: #14251F;
+  --diff-del:    #D9708A;
+  --diff-del-bg: #291720;
 }
 
 * { box-sizing: border-box; }
@@ -743,7 +777,94 @@ body {
   white-space: nowrap;
 }
 
-/* 减少动态：关光标闪烁与徽标脉冲 */
+/* ── 设置入口与浮层 ─────────────────────────── */
+.sidebar-foot {
+  margin-top: auto; /* 顶住左栏底部 */
+  display: flex;
+}
+
+.app.sidebar-collapsed .sidebar-foot { justify-content: center; }
+
+.settings { position: relative; }
+
+.settings-gear {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-muted);
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.settings-gear:hover {
+  color: var(--text);
+  background: var(--surface-sunk);
+}
+
+/* 锚定在齿轮按钮上方的浮层（非模态） */
+.settings-panel {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 0;
+  z-index: 20;
+  width: 224px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px 12px;
+  box-shadow: 0 6px 24px rgb(0 0 0 / 0.14);
+  animation: settings-pop 0.12s ease-out;
+}
+
+@keyframes settings-pop {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.settings-group-title {
+  margin: 0 0 8px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--text-faint);
+}
+
+.settings-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.settings-item-label {
+  font-size: 12.5px;
+  color: var(--text-muted);
+}
+
+.settings-options { display: flex; gap: 6px; }
+
+.settings-option {
+  flex: 1;
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  color: var(--text);
+  border-radius: 8px;
+  padding: 5px 0;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+/* 选中态用冷色 --busy：面板不用暖色（配色不变量） */
+.settings-option.selected {
+  border-color: var(--busy);
+  color: var(--busy);
+  box-shadow: inset 0 0 0 1px var(--busy);
+}
+
+/* 减少动态：关光标闪烁、徽标脉冲与设置浮层动画 */
 @media (prefers-reduced-motion: reduce) {
-  .cursor, .gate-badge { animation: none; }
+  .cursor, .gate-badge, .settings-panel { animation: none; }
 }
