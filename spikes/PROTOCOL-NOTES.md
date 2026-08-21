@@ -423,6 +423,22 @@ client 返回 `{"jsonrpc":"2.0","id":1,"result":{"terminalId":"m0-1787301167715"
 2. `session/new` 的 params 没有 permission/approval 字段；模式通过 `session/set_mode` 控制，而且 0.38.0 存在“返回 default 但未显式 set_mode 时仍直达 terminal/create”的实测差异。
 3. **Workbench 的真正安全边界必须在 client 提供的 `terminal/create`（以及 `fs/write_text_file`）处再做一次审批/白名单拦截，绝不能只等待 `session/request_permission`。** 否则 auto、未显式激活 default 或 agent 的能力回退路径都会绕过 UI 审批。
 
+### ⚠️ 病因补充（主会话 2026-08-21 事后查明）
+
+上表「不显式 set_mode 就直奔 terminal/create」**不是 kimi 的怪癖，是本机配置**：
+`~/.kimi-code/config.toml` 第 1 行 `default_permission_mode = "yolo"`。
+ACP 会话继承该默认值，因此不显式 `session/set_mode` 就没有标准权限请求。
+
+这让结论 3 的分量变得更重，而不是更轻：
+
+- 在**这台机器上**，workbench 若不显式 set_mode 且不拦 `terminal/create`，
+  开出来的 kimi 会话就是**全自动执行、UI 永远弹不出审批卡片**。
+- 因此 M1 的 kimi driver 有两条硬性要求：
+  1. 每个会话建好后**显式** `session/set_mode`，绝不读 `session/new` 的返回值就算数；
+  2. `terminal/create` 与 `fs/write_text_file` 作为**不可绕过的最终闸门**再拦一道。
+
+参照笔记见 `docs/kimi-web-reference.md`。
+
 ### usage/token 样本
 
 ```json
