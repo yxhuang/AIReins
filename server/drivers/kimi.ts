@@ -1,12 +1,16 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { basename } from "node:path";
+import { pathToFileURL } from "node:url";
 import type {
   ConfigOptionId,
   DriverConfigSchema,
   PermissionDecision,
   SessionConfig,
+  UnifiedCommand,
+  UserMessageInput,
 } from "../types.js";
-import { BaseDriver, errorMessage, parseJsonLine, withTimeout } from "./base.js";
+import { BaseDriver, errorMessage, parseJsonLine, readMentionText, userMessageText, withTimeout } from "./base.js";
 import { StdioRpcProbe } from "./rpc-probe.js";
 
 interface PendingRpc {
@@ -162,12 +166,26 @@ export class KimiDriver extends BaseDriver {
     return current;
   }
 
-  async sendUserMessage(text: string): Promise<void> {
+  async sendUserMessage(message: UserMessageInput): Promise<void> {
     if (!this.nativeSessionId) throw new Error("Kimi session 尚未就绪");
+    const prompt: Record<string, unknown>[] = [];
+    const text = userMessageText(message);
+    if (text) prompt.push({ type: "text", text });
+    for (const mention of message.mentions ?? []) {
+      prompt.push({
+        type: "resource",
+        resource: {
+          uri: pathToFileURL(mention.path).href,
+          mimeType: "text/plain",
+          text: readMentionText(mention),
+          _meta: { name: mention.name ?? basename(mention.path) },
+        },
+      });
+    }
     this.callbacks.status("running");
     void this.request("session/prompt", {
       sessionId: this.nativeSessionId,
-      prompt: [{ type: "text", text }],
+      prompt,
     }).then((result) => {
       this.callbacks.emit("turn_completed", {
         stopReason: result?.stopReason,
@@ -480,8 +498,13 @@ export class KimiDriver extends BaseDriver {
       this.callbacks.emit("usage_updated", { used: update.used, size: update.size });
       return;
     }
+    if (type === "available_commands_update") {
+      const commands = this.normalizeCommands(update.availableCommands);
+      this.callbacks.commands(commands);
+      return;
+    }
     const quiet = new Set([
-      "available_commands_update", "session_info_update",
+      "session_info_update",
     ]);
     if (!quiet.has(type)) this.callbacks.emit("raw_event", { source: "kimi", update });
   }
@@ -530,5 +553,22 @@ export class KimiDriver extends BaseDriver {
     return updatedInput && typeof updatedInput === "object"
       ? { ...original, ...updatedInput as Record<string, any> }
       : original;
+  }
+
+  private normalizeCommands(value: unknown): UnifiedCommand[] {
+    if (!Array.isArray(value)) return [];
+    return value.flatMap((command): UnifiedCommand[] => {
+      if (!command || typeof command !== "object") return [];
+      const item = command as Record<string, any>;
+      if (typeof item.name !== "string" || !item.name) return [];
+      return [{
+        name: item.name.replace(/^\/+/, ""),
+        description: typeof item.description === "string" ? item.description : "",
+        ...(typeof item.input?.hint === "string" && item.input.hint
+          ? { argHint: item.input.hint }
+          : {}),
+        source: "kimi",
+      }];
+    });
   }
 }

@@ -1,11 +1,14 @@
 import { randomUUID } from "node:crypto";
+import { basename } from "node:path";
 import type {
   DriverConfigSchema,
   DriverOptions,
   PermissionDecision,
   SessionConfig,
+  UnifiedCommand,
+  UserMessageInput,
 } from "../types.js";
-import { BaseDriver, parseJsonLine, withTimeout } from "./base.js";
+import { BaseDriver, parseJsonLine, readMentionText, userMessageText, withTimeout } from "./base.js";
 
 interface ClaudePermission {
   protocolRequestId: string;
@@ -15,6 +18,11 @@ interface ClaudePermission {
 interface PendingConfigRequest {
   mode: string;
   resolve(config: SessionConfig): void;
+  reject(error: Error): void;
+}
+
+interface PendingCommandRequest {
+  resolve(commands: UnifiedCommand[]): void;
   reject(error: Error): void;
 }
 
@@ -65,7 +73,10 @@ export class ClaudeDriver extends BaseDriver {
   readonly kind = "claude" as const;
   private readonly pendingPermissions = new Map<string, ClaudePermission>();
   private readonly pendingConfigRequests = new Map<string, PendingConfigRequest>();
+  private readonly pendingCommandRequests = new Map<string, PendingCommandRequest>();
   private readonly toolBlocks = new Map<number, { id: string; name: string; partialInput: string }>();
+  private commands: UnifiedCommand[] = [];
+  private refreshingCommands?: Promise<void>;
 
   async start(): Promise<void> {
     this.config = {
@@ -91,6 +102,14 @@ export class ClaudeDriver extends BaseDriver {
     const env = { ...process.env };
     delete env.CLAUDE_CODE_ENTRYPOINT;
     this.spawnProcess("claude", args, { env });
+    try {
+      await this.refreshCommands();
+    } catch (error) {
+      this.callbacks.emit("raw_event", {
+        source: "claude",
+        warning: `无法枚举 Claude 命令：${error instanceof Error ? error.message : String(error)}`,
+      });
+    }
     this.callbacks.metadata({ config: { ...this.config } });
     this.callbacks.status("idle");
   }
@@ -129,11 +148,25 @@ export class ClaudeDriver extends BaseDriver {
     }
   }
 
-  async sendUserMessage(text: string): Promise<void> {
+  async sendUserMessage(message: UserMessageInput): Promise<void> {
+    const content: Record<string, unknown>[] = [];
+    const text = userMessageText(message);
+    if (text) content.push({ type: "text", text });
+    for (const mention of message.mentions ?? []) {
+      content.push({
+        type: "document",
+        source: {
+          type: "text",
+          media_type: "text/plain",
+          data: readMentionText(mention),
+        },
+        title: mention.name ?? basename(mention.path),
+      });
+    }
     this.callbacks.status("running");
     this.send({
       type: "user",
-      message: { role: "user", content: [{ type: "text", text }] },
+      message: { role: "user", content },
     });
   }
 
@@ -183,6 +216,17 @@ export class ClaudeDriver extends BaseDriver {
         nativeSessionId: typeof message.session_id === "string" ? message.session_id : undefined,
         config: { ...this.config },
       });
+      if (this.commands.length === 0 && Array.isArray(message.slash_commands)) {
+        this.updateCommands(message.slash_commands.map((name: unknown) => ({ name })));
+      }
+      return;
+    }
+
+    if (message.type === "system" && message.subtype === "commands_changed") {
+      void this.refreshCommands().catch((error) => this.callbacks.emit("raw_event", {
+        source: "claude",
+        warning: `Claude 命令表刷新失败：${error instanceof Error ? error.message : String(error)}`,
+      }));
       return;
     }
 
@@ -199,6 +243,17 @@ export class ClaudeDriver extends BaseDriver {
           pending.resolve(current);
         } else {
           pending.reject(new Error(message.response?.error ?? "Claude set_permission_mode 失败"));
+        }
+        return;
+      }
+      const pendingCommands = this.pendingCommandRequests.get(requestId);
+      if (pendingCommands) {
+        this.pendingCommandRequests.delete(requestId);
+        if (message.response?.subtype === "success") {
+          const commands = this.normalizeCommands(message.response?.response?.commands);
+          pendingCommands.resolve(commands);
+        } else {
+          pendingCommands.reject(new Error(message.response?.error ?? "Claude initialize control_request 失败"));
         }
         return;
       }
@@ -316,5 +371,53 @@ export class ClaudeDriver extends BaseDriver {
         throw new Error(`Claude ${id} 不合法：${value}`);
       }
     }
+  }
+
+  private async refreshCommands(): Promise<void> {
+    if (this.refreshingCommands) return await this.refreshingCommands;
+    this.refreshingCommands = (async () => {
+      const requestId = randomUUID();
+      const result = new Promise<UnifiedCommand[]>((resolve, reject) => {
+        this.pendingCommandRequests.set(requestId, { resolve, reject });
+        this.send({
+          type: "control_request",
+          request_id: requestId,
+          request: { subtype: "initialize" },
+        });
+      });
+      try {
+        this.updateCommands(await withTimeout(result, 15_000, "Claude command initialize"));
+      } finally {
+        this.pendingCommandRequests.delete(requestId);
+      }
+    })();
+    try {
+      await this.refreshingCommands;
+    } finally {
+      this.refreshingCommands = undefined;
+    }
+  }
+
+  private normalizeCommands(value: unknown): UnifiedCommand[] {
+    if (!Array.isArray(value)) return [];
+    return value.flatMap((command): UnifiedCommand[] => {
+      if (!command || typeof command !== "object") return [];
+      const item = command as Record<string, unknown>;
+      if (typeof item.name !== "string" || !item.name) return [];
+      return [{
+        name: item.name.replace(/^\/+/, ""),
+        description: typeof item.description === "string" ? item.description : "",
+        ...(typeof item.argumentHint === "string" && item.argumentHint
+          ? { argHint: item.argumentHint }
+          : {}),
+        source: "claude",
+      }];
+    });
+  }
+
+  private updateCommands(value: unknown): void {
+    const commands = this.normalizeCommands(value);
+    this.commands = commands;
+    this.callbacks.commands(commands);
   }
 }

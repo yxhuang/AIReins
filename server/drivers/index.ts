@@ -14,6 +14,8 @@ export const DRIVER_CAPABILITIES: Record<AgentKind, DriverCapabilities> = {
     usage: "detailed",
     interrupt: true,
     resume: true,
+    commands: true,
+    mentions: true,
   },
   codex: {
     streaming: true,
@@ -25,6 +27,8 @@ export const DRIVER_CAPABILITIES: Record<AgentKind, DriverCapabilities> = {
     usage: "detailed",
     interrupt: true,
     resume: true,
+    commands: false,
+    mentions: true,
   },
   kimi: {
     streaming: true,
@@ -36,6 +40,8 @@ export const DRIVER_CAPABILITIES: Record<AgentKind, DriverCapabilities> = {
     usage: "context",
     interrupt: true,
     resume: true,
+    commands: true,
+    mentions: true,
     terminal: true,
     fsWrite: true,
     finalApprovalGates: ["terminal/create", "fs/write_text_file"],

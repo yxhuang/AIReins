@@ -1,6 +1,6 @@
 import { statSync } from "node:fs";
 import { isAbsolute, resolve } from "node:path";
-import { createDriver } from "./drivers/index.js";
+import { createDriver, DRIVER_CAPABILITIES } from "./drivers/index.js";
 import {
   cleanSessionConfig,
   configFromCreateInput,
@@ -22,7 +22,9 @@ import type {
   SessionConfig,
   SessionRecord,
   SessionStatus,
+  UnifiedCommand,
   UnifiedEvent,
+  UserMessageInput,
 } from "./types.js";
 import { ulid } from "./ulid.js";
 
@@ -32,6 +34,7 @@ export class SessionManager {
   private readonly sessions = new Map<string, SessionRecord>();
   private readonly workers = new Map<string, Driver>();
   private readonly rings = new Map<string, UnifiedEvent[]>();
+  private readonly commands = new Map<string, UnifiedCommand[]>();
   private readonly listeners = new Set<(event: UnifiedEvent) => void>();
 
   constructor() {
@@ -56,6 +59,7 @@ export class SessionManager {
         riskyMode: isRiskyConfig(stored.agent, config),
       });
       this.rings.set(stored.id, events.slice(-RING_SIZE));
+      this.commands.set(stored.id, []);
     }
     if (loaded.length > 0) this.persistRegistry();
   }
@@ -69,6 +73,11 @@ export class SessionManager {
   get(id: string): SessionRecord | undefined {
     const session = this.sessions.get(id);
     return session ? { ...session, config: { ...session.config } } : undefined;
+  }
+
+  getCommands(id: string): UnifiedCommand[] | undefined {
+    if (!this.sessions.has(id)) return undefined;
+    return (this.commands.get(id) ?? []).map((command) => ({ ...command }));
   }
 
   getSnapshot(id: string): { session: SessionRecord; seq: number; events: UnifiedEvent[] } | undefined {
@@ -119,6 +128,7 @@ export class SessionManager {
     };
     this.sessions.set(id, record);
     this.rings.set(id, []);
+    this.commands.set(id, []);
     this.persistRegistry();
     this.emit(id, "session_created", {
       agent: input.agent,
@@ -144,6 +154,12 @@ export class SessionManager {
         if (pid) current.processId = pid;
         this.persistRegistry();
       },
+      commands: (commands: UnifiedCommand[]) => {
+        if (!this.sessions.has(id)) return;
+        const current = commands.map((command) => ({ ...command }));
+        this.commands.set(id, current);
+        this.emit(id, "commands_updated", { commands: current });
+      },
       status: (status: SessionStatus) => this.setStatus(id, status),
       exited: (info: { code: number | null; signal: NodeJS.Signals | null; expected: boolean }) => {
         if (!this.sessions.has(id)) return;
@@ -164,7 +180,7 @@ export class SessionManager {
       await worker.start();
       record.processId = worker.child?.pid;
       this.persistRegistry();
-      if (input.initialMessage) await this.sendUserMessage(id, input.initialMessage);
+      if (input.initialMessage) await this.sendUserMessage(id, { text: input.initialMessage });
       return { ...record, config: { ...record.config } };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -176,11 +192,15 @@ export class SessionManager {
     }
   }
 
-  async sendUserMessage(id: string, text: string): Promise<void> {
-    if (!text.trim()) throw new Error("user_message.text 不能为空");
+  async sendUserMessage(id: string, input: UserMessageInput): Promise<void> {
     const worker = this.requireWorker(id);
-    await worker.sendUserMessage(text);
-    this.emit(id, "user_message", { text });
+    const message = this.normalizeUserMessage(id, input);
+    await worker.sendUserMessage(message);
+    this.emit(id, "user_message", {
+      ...(message.text !== undefined ? { text: message.text } : {}),
+      ...(message.command ? { command: message.command } : {}),
+      ...(message.mentions?.length ? { mentions: message.mentions } : {}),
+    });
   }
 
   async resolvePermission(
@@ -236,6 +256,7 @@ export class SessionManager {
     this.workers.delete(id);
     this.sessions.delete(id);
     this.rings.delete(id);
+    this.commands.delete(id);
     this.persistRegistry();
     return { ...record, status: "dead", processId: undefined };
   }
@@ -306,6 +327,47 @@ export class SessionManager {
     if (!cwd || !isAbsolute(cwd)) throw new Error("cwd 必须是绝对路径");
     const stats = statSync(cwd);
     if (!stats.isDirectory()) throw new Error("cwd 必须指向目录");
+  }
+
+  private normalizeUserMessage(id: string, input: UserMessageInput): UserMessageInput {
+    const session = this.sessions.get(id);
+    if (!session) throw new Error(`会话不存在：${id}`);
+    const capabilities = DRIVER_CAPABILITIES[session.agent];
+    if (input.command && !capabilities.commands) {
+      throw new Error(`${session.agent} driver 不支持斜杠命令`);
+    }
+    if ((input.mentions?.length ?? 0) > 0 && !capabilities.mentions) {
+      throw new Error(`${session.agent} driver 不支持 @ 引用`);
+    }
+    const text = input.text?.trim() ? input.text : undefined;
+    let command = input.command;
+    if (command) {
+      const name = command.name.replace(/^\/+/, "").trim();
+      if (!name || /\s/.test(name)) throw new Error("command.name 必须是不含空白的命令名");
+      command = {
+        name,
+        ...(command.arguments?.trim() ? { arguments: command.arguments.trim() } : {}),
+      };
+    }
+    const mentions = (input.mentions ?? []).map((mention) => {
+      const path = resolve(session.cwd, mention.path);
+      const stats = statSync(path);
+      if (!stats.isFile()) throw new Error(`引用路径不是文件：${path}`);
+      return {
+        type: "file" as const,
+        path,
+        ...(mention.name ? { name: mention.name } : {}),
+      };
+    });
+    if (!text && !command && mentions.length === 0) {
+      throw new Error("user_message 至少需要 text、command 或 mentions 之一");
+    }
+    if (text && command) throw new Error("user_message.text 与 command 不能同时提供");
+    return {
+      ...(text !== undefined ? { text } : {}),
+      ...(command ? { command } : {}),
+      ...(mentions.length ? { mentions } : {}),
+    };
   }
 
   private persistRegistry(): void {

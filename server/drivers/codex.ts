@@ -3,9 +3,11 @@ import type {
   DriverOptions,
   PermissionDecision,
   SessionConfig,
+  UserMessageInput,
 } from "../types.js";
+import { relative, sep } from "node:path";
 import { mergeSessionConfig } from "../session-config.js";
-import { BaseDriver, errorMessage, parseJsonLine, withTimeout } from "./base.js";
+import { BaseDriver, errorMessage, parseJsonLine, userMessageText, withTimeout } from "./base.js";
 import { StdioRpcProbe } from "./rpc-probe.js";
 
 interface PendingRpc {
@@ -229,13 +231,42 @@ export class CodexDriver extends BaseDriver {
     return { ...this.config };
   }
 
-  async sendUserMessage(text: string): Promise<void> {
+  async sendUserMessage(message: UserMessageInput): Promise<void> {
     if (!this.threadId) throw new Error("Codex thread 尚未就绪");
+    if (message.command) throw new Error("Codex app-server 不支持可枚举的斜杠命令");
+    const input: Record<string, unknown>[] = [];
+    let text = userMessageText(message);
+    const textElements: Array<{ byteRange: { start: number; end: number }; placeholder: string }> = [];
+    let searchFrom = 0;
+    for (const mention of message.mentions ?? []) {
+      const name = this.mentionPath(mention.path);
+      const marker = `@${name}`;
+      let markerIndex = text.indexOf(marker, searchFrom);
+      if (markerIndex < 0) {
+        text = `${text}${text ? "\n" : ""}${marker}`;
+        markerIndex = text.length - marker.length;
+      }
+      const start = Buffer.byteLength(text.slice(0, markerIndex), "utf8");
+      textElements.push({
+        byteRange: { start, end: start + Buffer.byteLength(marker, "utf8") },
+        placeholder: marker,
+      });
+      searchFrom = markerIndex + marker.length;
+    }
+    if (text) input.push({ type: "text", text, text_elements: textElements });
+    for (const mention of message.mentions ?? []) {
+      const name = this.mentionPath(mention.path);
+      input.push({
+        type: "mention",
+        name,
+        path: mention.path,
+      });
+    }
     this.callbacks.status("running");
     this.turnId = "";
     void this.request("turn/start", {
       threadId: this.threadId,
-      input: [{ type: "text", text, text_elements: [] }],
+      input,
       approvalPolicy: this.config.permissionMode ?? "untrusted",
       sandboxPolicy: {
         type: "workspaceWrite",
@@ -382,6 +413,13 @@ export class CodexDriver extends BaseDriver {
       this.rpc.set(id, { resolve, reject });
       this.send({ jsonrpc: "2.0", id, method, params });
     });
+  }
+
+  private mentionPath(path: string): string {
+    const relativePath = relative(this.cwd, path);
+    return relativePath && relativePath !== ".." && !relativePath.startsWith(`..${sep}`)
+      ? relativePath
+      : path;
   }
 
   private notify(method: string, params: unknown): void {

@@ -13,6 +13,7 @@ import {
   type PermissionDecision,
   type SessionConfig,
   type UnifiedEvent,
+  type UserMessageInput,
 } from "./types.js";
 import { ulid } from "./ulid.js";
 
@@ -128,12 +129,18 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse)
       respond(response, 201, 0, "success", { session }, requestId);
     } else {
       const snapshotMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/snapshot$/);
+      const commandsMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/commands$/);
       const detailMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)$/);
       if (method === "GET" && snapshotMatch) {
         const id = decodeURIComponent(snapshotMatch[1]);
         const snapshot = manager.getSnapshot(id);
         if (!snapshot) throw new ApiError(404, 40401, `会话不存在：${id}`);
         respond(response, 200, 0, "success", snapshot, requestId);
+      } else if (method === "GET" && commandsMatch) {
+        const id = decodeURIComponent(commandsMatch[1]);
+        const commands = manager.getCommands(id);
+        if (!commands) throw new ApiError(404, 40401, `会话不存在：${id}`);
+        respond(response, 200, 0, "success", { commands }, requestId);
       } else if (method === "GET" && detailMatch) {
         const id = decodeURIComponent(detailMatch[1]);
         const session = manager.get(id);
@@ -194,7 +201,7 @@ async function handleWsMessage(client: WsClientState, text: string): Promise<voi
   }
   try {
     if (message.type === "user_message") {
-      await manager.sendUserMessage(sessionId, String(message.text ?? ""));
+      await manager.sendUserMessage(sessionId, validateUserMessage(message));
     } else if (message.type === "permission_resolved") {
       const decisions = new Set(["allow", "deny", "always"]);
       if (!decisions.has(message.decision)) throw new Error("decision 必须是 allow、deny 或 always");
@@ -298,6 +305,59 @@ function validateSessionConfig(value: unknown, label: string): SessionConfig {
     }
   }
   return input as SessionConfig;
+}
+
+function validateUserMessage(value: Record<string, any>): UserMessageInput {
+  if (value.text !== undefined && typeof value.text !== "string") {
+    throw new ApiError(400, 40010, "user_message.text 必须是字符串");
+  }
+  let command: UserMessageInput["command"];
+  if (value.command !== undefined) {
+    if (!value.command || typeof value.command !== "object" || Array.isArray(value.command)) {
+      throw new ApiError(400, 40011, "user_message.command 必须是对象");
+    }
+    if (typeof value.command.name !== "string") {
+      throw new ApiError(400, 40012, "user_message.command.name 必须是字符串");
+    }
+    if (value.command.arguments !== undefined && typeof value.command.arguments !== "string") {
+      throw new ApiError(400, 40013, "user_message.command.arguments 必须是字符串");
+    }
+    command = {
+      name: value.command.name,
+      ...(value.command.arguments !== undefined ? { arguments: value.command.arguments } : {}),
+    };
+  }
+  if (value.mentions !== undefined && !Array.isArray(value.mentions)) {
+    throw new ApiError(400, 40014, "user_message.mentions 必须是数组");
+  }
+  if ((value.mentions?.length ?? 0) > 20) {
+    throw new ApiError(400, 40015, "单条 user_message 最多包含 20 个引用");
+  }
+  const mentions = (value.mentions ?? []).map((mention: unknown, index: number) => {
+    if (!mention || typeof mention !== "object" || Array.isArray(mention)) {
+      throw new ApiError(400, 40016, `user_message.mentions[${index}] 必须是对象`);
+    }
+    const item = mention as Record<string, unknown>;
+    if (item.type !== "file") {
+      throw new ApiError(400, 40017, `user_message.mentions[${index}].type 目前只支持 file`);
+    }
+    if (typeof item.path !== "string" || !item.path.trim()) {
+      throw new ApiError(400, 40018, `user_message.mentions[${index}].path 必须是非空字符串`);
+    }
+    if (item.name !== undefined && typeof item.name !== "string") {
+      throw new ApiError(400, 40019, `user_message.mentions[${index}].name 必须是字符串`);
+    }
+    return {
+      type: "file" as const,
+      path: item.path,
+      ...(item.name !== undefined ? { name: item.name } : {}),
+    };
+  });
+  return {
+    ...(value.text !== undefined ? { text: value.text } : {}),
+    ...(command ? { command } : {}),
+    ...(mentions.length ? { mentions } : {}),
+  };
 }
 
 function serveStatic(pathname: string, response: ServerResponse): boolean {

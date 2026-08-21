@@ -13,6 +13,7 @@ export const EVENT_TYPES = [
   "tool_call_completed",
   "permission_request",
   "permission_resolved",
+  "commands_updated",
   "config_updated",
   "usage_updated",
   "turn_completed",
@@ -51,6 +52,30 @@ export interface DriverConfigOption {
 export interface DriverConfigSchema {
   options: DriverConfigOption[];
   source: string;
+}
+
+export interface UnifiedCommand {
+  name: string;
+  description: string;
+  argHint?: string;
+  source: AgentKind;
+}
+
+export interface FileMention {
+  type: "file";
+  path: string;
+  name?: string;
+}
+
+export interface CommandInvocation {
+  name: string;
+  arguments?: string;
+}
+
+export interface UserMessageInput {
+  text?: string;
+  command?: CommandInvocation;
+  mentions?: FileMention[];
 }
 
 export interface UnifiedEvent {
@@ -92,6 +117,8 @@ export interface DriverCapabilities {
   usage: "detailed" | "context" | false;
   interrupt: boolean;
   resume: boolean;
+  commands: boolean;
+  mentions: boolean;
   terminal?: boolean;
   fsWrite?: boolean;
   finalApprovalGates?: string[];
@@ -104,6 +131,7 @@ export interface DriverCallbacks {
     nativeTranscriptPath?: string;
     config?: SessionConfig;
   }): void;
+  commands(commands: UnifiedCommand[]): void;
   status(status: SessionStatus): void;
   exited(info: { code: number | null; signal: NodeJS.Signals | null; expected: boolean }): void;
 }
@@ -122,7 +150,7 @@ export interface Driver {
   start(): Promise<void>;
   getConfigSchema(): DriverConfigSchema;
   setConfig(config: SessionConfig): Promise<SessionConfig>;
-  sendUserMessage(text: string): Promise<void>;
+  sendUserMessage(message: UserMessageInput): Promise<void>;
   resolvePermission(
     requestId: string,
     decision: PermissionDecision,
