@@ -215,16 +215,19 @@ export class SessionManager {
   }
 
   async setConfig(id: string, config: SessionConfig): Promise<SessionRecord> {
-    const entries = Object.entries(config).filter((entry): entry is [keyof SessionConfig, string] => (
-      typeof entry[1] === "string" && entry[1].length > 0
+    const entries = Object.entries(config).filter((entry): entry is [keyof SessionConfig, string | null] => (
+      entry[1] === null || (typeof entry[1] === "string" && entry[1].length > 0)
     ));
-    if (entries.length === 0) throw new Error("set_config.config 至少包含一个非空配置项");
+    if (entries.length === 0) throw new Error("set_config.config 至少包含一个配置项");
     const worker = this.requireWorker(id);
     const schema = worker.getConfigSchema();
     for (const [key, value] of entries) {
       const option = schema.options.find((item) => item.id === key);
       if (!option) throw new Error(`${worker.kind} 不支持配置项：${key}`);
       if (!option.mutable) throw new Error(`${worker.kind}.${key} 只能在建会话时设置`);
+      if (value === null && !option.values.some((item) => item.value === null)) {
+        throw new Error(`${worker.kind}.${key} 不支持跟随配置`);
+      }
       if (!option.values.some((item) => item.value === value)) {
         throw new Error(`${worker.kind}.${key} 不支持值：${value}`);
       }

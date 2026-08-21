@@ -4,6 +4,7 @@ import { extname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { WebSocket, WebSocketServer } from "ws";
 import { log } from "./logger.js";
+import { normalizeFileQuery, searchFiles } from "./file-search.js";
 import { getMeta, SERVER_VERSION } from "./meta.js";
 import { SessionManager } from "./session-manager.js";
 import {
@@ -130,6 +131,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse)
     } else {
       const snapshotMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/snapshot$/);
       const commandsMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/commands$/);
+      const filesMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/files$/);
       const detailMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)$/);
       if (method === "GET" && snapshotMatch) {
         const id = decodeURIComponent(snapshotMatch[1]);
@@ -141,6 +143,14 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse)
         const commands = manager.getCommands(id);
         if (!commands) throw new ApiError(404, 40401, `会话不存在：${id}`);
         respond(response, 200, 0, "success", { commands }, requestId);
+      } else if (method === "GET" && filesMatch) {
+        const id = decodeURIComponent(filesMatch[1]);
+        const session = manager.get(id);
+        if (!session) throw new ApiError(404, 40401, `会话不存在：${id}`);
+        const query = validateFileQuery(session.cwd, url.searchParams.get("q") ?? "");
+        const limit = validateFileLimit(url.searchParams.get("limit"));
+        const files = await searchFiles(session.cwd, query, limit);
+        respond(response, 200, 0, "success", { files }, requestId);
       } else if (method === "GET" && detailMatch) {
         const id = decodeURIComponent(detailMatch[1]);
         const session = manager.get(id);
@@ -194,12 +204,19 @@ async function handleWsMessage(client: WsClientState, text: string): Promise<voi
     sendWs(client, { type: "error", code: 40001, msg: "WS 消息必须是 JSON" });
     return;
   }
+  const context = {
+    action: typeof message.type === "string" ? message.type : String(message.type ?? ""),
+    ...(message.clientRequestId !== undefined ? { clientRequestId: message.clientRequestId } : {}),
+  };
   const sessionId = String(message.sessionId ?? client.sessionId ?? "");
   if (!sessionId) {
-    sendWs(client, { type: "error", code: 40002, msg: "WS 消息缺少 sessionId" });
+    sendWs(client, { type: "error", code: 40002, msg: "WS 消息缺少 sessionId", ...context });
     return;
   }
   try {
+    if (message.clientRequestId !== undefined && typeof message.clientRequestId !== "string") {
+      throw new Error("clientRequestId 必须是字符串");
+    }
     if (message.type === "user_message") {
       await manager.sendUserMessage(sessionId, validateUserMessage(message));
     } else if (message.type === "permission_resolved") {
@@ -218,15 +235,33 @@ async function handleWsMessage(client: WsClientState, text: string): Promise<voi
     } else {
       throw new Error(`不支持的 WS 上行类型：${String(message.type)}`);
     }
-    sendWs(client, { type: "ack", action: message.type, sessionId, clientRequestId: message.requestId });
+    sendWs(client, { type: "ack", sessionId, ...context });
   } catch (error) {
     sendWs(client, {
       type: "error",
       code: 40003,
       msg: error instanceof Error ? error.message : String(error),
       sessionId,
+      ...context,
     });
   }
+}
+
+function validateFileQuery(cwd: string, value: string): string {
+  try {
+    return normalizeFileQuery(cwd, value);
+  } catch (error) {
+    throw new ApiError(400, 40020, error instanceof Error ? error.message : String(error));
+  }
+}
+
+function validateFileLimit(value: string | null): number {
+  if (value === null || value === "") return 50;
+  const limit = Number(value);
+  if (!Number.isInteger(limit) || limit < 1 || limit > 200) {
+    throw new ApiError(400, 40021, "limit 必须是 1 到 200 的整数");
+  }
+  return limit;
 }
 
 function sendEvent(client: WsClientState, event: UnifiedEvent): void {

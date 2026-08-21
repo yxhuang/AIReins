@@ -1,4 +1,5 @@
 import type {
+  ConfigOptionId,
   DriverConfigSchema,
   DriverOptions,
   PermissionDecision,
@@ -6,7 +7,7 @@ import type {
   UserMessageInput,
 } from "../types.js";
 import { relative, sep } from "node:path";
-import { mergeSessionConfig } from "../session-config.js";
+import { isRiskyConfig, mergeSessionConfig } from "../session-config.js";
 import { BaseDriver, errorMessage, parseJsonLine, userMessageText, withTimeout } from "./base.js";
 import { StdioRpcProbe } from "./rpc-probe.js";
 
@@ -134,6 +135,10 @@ export class CodexDriver extends BaseDriver {
   private configSchema = codexConfigSchemaFromModels([], undefined);
   private sendModel: boolean;
   private sendEffort: boolean;
+  private clearModelNextTurn = false;
+  private clearEffortNextTurn = false;
+  private readonly pendingConfigFields = new Set<ConfigOptionId>();
+  private applyingConfig?: ApplyingConfig;
 
   constructor(options: DriverOptions) {
     super(options);
@@ -225,8 +230,19 @@ export class CodexDriver extends BaseDriver {
   async setConfig(config: SessionConfig): Promise<SessionConfig> {
     this.validateConfig(config);
     this.config = mergeSessionConfig(this.config, config);
-    if (config.model !== undefined) this.sendModel = true;
-    if (config.effort !== undefined) this.sendEffort = true;
+    if (config.model !== undefined) {
+      this.sendModel = config.model !== null;
+      this.clearModelNextTurn = config.model === null;
+      if (config.model === null) this.config.model = this.configDefault("model");
+      this.pendingConfigFields.add("model");
+    }
+    if (config.effort !== undefined) {
+      this.sendEffort = config.effort !== null;
+      this.clearEffortNextTurn = config.effort === null;
+      if (config.effort === null) this.config.effort = this.configDefault("effort");
+      this.pendingConfigFields.add("effort");
+    }
+    if (config.permissionMode !== undefined) this.pendingConfigFields.add("permissionMode");
     this.callbacks.metadata({ config: { ...this.config } });
     return { ...this.config };
   }
@@ -264,6 +280,7 @@ export class CodexDriver extends BaseDriver {
     }
     this.callbacks.status("running");
     this.turnId = "";
+    const applyingConfig = this.capturePendingConfig();
     void this.request("turn/start", {
       threadId: this.threadId,
       input,
@@ -275,11 +292,17 @@ export class CodexDriver extends BaseDriver {
         excludeTmpdirEnvVar: false,
         excludeSlashTmp: false,
       },
-      ...(this.sendModel && this.config.model ? { model: this.config.model } : {}),
-      ...(this.sendEffort && this.config.effort ? { effort: this.config.effort } : {}),
+      ...(applyingConfig?.clearModel
+        ? { model: null }
+        : this.sendModel && this.config.model ? { model: this.config.model } : {}),
+      ...(applyingConfig?.clearEffort
+        ? { effort: null }
+        : this.sendEffort && this.config.effort ? { effort: this.config.effort } : {}),
     }).then((result) => {
       if (result?.turn?.id) this.turnId = result.turn.id;
+      this.confirmAppliedConfig(applyingConfig, this.turnId);
     }).catch((error) => {
+      this.restorePendingConfig(applyingConfig);
       this.callbacks.emit("session_error", { message: errorMessage(error), source: "turn/start" });
       this.callbacks.status("error");
     });
@@ -386,6 +409,7 @@ export class CodexDriver extends BaseDriver {
     }
     if (method === "turn/started") {
       this.turnId = params.turn?.id ?? params.turnId ?? this.turnId;
+      this.confirmAppliedConfig(this.applyingConfig, this.turnId);
       this.callbacks.status("running");
       return;
     }
@@ -422,6 +446,51 @@ export class CodexDriver extends BaseDriver {
       : path;
   }
 
+  private configDefault(id: "model" | "effort"): string | null {
+    return this.configSchema.options.find((option) => option.id === id)?.default ?? null;
+  }
+
+  private capturePendingConfig(): ApplyingConfig | undefined {
+    if (this.pendingConfigFields.size === 0) return undefined;
+    const fields = [...this.pendingConfigFields];
+    for (const field of fields) this.pendingConfigFields.delete(field);
+    const applying = {
+      fields,
+      config: { ...this.config },
+      clearModel: this.clearModelNextTurn,
+      clearEffort: this.clearEffortNextTurn,
+    };
+    this.applyingConfig = applying;
+    return applying;
+  }
+
+  private confirmAppliedConfig(
+    applying: ApplyingConfig | undefined,
+    turnId: string,
+  ): void {
+    if (!applying || this.applyingConfig !== applying) return;
+    this.applyingConfig = undefined;
+    if (applying.clearModel && !this.sendModel) this.clearModelNextTurn = false;
+    if (applying.clearEffort && !this.sendEffort) this.clearEffortNextTurn = false;
+    this.callbacks.emit("config_updated", {
+      config: { ...this.config },
+      model: this.config.model ?? null,
+      effort: this.config.effort ?? null,
+      permissionMode: this.config.permissionMode ?? null,
+      riskyMode: isRiskyConfig("codex", this.config),
+      effectiveConfig: { ...applying.config },
+      appliedFields: applying.fields,
+      effectiveFrom: "current_turn",
+      ...(turnId ? { turnId } : {}),
+    });
+  }
+
+  private restorePendingConfig(applying: ApplyingConfig | undefined): void {
+    if (!applying || this.applyingConfig !== applying) return;
+    this.applyingConfig = undefined;
+    for (const field of applying.fields) this.pendingConfigFields.add(field);
+  }
+
   private notify(method: string, params: unknown): void {
     this.send({ jsonrpc: "2.0", method, params });
   }
@@ -446,4 +515,11 @@ export class CodexDriver extends BaseDriver {
       }
     }
   }
+}
+
+interface ApplyingConfig {
+  fields: ConfigOptionId[];
+  config: SessionConfig;
+  clearModel: boolean;
+  clearEffort: boolean;
 }
