@@ -6,15 +6,23 @@
   "scripts": {
     "server": "tsx server/index.ts",
     "typecheck": "tsc --noEmit",
+    "typecheck:frontend": "tsc --noEmit -p frontend",
+    "build": "vite build --config frontend/vite.config.ts",
+    "dev": "vite --config frontend/vite.config.ts",
     "spike:claude": "tsx spikes/claude-loop.ts",
     "spike:codex": "tsx spikes/codex-loop.ts",
     "spike:kimi": "tsx spikes/kimi-loop.ts"
   },
   "devDependencies": {
     "@types/node": "^26.2.0",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.4",
     "@types/ws": "^8.18.1",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
     "tsx": "^4.23.12",
-    "typescript": "^7.0.2"
+    "typescript": "^7.0.2",
+    "vite": "^8.2.2"
   },
   "dependencies": {
     "ws": "^8.21.3"

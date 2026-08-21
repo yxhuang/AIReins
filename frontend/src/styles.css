@@ -1,0 +1,702 @@
+/* 设计令牌：暖色只留给「需要人出手」的审批元素；其余一律冷色或中性。 */
+:root {
+  --bg:            #F2F4F7;
+  --surface:       #FFFFFF;
+  --surface-sunk:  #E8ECF2;
+  --border:        #D3DAE4;
+  --border-strong: #B4BECD;
+  --text:          #171C24;
+  --text-muted:    #5C6779;
+  --text-faint:    #8B95A6;
+  --agent-claude:  #2E7FA6;
+  --agent-codex:   #6B5CC4;
+  --agent-kimi:    #17806B;
+  --gate:          #C25415;
+  --gate-bg:       #FDF0E6;
+  --gate-border:   #E39A63;
+  --ok:      #17806B;
+  --dead:    #8B95A6;
+  --busy:    #2E7FA6;
+  --danger:  #B3234A;
+  /* diff 行：新增用 --ok 同色相，删除用冷调红；都不是暖色，也不复用 --danger */
+  --diff-add:    #17806B;
+  --diff-add-bg: #E2F1EC;
+  --diff-del:    #A63D57;
+  --diff-del-bg: #F6E9ED;
+
+  --font-ui:   system-ui, -apple-system, "Segoe UI", "Microsoft YaHei UI",
+               "PingFang SC", "Noto Sans CJK SC", sans-serif;
+  --font-mono: ui-monospace, "Cascadia Code", "JetBrains Mono", Consolas,
+               "Noto Sans Mono CJK SC", monospace;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg:            #0F1319;
+    --surface:       #161C24;
+    --surface-sunk:  #0B0F14;
+    --border:        #28313D;
+    --border-strong: #3A4655;
+    --text:          #E4E9F0;
+    --text-muted:    #96A1B2;
+    --text-faint:    #5C6779;
+    --agent-claude:  #4FA8D0;
+    --agent-codex:   #8E7EE8;
+    --agent-kimi:    #2BA88C;
+    --gate:          #F08A3E;
+    --gate-bg:       #2A1A0E;
+    --gate-border:   #8A4E22;
+    --ok:      #2BA88C;
+    --dead:    #5C6779;
+    --busy:    #4FA8D0;
+    --danger:  #E5577E;
+    --diff-add:    #2BA88C;
+    --diff-add-bg: #14251F;
+    --diff-del:    #D9708A;
+    --diff-del-bg: #291720;
+  }
+}
+
+* { box-sizing: border-box; }
+
+html, body, #root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family: var(--font-ui);
+  font-size: 14px;
+  color: var(--text);
+  background: var(--bg);
+}
+
+.mono, .code-block, .agent-name {
+  font-family: var(--font-mono);
+}
+
+:focus-visible {
+  outline: 2px solid var(--busy);
+  outline-offset: 2px;
+}
+
+/* ── 布局骨架 ─────────────────────────────── */
+.app {
+  display: flex;
+  height: 100%;
+}
+
+.sidebar {
+  width: 264px;
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+  padding: 10px;
+  gap: 10px;
+  overflow-y: auto;
+}
+
+.app.sidebar-collapsed .sidebar {
+  width: 52px;
+  padding: 10px 6px;
+}
+
+.main {
+  flex: 1 1 auto;
+  min-width: 0; /* 主区不横向滚动 */
+  display: flex;
+  flex-direction: column;
+}
+
+/* ── 左栏 ────────────────────────────────── */
+.sidebar-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.brand {
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  font-size: 15px;
+}
+
+.app.sidebar-collapsed .brand { display: none; }
+
+.icon-btn {
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-muted);
+  border-radius: 8px;
+  padding: 2px 8px;
+  cursor: pointer;
+}
+
+.btn {
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  color: var(--text);
+  border-radius: 8px;
+  padding: 6px 12px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn-primary {
+  background: var(--busy);
+  border-color: var(--busy);
+  color: #fff;
+}
+
+.btn-new {
+  width: 100%;
+  border-style: dashed;
+  color: var(--text-muted);
+}
+
+/* 新建会话表单 */
+.new-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-sunk);
+}
+
+.new-agents { display: flex; gap: 6px; }
+
+.new-agent {
+  flex: 1;
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  border-radius: 8px;
+  padding: 5px 0;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  cursor: pointer;
+  color: var(--text);
+}
+
+.new-agent.agent-claude.selected { border-color: var(--agent-claude); color: var(--agent-claude); box-shadow: inset 0 0 0 1px var(--agent-claude); }
+.new-agent.agent-codex.selected  { border-color: var(--agent-codex);  color: var(--agent-codex);  box-shadow: inset 0 0 0 1px var(--agent-codex); }
+.new-agent.agent-kimi.selected   { border-color: var(--agent-kimi);   color: var(--agent-kimi);   box-shadow: inset 0 0 0 1px var(--agent-kimi); }
+
+.new-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12.5px;
+  color: var(--text-muted);
+}
+
+.new-field input, .new-field textarea {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  padding: 6px 8px;
+  font-size: 13px;
+  font-family: inherit;
+  resize: vertical;
+}
+
+.new-field input.mono { font-family: var(--font-mono); }
+
+.new-error {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--danger);
+}
+
+/* 会话列表 */
+.session-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.session-list-empty {
+  color: var(--text-faint);
+  font-size: 12.5px;
+  padding: 8px 4px;
+}
+
+.session-row {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: none;
+  background: transparent;
+  border-radius: 8px;
+  padding: 6px 8px 6px 10px;
+  cursor: pointer;
+  color: var(--text);
+  /* 左侧 3px 身份色脊：辨识 agent 的主要手段 */
+  border-left: 3px solid var(--border);
+}
+
+.session-row.agent-claude { border-left-color: var(--agent-claude); }
+.session-row.agent-codex  { border-left-color: var(--agent-codex); }
+.session-row.agent-kimi   { border-left-color: var(--agent-kimi); }
+
+.session-row:hover { background: var(--surface-sunk); }
+.session-row.active { background: var(--surface-sunk); }
+.session-row.dead { opacity: 0.55; }
+
+.row-top {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.agent-name {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+}
+
+.agent-claude .agent-name, .session-title-line.agent-claude .agent-name { color: var(--agent-claude); }
+.agent-codex .agent-name { color: var(--agent-codex); }
+.agent-kimi .agent-name { color: var(--agent-kimi); }
+
+.row-time {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--text-faint);
+  white-space: nowrap;
+}
+
+.row-title {
+  display: block;
+  margin-top: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.row-status {
+  display: block;
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-top: 1px;
+}
+
+.status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+}
+.status-starting, .status-idle { background: var(--ok); }
+.status-running { background: var(--busy); }
+.status-dead { background: var(--dead); }
+.status-error { background: var(--danger); }
+
+/* 未决闸门徽标：全站除闸门外唯一的暖色元素 */
+.gate-badge {
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: var(--gate);
+  color: #fff;
+  font-size: 11.5px;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  animation: badge-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes badge-pulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.15); }
+}
+
+/* ── 会话区 ───────────────────────────────── */
+.session {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.session-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  border-left: 3px solid var(--border);
+}
+
+.session.agent-claude .session-head { border-left-color: var(--agent-claude); }
+.session.agent-codex  .session-head { border-left-color: var(--agent-codex); }
+.session.agent-kimi   .session-head { border-left-color: var(--agent-kimi); }
+
+.session-head-main { min-width: 0; }
+
+.session-title-line {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.session-cwd {
+  font-weight: 400;
+  font-size: 12.5px;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.session-sub {
+  font-size: 12.5px;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+.session-head-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.ws-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+.ws-open { background: var(--ok); }
+.ws-connecting { background: var(--busy); }
+.ws-closed { background: var(--dead); }
+
+/* 事件流 */
+.stream {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.user-block {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  background: var(--surface-sunk);
+  border-radius: 8px;
+  padding: 8px 12px;
+}
+
+.user-tag {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-muted);
+  flex: 0 0 auto;
+}
+
+.user-text { white-space: pre-wrap; }
+
+.text-block {
+  white-space: pre-wrap;
+  line-height: 1.65;
+  padding: 0 2px;
+}
+
+/* 流式光标：全站唯一装饰性动画 */
+.cursor {
+  color: var(--text-faint);
+  animation: cursor-blink 0.9s steps(2, start) infinite;
+}
+
+@keyframes cursor-blink {
+  to { visibility: hidden; }
+}
+
+.thought-block, .tool-card, .raw-line {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.thought-head, .tool-head, .raw-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 12.5px;
+  padding: 7px 10px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.chevron { font-size: 10px; }
+
+.thought-body {
+  padding: 0 12px 10px 26px;
+  color: var(--text-muted);
+  font-size: 12.5px;
+  white-space: pre-wrap;
+  line-height: 1.6;
+}
+
+.tool-name { color: var(--text); font-size: 12.5px; }
+
+.tool-summary {
+  color: var(--text-faint);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.tool-status { margin-left: auto; flex: 0 0 auto; font-size: 12px; }
+.tool-status-running { color: var(--busy); }
+.tool-status-ok { color: var(--ok); }
+.tool-status-error { color: var(--danger); }
+
+.tool-card.tool-error { border-color: var(--danger); }
+
+.tool-body { padding: 0 10px 10px; }
+
+.tool-result-label {
+  font-size: 12px;
+  color: var(--text-faint);
+  margin: 6px 0 4px;
+}
+
+/* 长命令/长文本在自己的容器里横向滚动，主区不横向滚动 */
+.code-block {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  background: var(--surface-sunk);
+  border-radius: 8px;
+  padding: 8px 10px;
+  margin: 0;
+  overflow-x: auto;
+  white-space: pre;
+  line-height: 1.5;
+}
+
+.system-line {
+  font-size: 12px;
+  color: var(--text-faint);
+  text-align: center;
+}
+
+.system-error { color: var(--danger); }
+
+/* ── 闸门块：暖色 + 直角，签名元素 ─────────── */
+.gate-block {
+  background: var(--gate-bg);
+  border: 1px solid var(--gate-border);
+  border-radius: 0; /* 硬边对比：其余卡片一律 8px 圆角 */
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.gate-title {
+  font-weight: 700;
+  color: var(--gate);
+}
+
+.gate-title .mono { font-weight: 700; }
+
+.gate-final-tag {
+  margin-left: 8px;
+  font-size: 11.5px;
+  font-weight: 600;
+  border: 1px solid var(--gate-border);
+  color: var(--gate);
+  padding: 1px 6px;
+}
+
+.gate-label { font-size: 12.5px; color: var(--text-muted); }
+
+.gate-command { background: var(--surface); }
+
+.gate-path {
+  font-size: 12.5px;
+  color: var(--text);
+  overflow-x: auto;
+  white-space: pre;
+}
+
+.gate-fold {
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 12.5px;
+  cursor: pointer;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.gate-content .code-block { margin-top: 6px; }
+
+/* diff 视图：删除行 - 前缀冷调红，新增行 + 前缀同 --ok 色相 */
+.diff-block { padding: 4px 0; }
+
+.diff-line {
+  display: block;
+  padding: 0 10px;
+  white-space: pre;
+}
+
+.diff-add {
+  color: var(--diff-add);
+  background: var(--diff-add-bg);
+}
+
+.diff-del {
+  color: var(--diff-del);
+  background: var(--diff-del-bg);
+}
+
+.gate-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+.btn-gate {
+  background: var(--gate);
+  border-color: var(--gate);
+  color: #fff;
+}
+
+.btn-danger {
+  background: transparent;
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+/* 已处理的闸门降级为中性样式 */
+.gate-block.gate-resolved {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 12px;
+}
+
+.gate-resolved-label {
+  font-size: 12.5px;
+  color: var(--text-muted);
+}
+
+/* 未决闸门滚出视口时的底部贴条 */
+.pending-bar {
+  border: none;
+  border-top: 1px solid var(--gate-border);
+  background: var(--gate-bg);
+  color: var(--gate);
+  font-weight: 600;
+  font-size: 12.5px;
+  padding: 6px;
+  cursor: pointer;
+  width: 100%;
+}
+
+/* 输入区 */
+.composer {
+  display: flex;
+  gap: 8px;
+  padding: 10px 16px;
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+}
+
+.composer textarea {
+  flex: 1;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text);
+  padding: 8px 10px;
+  font-size: 14px;
+  font-family: inherit;
+  resize: none;
+}
+
+.composer textarea:disabled {
+  color: var(--text-faint);
+}
+
+/* 空状态 */
+.empty-state {
+  margin: auto;
+  max-width: 460px;
+  text-align: center;
+  padding: 24px;
+}
+
+.empty-state h1 {
+  font-size: 20px;
+  letter-spacing: 0.04em;
+  margin: 0 0 12px;
+}
+
+.empty-state p {
+  color: var(--text-muted);
+  line-height: 1.7;
+}
+
+.empty-hint { font-size: 12.5px; }
+
+/* 错误提示条 */
+.toast {
+  position: fixed;
+  bottom: 16px;
+  right: 16px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--surface);
+  border: 1px solid var(--danger);
+  border-radius: 8px;
+  color: var(--danger);
+  padding: 8px 12px;
+  font-size: 12.5px;
+  max-width: 480px;
+}
+
+.toast-close {
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+/* 减少动态：关光标闪烁与徽标脉冲 */
+@media (prefers-reduced-motion: reduce) {
+  .cursor, .gate-badge { animation: none; }
+}
