@@ -1,6 +1,8 @@
 import type {
+  ConfigOptionId,
   MetaInfo,
   PermissionDecision,
+  SessionConfig,
   SessionRecord,
   SessionStatus,
   UnifiedEvent,
@@ -38,6 +40,12 @@ class Store {
   data = new Map<string, SessionData>();
   wsState: WsState = "closed";
   lastError: string | null = null;
+  /** set_config 发送中的控件（sessionId → 选项 id 集合）；等 config_updated 回来才解除 */
+  configPending = new Map<string, Set<ConfigOptionId>>();
+  /** set_config 失败错误（sessionId → 消息），显示在会话头控件旁 */
+  configErrors = new Map<string, string>();
+  /** codex effectiveFrom:"next_turn" 的一次性提示 */
+  configHints = new Map<string, string>();
   /** 全局时钟（每秒 tick），驱动相对时间与用时刷新 */
   now = Date.now();
   /** 每次 notify 自增，供 useSyncExternalStore 做快照 */
@@ -52,6 +60,7 @@ class Store {
   private snapshotGen = new Map<string, number>();
   /** 每会话 in-flight 快照请求：并发对齐复用同一 Promise */
   private snapshotInflight = new Map<string, Promise<void>>();
+  private configHintTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
   subscribe = (listener: () => void): (() => void) => {
     this.listeners.add(listener);
@@ -226,7 +235,15 @@ class Store {
       return;
     }
     if (type === "error") {
-      this.lastError = String(frame.msg ?? "未知错误");
+      const msg = String(frame.msg ?? "未知错误");
+      const sid = typeof frame.sessionId === "string" ? frame.sessionId : "";
+      // 有 set_config 在等结果的会话：错误归到会话头控件旁，不进全局提示条。
+      if (sid && this.configPending.has(sid)) {
+        this.configPending.delete(sid);
+        this.configErrors.set(sid, msg);
+      } else {
+        this.lastError = msg;
+      }
       this.notify();
       return;
     }
@@ -275,12 +292,43 @@ class Store {
       session.lastActivityAt = event.timestamp;
       const status = statusFromEvent(event);
       if (status) session.status = status;
+      if (event.type === "config_updated") this.applyConfigUpdated(event, session);
     } else {
       // 新会话（别的客户端建的）：刷新列表。
       void this.refreshSessions();
     }
     this.scheduleListRefresh();
     this.notify();
+  }
+
+  /**
+   * config_updated 广播：payload 带完整 config 与 model/effort/permissionMode/riskyMode，
+   * 不做乐观更新——显示以此事件为准；同时解除该会话的发送中状态。
+   */
+  private applyConfigUpdated(event: UnifiedEvent, session: SessionRecord): void {
+    const payload = event.payload;
+    if (payload.config && typeof payload.config === "object") {
+      session.config = payload.config as SessionConfig;
+    }
+    if ("model" in payload) session.model = payload.model as string | null;
+    if ("effort" in payload) session.effort = payload.effort as string | null;
+    if ("permissionMode" in payload) session.permissionMode = payload.permissionMode as string | null;
+    if (typeof payload.riskyMode === "boolean") session.riskyMode = payload.riskyMode;
+    this.configPending.delete(event.sessionId);
+    this.configErrors.delete(event.sessionId);
+    if (payload.effectiveFrom === "next_turn") {
+      this.configHints.set(event.sessionId, "下一轮生效");
+      const timer = this.configHintTimers.get(event.sessionId);
+      if (timer) clearTimeout(timer);
+      this.configHintTimers.set(
+        event.sessionId,
+        setTimeout(() => {
+          this.configHints.delete(event.sessionId);
+          this.configHintTimers.delete(event.sessionId);
+          this.notify();
+        }, 8000),
+      );
+    }
   }
 
   /** 事件驱动之外，定期对齐一次权威列表（状态、processId 等）。 */
@@ -292,13 +340,14 @@ class Store {
     }, 2000);
   }
 
-  private send(frame: Record<string, unknown>): void {
+  private send(frame: Record<string, unknown>): boolean {
     if (this.socket?.readyState === WebSocket.OPEN) {
       this.socket.send(JSON.stringify(frame));
-    } else {
-      this.lastError = "连接已断开，正在重连…";
-      this.notify();
+      return true;
     }
+    this.lastError = "连接已断开，正在重连…";
+    this.notify();
+    return false;
   }
 
   sendUserMessage(sessionId: string, text: string): void {
@@ -316,6 +365,29 @@ class Store {
 
   interrupt(sessionId: string): void {
     this.send({ type: "interrupt", sessionId });
+  }
+
+  /**
+   * 活改会话配置（WS set_config）。不做乐观更新：控件进入发送中态，
+   * 等 config_updated 广播回来才更新显示；失败走 WS error 帧。
+   */
+  setConfig(sessionId: string, config: Partial<Record<ConfigOptionId, string>>): void {
+    const keys = Object.keys(config) as ConfigOptionId[];
+    if (keys.length === 0) return;
+    const pending = this.configPending.get(sessionId) ?? new Set<ConfigOptionId>();
+    for (const key of keys) pending.add(key);
+    this.configPending.set(sessionId, pending);
+    this.configErrors.delete(sessionId);
+    this.configHints.delete(sessionId);
+    if (!this.send({ type: "set_config", sessionId, config })) {
+      this.configPending.delete(sessionId);
+      this.configErrors.set(sessionId, "连接已断开，正在重连…");
+    }
+    this.notify();
+  }
+
+  clearConfigError(sessionId: string): void {
+    if (this.configErrors.delete(sessionId)) this.notify();
   }
 
   async create(input: CreateSessionInput): Promise<SessionRecord> {

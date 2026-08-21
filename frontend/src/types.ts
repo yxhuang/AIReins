@@ -5,6 +5,31 @@ export type AgentKind = "claude" | "codex" | "kimi";
 export type SessionStatus = "starting" | "idle" | "running" | "dead" | "error";
 export type PermissionDecision = "allow" | "deny" | "always";
 
+export type ConfigOptionId = "model" | "effort" | "permissionMode";
+
+/** 会话级配置覆盖；字段为 null 表示不覆盖、跟随 CLI 有效配置。 */
+export interface SessionConfig {
+  model?: string | null;
+  effort?: string | null;
+  permissionMode?: string | null;
+}
+
+export interface ConfigOptionValue {
+  value: string | null;
+  label: string;
+  description?: string;
+}
+
+/** /api/meta 的 drivers.<agent>.options[] 项：前端配置控件的唯一事实源，不许硬编码值。 */
+export interface DriverConfigOption {
+  id: ConfigOptionId;
+  name: string;
+  values: ConfigOptionValue[];
+  default: string | null;
+  /** false = 只能建会话时设置，活改会被后端拒绝 */
+  mutable: boolean;
+}
+
 export interface UnifiedEvent {
   type: string;
   sessionId: string;
@@ -27,7 +52,12 @@ export interface SessionRecord {
   nativeSessionId?: string;
   nativeTranscriptPath?: string;
   processId?: number;
-  model?: string;
+  model?: string | null;
+  effort?: string | null;
+  permissionMode?: string | null;
+  config: SessionConfig;
+  /** true = 该会话已关闭 agent 主动询问（claude bypass/dontAsk、codex never、kimi yolo） */
+  riskyMode: boolean;
 }
 
 export interface DriverCapabilities {
@@ -45,11 +75,18 @@ export interface DriverCapabilities {
   finalApprovalGates?: string[];
 }
 
+/** meta.drivers.<agent> = 能力位 + 配置 schema（options 探针失败时为空数组并带 error） */
+export interface DriverMeta extends DriverCapabilities {
+  options?: DriverConfigOption[];
+  source?: string;
+  error?: string;
+}
+
 export interface MetaInfo {
   serverVersion: string;
   cliVersions: Record<AgentKind, string>;
   capabilities: Record<string, unknown>;
-  drivers: Record<AgentKind, DriverCapabilities>;
+  drivers: Record<AgentKind, DriverMeta>;
   security: Record<string, unknown>;
 }
 

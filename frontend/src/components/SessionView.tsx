@@ -69,11 +69,11 @@ export function SessionView({ session }: { session: SessionRecord }) {
             <span className="session-cwd mono">{session.cwd}</span>
           </div>
           <div className="session-sub mono">
-            {session.model && <span>{session.model} · </span>}
             <UsageView agent={session.agent} usage={data?.latestUsage} meta={store.meta} />
             <span> · 用时 {duration(session.createdAt, session.lastActivityAt)}</span>
             <span> · seq {data?.seq ?? session.seq}</span>
           </div>
+          <ConfigControls session={session} />
         </div>
         <div className="session-head-actions">
           <span className={`ws-dot ws-${store.wsState}`} title={`连接：${store.wsState}`} />
@@ -88,6 +88,12 @@ export function SessionView({ session }: { session: SessionRecord }) {
           </button>
         </div>
       </header>
+
+      {session.riskyMode && (
+        <div className="risky-banner" role="alert">
+          该会话已关闭 agent 主动询问，workbench 仍会拦截实际执行
+        </div>
+      )}
 
       <div className="stream" ref={streamRef} onScroll={updateHiddenPending}>
         {!data && <p className="system-line">载入会话…</p>}
@@ -135,6 +141,83 @@ export function SessionView({ session }: { session: SessionRecord }) {
       )}
 
       <Composer dead={dead} onSend={(text) => store.sendUserMessage(session.id, text)} />
+    </div>
+  );
+}
+
+// 会话头的模型/推理强度/审批模式控件：选项全部来自 /api/meta 的 options，
+// 前端不硬编码任何值；活改走 WS set_config，等 config_updated 广播回来才更新显示。
+function ConfigControls({ session }: { session: SessionRecord }) {
+  const store = useStore();
+  const options = store.meta?.drivers[session.agent]?.options ?? [];
+  const pending = store.configPending.get(session.id);
+  const error = store.configErrors.get(session.id);
+  const hint = store.configHints.get(session.id);
+  const live = Boolean(session.processId) && session.status !== "dead";
+  if (options.length === 0 && !error) return null;
+
+  return (
+    <div className="session-config">
+      {options.map((option) => {
+        const current = session.config?.[option.id];
+        const currentKey = current ?? "";
+        // default 为 null 的那条 values 项带后端给的「跟随 … 配置」标签，优先用它。
+        const followLabel =
+          option.values.find((v) => v.value === null)?.label ?? "跟随配置";
+        const known = new Set(option.values.map((v) => v.value));
+        const disabled = !option.mutable || !live || Boolean(pending?.has(option.id));
+        const title = !option.mutable
+          ? "此项需新建会话才能更改"
+          : !live
+            ? "会话已结束，无法更改"
+            : undefined;
+        return (
+          <label className="config-select" key={option.id} title={title}>
+            <span className="config-select-name">{option.name}</span>
+            <select
+              value={currentKey}
+              disabled={disabled}
+              onChange={(e) => {
+                const value = e.target.value;
+                // 空值是「跟随配置」展示项，不能用于撤销会话级覆盖（后端也只接受字符串值）。
+                if (value) store.setConfig(session.id, { [option.id]: value });
+              }}
+            >
+              {currentKey === "" && (
+                <option value="" disabled>
+                  {/* claude 首轮 init 后才报实际模型：跟随配置时把实际值并进同一处显示 */}
+                  {option.id === "model" && session.model
+                    ? `${followLabel}（${session.model}）`
+                    : followLabel}
+                </option>
+              )}
+              {currentKey !== "" && !known.has(currentKey) && (
+                <option value={currentKey}>{currentKey}</option>
+              )}
+              {option.values
+                .filter((v): v is { value: string; label: string } => v.value !== null)
+                .map((v) => (
+                  <option key={v.value} value={v.value}>
+                    {v.label}
+                  </option>
+                ))}
+            </select>
+          </label>
+        );
+      })}
+      {hint && <span className="config-hint">{hint}</span>}
+      {error && (
+        <span className="config-error" role="alert">
+          {error}
+          <button
+            type="button"
+            className="config-error-close"
+            onClick={() => store.clearConfigError(session.id)}
+          >
+            ×
+          </button>
+        </span>
+      )}
     </div>
   );
 }

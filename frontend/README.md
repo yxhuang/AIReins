@@ -41,9 +41,9 @@ frontend/
     useStore.ts         useSyncExternalStore 订阅 hook
     App.tsx             布局骨架、hash 路由、错误提示条
     components/
-      Sidebar.tsx       会话列表（身份色脊 / 状态点 / 闸门徽标）+ 新建会话表单 + 底部设置入口
-      SettingsMenu.tsx  设置齿轮 + 锚定浮层（分组/条目结构）；主题三选一写 <html data-theme>、localStorage 持久化（读写均 try/catch）
-      SessionView.tsx   会话头（usage 分家渲染 / 中断）+ 事件流 + 输入框 + 未决闸门贴条
+      Sidebar.tsx       会话列表（身份色脊 / 状态点 / 闸门徽标 / 危险模式「!」标记）+ 新建会话表单（含三个配置下拉）+ 底部设置入口
+      SettingsMenu.tsx  设置齿轮 + 锚定浮层（分组/条目结构，60vh 限高滚动 + focus trap）；主题三选一写 <html data-theme>、localStorage 持久化（读写均 try/catch）
+      SessionView.tsx   会话头（usage 分家渲染 / 配置控件行 / 中断）+ 危险模式警示条 + 事件流 + 输入框 + 未决闸门贴条
       StreamItems.tsx   用户消息 / 文本块 / 思考折叠块 / 工具卡片 / 闸门块 / 系统行
     styles.css          设计令牌（深浅两套）与全部样式
 ```
@@ -112,7 +112,17 @@ frontend/
 - [x] **26. Esc 关面板、焦点回齿轮。** 打开时焦点进面板第一个控件；Esc 或点浮层外关闭（齿轮在容器内，`pointerdown` 目标判断不会与齿轮自身 click 打架）；关闭后焦点回齿轮按钮；`prefers-reduced-motion: reduce` 时浮层无动画；所有可聚焦元素走全局 `:focus-visible` 描边。证据：代码复核；未人工过键盘流。
 - [x] **27. 构建与类型检查全绿。** 实测：`npm run build`（vite 8.2.2，25 modules，无警告退出码 0）、`npx tsc --noEmit -p frontend` 与根 `npx tsc --noEmit` 均退出码 0。
 
-已知取舍（本轮新增）：浮层宽度固定 224px、只向上展开，后续条目变多时需要加 `max-height` + 滚动；`role="radiogroup"` 未实现方向键在选项间移动的完整 radio 键盘模式（Tab 可达各选项）。
+已知取舍（M3 收尾）：`role="radiogroup"` 未实现方向键在选项间移动的完整 radio 键盘模式（Tab 可达各选项）。
+
+### M4 配置控件与危险模式警示（2026-08-21）
+
+- [x] **28. 三个下拉选项确实来自 /api/meta。** 会话头控件（`SessionView.tsx` 的 `ConfigControls`）与新建表单（`Sidebar.tsx` 的 `NewSessionForm`）都只遍历 `meta.drivers[agent].options[]` 渲染 `<option>`，值、标签、`mutable` 全部取自后端；前端唯一字面量是「跟随配置」兜底标签（仅当 values 里没有 null 项时使用，实际三家都有后端给的「跟随 … 配置」标签）。证据：**代码路径复核**，UI 无任何硬编码配置值。
+- [x] **29. claude 的 model/effort 禁用态，permissionMode 可活改。** `mutable:false` 渲染 `disabled` + title「此项需新建会话才能更改」；当前值为 null 时显示后端「跟随 … 配置」标签（model 项还会并入 init 后报出的实际模型，如「跟随 Claude 配置（claude-opus-5）」，替代原会话头独立 model 文本，不重复显示）。证据：**代码复核**（`mutable` 字段由后端 schema 实测给出，见 server/README §9）。
+- [x] **30. kimi 三项可活改，config_updated 到达后才更新显示。** `store.setConfig` 发 WS `set_config` 并把该控件置为发送中（禁用）；**不做乐观更新**，`handleEvent` 的 `config_updated` 分支把 payload 的完整 `config`/`model`/`effort`/`permissionMode`/`riskyMode` 写回 session 记录并解除发送中。失败时 WS `error` 帧带 sessionId，归到该会话头控件旁的冷调洋红错误（可关闭），不进全局 toast。codex 的 `effectiveFrom:"next_turn"` 在控件旁给一次性「下一轮生效」提示（8 秒后自动消失）。snapshot/list 刷新本来带 session 全量字段，config/riskyMode 随之更新。证据：**store 逻辑复核** + 类型检查。
+- [x] **31. 建会话传 config → 请求体正确携带。** 新建表单默认三项都选「跟随配置」（值 `""`），提交时 `Object.entries(configSel).filter(([,v]) => v)` 只保留非默认字段，全非默认时不带 `config` 键；切 agent 时 `setConfigSel({})` 重置，不会把 claude 的值发给 kimi。证据：**代码复核**（`Sidebar.tsx` 的 `submit`）。
+- [x] **32. riskyMode 警示。** `session.riskyMode === true` 时会话头下显示冷调洋红（`--danger`，非暖色）警示条「该会话已关闭 agent 主动询问，workbench 仍会拦截实际执行」；左栏该会话行第 2 行元信息里加同色「!」小标记（title 同文案前半句）。未新增设计令牌，`check:theme` 不受影响。证据：**代码复核** + 构建通过；视觉效果未在浏览器人工确认。
+- [x] **33. 设置浮层两条修复。** `.settings-panel` 加 `max-height: 60vh` + `overflow-y: auto`；补 focus trap——面板打开时 Tab/Shift+Tab 在面板内可聚焦元素间循环（焦点漏出面板时也拉回），Esc 关闭与焦点回齿轮的现有行为保留。证据：**代码复核**；未人工过键盘流。
+- [x] **34. 构建与前端类型检查、主题校验全绿。** 实测：`npm run typecheck:frontend` 退出码 0；`npm run check:theme` 输出「✅ 深色令牌两份一致（26 项）」（本轮未新增令牌）；`npm run build`（vite 8.2.2，25 modules，退出码 0）。根 `npm run typecheck` 本轮为红：错误全部位于 `server/**`（`UserMessageInput` / `DriverCallbacks.commands`，另一执行者并行改动中途状态），根 tsconfig 只 include server 与 spikes，与前端改动无关。
 
 ## 已知取舍
 

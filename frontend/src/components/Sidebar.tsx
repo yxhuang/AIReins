@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { AgentKind } from "../types";
+import type { AgentKind, ConfigOptionId } from "../types";
 import { relativeTime, sessionTitle } from "../format";
 import { store } from "../store";
 import { useStore } from "../useStore";
@@ -90,6 +90,11 @@ export function Sidebar({ collapsed, onToggle, newOpen, onNewOpenChange }: Sideb
                     </span>
                     <span className="row-meta">
                       <span className={`status-dot status-${session.status}`} />
+                      {session.riskyMode && (
+                        <span className="risky-mark" title="该会话已关闭 agent 主动询问">
+                          !
+                        </span>
+                      )}
                       <span className="row-meta-text">
                         {AGENT_LABELS[session.agent]} · {STATUS_LABELS[session.status] ?? session.status} · {relativeTime(session.lastActivityAt, store.now)}
                       </span>
@@ -110,20 +115,29 @@ export function Sidebar({ collapsed, onToggle, newOpen, onNewOpenChange }: Sideb
 }
 
 function NewSessionForm({ onDone }: { onDone: () => void }) {
+  const store = useStore();
   const [agent, setAgent] = useState<AgentKind>("claude");
   const [cwd, setCwd] = useState("");
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // 三个配置下拉的已选值；"" = 跟随配置（不传该字段）。切 agent 时整体重置。
+  const [configSel, setConfigSel] = useState<Partial<Record<ConfigOptionId, string>>>({});
+  const options = store.meta?.drivers[agent]?.options ?? [];
 
   const submit = async () => {
     if (!cwd.trim() || busy) return;
     setBusy(true);
     setError(null);
+    // 只把非默认（非「跟随配置」）的字段放进 config
+    const config = Object.fromEntries(
+      Object.entries(configSel).filter(([, value]) => value),
+    );
     try {
       const session = await store.create({
         agent,
         cwd: cwd.trim(),
+        ...(Object.keys(config).length > 0 ? { config } : {}),
         ...(message.trim() ? { initialMessage: message.trim() } : {}),
       });
       store.navigate(session.id);
@@ -149,12 +163,40 @@ function NewSessionForm({ onDone }: { onDone: () => void }) {
             key={kind}
             type="button"
             className={`new-agent agent-${kind}${agent === kind ? " selected" : ""}`}
-            onClick={() => setAgent(kind)}
+            onClick={() => {
+              setAgent(kind);
+              // 选项随 agent 切换，已选值一并重置（别把 claude 的值发给 kimi）
+              setConfigSel({});
+            }}
           >
             {AGENT_LABELS[kind]}
           </button>
         ))}
       </div>
+      {options.map((option) => {
+        // default 为 null 的那条 values 项带后端给的「跟随 … 配置」标签，优先用它
+        const followLabel = option.values.find((v) => v.value === null)?.label ?? "跟随配置";
+        return (
+          <label className="new-field" key={option.id}>
+            <span>{option.name}</span>
+            <select
+              value={configSel[option.id] ?? ""}
+              onChange={(e) =>
+                setConfigSel((prev) => ({ ...prev, [option.id]: e.target.value }))
+              }
+            >
+              <option value="">{followLabel}</option>
+              {option.values
+                .filter((v): v is { value: string; label: string } => v.value !== null)
+                .map((v) => (
+                  <option key={v.value} value={v.value}>
+                    {v.label}
+                  </option>
+                ))}
+            </select>
+          </label>
+        );
+      })}
       <label className="new-field">
         <span>工作目录（绝对路径）</span>
         <input

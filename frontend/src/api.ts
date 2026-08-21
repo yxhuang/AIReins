@@ -1,4 +1,4 @@
-import type { ApiEnvelope, MetaInfo, SessionRecord, Snapshot } from "./types";
+import type { ApiEnvelope, MetaInfo, SessionConfig, SessionRecord, Snapshot } from "./types";
 import type { AgentKind } from "./types";
 
 // REST 信封统一为 {code,msg,data,request_id}；code 非 0 时 msg 是中文错误消息。
@@ -24,6 +24,7 @@ export function fetchSnapshot(id: string): Promise<Snapshot> {
 export interface CreateSessionInput {
   agent: AgentKind;
   cwd: string;
+  config?: SessionConfig;
   initialMessage?: string;
 }
 

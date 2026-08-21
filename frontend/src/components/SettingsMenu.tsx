@@ -78,11 +78,33 @@ export function SettingsMenu() {
     panelRef.current?.querySelector<HTMLElement>("button")?.focus();
   }, [open]);
 
-  // Esc 关闭；点浮层外关闭（齿轮按钮在 rootRef 内，自身 click 不会触发这条）
+  // Esc 关闭；Tab/Shift+Tab 在面板内循环（focus trap）；点浮层外关闭
+  // （齿轮按钮在 rootRef 内，自身 click 不会触发这条）
   useEffect(() => {
     if (!open) return;
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") close(true);
+      if (e.key === "Escape") {
+        close(true);
+        return;
+      }
+      if (e.key !== "Tab") return;
+      const panel = panelRef.current;
+      if (!panel) return;
+      const focusables = panel.querySelectorAll<HTMLElement>(
+        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+      );
+      if (focusables.length === 0) return;
+      const first = focusables.item(0);
+      const last = focusables.item(focusables.length - 1);
+      const active = document.activeElement;
+      const outside = !panel.contains(active);
+      if (e.shiftKey && (outside || active === first)) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && (outside || active === last)) {
+        e.preventDefault();
+        first.focus();
+      }
     };
     const onPointerDown = (e: PointerEvent) => {
       if (rootRef.current && !rootRef.current.contains(e.target as Node)) {
