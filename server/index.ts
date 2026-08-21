@@ -293,8 +293,8 @@ function validateSessionConfig(value: unknown, label: string): SessionConfig {
     if (!CONFIG_OPTION_IDS.includes(key as (typeof CONFIG_OPTION_IDS)[number])) {
       throw new ApiError(400, 40008, `${label} 不支持字段：${key}`);
     }
-    if (typeof input[key] !== "string") {
-      throw new ApiError(400, 40009, `${label}.${key} 必须是字符串`);
+    if (typeof input[key] !== "string" && input[key] !== null) {
+      throw new ApiError(400, 40009, `${label}.${key} 必须是字符串或 null`);
     }
   }
   return input as SessionConfig;

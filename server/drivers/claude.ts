@@ -25,23 +25,23 @@ export const CLAUDE_CONFIG_SCHEMA: DriverConfigSchema = {
       id: "model",
       name: "模型",
       values: [
-        { value: "", label: "CLI 默认" },
+        { value: null, label: "跟随 Claude 配置" },
         { value: "fable", label: "Fable（最新）" },
         { value: "opus", label: "Opus（最新）" },
         { value: "sonnet", label: "Sonnet（最新）" },
         { value: "haiku", label: "Haiku（最新）" },
       ],
-      default: "",
+      default: null,
       mutable: false,
     },
     {
       id: "effort",
       name: "推理强度",
-      values: ["", "low", "medium", "high", "xhigh", "max"].map((value) => ({
-        value,
-        label: value || "CLI 默认",
-      })),
-      default: "",
+      values: [
+        { value: null, label: "跟随 Claude 配置" },
+        ...["low", "medium", "high", "xhigh", "max"].map((value) => ({ value, label: value })),
+      ],
+      default: null,
       mutable: false,
     },
     {
@@ -69,8 +69,8 @@ export class ClaudeDriver extends BaseDriver {
 
   async start(): Promise<void> {
     this.config = {
-      model: this.config.model ?? "",
-      effort: this.config.effort ?? "",
+      model: this.config.model ?? null,
+      effort: this.config.effort ?? null,
       permissionMode: this.config.permissionMode ?? "manual",
     };
     this.validateConfig(this.config);
@@ -175,6 +175,7 @@ export class ClaudeDriver extends BaseDriver {
 
     if (message.type === "system" && message.subtype === "init") {
       if (typeof message.model === "string") this.config.model = message.model;
+      if (typeof message.effort === "string") this.config.effort = message.effort;
       if (typeof message.permissionMode === "string") {
         this.config.permissionMode = message.permissionMode === "default" ? "manual" : message.permissionMode;
       }

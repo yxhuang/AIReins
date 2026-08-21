@@ -29,13 +29,13 @@ export const CONFIG_OPTION_IDS = ["model", "effort", "permissionMode"] as const;
 export type ConfigOptionId = (typeof CONFIG_OPTION_IDS)[number];
 
 export interface SessionConfig {
-  model?: string;
-  effort?: string;
-  permissionMode?: string;
+  model?: string | null;
+  effort?: string | null;
+  permissionMode?: string | null;
 }
 
 export interface ConfigOptionValue {
-  value: string;
+  value: string | null;
   label: string;
   description?: string;
 }
@@ -44,7 +44,7 @@ export interface DriverConfigOption {
   id: ConfigOptionId;
   name: string;
   values: ConfigOptionValue[];
-  default: string;
+  default: string | null;
   mutable: boolean;
 }
 
@@ -75,9 +75,9 @@ export interface SessionRecord {
   nativeSessionId?: string;
   nativeTranscriptPath?: string;
   processId?: number;
-  model?: string;
-  effort?: string;
-  permissionMode?: string;
+  model?: string | null;
+  effort?: string | null;
+  permissionMode?: string | null;
   config: SessionConfig;
   riskyMode: boolean;
 }

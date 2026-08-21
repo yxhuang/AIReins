@@ -2,9 +2,12 @@ import type { CreateSessionInput, SessionConfig } from "./types.js";
 
 export function cleanSessionConfig(config: SessionConfig = {}): SessionConfig {
   const cleaned: SessionConfig = {};
-  if (typeof config.model === "string") cleaned.model = config.model.trim();
-  if (typeof config.effort === "string") cleaned.effort = config.effort.trim();
-  if (typeof config.permissionMode === "string") cleaned.permissionMode = config.permissionMode.trim();
+  if (config.model === null) cleaned.model = null;
+  else if (typeof config.model === "string") cleaned.model = config.model.trim();
+  if (config.effort === null) cleaned.effort = null;
+  else if (typeof config.effort === "string") cleaned.effort = config.effort.trim();
+  if (config.permissionMode === null) cleaned.permissionMode = null;
+  else if (typeof config.permissionMode === "string") cleaned.permissionMode = config.permissionMode.trim();
   return cleaned;
 }
 

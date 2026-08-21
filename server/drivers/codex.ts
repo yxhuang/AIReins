@@ -36,29 +36,54 @@ interface CodexModelInfo {
   isDefault?: boolean;
 }
 
-export function codexConfigSchemaFromModels(models: CodexModelInfo[]): DriverConfigSchema {
-  const defaultModel = models.find((model) => model.isDefault) ?? models[0];
-  const defaultEffort = CODEX_EFFORTS.includes(defaultModel?.defaultReasoningEffort ?? "")
-    ? defaultModel!.defaultReasoningEffort!
-    : "medium";
+interface CodexEffectiveConfig {
+  model?: unknown;
+  model_reasoning_effort?: unknown;
+}
+
+export function codexConfigSchemaFromModels(
+  models: CodexModelInfo[],
+  effectiveConfig?: CodexEffectiveConfig,
+): DriverConfigSchema {
+  const builtInDefaultModel = models.find((model) => model.isDefault) ?? models[0];
+  const configuredModel = typeof effectiveConfig?.model === "string" ? effectiveConfig.model : undefined;
+  const effectiveModel = models.find((model) => (model.model ?? model.id) === configuredModel)
+    ?? builtInDefaultModel;
+  const configuredEffort = typeof effectiveConfig?.model_reasoning_effort === "string"
+    ? effectiveConfig.model_reasoning_effort
+    : undefined;
+  const builtInEffort = CODEX_EFFORTS.includes(effectiveModel?.defaultReasoningEffort ?? "")
+    ? effectiveModel!.defaultReasoningEffort!
+    : null;
+  // effectiveConfig === undefined 表示 config/read 不可用；此时宁可报告未知，也不猜内建默认值。
+  const defaultModel = effectiveConfig === undefined
+    ? null
+    : configuredModel ?? (String(builtInDefaultModel?.model ?? builtInDefaultModel?.id ?? "") || null);
+  const defaultEffort = effectiveConfig === undefined ? null : configuredEffort ?? builtInEffort;
   return {
-    source: "Codex app-server model/list and v2 protocol schema",
+    source: "Codex app-server config/read, model/list and v2 protocol schema",
     options: [
       {
         id: "model",
         name: "模型",
-        values: models.map((model) => ({
-          value: String(model.model ?? model.id ?? ""),
-          label: String(model.displayName ?? model.model ?? model.id ?? ""),
-          ...(model.description ? { description: model.description } : {}),
-        })).filter((value) => value.value),
-        default: String(defaultModel?.model ?? defaultModel?.id ?? ""),
+        values: [
+          { value: null, label: "跟随 Codex 配置" },
+          ...models.map((model) => ({
+            value: String(model.model ?? model.id ?? ""),
+            label: String(model.displayName ?? model.model ?? model.id ?? ""),
+            ...(model.description ? { description: model.description } : {}),
+          })).filter((value) => value.value),
+        ],
+        default: defaultModel,
         mutable: true,
       },
       {
         id: "effort",
         name: "推理强度",
-        values: CODEX_EFFORTS.map((value) => ({ value, label: value })),
+        values: [
+          { value: null, label: "跟随 Codex 配置" },
+          ...CODEX_EFFORTS.map((value) => ({ value, label: value })),
+        ],
         default: defaultEffort,
         mutable: true,
       },
@@ -85,8 +110,13 @@ export async function probeCodexConfigSchema(cwd: string): Promise<DriverConfigS
       capabilities: null,
     });
     probe.notify("initialized", {});
+    let effectiveConfig: CodexEffectiveConfig | undefined;
+    try {
+      const configResult = await probe.request("config/read", { cwd, includeLayers: false });
+      effectiveConfig = configResult?.config ?? {};
+    } catch { /* 旧版 app-server 没有 config/read 时，schema 默认值保持 null。 */ }
     const result = await probe.request("model/list", { limit: 100, includeHidden: false });
-    return codexConfigSchemaFromModels(Array.isArray(result?.data) ? result.data : []);
+    return codexConfigSchemaFromModels(Array.isArray(result?.data) ? result.data : [], effectiveConfig);
   } finally {
     await probe.close();
   }
@@ -99,7 +129,7 @@ export class CodexDriver extends BaseDriver {
   private readonly permissions = new Map<string, CodexPermission>();
   private threadId = "";
   private turnId = "";
-  private configSchema = codexConfigSchemaFromModels([]);
+  private configSchema = codexConfigSchemaFromModels([], undefined);
   private sendModel: boolean;
   private sendEffort: boolean;
 
@@ -117,11 +147,28 @@ export class CodexDriver extends BaseDriver {
     }), 15_000, "Codex initialize");
     if (!initialized) throw new Error("Codex initialize 未返回 result");
     this.notify("initialized", {});
+    let effectiveConfig: CodexEffectiveConfig | undefined;
+    try {
+      const configResult = await withTimeout(this.request("config/read", {
+        cwd: this.cwd,
+        includeLayers: false,
+      }), 15_000, "Codex config/read");
+      effectiveConfig = configResult?.config ?? {};
+    } catch (error) {
+      this.callbacks.emit("raw_event", {
+        source: "codex",
+        method: "config/read",
+        warning: `无法读取有效配置，未覆盖项将报告为 null：${errorMessage(error)}`,
+      });
+    }
     const models = await withTimeout(this.request("model/list", {
       limit: 100,
       includeHidden: false,
     }), 15_000, "Codex model/list");
-    this.configSchema = codexConfigSchemaFromModels(Array.isArray(models?.data) ? models.data : []);
+    this.configSchema = codexConfigSchemaFromModels(
+      Array.isArray(models?.data) ? models.data : [],
+      effectiveConfig,
+    );
     this.validateConfig(this.config);
     const modelOption = this.configSchema.options.find((option) => option.id === "model");
     const effortOption = this.configSchema.options.find((option) => option.id === "effort");
@@ -131,9 +178,11 @@ export class CodexDriver extends BaseDriver {
       permissionMode: this.config.permissionMode ?? "untrusted",
     };
     const threadOverrides = {
-      ...(this.sendModel ? { model: this.config.model } : {}),
+      ...(this.sendModel && this.config.model ? { model: this.config.model } : {}),
       approvalPolicy: this.config.permissionMode,
-      ...(this.sendEffort ? { config: { model_reasoning_effort: this.config.effort } } : {}),
+      ...(this.sendEffort && this.config.effort
+        ? { config: { model_reasoning_effort: this.config.effort } }
+        : {}),
     };
     const result = this.resumeSessionId
       ? await withTimeout(this.request("thread/resume", {
@@ -150,6 +199,15 @@ export class CodexDriver extends BaseDriver {
       }), 15_000, "Codex thread/start");
     this.threadId = result?.thread?.id ?? result?.id ?? this.resumeSessionId ?? "";
     if (!this.threadId) throw new Error("Codex 未返回 thread id");
+    this.config = {
+      model: typeof result?.model === "string" ? result.model : this.config.model ?? null,
+      effort: typeof result?.reasoningEffort === "string"
+        ? result.reasoningEffort
+        : result?.reasoningEffort === null ? null : this.config.effort ?? null,
+      permissionMode: typeof result?.approvalPolicy === "string"
+        ? result.approvalPolicy
+        : this.config.permissionMode ?? "untrusted",
+    };
     this.callbacks.metadata({
       nativeSessionId: this.threadId,
       nativeTranscriptPath: result?.thread?.path,
@@ -186,8 +244,8 @@ export class CodexDriver extends BaseDriver {
         excludeTmpdirEnvVar: false,
         excludeSlashTmp: false,
       },
-      ...(this.sendModel ? { model: this.config.model } : {}),
-      ...(this.sendEffort ? { effort: this.config.effort } : {}),
+      ...(this.sendModel && this.config.model ? { model: this.config.model } : {}),
+      ...(this.sendEffort && this.config.effort ? { effort: this.config.effort } : {}),
     }).then((result) => {
       if (result?.turn?.id) this.turnId = result.turn.id;
     }).catch((error) => {
@@ -342,7 +400,7 @@ export class CodexDriver extends BaseDriver {
 
   private validateConfig(config: SessionConfig): void {
     for (const [id, value] of Object.entries(config)) {
-      if (value === undefined) continue;
+      if (value === undefined || value === null) continue;
       const option = this.configSchema.options.find((item) => item.id === id);
       if (!option) throw new Error(`Codex 不支持配置项：${id}`);
       if (!option.values.some((item) => item.value === value)) {
