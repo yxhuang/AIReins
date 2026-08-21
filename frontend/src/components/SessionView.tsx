@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { MetaInfo, SessionRecord } from "../types";
-import { compactTokens, duration } from "../format";
+import { compactTokens, duration, asRecord } from "../format";
 import { buildRenderItems, type GateView } from "../render-items";
 import { store } from "../store";
 import { useStore } from "../useStore";
@@ -18,9 +18,10 @@ export function SessionView({ session }: { session: SessionRecord }) {
   const gateRefs = useRef(new Map<string, HTMLElement>());
   const [hiddenPending, setHiddenPending] = useState(0);
 
-  const pendingGates = items.filter(
-    (item): item is GateView => item.kind === "gate" && !item.decision,
-  );
+  // dead 会话的未决闸门渲染为「已失效」中性态，不计入待处理数。
+  const pendingGates = dead
+    ? []
+    : items.filter((item): item is GateView => item.kind === "gate" && !item.decision);
 
   // 未决闸门滚出视口时，底部贴暖色细条提示。
   const updateHiddenPending = useCallback(() => {
@@ -90,6 +91,9 @@ export function SessionView({ session }: { session: SessionRecord }) {
 
       <div className="stream" ref={streamRef} onScroll={updateHiddenPending}>
         {!data && <p className="system-line">载入会话…</p>}
+        {data && data.dropped > 0 && (
+          <p className="system-line">最早的 {data.dropped} 条事件已省略（内存上限）；快照仍保留全量。</p>
+        )}
         {items.map((item, index) => {
           const isLast = index === items.length - 1;
           switch (item.kind) {
@@ -107,7 +111,7 @@ export function SessionView({ session }: { session: SessionRecord }) {
                   key={item.key}
                   item={item}
                   sessionId={session.id}
-                  disabled={dead}
+                  dead={dead}
                   ref={(el) => {
                     if (el) gateRefs.current.set(item.requestId, el);
                     else gateRefs.current.delete(item.requestId);
@@ -161,19 +165,26 @@ function UsageView({
     );
   }
 
-  // detailed：claude {usage:{input_tokens,...}, costUsd}；codex {usage: tokenUsage}。
-  const detail = (usage.usage ?? usage) as Record<string, unknown>;
-  const pick = (...keys: string[]): number => {
+  // detailed：claude {usage:{input_tokens,output_tokens}, costUsd}；
+  // codex {usage:{total:{totalTokens,inputTokens,outputTokens,...}, last:{...}, modelContextWindow}}。
+  const detail = asRecord(usage.usage ?? usage);
+  const total = asRecord(detail.total);
+  const pickFrom = (source: Record<string, unknown>, ...keys: string[]): number => {
     for (const key of keys) {
-      const value = Number(detail[key]);
+      const value = Number(source[key]);
       if (Number.isFinite(value) && value > 0) return value;
     }
     return 0;
   };
-  const input = pick("input_tokens", "inputTokens");
-  const output = pick("output_tokens", "outputTokens");
+  const input = pickFrom(detail, "input_tokens", "inputTokens") || pickFrom(total, "inputTokens");
+  const output = pickFrom(detail, "output_tokens", "outputTokens") || pickFrom(total, "outputTokens");
+  const totalTokens = pickFrom(total, "totalTokens");
+  const contextWindow = Number(detail.modelContextWindow ?? 0);
   const cost = Number(usage.costUsd ?? 0);
   const parts: string[] = [];
+  if (contextWindow > 0 && totalTokens > 0) {
+    parts.push(`上下文 ${compactTokens(totalTokens)} / ${compactTokens(contextWindow)}`);
+  }
   if (input) parts.push(`输入 ${compactTokens(input)}`);
   if (output) parts.push(`输出 ${compactTokens(output)}`);
   if (cost > 0) parts.push(`$${cost.toFixed(4)}`);

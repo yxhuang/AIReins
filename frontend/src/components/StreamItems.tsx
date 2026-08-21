@@ -68,21 +68,22 @@ export function ToolCard({ item }: { item: ToolView }) {
 }
 
 // 签名元素：闸门块。暖色边框 + 暖色浅底 + 直角，与圆角卡片形成硬边对比。
-export const GateBlock = forwardRef<HTMLDivElement, { item: GateView; sessionId: string; disabled: boolean }>(
-  function GateBlock({ item, sessionId, disabled }, ref) {
+// dead 会话里的未决闸门降级为中性「已失效」态：无暖色、不可点击。
+export const GateBlock = forwardRef<HTMLDivElement, { item: GateView; sessionId: string; dead: boolean }>(
+  function GateBlock({ item, sessionId, dead }, ref) {
     const [detailOpen, setDetailOpen] = useState(false);
     const [contentOpen, setContentOpen] = useState(false);
+    // 点击决策后进入提交中态：禁用所有决策按钮，直到 permission_resolved 到达。
+    const [submitting, setSubmitting] = useState(false);
 
-    const decide = (decision: "allow" | "deny" | "always") => {
-      // 「允许并记住」：把第一条 permissionSuggestion 作为 updatedInput 原样回传。
-      const updatedInput =
-        decision === "always" && item.suggestions.length > 0 ? item.suggestions[0] : undefined;
-      store.resolvePermission(sessionId, item.requestId, decision, updatedInput);
+    const decide = (decision: "allow" | "deny") => {
+      if (submitting || dead) return;
+      setSubmitting(true);
+      store.resolvePermission(sessionId, item.requestId, decision);
     };
 
     if (item.decision) {
-      const label =
-        item.decision === "allow" ? "已允许" : item.decision === "always" ? "已允许（记住）" : "已拒绝";
+      const label = item.decision === "deny" ? "已拒绝" : "已允许";
       return (
         <div className="gate-block gate-resolved" ref={ref}>
           <span className="gate-resolved-label">
@@ -91,6 +92,18 @@ export const GateBlock = forwardRef<HTMLDivElement, { item: GateView; sessionId:
         </div>
       );
     }
+
+    if (dead) {
+      return (
+        <div className="gate-block gate-expired" ref={ref}>
+          <span className="gate-resolved-label">
+            {item.agent} 要执行 <span className="mono">{item.toolName}</span> —— 会话已结束，此审批已失效
+          </span>
+        </div>
+      );
+    }
+
+    const disabled = submitting;
 
     const isEdit = Boolean(item.removed || item.added);
     const addedText = isEdit ? item.added : item.content;
@@ -141,18 +154,8 @@ export const GateBlock = forwardRef<HTMLDivElement, { item: GateView; sessionId:
 
         <div className="gate-actions">
           <button type="button" className="btn btn-gate" disabled={disabled} onClick={() => decide("allow")}>
-            允许
+            {submitting ? "提交中…" : "允许"}
           </button>
-          {item.suggestions.length > 0 && (
-            <button
-              type="button"
-              className="btn btn-gate"
-              disabled={disabled}
-              onClick={() => decide("always")}
-            >
-              允许并记住
-            </button>
-          )}
           <button type="button" className="btn btn-danger" disabled={disabled} onClick={() => decide("deny")}>
             拒绝
           </button>

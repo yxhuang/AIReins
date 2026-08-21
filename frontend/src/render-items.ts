@@ -287,6 +287,7 @@ export function buildRenderItems(events: UnifiedEvent[], agent: AgentKind): Rend
         });
         break;
       case "raw_event":
+        breakRun();
         items.push({
           kind: "raw",
           key: `raw:${event.seq}`,

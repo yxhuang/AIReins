@@ -30,11 +30,23 @@ export function Sidebar({ collapsed, onToggle, newOpen, onNewOpenChange }: Sideb
   const sessions = [...store.sessions].sort(
     (a, b) => Date.parse(b.lastActivityAt) - Date.parse(a.lastActivityAt),
   );
+  // 收起态仍要能看到全局待审批压力：全部会话未决闸门总数。
+  const totalPending = sessions.reduce((sum, session) => sum + store.pendingCount(session.id), 0);
 
   return (
     <aside className="sidebar">
       <div className="sidebar-head">
         <span className="brand">workbench</span>
+        {collapsed && totalPending > 0 && (
+          <button
+            type="button"
+            className="gate-badge gate-badge-btn"
+            title={`${totalPending} 个闸门等待处理，点击展开会话列表`}
+            onClick={onToggle}
+          >
+            {totalPending}
+          </button>
+        )}
         <button
           type="button"
           className="icon-btn"

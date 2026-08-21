@@ -134,6 +134,18 @@ body {
 
 .app.sidebar-collapsed .brand { display: none; }
 
+/* 收起态头部纵向排列，给总未决徽标留位置 */
+.app.sidebar-collapsed .sidebar-head {
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* 收起态的总未决徽标可点击（点击展开左栏） */
+.gate-badge-btn {
+  border: none;
+  cursor: pointer;
+}
+
 .icon-btn {
   border: 1px solid var(--border);
   background: var(--surface);
@@ -619,6 +631,14 @@ body {
 .gate-resolved-label {
   font-size: 12.5px;
   color: var(--text-muted);
+}
+
+/* dead 会话里失效的未决闸门：中性降级，无暖色、不可点击 */
+.gate-block.gate-expired {
+  background: var(--surface);
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  padding: 8px 12px;
 }
 
 /* 未决闸门滚出视口时的底部贴条 */

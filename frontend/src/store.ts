@@ -9,15 +9,23 @@ import { createSession, fetchMeta, fetchSessions, fetchSnapshot, type CreateSess
 
 // 全局状态与连接恢复：
 // - 一条全局 WS（不带 sessionId）收全部会话事件，支撑左栏跨会话待审批徽标；
+//   服务端只对带 sessionId&afterSeq 的连接补发，全局连接没有任何补发——
+//   因此 WS open 后对每个会话都重取快照对齐（不只当前会话），覆盖
+//   「快照完成、WS 未建立」与断连期间的审批事件；
 // - 进入会话先 GET snapshot 拿全量 events + seq，WS 上 seq 更大的事件追加；
-// - WS 断线指数退避重连，重连后重新拉列表并对当前会话重取快照；
-// - 收到 resync_required 时对该会话重取快照。
+// - 快照请求按会话去重（in-flight 复用同一 Promise）并带版本戳（过期响应丢弃）；
+// - WS 断线指数退避重连；收到 resync_required 或 seq 缺口时对该会话重取快照。
 
 export type WsState = "connecting" | "open" | "closed";
+
+/** 每会话内存事件上限：超出丢弃最旧并计数，快照重取即可恢复全量。 */
+const MAX_EVENTS = 2000;
 
 interface SessionData {
   events: UnifiedEvent[];
   seq: number;
+  /** 因 MAX_EVENTS 上限被丢弃的最旧事件数（>0 时流顶部提示） */
+  dropped: number;
   /** requestId → 请求事件 seq，用于闸门块定位与排序 */
   pendingGates: Map<string, number>;
   latestUsage?: Record<string, unknown>;
@@ -40,6 +48,10 @@ class Store {
   private reconnectDelay = 1000;
   private reconnectTimer: ReturnType<typeof setTimeout> | undefined;
   private listRefreshTimer: ReturnType<typeof setTimeout> | undefined;
+  /** 每会话快照版本戳：作废旧响应（重取快照前先自增） */
+  private snapshotGen = new Map<string, number>();
+  /** 每会话 in-flight 快照请求：并发对齐复用同一 Promise */
+  private snapshotInflight = new Map<string, Promise<void>>();
 
   subscribe = (listener: () => void): (() => void) => {
     this.listeners.add(listener);
@@ -95,19 +107,51 @@ class Store {
     } catch (error) {
       this.lastError = error instanceof Error ? error.message : String(error);
     }
+    // dead 会话的未决闸门已不可操作，清掉避免僵尸暖色徽标。
+    for (const session of this.sessions) {
+      if (session.status === "dead") this.data.get(session.id)?.pendingGates.clear();
+    }
     this.notify();
   }
 
   /** 会话事件是否已加载；未加载则取快照。 */
   async ensureLoaded(id: string): Promise<void> {
     if (this.data.has(id)) return;
-    try {
-      const snapshot = await fetchSnapshot(id);
-      this.applySnapshot(id, snapshot.session, snapshot.seq, snapshot.events);
-    } catch (error) {
-      this.lastError = error instanceof Error ? error.message : String(error);
-    }
+    await this.alignSnapshot(id);
     this.notify();
+  }
+
+  /**
+   * 取快照对齐该会话。同会话 in-flight 复用同一 Promise；
+   * 版本戳不匹配的过期响应直接丢弃（等待期间已有更新的对齐周期启动）。
+   */
+  private alignSnapshot(id: string): Promise<void> {
+    const inflight = this.snapshotInflight.get(id);
+    if (inflight) return inflight;
+    const gen = this.snapshotGen.get(id) ?? 0;
+    const promise = (async () => {
+      try {
+        const snapshot = await fetchSnapshot(id);
+        if (this.snapshotGen.get(id) === gen) {
+          this.applySnapshot(id, snapshot.session, snapshot.seq, snapshot.events);
+        }
+      } catch (error) {
+        this.lastError = error instanceof Error ? error.message : String(error);
+      } finally {
+        this.snapshotInflight.delete(id);
+      }
+      this.notify();
+    })();
+    this.snapshotInflight.set(id, promise);
+    return promise;
+  }
+
+  /** 作废 in-flight 快照响应并强制重取（seq 缺口 / resync_required / WS open 对齐）。 */
+  private resync(id: string): Promise<void> {
+    this.snapshotGen.set(id, (this.snapshotGen.get(id) ?? 0) + 1);
+    this.snapshotInflight.delete(id);
+    this.data.delete(id);
+    return this.alignSnapshot(id);
   }
 
   private applySnapshot(
@@ -118,16 +162,20 @@ class Store {
   ): void {
     const pendingGates = new Map<string, number>();
     let latestUsage: Record<string, unknown> | undefined;
+    // dead 会话的 permission_request 不计入 pending：进程已不在，闸门不可操作。
+    const dead = session.status === "dead";
     for (const event of events) {
       if (event.type === "permission_request") {
-        pendingGates.set(String(event.payload.requestId ?? ""), event.seq);
+        if (!dead) pendingGates.set(String(event.payload.requestId ?? ""), event.seq);
       } else if (event.type === "permission_resolved") {
         pendingGates.delete(String(event.payload.requestId ?? ""));
       } else if (event.type === "usage_updated") {
         latestUsage = event.payload;
       }
     }
-    this.data.set(id, { events: [...events].sort((a, b) => a.seq - b.seq), seq, pendingGates, latestUsage });
+    const sorted = [...events].sort((a, b) => a.seq - b.seq);
+    const dropped = Math.max(0, sorted.length - MAX_EVENTS);
+    this.data.set(id, { events: sorted.slice(dropped), seq, dropped, pendingGates, latestUsage });
     const index = this.sessions.findIndex((s) => s.id === id);
     if (index >= 0) this.sessions[index] = session;
     else this.sessions.push(session);
@@ -144,12 +192,11 @@ class Store {
     socket.addEventListener("open", () => {
       this.wsState = "open";
       this.reconnectDelay = 1000;
-      // 重连后列表与当前会话快照都可能过期，主动重取。
-      void this.refreshSessions();
-      if (this.currentId) {
-        this.data.delete(this.currentId);
-        void this.ensureLoaded(this.currentId);
-      }
+      // 全局连接没有补发能力：断连期间（含启动时快照与 WS 建立之间的窗口）
+      // 任何会话的事件都可能丢失，open 后对每个会话重取快照对齐。
+      void this.refreshSessions().then(() => {
+        for (const session of this.sessions) void this.resync(session.id);
+      });
       this.notify();
     });
     socket.addEventListener("message", (messageEvent) => {
@@ -175,10 +222,7 @@ class Store {
     if (type === "ack") return;
     if (type === "resync_required") {
       const id = String(frame.sessionId ?? "");
-      if (id) {
-        this.data.delete(id);
-        void this.ensureLoaded(id).then(() => this.notify());
-      }
+      if (id) void this.resync(id);
       return;
     }
     if (type === "error") {
@@ -195,17 +239,26 @@ class Store {
     if (data) {
       // 快照语义：只追加 seq 更大的事件；出现缺口则重取快照。
       if (event.seq > data.seq + 1) {
-        this.data.delete(event.sessionId);
-        void this.ensureLoaded(event.sessionId).then(() => this.notify());
+        void this.resync(event.sessionId);
         return;
       }
       if (event.seq === data.seq + 1) {
         data.events.push(event);
+        if (data.events.length > MAX_EVENTS) {
+          const excess = data.events.length - MAX_EVENTS;
+          data.events.splice(0, excess);
+          data.dropped += excess;
+        }
         data.seq = event.seq;
         if (event.type === "permission_request") {
-          data.pendingGates.set(String(event.payload.requestId ?? ""), event.seq);
+          if (this.session(event.sessionId)?.status !== "dead") {
+            data.pendingGates.set(String(event.payload.requestId ?? ""), event.seq);
+          }
         } else if (event.type === "permission_resolved") {
           data.pendingGates.delete(String(event.payload.requestId ?? ""));
+        } else if (event.type === "process_exited") {
+          // 进程退出后未决闸门永不可操作，立即清掉避免僵尸暖色徽标。
+          data.pendingGates.clear();
         } else if (event.type === "usage_updated") {
           data.latestUsage = event.payload;
         }
@@ -213,7 +266,7 @@ class Store {
       // event.seq <= data.seq：重发，忽略。
     } else {
       // 未加载的会话（如别的客户端刚建的）：取快照，快照会包含这条事件。
-      void this.ensureLoaded(event.sessionId).then(() => this.notify());
+      void this.ensureLoaded(event.sessionId);
     }
 
     // 任何事件都刷新该会话的本地视图（lastActivityAt / 状态推断）。
