@@ -1,4 +1,4 @@
-import type { ApiEnvelope, MetaInfo, SessionConfig, SessionRecord, Snapshot } from "./types";
+import type { ApiEnvelope, CommandInfo, MetaInfo, SessionConfig, SessionRecord, Snapshot } from "./types";
 import type { AgentKind } from "./types";
 
 // REST 信封统一为 {code,msg,data,request_id}；code 非 0 时 msg 是中文错误消息。
@@ -19,6 +19,12 @@ export function fetchSessions(): Promise<SessionRecord[]> {
 
 export function fetchSnapshot(id: string): Promise<Snapshot> {
   return call<Snapshot>(`/api/sessions/${encodeURIComponent(id)}/snapshot`);
+}
+
+export function fetchCommands(id: string): Promise<CommandInfo[]> {
+  return call<{ commands: CommandInfo[] }>(
+    `/api/sessions/${encodeURIComponent(id)}/commands`,
+  ).then((data) => data.commands);
 }
 
 export interface CreateSessionInput {

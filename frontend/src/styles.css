@@ -781,14 +781,21 @@ body {
 
 /* 输入区 */
 .composer {
+  position: relative; /* 命令面板锚定在输入框上方 */
   display: flex;
-  gap: 8px;
+  flex-direction: column;
+  gap: 6px;
   padding: 10px 16px;
   background: var(--surface);
   border-top: 1px solid var(--border);
 }
 
-.composer textarea {
+.composer-row {
+  display: flex;
+  gap: 8px;
+}
+
+.composer-row textarea {
   flex: 1;
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -800,8 +807,78 @@ body {
   resize: none;
 }
 
-.composer textarea:disabled {
+.composer-row textarea:disabled {
   color: var(--text-faint);
+}
+
+/* 斜杠命令面板：与设置浮层同一套面板语言（冷色，不用暖色） */
+.cmd-panel {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 16px;
+  right: 16px;
+  z-index: 20;
+  max-height: 45vh; /* claude 102 条必须能滚 */
+  overflow-y: auto;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 4px;
+  box-shadow: 0 6px 24px rgb(0 0 0 / 0.14);
+  animation: settings-pop 0.12s ease-out;
+}
+
+.cmd-item {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+/* 选中态用冷色 --busy 系（同设置浮层选中项的纪律） */
+.cmd-item.selected {
+  background: var(--surface-sunk);
+  box-shadow: inset 2px 0 0 var(--busy);
+}
+
+.cmd-name {
+  color: var(--text);
+  font-size: 12.5px;
+  font-weight: 600;
+  flex: 0 0 auto;
+}
+
+.cmd-item.selected .cmd-name { color: var(--busy); }
+
+.cmd-desc {
+  color: var(--text-muted);
+  font-size: 12.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.cmd-empty {
+  padding: 8px 10px;
+  font-size: 12.5px;
+  color: var(--text-faint);
+}
+
+/* 已确认命令的参数提示行（argHint） */
+.composer-hint {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+/* codex 无命令枚举协议的克制说明；title 带完整解释 */
+.composer-note {
+  font-size: 12px;
+  color: var(--text-faint);
+  cursor: help;
 }
 
 /* 空状态 */
@@ -939,7 +1016,7 @@ body {
   box-shadow: inset 0 0 0 1px var(--busy);
 }
 
-/* 减少动态：关光标闪烁、徽标脉冲与设置浮层动画 */
+/* 减少动态：关光标闪烁、徽标脉冲与浮层动画 */
 @media (prefers-reduced-motion: reduce) {
-  .cursor, .gate-badge, .settings-panel { animation: none; }
+  .cursor, .gate-badge, .settings-panel, .cmd-panel { animation: none; }
 }

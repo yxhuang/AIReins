@@ -60,6 +60,14 @@ export interface SessionRecord {
   riskyMode: boolean;
 }
 
+/** GET /api/sessions/:id/commands 与 commands_updated 的命令项；name 不含开头的 /。 */
+export interface CommandInfo {
+  name: string;
+  description: string;
+  argHint?: string;
+  source: AgentKind;
+}
+
 export interface DriverCapabilities {
   streaming: boolean;
   thoughts: boolean;
@@ -70,6 +78,10 @@ export interface DriverCapabilities {
   usage: "detailed" | "context" | false;
   interrupt: boolean;
   resume: boolean;
+  /** false = 无斜杠命令枚举协议（codex）：不弹命令面板，结构化 command 会被后端拒绝 */
+  commands: boolean;
+  /** @ 文件引用能力位（UI 下一轮做，先留类型） */
+  mentions: boolean;
   terminal?: boolean;
   fsWrite?: boolean;
   finalApprovalGates?: string[];

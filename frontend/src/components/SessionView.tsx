@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import type { MetaInfo, SessionRecord } from "../types";
-import { compactTokens, duration, asRecord } from "../format";
+import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from "react";
+import type { CommandInfo, MetaInfo, SessionRecord } from "../types";
+import { compactTokens, duration, asRecord, truncateDisplayWidth } from "../format";
 import { buildRenderItems, type GateView } from "../render-items";
 import { store } from "../store";
 import { useStore } from "../useStore";
@@ -140,7 +140,7 @@ export function SessionView({ session }: { session: SessionRecord }) {
         </button>
       )}
 
-      <Composer dead={dead} onSend={(text) => store.sendUserMessage(session.id, text)} />
+      <Composer session={session} dead={dead} />
     </div>
   );
 }
@@ -275,32 +275,168 @@ function UsageView({
   return <span>{parts.join(" · ")}</span>;
 }
 
-function Composer({ dead, onSend }: { dead: boolean; onSend: (text: string) => void }) {
+function Composer({ session, dead }: { session: SessionRecord; dead: boolean }) {
+  const store = useStore();
   const [text, setText] = useState("");
+  const [selected, setSelected] = useState(0);
+  // Esc 关闭面板后，到下一次输入变化前不再自动弹出
+  const [dismissed, setDismissed] = useState(false);
+  const listRef = useRef<HTMLDivElement>(null);
+
+  const caps = store.meta?.drivers[session.agent];
+  const commandsSupported = caps?.commands === true;
+  const table = store.commands.get(session.id) ?? [];
+
+  // 仅行首 / 触发（整段文本即「/query」形态）；行中间的 /（如路径）是普通字符
+  const slashQuery = /^\/([^\s]*)$/.exec(text)?.[1] ?? null;
+  const panelOpen = commandsSupported && !dead && slashQuery !== null && !dismissed;
+  const filtered = panelOpen ? filterCommands(table, slashQuery ?? "") : [];
+  const sel = Math.min(selected, Math.max(filtered.length - 1, 0));
+  const active = filtered[sel];
+
+  // 已确认命令的参数提示：文本进入「/name 参数…」形态后显示该命令的 argHint
+  const typedName = /^\/([^\s]+)\s/.exec(text)?.[1];
+  const activeCmd = typedName ? table.find((c) => c.name === typedName) : undefined;
+
+  useEffect(() => setSelected(0), [slashQuery]);
+
+  // 选中项滚动进可视区（claude 102 条时长列表必须可达）
+  useEffect(() => {
+    if (!panelOpen) return;
+    listRef.current?.querySelector(".cmd-item.selected")?.scrollIntoView({ block: "nearest" });
+  }, [panelOpen, sel, active?.name]);
+
+  const confirm = (cmd: CommandInfo, fillOnly: boolean) => {
+    if (!fillOnly && !cmd.argHint) {
+      // 无参数命令：确认即直接发（结构化 command，不拼 text）
+      store.sendCommand(session.id, cmd.name, "");
+      setText("");
+    } else {
+      // 有参数（或 Tab 只填充）：填入「/name 」，光标留在末尾参数位等用户补完
+      setText(`/${cmd.name} `);
+    }
+    setDismissed(false);
+  };
+
   const send = () => {
     const trimmed = text.trim();
     if (!trimmed || dead) return;
-    onSend(trimmed);
+    store.sendComposerInput(session.id, trimmed);
     setText("");
+    setDismissed(false);
   };
+
+  const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (panelOpen) {
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        e.preventDefault();
+        if (filtered.length > 0) {
+          const delta = e.key === "ArrowDown" ? 1 : -1;
+          setSelected((i) => (i + delta + filtered.length) % filtered.length);
+        }
+        return;
+      }
+      if (e.key === "Tab") {
+        e.preventDefault();
+        if (active) confirm(active, true);
+        return;
+      }
+      if (e.key === "Escape") {
+        e.preventDefault();
+        setDismissed(true);
+        return;
+      }
+      if (e.key === "Enter" && !e.shiftKey && active) {
+        e.preventDefault();
+        confirm(active, false);
+        return;
+      }
+    }
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      send();
+    }
+  };
+
   return (
     <div className="composer">
-      <textarea
-        value={text}
-        rows={2}
-        disabled={dead}
-        placeholder={dead ? "会话已结束，新建会话可续接" : "发消息给这个 agent…（Enter 发送，Shift+Enter 换行）"}
-        onChange={(e) => setText(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" && !e.shiftKey) {
-            e.preventDefault();
-            send();
-          }
-        }}
-      />
-      <button type="button" className="btn btn-primary" disabled={dead || !text.trim()} onClick={send}>
-        发送
-      </button>
+      {panelOpen && (
+        <div className="cmd-panel" role="listbox" aria-label="斜杠命令" ref={listRef}>
+          {filtered.length === 0 && <div className="cmd-empty">没有匹配的命令</div>}
+          {filtered.map((cmd, i) => (
+            <div
+              key={cmd.name}
+              role="option"
+              aria-selected={i === sel}
+              className={`cmd-item${i === sel ? " selected" : ""}`}
+              onMouseDown={(e) => {
+                e.preventDefault(); // 不抢输入框焦点，键盘可继续输入
+                confirm(cmd, false);
+              }}
+              onMouseEnter={() => setSelected(i)}
+            >
+              <span className="cmd-name mono">/{cmd.name}</span>
+              <span className="cmd-desc">{truncateDisplayWidth(cmd.description, 48)}</span>
+            </div>
+          ))}
+        </div>
+      )}
+      {!panelOpen && activeCmd?.argHint && (
+        <div className="composer-hint">
+          <span className="mono">/{activeCmd.name}</span> 参数：{activeCmd.argHint}
+        </div>
+      )}
+      {caps && !caps.commands && (
+        <div
+          className="composer-note"
+          title="Codex app-server 没有斜杠命令枚举协议（listPrompts / customPrompts / slashCommands 等请求都返回未知方法），这里没有命令面板；行首 / 只会按普通文本发送。"
+        >
+          Codex 不支持斜杠命令
+        </div>
+      )}
+      <div className="composer-row">
+        <textarea
+          value={text}
+          rows={2}
+          disabled={dead}
+          placeholder={dead ? "会话已结束，新建会话可续接" : "发消息给这个 agent…（Enter 发送，Shift+Enter 换行）"}
+          onChange={(e) => {
+            setText(e.target.value);
+            setDismissed(false);
+          }}
+          onKeyDown={onKeyDown}
+        />
+        <button type="button" className="btn btn-primary" disabled={dead || !text.trim()} onClick={send}>
+          发送
+        </button>
+      </div>
     </div>
   );
+}
+
+// 命令筛选：名称前缀 > 名称子序列模糊 > 描述子串；各组内保持命令表原顺序。
+function filterCommands(commands: CommandInfo[], query: string): CommandInfo[] {
+  const q = query.toLowerCase();
+  if (!q) return commands;
+  const prefix: CommandInfo[] = [];
+  const fuzzy: CommandInfo[] = [];
+  const desc: CommandInfo[] = [];
+  for (const cmd of commands) {
+    const name = cmd.name.toLowerCase();
+    if (name.startsWith(q)) prefix.push(cmd);
+    else if (isSubsequence(q, name)) fuzzy.push(cmd);
+    else if (cmd.description.toLowerCase().includes(q)) desc.push(cmd);
+  }
+  return [...prefix, ...fuzzy, ...desc];
+}
+
+function isSubsequence(needle: string, haystack: string): boolean {
+  let i = 0;
+  for (const ch of haystack) {
+    if (ch === needle[i]) {
+      i++;
+      if (i === needle.length) return true;
+    }
+  }
+  return needle.length === 0;
 }

@@ -1,4 +1,5 @@
 import type {
+  CommandInfo,
   ConfigOptionId,
   MetaInfo,
   PermissionDecision,
@@ -7,7 +8,7 @@ import type {
   SessionStatus,
   UnifiedEvent,
 } from "./types";
-import { createSession, fetchMeta, fetchSessions, fetchSnapshot, type CreateSessionInput } from "./api";
+import { createSession, fetchCommands, fetchMeta, fetchSessions, fetchSnapshot, type CreateSessionInput } from "./api";
 
 // 全局状态与连接恢复：
 // - 一条全局 WS（不带 sessionId）收全部会话事件，支撑左栏跨会话待审批徽标；
@@ -46,6 +47,8 @@ class Store {
   configErrors = new Map<string, string>();
   /** codex effectiveFrom:"next_turn" 的一次性提示 */
   configHints = new Map<string, string>();
+  /** 每会话斜杠命令表：快照内 commands_updated 打底 + REST 首取覆盖 + WS 实时全量覆盖 */
+  commands = new Map<string, CommandInfo[]>();
   /** 全局时钟（每秒 tick），驱动相对时间与用时刷新 */
   now = Date.now();
   /** 每次 notify 自增，供 useSyncExternalStore 做快照 */
@@ -149,6 +152,14 @@ class Store {
       } finally {
         this.snapshotInflight.delete(id);
       }
+      // REST 首取实时命令表（覆盖快照里可能过期的 commands_updated 结果）；
+      // dead 会话等失败场景保留快照内的结果，不打扰全局错误条。
+      try {
+        const list = await fetchCommands(id);
+        if (this.snapshotGen.get(id) === gen) this.commands.set(id, list);
+      } catch {
+        /* 保留快照内的命令表 */
+      }
       this.notify();
     })();
     this.snapshotInflight.set(id, promise);
@@ -171,6 +182,7 @@ class Store {
   ): void {
     const pendingGates = new Map<string, number>();
     let latestUsage: Record<string, unknown> | undefined;
+    let commands: CommandInfo[] | undefined;
     // dead 会话的 permission_request 不计入 pending：进程已不在，闸门不可操作。
     const dead = session.status === "dead";
     for (const event of events) {
@@ -180,8 +192,11 @@ class Store {
         pendingGates.delete(String(event.payload.requestId ?? ""));
       } else if (event.type === "usage_updated") {
         latestUsage = event.payload;
+      } else if (event.type === "commands_updated") {
+        commands = commandsFromPayload(event.payload);
       }
     }
+    if (commands) this.commands.set(id, commands);
     const sorted = [...events].sort((a, b) => a.seq - b.seq);
     const dropped = Math.max(0, sorted.length - MAX_EVENTS);
     this.data.set(id, { events: sorted.slice(dropped), seq, dropped, pendingGates, latestUsage });
@@ -278,6 +293,9 @@ class Store {
           data.pendingGates.clear();
         } else if (event.type === "usage_updated") {
           data.latestUsage = event.payload;
+        } else if (event.type === "commands_updated") {
+          // 实时全量覆盖（装新 skill 后立即可见），不是一次性快照。
+          this.commands.set(event.sessionId, commandsFromPayload(event.payload));
         }
       }
       // event.seq <= data.seq：重发，忽略。
@@ -354,6 +372,31 @@ class Store {
     this.send({ type: "user_message", sessionId, text });
   }
 
+  /** 结构化斜杠命令上行：command 与 text 互斥（后端对不支持的 driver 明确报错）。 */
+  sendCommand(sessionId: string, name: string, args: string): void {
+    this.send({ type: "user_message", sessionId, command: { name, arguments: args } });
+  }
+
+  /**
+   * 输入框统一入口：行首「/命令表内名称 + 可选参数」走结构化 command，
+   * 其余一律按普通文本（能力位为 false 的 driver 绝不拼结构化 command）。
+   */
+  sendComposerInput(sessionId: string, text: string): void {
+    const session = this.session(sessionId);
+    const caps = session ? this.meta?.drivers[session.agent] : undefined;
+    if (caps?.commands) {
+      const match = /^\/([^\s]+)(?:\s+([\s\S]*))?$/.exec(text);
+      if (match) {
+        const hit = (this.commands.get(sessionId) ?? []).find((c) => c.name === match[1]);
+        if (hit) {
+          this.sendCommand(sessionId, hit.name, (match[2] ?? "").trim());
+          return;
+        }
+      }
+    }
+    this.sendUserMessage(sessionId, text);
+  }
+
   resolvePermission(
     sessionId: string,
     requestId: string,
@@ -401,6 +444,12 @@ class Store {
     this.lastError = null;
     this.notify();
   }
+}
+
+/** commands_updated 的 payload 是 {commands: UnifiedCommand[]}；取不出时按空表处理。 */
+function commandsFromPayload(payload: Record<string, unknown>): CommandInfo[] {
+  const list = payload.commands;
+  return Array.isArray(list) ? (list as CommandInfo[]) : [];
 }
 
 // 从事件推断会话状态（权威值靠定期 GET /api/sessions 对齐）。

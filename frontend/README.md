@@ -43,7 +43,7 @@ frontend/
     components/
       Sidebar.tsx       会话列表（身份色脊 / 状态点 / 闸门徽标 / 危险模式「!」标记）+ 新建会话表单（含三个配置下拉）+ 底部设置入口
       SettingsMenu.tsx  设置齿轮 + 锚定浮层（分组/条目结构，60vh 限高滚动 + focus trap）；主题三选一写 <html data-theme>、localStorage 持久化（读写均 try/catch）
-      SessionView.tsx   会话头（usage 分家渲染 / 配置控件行 / 中断）+ 危险模式警示条 + 事件流 + 输入框 + 未决闸门贴条
+      SessionView.tsx   会话头（usage 分家渲染 / 配置控件行 / 中断）+ 危险模式警示条 + 事件流 + 输入框（行首 / 命令面板、结构化 command 上行、codex 降级说明）+ 未决闸门贴条
       StreamItems.tsx   用户消息 / 文本块 / 思考折叠块 / 工具卡片 / 闸门块 / 系统行
     styles.css          设计令牌（深浅两套）与全部样式
 ```
@@ -123,6 +123,17 @@ frontend/
 - [x] **32. riskyMode 警示。** `session.riskyMode === true` 时会话头下显示冷调洋红（`--danger`，非暖色）警示条「该会话已关闭 agent 主动询问，workbench 仍会拦截实际执行」；左栏该会话行第 2 行元信息里加同色「!」小标记（title 同文案前半句）。未新增设计令牌，`check:theme` 不受影响。证据：**代码复核** + 构建通过；视觉效果未在浏览器人工确认。
 - [x] **33. 设置浮层两条修复。** `.settings-panel` 加 `max-height: 60vh` + `overflow-y: auto`；补 focus trap——面板打开时 Tab/Shift+Tab 在面板内可聚焦元素间循环（焦点漏出面板时也拉回），Esc 关闭与焦点回齿轮的现有行为保留。证据：**代码复核**；未人工过键盘流。
 - [x] **34. 构建与前端类型检查、主题校验全绿。** 实测：`npm run typecheck:frontend` 退出码 0；`npm run check:theme` 输出「✅ 深色令牌两份一致（26 项）」（本轮未新增令牌）；`npm run build`（vite 8.2.2，25 modules，退出码 0）。根 `npm run typecheck` 本轮为红：错误全部位于 `server/**`（`UserMessageInput` / `DriverCallbacks.commands`，另一执行者并行改动中途状态），根 tsconfig 只 include server 与 spikes，与前端改动无关。
+
+### M5 斜杠命令补全（2026-08-21）
+
+输入框行首 `/` 弹出命令面板（行中间的 `/`，如路径 `server/index.ts`，是普通字符不弹）：按名称前缀 > 名称子序列模糊 > 描述子串筛选，↑↓ 选择、Enter 确认、Tab 只填充、Esc 关闭（到下一次输入变化前不再弹），键盘全程可操作且焦点留在输入框。面板锚定在输入框上方，与设置浮层同一套面板语言（`max-height: 45vh` + `overflow-y: auto`，复用 `settings-pop` 动画，reduced-motion 关闭），选中项 `scrollIntoView` 跟进可视区；每条显示 `/名称` + 按显示宽度截断的描述（复用 `format.ts` 的 `truncateDisplayWidth`，本轮导出共用）。选中态用冷色 `--busy` 系，不碰暖色。确认语义：无 `argHint` 的命令确认即直接结构化发送；有 `argHint` 的填入 `/name ` 并在输入框上方显示参数提示行，光标留在参数位等用户补完再 Enter 发。发送统一走 `store.sendComposerInput`：行首 `/名称` 且名称在命令表内 → 结构化 `command`（不拼 text）；能力位 `commands:false` 的 driver 一律按普通文本。命令表来源：快照内 `commands_updated` 打底 + REST 首取覆盖 + WS `commands_updated` 实时全量覆盖。codex（`commands:false`）不弹面板，输入框上方常驻克制说明「Codex 不支持斜杠命令」，title 带完整解释（app-server 无命令枚举协议），且绝不把 `/xxx` 拼成结构化 command。`types.ts` 顺带加了 `mentions` 能力位布尔，为下轮 @ 补全留位（UI 未做）。
+
+接口侧实测（隔离实例 `WORKBENCH_PORT=8792`，三家真实会话，完事 DELETE + 按端口 kill）：
+
+- [x] **35. claude 102 条 / kimi 51 条 / codex 空表。** `GET /api/sessions/:id/commands` 实测：claude 会话 102 条；kimi 会话 51 条，含 36 条 `skill:*`（`skill:a-stock-data` 等）且 `compact.argHint` 为 `<optional custom summarization instructions>`；codex 会话 0 条。面板滚动/筛选交互本身**未在浏览器实测**（无头环境），逻辑为代码复核 + 类型检查。
+- [x] **36. kimi 结构化 `/help` 实发。** WS 上行 `{"type":"user_message","command":{"name":"help","arguments":""}}`，agent 回复以 `Available commands:` 开头的原生命令表（`HELP_OK`）。同连接还实测收到 `commands_updated`（seq=2，51 条）实时事件——store 的覆盖路径为代码复核。
+- [x] **37. codex 结构化命令被后端明确拒绝。** 对 codex 会话发结构化 `compact` 收到 WS error「codex driver 不支持斜杠命令」——即使前端误发也不会静默降级为文本。
+- [x] **38. 构建与检查全绿。** 实测：`npm run build` 退出码 0、`npm run typecheck:frontend` 退出码 0、根 `npm run typecheck` 退出码 0、`npm run check:theme` 输出「✅ 深色令牌两份一致（26 项）」（本轮未新增令牌）。
 
 ## 已知取舍
 

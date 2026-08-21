@@ -46,7 +46,7 @@ export function sessionTitle(session: SessionRecord, events: UnifiedEvent[] | un
 }
 
 // 按显示宽度截断：CJK/全角字符计 2，其余计 1；超出上限时截断并追加 …。
-function truncateDisplayWidth(text: string, maxWidth: number): string {
+export function truncateDisplayWidth(text: string, maxWidth: number): string {
   let width = 0;
   let out = "";
   for (const ch of text) {
