@@ -7,5 +7,5 @@
     "noEmit": true,
     "types": ["node"]
   },
-  "include": ["spikes/**/*.ts"]
+  "include": ["server/**/*.ts", "spikes/**/*.ts"]
 }

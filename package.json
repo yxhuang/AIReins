@@ -1,16 +1,22 @@
 {
   "name": "workbench",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "private": true,
   "type": "module",
   "scripts": {
+    "server": "tsx server/index.ts",
+    "typecheck": "tsc --noEmit",
     "spike:claude": "tsx spikes/claude-loop.ts",
     "spike:codex": "tsx spikes/codex-loop.ts",
     "spike:kimi": "tsx spikes/kimi-loop.ts"
   },
   "devDependencies": {
     "@types/node": "^26.2.0",
+    "@types/ws": "^8.18.1",
     "tsx": "^4.23.12",
     "typescript": "^7.0.2"
+  },
+  "dependencies": {
+    "ws": "^8.21.3"
   }
 }
