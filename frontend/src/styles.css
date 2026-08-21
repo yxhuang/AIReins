@@ -881,6 +881,20 @@ body {
   cursor: help;
 }
 
+/* @ 引用预览条：实时反映当前文本会解析出的有效引用；
+   未知路径用冷调 --danger 标注，不用暖色（暖色只给审批闸门） */
+.mention-preview {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 12px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.mention-missing {
+  color: var(--danger);
+}
+
 /* 空状态 */
 .empty-state {
   margin: auto;

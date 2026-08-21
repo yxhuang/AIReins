@@ -27,6 +27,15 @@ export function fetchCommands(id: string): Promise<CommandInfo[]> {
   ).then((data) => data.commands);
 }
 
+/** 会话 cwd 内的文件检索（@ 引用补全）：子串匹配、字典序；空 q 也返回列表。 */
+export function fetchFiles(id: string, q: string, limit?: number): Promise<string[]> {
+  const params = new URLSearchParams({ q });
+  if (limit !== undefined) params.set("limit", String(limit));
+  return call<{ files: string[] }>(
+    `/api/sessions/${encodeURIComponent(id)}/files?${params}`,
+  ).then((data) => data.files);
+}
+
 export interface CreateSessionInput {
   agent: AgentKind;
   cwd: string;

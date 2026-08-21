@@ -68,6 +68,12 @@ export interface CommandInfo {
   source: AgentKind;
 }
 
+/** WS user_message 的 mentions 项（当前只有文件引用）；path 为会话 cwd 相对路径。 */
+export interface FileMention {
+  type: "file";
+  path: string;
+}
+
 export interface DriverCapabilities {
   streaming: boolean;
   thoughts: boolean;
@@ -80,7 +86,7 @@ export interface DriverCapabilities {
   resume: boolean;
   /** false = 无斜杠命令枚举协议（codex）：不弹命令面板，结构化 command 会被后端拒绝 */
   commands: boolean;
-  /** @ 文件引用能力位（UI 下一轮做，先留类型） */
+  /** @ 文件引用能力位：false = 不弹 @ 面板、不显示预览条、发送不解析引用（纯文本原样发） */
   mentions: boolean;
   terminal?: boolean;
   fsWrite?: boolean;

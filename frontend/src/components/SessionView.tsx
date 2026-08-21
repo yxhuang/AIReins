@@ -2,7 +2,9 @@ import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from "re
 import type { CommandInfo, MetaInfo, SessionRecord } from "../types";
 import { compactTokens, duration, asRecord, truncateDisplayWidth } from "../format";
 import { buildRenderItems, type GateView } from "../render-items";
-import { store } from "../store";
+import { extractMentionTokens, mentionQueryAt, mentionTokenEnd } from "../mentions";
+import { fetchFiles } from "../api";
+import { MAX_MENTIONS, store } from "../store";
 import { useStore } from "../useStore";
 import { GateBlock, RawLine, SystemLine, TextBlockView, ThoughtBlockView, ToolCard, UserBlockView } from "./StreamItems";
 
@@ -278,33 +280,114 @@ function UsageView({
 function Composer({ session, dead }: { session: SessionRecord; dead: boolean }) {
   const store = useStore();
   const [text, setText] = useState("");
+  const [cursor, setCursor] = useState(0);
   const [selected, setSelected] = useState(0);
   // Esc 关闭面板后，到下一次输入变化前不再自动弹出
   const [dismissed, setDismissed] = useState(false);
+  // IME 组合输入期间：不触发检索、不弹/不更新面板、Enter 不当确认（很多输入法用 Enter 上屏组合串）
+  const [composing, setComposing] = useState(false);
+  const [files, setFiles] = useState<string[]>([]);
   const listRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  /** 选中补全项后要落到的光标位置（setText 之后在 effect 里应用） */
+  const pendingCursor = useRef<number | null>(null);
+  /** @ 检索序号：晚到的旧响应丢弃 */
+  const searchSeq = useRef(0);
 
   const caps = store.meta?.drivers[session.agent];
   const commandsSupported = caps?.commands === true;
+  const mentionsSupported = caps?.mentions === true;
   const table = store.commands.get(session.id) ?? [];
 
   // 仅行首 / 触发（整段文本即「/query」形态）；行中间的 /（如路径）是普通字符
   const slashQuery = /^\/([^\s]*)$/.exec(text)?.[1] ?? null;
-  const panelOpen = commandsSupported && !dead && slashQuery !== null && !dismissed;
-  const filtered = panelOpen ? filterCommands(table, slashQuery ?? "") : [];
+  const slashOpen = commandsSupported && !dead && slashQuery !== null && !dismissed;
+  const filtered = slashOpen ? filterCommands(table, slashQuery ?? "") : [];
   const sel = Math.min(selected, Math.max(filtered.length - 1, 0));
   const active = filtered[sel];
+
+  // @ 引用：光标处 token 以 @ 开头即触发（句中也可以，不同于 / 的整行锚定）；
+  // IME 组合期间不触发；与 / 面板互斥（slashOpen 时不评估 @）。
+  const mention =
+    mentionsSupported && !dead && !slashOpen && !composing
+      ? mentionQueryAt(text, cursor)
+      : null;
+  const mentionOpen = mention !== null && !dismissed;
+  const mentionQuery = mention?.query ?? null;
+  const selM = Math.min(selected, Math.max(files.length - 1, 0));
+  const activeFile = files[selM];
 
   // 已确认命令的参数提示：文本进入「/name 参数…」形态后显示该命令的 argHint
   const typedName = /^\/([^\s]+)\s/.exec(text)?.[1];
   const activeCmd = typedName ? table.find((c) => c.name === typedName) : undefined;
+  // 发送时会走结构化 command 的形态（与 store.sendComposerInput 同一判定）：不解析 mentions
+  const cmdMatch = commandsSupported ? /^\/([^\s]+)(?:\s+[\s\S]*)?$/.exec(text) : null;
+  const willBeCommand = cmdMatch !== null && table.some((c) => c.name === cmdMatch[1]);
 
-  useEffect(() => setSelected(0), [slashQuery]);
+  // 待附加文件预览：当前文本会解析出的 @token（去重、保持出现顺序）
+  const tokens =
+    mentionsSupported && !dead && !willBeCommand ? extractMentionTokens(text) : [];
+  const attachable: string[] = [];
+  const missing: string[] = [];
+  let checking = 0;
+  tokens.forEach((token, index) => {
+    const known = store.fileKnownSync(session.id, token);
+    if (known === true) {
+      if (index < MAX_MENTIONS) attachable.push(token);
+    } else if (known === false) {
+      missing.push(token);
+    } else {
+      checking++;
+    }
+  });
 
-  // 选中项滚动进可视区（claude 102 条时长列表必须可达）
+  useEffect(() => setSelected(0), [slashQuery, mentionQuery]);
+
+  // @ 检索：250ms 防抖 + 序号作废旧响应；检索结果同时写进存在性缓存
   useEffect(() => {
-    if (!panelOpen) return;
+    if (!mentionOpen) {
+      setFiles([]);
+      return;
+    }
+    const seq = ++searchSeq.current;
+    const timer = setTimeout(() => {
+      fetchFiles(session.id, mentionQuery ?? "")
+        .then((list) => {
+          if (searchSeq.current !== seq) return; // 晚到的旧响应丢弃
+          store.noteFiles(session.id, list);
+          setFiles(list);
+        })
+        .catch(() => {
+          if (searchSeq.current === seq) setFiles([]);
+        });
+    }, 250);
+    return () => clearTimeout(timer);
+    // store 是模块级单例，不进依赖
+  }, [mentionOpen, mentionQuery, session.id]);
+
+  // 预览条：对未确认的 token 发起精确存在性查询（store 内缓存 + in-flight 去重）
+  useEffect(() => {
+    if (!mentionsSupported || dead || willBeCommand) return;
+    for (const token of extractMentionTokens(text).slice(0, MAX_MENTIONS)) {
+      if (store.fileKnownSync(session.id, token) === undefined) {
+        void store.resolveFile(session.id, token);
+      }
+    }
+  }, [text, mentionsSupported, dead, willBeCommand, session.id]);
+
+  // 选中项滚动进可视区（长列表必须可达）
+  useEffect(() => {
+    if (!slashOpen && !mentionOpen) return;
     listRef.current?.querySelector(".cmd-item.selected")?.scrollIntoView({ block: "nearest" });
-  }, [panelOpen, sel, active?.name]);
+  }, [slashOpen, mentionOpen, sel, selM, active?.name, activeFile]);
+
+  // 补全插入后把光标落到插入路径之后
+  useEffect(() => {
+    if (pendingCursor.current !== null && textareaRef.current) {
+      textareaRef.current.setSelectionRange(pendingCursor.current, pendingCursor.current);
+      pendingCursor.current = null;
+    }
+  }, [text]);
 
   const confirm = (cmd: CommandInfo, fillOnly: boolean) => {
     if (!fillOnly && !cmd.argHint) {
@@ -318,6 +401,18 @@ function Composer({ session, dead }: { session: SessionRecord; dead: boolean }) 
     setDismissed(false);
   };
 
+  // 选中文件：把 @相对路径 插回光标处（整 token 替换），光标移到插入路径后并补一个空格
+  const confirmMention = (path: string) => {
+    if (!mention) return;
+    const end = mentionTokenEnd(text, cursor);
+    const inserted = `@${path} `;
+    const nextCursor = mention.start + inserted.length;
+    pendingCursor.current = nextCursor;
+    setText(text.slice(0, mention.start) + inserted + text.slice(end));
+    setCursor(nextCursor);
+    setDismissed(false);
+  };
+
   const send = () => {
     const trimmed = text.trim();
     if (!trimmed || dead) return;
@@ -327,7 +422,9 @@ function Composer({ session, dead }: { session: SessionRecord; dead: boolean }) 
   };
 
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (panelOpen) {
+    // IME 组合期间：Enter/Tab 等都是输入法上屏键，不当确认也不发送
+    if (e.nativeEvent.isComposing) return;
+    if (slashOpen) {
       if (e.key === "ArrowDown" || e.key === "ArrowUp") {
         e.preventDefault();
         if (filtered.length > 0) {
@@ -352,6 +449,32 @@ function Composer({ session, dead }: { session: SessionRecord; dead: boolean }) 
         return;
       }
     }
+    if (mentionOpen) {
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        e.preventDefault();
+        if (files.length > 0) {
+          const delta = e.key === "ArrowDown" ? 1 : -1;
+          setSelected((i) => (i + delta + files.length) % files.length);
+        }
+        return;
+      }
+      if (e.key === "Tab") {
+        e.preventDefault(); // 焦点留在输入框
+        if (activeFile) confirmMention(activeFile);
+        return;
+      }
+      if (e.key === "Escape") {
+        e.preventDefault();
+        setDismissed(true);
+        return;
+      }
+      if (e.key === "Enter" && !e.shiftKey && activeFile) {
+        e.preventDefault();
+        confirmMention(activeFile);
+        return;
+      }
+      // 无匹配时 Enter 落回普通发送（未知路径本就不会附加）
+    }
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       send();
@@ -360,7 +483,7 @@ function Composer({ session, dead }: { session: SessionRecord; dead: boolean }) 
 
   return (
     <div className="composer">
-      {panelOpen && (
+      {slashOpen && (
         <div className="cmd-panel" role="listbox" aria-label="斜杠命令" ref={listRef}>
           {filtered.length === 0 && <div className="cmd-empty">没有匹配的命令</div>}
           {filtered.map((cmd, i) => (
@@ -381,7 +504,47 @@ function Composer({ session, dead }: { session: SessionRecord; dead: boolean }) 
           ))}
         </div>
       )}
-      {!panelOpen && activeCmd?.argHint && (
+      {mentionOpen && (
+        <div className="cmd-panel" role="listbox" aria-label="文件引用" ref={listRef}>
+          {files.length === 0 && <div className="cmd-empty">没有匹配的文件</div>}
+          {files.map((file, i) => (
+            <div
+              key={file}
+              role="option"
+              aria-selected={i === selM}
+              className={`cmd-item${i === selM ? " selected" : ""}`}
+              onMouseDown={(e) => {
+                e.preventDefault(); // 不抢输入框焦点，键盘可继续输入
+                confirmMention(file);
+              }}
+              onMouseEnter={() => setSelected(i)}
+            >
+              <span className="cmd-name mono">@{file}</span>
+            </div>
+          ))}
+        </div>
+      )}
+      {tokens.length > 0 && (
+        <div className="mention-preview">
+          {attachable.length > 0 && (
+            <span>
+              将附加 {attachable.length} 个文件：{attachable.join(" · ")}
+            </span>
+          )}
+          {missing.map((token) => (
+            <span key={token} className="mention-missing">
+              @{token} 未找到，不会附加
+            </span>
+          ))}
+          {checking > 0 && <span>{checking} 个引用检查中…</span>}
+          {tokens.length > MAX_MENTIONS && (
+            <span className="mention-missing">
+              超过 {MAX_MENTIONS} 个引用，超出的不会附加
+            </span>
+          )}
+        </div>
+      )}
+      {!slashOpen && activeCmd?.argHint && (
         <div className="composer-hint">
           <span className="mono">/{activeCmd.name}</span> 参数：{activeCmd.argHint}
         </div>
@@ -396,13 +559,23 @@ function Composer({ session, dead }: { session: SessionRecord; dead: boolean }) 
       )}
       <div className="composer-row">
         <textarea
+          ref={textareaRef}
           value={text}
           rows={2}
           disabled={dead}
           placeholder={dead ? "会话已结束，新建会话可续接" : "发消息给这个 agent…（Enter 发送，Shift+Enter 换行）"}
           onChange={(e) => {
             setText(e.target.value);
+            setCursor(e.target.selectionStart);
             setDismissed(false);
+          }}
+          onSelect={(e) => setCursor(e.currentTarget.selectionStart)}
+          onCompositionStart={() => setComposing(true)}
+          onCompositionEnd={(e) => {
+            // 组合结束后再按当前文本评估是否触发 @ 面板
+            setComposing(false);
+            setText(e.currentTarget.value);
+            setCursor(e.currentTarget.selectionStart);
           }}
           onKeyDown={onKeyDown}
         />

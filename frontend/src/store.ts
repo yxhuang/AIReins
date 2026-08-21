@@ -1,6 +1,7 @@
 import type {
   CommandInfo,
   ConfigOptionId,
+  FileMention,
   MetaInfo,
   PermissionDecision,
   SessionConfig,
@@ -8,7 +9,8 @@ import type {
   SessionStatus,
   UnifiedEvent,
 } from "./types";
-import { createSession, fetchCommands, fetchMeta, fetchSessions, fetchSnapshot, type CreateSessionInput } from "./api";
+import { createSession, fetchCommands, fetchFiles, fetchMeta, fetchSessions, fetchSnapshot, type CreateSessionInput } from "./api";
+import { extractMentionTokens } from "./mentions";
 
 // 全局状态与连接恢复：
 // - 一条全局 WS（不带 sessionId）收全部会话事件，支撑左栏跨会话待审批徽标；
@@ -23,6 +25,9 @@ export type WsState = "connecting" | "open" | "closed";
 
 /** 每会话内存事件上限：超出丢弃最旧并计数，快照重取即可恢复全量。 */
 const MAX_EVENTS = 2000;
+
+/** 单条消息的 mentions 上限（后端硬限制，超出截断并在预览条提示）。 */
+export const MAX_MENTIONS = 20;
 
 interface SessionData {
   events: UnifiedEvent[];
@@ -49,6 +54,8 @@ class Store {
   configHints = new Map<string, string>();
   /** 每会话斜杠命令表：快照内 commands_updated 打底 + REST 首取覆盖 + WS 实时全量覆盖 */
   commands = new Map<string, CommandInfo[]>();
+  /** @ 引用存在性结论缓存：sessionId →（路径 → 是否真实文件）；面板检索命中与精确查询都写入 */
+  fileKnown = new Map<string, Map<string, boolean>>();
   /** 全局时钟（每秒 tick），驱动相对时间与用时刷新 */
   now = Date.now();
   /** 每次 notify 自增，供 useSyncExternalStore 做快照 */
@@ -64,6 +71,8 @@ class Store {
   /** 每会话 in-flight 快照请求：并发对齐复用同一 Promise */
   private snapshotInflight = new Map<string, Promise<void>>();
   private configHintTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  /** @ 引用精确查询 in-flight 去重（key = sessionId + \n + path） */
+  private fileKnownInflight = new Map<string, Promise<boolean>>();
 
   subscribe = (listener: () => void): (() => void) => {
     this.listeners.add(listener);
@@ -368,8 +377,13 @@ class Store {
     return false;
   }
 
-  sendUserMessage(sessionId: string, text: string): void {
-    this.send({ type: "user_message", sessionId, text });
+  sendUserMessage(sessionId: string, text: string, mentions?: FileMention[]): void {
+    this.send({
+      type: "user_message",
+      sessionId,
+      text,
+      ...(mentions && mentions.length > 0 ? { mentions } : {}),
+    });
   }
 
   /** 结构化斜杠命令上行：command 与 text 互斥（后端对不支持的 driver 明确报错）。 */
@@ -378,8 +392,9 @@ class Store {
   }
 
   /**
-   * 输入框统一入口：行首「/命令表内名称 + 可选参数」走结构化 command，
+   * 输入框统一入口：行首「/命令表内名称 + 可选参数」走结构化 command（不附 mentions），
    * 其余一律按普通文本（能力位为 false 的 driver 绝不拼结构化 command）。
+   * mentions 能力位 true 时解析 @token：仅确认存在的路径进 mentions，文本原样发送。
    */
   sendComposerInput(sessionId: string, text: string): void {
     const session = this.session(sessionId);
@@ -394,7 +409,67 @@ class Store {
         }
       }
     }
-    this.sendUserMessage(sessionId, text);
+    if (!caps?.mentions) {
+      this.sendUserMessage(sessionId, text);
+      return;
+    }
+    void this.sendWithMentions(sessionId, text);
+  }
+
+  /** 检索结果整体记入缓存：返回过的路径确认存在。 */
+  noteFiles(sessionId: string, files: string[]): void {
+    let map = this.fileKnown.get(sessionId);
+    if (!map) {
+      map = new Map();
+      this.fileKnown.set(sessionId, map);
+    }
+    for (const file of files) map.set(file, true);
+  }
+
+  /** 同步读存在性结论（undefined = 尚未确认），供预览条渲染。 */
+  fileKnownSync(sessionId: string, path: string): boolean | undefined {
+    return this.fileKnown.get(sessionId)?.get(path);
+  }
+
+  /**
+   * 精确存在性查询：q=完整路径，结果里精确命中才算存在（检索是子串模糊匹配，
+   * 「出现在结果中」不等于「该路径是真实文件」）。结论缓存、in-flight 去重；
+   * 请求失败不缓存结论，下次重试。
+   */
+  resolveFile(sessionId: string, path: string): Promise<boolean> {
+    const cached = this.fileKnownSync(sessionId, path);
+    if (cached !== undefined) return Promise.resolve(cached);
+    const key = `${sessionId}\n${path}`;
+    const inflight = this.fileKnownInflight.get(key);
+    if (inflight) return inflight;
+    const promise = (async () => {
+      try {
+        const files = await fetchFiles(sessionId, path, 200);
+        this.noteFiles(sessionId, files);
+        const exists = files.includes(path);
+        this.fileKnown.get(sessionId)?.set(path, exists);
+        this.notify(); // 预览条等读缓存的视图刷新
+        return exists;
+      } catch {
+        return false;
+      } finally {
+        this.fileKnownInflight.delete(key);
+      }
+    })();
+    this.fileKnownInflight.set(key, promise);
+    return promise;
+  }
+
+  /** 发送前解析 @token：只把确认存在的路径放进 mentions（去重、≤20），文本原样发送。 */
+  private async sendWithMentions(sessionId: string, text: string): Promise<void> {
+    const tokens = extractMentionTokens(text).slice(0, MAX_MENTIONS);
+    const mentions: FileMention[] = [];
+    for (const token of tokens) {
+      if (await this.resolveFile(sessionId, token)) {
+        mentions.push({ type: "file", path: token });
+      }
+    }
+    this.sendUserMessage(sessionId, text, mentions);
   }
 
   resolvePermission(

@@ -37,13 +37,14 @@ frontend/
     api.ts              REST 信封客户端（code 非 0 抛中文错误消息）
     format.ts           相对时间 / 用时 / token 紧凑格式 / 会话标题派生
     render-items.ts     统一事件 → 渲染条目（文本合并、工具聚合、闸门提取）
+    mentions.ts         @ 引用纯文本 token 提取 / 光标处触发判定（无 DOM 依赖，可单测）
     store.ts            全局状态 + WS 连接恢复（见下）
     useStore.ts         useSyncExternalStore 订阅 hook
     App.tsx             布局骨架、hash 路由、错误提示条
     components/
       Sidebar.tsx       会话列表（身份色脊 / 状态点 / 闸门徽标 / 危险模式「!」标记）+ 新建会话表单（含三个配置下拉）+ 底部设置入口
       SettingsMenu.tsx  设置齿轮 + 锚定浮层（分组/条目结构，60vh 限高滚动 + focus trap）；主题三选一写 <html data-theme>、localStorage 持久化（读写均 try/catch）
-      SessionView.tsx   会话头（usage 分家渲染 / 配置控件行 / 中断）+ 危险模式警示条 + 事件流 + 输入框（行首 / 命令面板、结构化 command 上行、codex 降级说明）+ 未决闸门贴条
+      SessionView.tsx   会话头（usage 分家渲染 / 配置控件行 / 中断）+ 危险模式警示条 + 事件流 + 输入框（行首 / 命令面板、@ 文件引用面板与待附加预览条、结构化 command 上行、codex 降级说明）+ 未决闸门贴条
       StreamItems.tsx   用户消息 / 文本块 / 思考折叠块 / 工具卡片 / 闸门块 / 系统行
     styles.css          设计令牌（深浅两套）与全部样式
 ```
@@ -135,7 +136,27 @@ frontend/
 - [x] **37. codex 结构化命令被后端明确拒绝。** 对 codex 会话发结构化 `compact` 收到 WS error「codex driver 不支持斜杠命令」——即使前端误发也不会静默降级为文本。
 - [x] **38. 构建与检查全绿。** 实测：`npm run build` 退出码 0、`npm run typecheck:frontend` 退出码 0、根 `npm run typecheck` 退出码 0、`npm run check:theme` 输出「✅ 深色令牌两份一致（26 项）」（本轮未新增令牌）。
 
+### M6 `@` 文件引用补全（2026-08-21）
+
+纯 textarea + 发送时解析，不做 contenteditable/chip（用户是中文输入法用户，contenteditable 的 IME 组合输入是经典 bug 温床）：
+
+- **触发**：光标处 token（空白分隔的一段）以 `@` 开头即触发——句中也可以（`看看 @server/index.ts 这个`），不同于 `/` 的整行锚定；`foo@bar.com` 这类 token 中间的 `@` 不触发。空 query（刚敲 `@`）也弹全量列表。
+- **检索**：`GET /api/sessions/:id/files?q=`，250ms 防抖 + 序号作废旧响应；面板复用 `/` 命令面板的 `cmd-panel/cmd-item` 样式语言（冷色，`max-height: 45vh` + `overflow-y: auto`），↑↓ 选、Enter/Tab 确认、Esc 关，焦点始终在 textarea；与 `/` 面板互斥（slashOpen 时不评估 `@`）。
+- **确认**：`@相对路径` 整 token 替换插回光标处，光标落到插入路径后并补一个空格。
+- **预览条**：输入框上方一行小字实时反映当前文本会解析出的引用——已确认存在的显示「将附加 N 个文件：a · b」；未确认的异步做精确存在性查询（`q=完整路径`，结果里**精确命中**才算存在，因为检索是子串模糊匹配），结论缓存在 store 的 `fileKnown`（面板检索命中也写入），in-flight 去重，请求失败不缓存结论；确认不存在的标冷调 `--danger`「@路径 未找到，不会附加」（暖色只给审批闸门）；超过后端 20 个上限时提示「超出的不会附加」。发送时会走结构化 command 的文本不解析、不显示预览条。
+- **发送**：`store.sendComposerInput` 在 mentions 能力位 true 时走 `sendWithMentions`——`extractMentionTokens` 解析 `@token`（去重、截断到 20），逐个用缓存/精确查询确认存在后才进 `mentions:[{type:"file",path}]`，**文本本身原样发送**（后端三家翻译都需要 `@` 锚点）；能力位 false 时不触发面板、不出预览条、纯文本原样发。`/` 结构化 command 路径不受影响（command 与 text 互斥，本轮不附 mentions）。
+- **IME 处理**：textarea 监听 `compositionstart`/`compositionend`——组合期间 `composing=true`，此时不评估触发、不弹/不更新面板、不检索；`onKeyDown` 第一行 `e.nativeEvent.isComposing` 直接返回，组合期间的 Enter/Tab（输入法上屏键）不会确认补全也不会发送；`compositionend` 后用当前文本与光标重新评估是否弹面板。
+
+- [x] **39. `@ser` 弹面板列匹配文件，选中后文本变 `@server/...`。** 触发/提取/替换逻辑 **tsx 实测 19 例全过**（行首/句中/token 内光标/email 不触发/空 query/换行分隔/去重/整 token 替换终点）；面板渲染与键盘交互为**代码复核**（无头环境未启浏览器），样式复用已验收的 `/` 面板类。
+- [x] **40. 实测带引用的消息 agent 真读到内容。** 隔离实例 `WORKBENCH_PORT=8793`：`server/test-sandbox/mention-target.txt`（含唯一标记 `WB_MENTION_MARK_9F2E7B41`；注：该目录 `.gitignore` 为 `*`，靶文件不在检索列表中，但 mentions 投递不依赖检索）→ kimi 会话（cwd=test-sandbox）WS 上行 `{text:"读一下 @mention-target.txt 并回复其中的标记", mentions:[{type:"file",path:"mention-target.txt"}]}`，agent 回复「文件 `mention-target.txt` 中的唯一标记串是：`WB_MENTION_MARK_9F2E7B41`」，输出 `MENTION_OK`。同实例顺带实测 files API：400 边界（`q=../../../etc/passwd` → HTTP 400/code 40020）。完事 DELETE 两个会话、删靶文件、按端口 kill（`ss -tlnp | grep 8793` 确认关闭）。
+- [x] **41. 句中触发（`看看 @server/index.ts 这个文件`）。** `mentionQueryAt` 只要求光标处 token 以 `@` 开头，tsx 用例「句中 @ser」「句中 token 终点」实测通过。
+- [x] **42. 不存在路径 → 预览条「未找到，不会附加」且发送帧不含它。** **代码复核**：`fileKnownSync===false` 渲染 `mention-missing`；`sendWithMentions` 仅 `resolveFile` 返回 true 才 push 进 mentions，文本原样保留。精确存在性判定：检索结果精确 `includes`（子串模糊命中不算存在）。
+- [x] **43. IME 组合期间不误触发。** **代码复核**（无头环境无法驱动真实 IME）：三个处理点——`composing` 态屏蔽触发评估、`isComposing` 屏蔽全部按键确认/发送、`compositionend` 后重新评估。
+- [x] **44. 构建与检查全绿。** 实测：`npm run build`（vite 8.2.2，26 modules，退出码 0）、`npm run typecheck:frontend` 退出码 0、根 `npm run typecheck` 退出码 0、`npm run check:theme` 输出「✅ 深色令牌两份一致（26 项）」（本轮未新增令牌）。
+
 ## 已知取舍
+
+- `@token` 严格按空白切段：句末紧跟标点（如 `@a.ts，`）会把标点并入 token 导致「未找到，不会附加」，需要用户在引用后敲空格。
 
 - 未引入 UI 组件库、图标库、路由库：图标用 Unicode，路由用 hash（`#/session/<id>`）。
 - 未引入 `@vitejs/plugin-react`：esbuild automatic JSX 够用，dev 下 HMR 退化为整页刷新。
