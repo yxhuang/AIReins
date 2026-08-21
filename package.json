@@ -11,7 +11,8 @@
     "dev": "vite --config frontend/vite.config.ts",
     "spike:claude": "tsx spikes/claude-loop.ts",
     "spike:codex": "tsx spikes/codex-loop.ts",
-    "spike:kimi": "tsx spikes/kimi-loop.ts"
+    "spike:kimi": "tsx spikes/kimi-loop.ts",
+    "check:theme": "node frontend/scripts/check-theme-parity.mjs"
   },
   "devDependencies": {
     "@types/node": "^26.2.0",
