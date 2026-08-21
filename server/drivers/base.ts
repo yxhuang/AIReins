@@ -1,14 +1,22 @@
 import { spawn, type ChildProcessWithoutNullStreams, type SpawnOptionsWithoutStdio } from "node:child_process";
 import { createInterface } from "node:readline";
 import { log } from "../logger.js";
-import type { AgentKind, Driver, DriverCallbacks, DriverOptions, PermissionDecision } from "../types.js";
+import type {
+  AgentKind,
+  Driver,
+  DriverCallbacks,
+  DriverConfigSchema,
+  DriverOptions,
+  PermissionDecision,
+  SessionConfig,
+} from "../types.js";
 
 export abstract class BaseDriver implements Driver {
   abstract readonly kind: AgentKind;
   child?: ChildProcessWithoutNullStreams;
   protected readonly sessionId: string;
   protected readonly cwd: string;
-  protected readonly model?: string;
+  protected config: SessionConfig;
   protected readonly resumeSessionId?: string;
   protected readonly callbacks: DriverCallbacks;
   protected stopping = false;
@@ -16,12 +24,14 @@ export abstract class BaseDriver implements Driver {
   constructor(options: DriverOptions) {
     this.sessionId = options.sessionId;
     this.cwd = options.cwd;
-    this.model = options.model;
+    this.config = { ...options.config };
     this.resumeSessionId = options.resumeSessionId;
     this.callbacks = options.callbacks;
   }
 
   abstract start(): Promise<void>;
+  abstract getConfigSchema(): DriverConfigSchema;
+  abstract setConfig(config: SessionConfig): Promise<SessionConfig>;
   abstract sendUserMessage(text: string): Promise<void>;
   abstract resolvePermission(requestId: string, decision: PermissionDecision, updatedInput?: unknown): Promise<void>;
 

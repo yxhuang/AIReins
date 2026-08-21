@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { DRIVER_CAPABILITIES } from "./drivers/index.js";
+import { getDriverMetadata } from "./drivers/index.js";
 
 export const SERVER_VERSION = "0.1.0";
 
@@ -31,7 +31,8 @@ export function getMeta(): Promise<Record<string, unknown>> {
     probeVersion("claude"),
     probeVersion("codex"),
     probeVersion("kimi"),
-  ]).then(([claude, codex, kimi]) => ({
+    getDriverMetadata(process.cwd()),
+  ]).then(([claude, codex, kimi, drivers]) => ({
     serverVersion: SERVER_VERSION,
     cliVersions: { claude, codex, kimi },
     capabilities: {
@@ -40,7 +41,7 @@ export function getMeta(): Promise<Record<string, unknown>> {
       ringReplay: true,
       staticServing: true,
     },
-    drivers: DRIVER_CAPABILITIES,
+    drivers,
     security: {
       bindHost: "127.0.0.1",
       authentication: false,

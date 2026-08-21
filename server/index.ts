@@ -6,14 +6,30 @@ import { WebSocket, WebSocketServer } from "ws";
 import { log } from "./logger.js";
 import { getMeta, SERVER_VERSION } from "./meta.js";
 import { SessionManager } from "./session-manager.js";
-import { AGENTS, type CreateSessionInput, type PermissionDecision, type UnifiedEvent } from "./types.js";
+import {
+  AGENTS,
+  CONFIG_OPTION_IDS,
+  type CreateSessionInput,
+  type PermissionDecision,
+  type SessionConfig,
+  type UnifiedEvent,
+} from "./types.js";
 import { ulid } from "./ulid.js";
 
 const HOST = "127.0.0.1";
-const PORT = 8790;
+const PORT = listenPort(process.env.WORKBENCH_PORT);
 const STATIC_ROOT = process.env.WORKBENCH_STATIC_DIR
   ? resolve(process.env.WORKBENCH_STATIC_DIR)
   : resolve(fileURLToPath(new URL("../frontend/dist", import.meta.url)));
+
+function listenPort(value: string | undefined): number {
+  if (value === undefined) return 8790;
+  const port = Number(value);
+  if (!Number.isInteger(port) || port < 1 || port > 65_535) {
+    throw new Error("WORKBENCH_PORT 必须是 1 到 65535 的整数");
+  }
+  return port;
+}
 
 class ApiError extends Error {
   constructor(readonly status: number, readonly code: number, message: string) {
@@ -190,6 +206,8 @@ async function handleWsMessage(client: WsClientState, text: string): Promise<voi
       );
     } else if (message.type === "interrupt") {
       await manager.interrupt(sessionId);
+    } else if (message.type === "set_config") {
+      await manager.setConfig(sessionId, validateSessionConfig(message.config, "set_config.config"));
     } else {
       throw new Error(`不支持的 WS 上行类型：${String(message.type)}`);
     }
@@ -258,7 +276,28 @@ function validateCreateSession(value: unknown): CreateSessionInput {
   if (typeof input.cwd !== "string") throw new ApiError(400, 40002, "cwd 必须是绝对路径字符串");
   if (input.agentId !== undefined && typeof input.agentId !== "string") throw new ApiError(400, 40003, "agentId 必须是字符串");
   if (input.initialMessage !== undefined && typeof input.initialMessage !== "string") throw new ApiError(400, 40004, "initialMessage 必须是字符串");
+  if (input.model !== undefined && typeof input.model !== "string") throw new ApiError(400, 40005, "model 必须是字符串");
+  if (input.kimiMode !== undefined && !["default", "plan", "auto", "yolo"].includes(String(input.kimiMode))) {
+    throw new ApiError(400, 40006, "kimiMode 必须是 default、plan、auto 或 yolo");
+  }
+  if (input.config !== undefined) validateSessionConfig(input.config, "config");
   return input as unknown as CreateSessionInput;
+}
+
+function validateSessionConfig(value: unknown, label: string): SessionConfig {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new ApiError(400, 40007, `${label} 必须是 JSON 对象`);
+  }
+  const input = value as Record<string, unknown>;
+  for (const key of Object.keys(input)) {
+    if (!CONFIG_OPTION_IDS.includes(key as (typeof CONFIG_OPTION_IDS)[number])) {
+      throw new ApiError(400, 40008, `${label} 不支持字段：${key}`);
+    }
+    if (typeof input[key] !== "string") {
+      throw new ApiError(400, 40009, `${label}.${key} 必须是字符串`);
+    }
+  }
+  return input as SessionConfig;
 }
 
 function serveStatic(pathname: string, response: ServerResponse): boolean {

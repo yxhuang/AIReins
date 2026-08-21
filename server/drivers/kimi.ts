@@ -1,7 +1,13 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import type { DriverOptions, PermissionDecision } from "../types.js";
+import type {
+  ConfigOptionId,
+  DriverConfigSchema,
+  PermissionDecision,
+  SessionConfig,
+} from "../types.js";
 import { BaseDriver, errorMessage, parseJsonLine, withTimeout } from "./base.js";
+import { StdioRpcProbe } from "./rpc-probe.js";
 
 interface PendingRpc {
   resolve(value: any): void;
@@ -23,20 +29,93 @@ interface TerminalState {
   done: Promise<void>;
 }
 
+interface AcpConfigOption {
+  id?: string;
+  name?: string;
+  currentValue?: unknown;
+  options?: Array<{ value?: unknown; name?: string; description?: string }>;
+}
+
+const KIMI_CONFIG_IDS: Record<ConfigOptionId, string> = {
+  model: "model",
+  effort: "thinking",
+  permissionMode: "mode",
+};
+
+const KIMI_UNIFIED_IDS: Record<string, ConfigOptionId> = {
+  model: "model",
+  thinking: "effort",
+  mode: "permissionMode",
+};
+
+const CONFIG_NAMES: Record<ConfigOptionId, string> = {
+  model: "模型",
+  effort: "推理强度",
+  permissionMode: "审批模式",
+};
+
+export function kimiConfigSchemaFromOptions(configOptions: AcpConfigOption[]): DriverConfigSchema {
+  return {
+    source: "Kimi ACP session/new.configOptions",
+    options: configOptions.flatMap((option) => {
+      const id = KIMI_UNIFIED_IDS[String(option.id ?? "")];
+      if (!id) return [];
+      return [{
+        id,
+        name: CONFIG_NAMES[id],
+        values: (option.options ?? []).flatMap((value) => {
+          if (value.value === undefined) return [];
+          return [{
+            value: String(value.value),
+            label: value.name ?? String(value.value),
+            ...(value.description ? { description: value.description } : {}),
+          }];
+        }),
+        default: option.currentValue === undefined ? "" : String(option.currentValue),
+        mutable: true,
+      }];
+    }),
+  };
+}
+
+export function kimiConfigFromOptions(configOptions: AcpConfigOption[]): SessionConfig {
+  const config: SessionConfig = {};
+  for (const option of configOptions) {
+    const id = KIMI_UNIFIED_IDS[String(option.id ?? "")];
+    if (id && option.currentValue !== undefined) config[id] = String(option.currentValue);
+  }
+  return config;
+}
+
+export async function probeKimiConfigSchema(cwd: string): Promise<DriverConfigSchema> {
+  const probe = new StdioRpcProbe("kimi", ["acp"], cwd);
+  let sessionId = "";
+  try {
+    await probe.request("initialize", {
+      protocolVersion: 1,
+      clientCapabilities: { fs: { readTextFile: true, writeTextFile: true }, terminal: true },
+      clientInfo: { name: "workbench-meta", title: "Workbench metadata probe", version: "0.1.0" },
+    });
+    const result = await probe.request("session/new", { cwd, mcpServers: [] });
+    sessionId = String(result?.sessionId ?? "");
+    return kimiConfigSchemaFromOptions(Array.isArray(result?.configOptions) ? result.configOptions : []);
+  } finally {
+    if (sessionId) {
+      try { await probe.request("session/close", { sessionId }, 1_000); } catch { /* probe shutdown remains authoritative */ }
+    }
+    await probe.close();
+  }
+}
+
 export class KimiDriver extends BaseDriver {
   readonly kind = "kimi" as const;
-  private readonly mode: "default" | "plan" | "auto" | "yolo";
   private rpcId = 1_000;
   private readonly rpc = new Map<number, PendingRpc>();
   private readonly permissions = new Map<string, KimiPermission>();
   private readonly terminals = new Map<string, TerminalState>();
   private nativeSessionId = "";
   private terminalCounter = 0;
-
-  constructor(options: DriverOptions) {
-    super(options);
-    this.mode = options.kimiMode ?? "default";
-  }
+  private configOptions: AcpConfigOption[] = [];
 
   async start(): Promise<void> {
     this.spawnProcess("kimi", ["acp"]);
@@ -46,6 +125,7 @@ export class KimiDriver extends BaseDriver {
       clientInfo: { name: "workbench", title: "Workbench", version: "0.1.0" },
     }), 15_000, "Kimi initialize");
 
+    const requestedConfig = { ...this.config };
     const result = this.resumeSessionId
       ? await withTimeout(this.request("session/resume", {
         sessionId: this.resumeSessionId,
@@ -55,14 +135,31 @@ export class KimiDriver extends BaseDriver {
       : await withTimeout(this.request("session/new", { cwd: this.cwd, mcpServers: [] }), 15_000, "Kimi session/new");
     this.nativeSessionId = result?.sessionId ?? this.resumeSessionId ?? "";
     if (!this.nativeSessionId) throw new Error("Kimi 未返回 sessionId");
-    this.callbacks.metadata({ nativeSessionId: this.nativeSessionId });
+    this.updateConfigOptions(result?.configOptions ?? []);
 
-    // 安全边界：即使 session/new 声称 currentModeId=default，也必须实际调用 set_mode。
-    await withTimeout(this.request("session/set_mode", {
-      sessionId: this.nativeSessionId,
-      modeId: this.mode,
-    }), 15_000, "Kimi session/set_mode");
+    if (requestedConfig.model) await this.applyConfigOption("model", requestedConfig.model);
+    if (requestedConfig.effort) await this.applyConfigOption("effort", requestedConfig.effort);
+    // 安全边界：即使 session/new 声称 currentModeId=default，也必须实际设置 mode。
+    await this.applyConfigOption("permissionMode", requestedConfig.permissionMode ?? "default");
+    this.callbacks.metadata({
+      nativeSessionId: this.nativeSessionId,
+      config: { ...this.config },
+    });
     this.callbacks.status("idle");
+  }
+
+  getConfigSchema(): DriverConfigSchema {
+    return kimiConfigSchemaFromOptions(this.configOptions);
+  }
+
+  async setConfig(config: SessionConfig): Promise<SessionConfig> {
+    const entries = (["model", "effort", "permissionMode"] as ConfigOptionId[])
+      .filter((id) => config[id] !== undefined);
+    if (entries.length === 0) throw new Error("Kimi set_config 没有可修改的配置项");
+    for (const id of entries) await this.applyConfigOption(id, config[id]!);
+    const current = { ...this.config };
+    this.callbacks.metadata({ config: current });
+    return current;
   }
 
   async sendUserMessage(text: string): Promise<void> {
@@ -337,6 +434,16 @@ export class KimiDriver extends BaseDriver {
   private handleSessionUpdate(params: Record<string, any>): void {
     const update = params.update ?? {};
     const type = update.sessionUpdate;
+    if (type === "config_option_update") {
+      this.updateConfigOptions(update.configOptions ?? []);
+      this.callbacks.metadata({ config: { ...this.config } });
+      return;
+    }
+    if (type === "current_mode_update" && typeof update.currentModeId === "string") {
+      this.config.permissionMode = update.currentModeId;
+      this.callbacks.metadata({ config: { ...this.config } });
+      return;
+    }
     if (type === "agent_message_chunk") {
       this.callbacks.emit("agent_text_delta", { text: update.content?.text ?? "" });
       return;
@@ -374,7 +481,7 @@ export class KimiDriver extends BaseDriver {
       return;
     }
     const quiet = new Set([
-      "available_commands_update", "config_option_update", "current_mode_update", "session_info_update",
+      "available_commands_update", "session_info_update",
     ]);
     if (!quiet.has(type)) this.callbacks.emit("raw_event", { source: "kimi", update });
   }
@@ -385,6 +492,30 @@ export class KimiDriver extends BaseDriver {
       this.rpc.set(id, { resolve, reject });
       this.send({ jsonrpc: "2.0", id, method, params });
     });
+  }
+
+  private async applyConfigOption(id: ConfigOptionId, value: string): Promise<void> {
+    const schema = this.getConfigSchema();
+    const option = schema.options.find((item) => item.id === id);
+    if (!option) throw new Error(`Kimi session/new 未提供配置项：${id}`);
+    if (!option.values.some((item) => item.value === value)) {
+      throw new Error(`Kimi ${id} 不合法：${value}`);
+    }
+    const result = await withTimeout(this.request("session/set_config_option", {
+      sessionId: this.nativeSessionId,
+      configId: KIMI_CONFIG_IDS[id],
+      value,
+    }), 15_000, `Kimi session/set_config_option(${id})`);
+    if (Array.isArray(result?.configOptions)) {
+      this.updateConfigOptions(result.configOptions);
+    } else {
+      this.config[id] = value;
+    }
+  }
+
+  private updateConfigOptions(configOptions: AcpConfigOption[]): void {
+    this.configOptions = configOptions;
+    this.config = kimiConfigFromOptions(configOptions);
   }
 
   private replyResult(id: string | number, result: unknown): void {

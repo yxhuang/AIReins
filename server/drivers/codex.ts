@@ -1,5 +1,12 @@
-import type { DriverOptions, PermissionDecision } from "../types.js";
+import type {
+  DriverConfigSchema,
+  DriverOptions,
+  PermissionDecision,
+  SessionConfig,
+} from "../types.js";
+import { mergeSessionConfig } from "../session-config.js";
 import { BaseDriver, errorMessage, parseJsonLine, withTimeout } from "./base.js";
+import { StdioRpcProbe } from "./rpc-probe.js";
 
 interface PendingRpc {
   resolve(value: any): void;
@@ -18,6 +25,73 @@ const APPROVAL_METHODS = new Set([
   "item/permissions/requestApproval",
 ]);
 
+const CODEX_EFFORTS = ["minimal", "low", "medium", "high", "xhigh"];
+
+interface CodexModelInfo {
+  id?: string;
+  model?: string;
+  displayName?: string;
+  description?: string;
+  defaultReasoningEffort?: string;
+  isDefault?: boolean;
+}
+
+export function codexConfigSchemaFromModels(models: CodexModelInfo[]): DriverConfigSchema {
+  const defaultModel = models.find((model) => model.isDefault) ?? models[0];
+  const defaultEffort = CODEX_EFFORTS.includes(defaultModel?.defaultReasoningEffort ?? "")
+    ? defaultModel!.defaultReasoningEffort!
+    : "medium";
+  return {
+    source: "Codex app-server model/list and v2 protocol schema",
+    options: [
+      {
+        id: "model",
+        name: "模型",
+        values: models.map((model) => ({
+          value: String(model.model ?? model.id ?? ""),
+          label: String(model.displayName ?? model.model ?? model.id ?? ""),
+          ...(model.description ? { description: model.description } : {}),
+        })).filter((value) => value.value),
+        default: String(defaultModel?.model ?? defaultModel?.id ?? ""),
+        mutable: true,
+      },
+      {
+        id: "effort",
+        name: "推理强度",
+        values: CODEX_EFFORTS.map((value) => ({ value, label: value })),
+        default: defaultEffort,
+        mutable: true,
+      },
+      {
+        id: "permissionMode",
+        name: "审批模式",
+        values: [
+          { value: "untrusted", label: "Untrusted" },
+          { value: "on-request", label: "On Request" },
+          { value: "never", label: "Never" },
+        ],
+        default: "untrusted",
+        mutable: true,
+      },
+    ],
+  };
+}
+
+export async function probeCodexConfigSchema(cwd: string): Promise<DriverConfigSchema> {
+  const probe = new StdioRpcProbe("codex", ["app-server", "--stdio"], cwd);
+  try {
+    await probe.request("initialize", {
+      clientInfo: { name: "workbench-meta", title: "Workbench metadata probe", version: "0.1.0" },
+      capabilities: null,
+    });
+    probe.notify("initialized", {});
+    const result = await probe.request("model/list", { limit: 100, includeHidden: false });
+    return codexConfigSchemaFromModels(Array.isArray(result?.data) ? result.data : []);
+  } finally {
+    await probe.close();
+  }
+}
+
 export class CodexDriver extends BaseDriver {
   readonly kind = "codex" as const;
   private rpcId = 1_000;
@@ -25,6 +99,15 @@ export class CodexDriver extends BaseDriver {
   private readonly permissions = new Map<string, CodexPermission>();
   private threadId = "";
   private turnId = "";
+  private configSchema = codexConfigSchemaFromModels([]);
+  private sendModel: boolean;
+  private sendEffort: boolean;
+
+  constructor(options: DriverOptions) {
+    super(options);
+    this.sendModel = Boolean(options.config.model);
+    this.sendEffort = Boolean(options.config.effort);
+  }
 
   async start(): Promise<void> {
     this.spawnProcess("codex", ["app-server", "--stdio"]);
@@ -34,11 +117,33 @@ export class CodexDriver extends BaseDriver {
     }), 15_000, "Codex initialize");
     if (!initialized) throw new Error("Codex initialize 未返回 result");
     this.notify("initialized", {});
+    const models = await withTimeout(this.request("model/list", {
+      limit: 100,
+      includeHidden: false,
+    }), 15_000, "Codex model/list");
+    this.configSchema = codexConfigSchemaFromModels(Array.isArray(models?.data) ? models.data : []);
+    this.validateConfig(this.config);
+    const modelOption = this.configSchema.options.find((option) => option.id === "model");
+    const effortOption = this.configSchema.options.find((option) => option.id === "effort");
+    this.config = {
+      model: this.config.model ?? modelOption?.default,
+      effort: this.config.effort ?? effortOption?.default,
+      permissionMode: this.config.permissionMode ?? "untrusted",
+    };
+    const threadOverrides = {
+      ...(this.sendModel ? { model: this.config.model } : {}),
+      approvalPolicy: this.config.permissionMode,
+      ...(this.sendEffort ? { config: { model_reasoning_effort: this.config.effort } } : {}),
+    };
     const result = this.resumeSessionId
-      ? await withTimeout(this.request("thread/resume", { threadId: this.resumeSessionId, cwd: this.cwd }), 15_000, "Codex thread/resume")
+      ? await withTimeout(this.request("thread/resume", {
+        threadId: this.resumeSessionId,
+        cwd: this.cwd,
+        ...threadOverrides,
+      }), 15_000, "Codex thread/resume")
       : await withTimeout(this.request("thread/start", {
         cwd: this.cwd,
-        approvalPolicy: "untrusted",
+        ...threadOverrides,
         sandbox: "workspace-write",
         ephemeral: false,
         serviceName: "workbench",
@@ -48,8 +153,22 @@ export class CodexDriver extends BaseDriver {
     this.callbacks.metadata({
       nativeSessionId: this.threadId,
       nativeTranscriptPath: result?.thread?.path,
+      config: { ...this.config },
     });
     this.callbacks.status("idle");
+  }
+
+  getConfigSchema(): DriverConfigSchema {
+    return this.configSchema;
+  }
+
+  async setConfig(config: SessionConfig): Promise<SessionConfig> {
+    this.validateConfig(config);
+    this.config = mergeSessionConfig(this.config, config);
+    if (config.model !== undefined) this.sendModel = true;
+    if (config.effort !== undefined) this.sendEffort = true;
+    this.callbacks.metadata({ config: { ...this.config } });
+    return { ...this.config };
   }
 
   async sendUserMessage(text: string): Promise<void> {
@@ -59,7 +178,7 @@ export class CodexDriver extends BaseDriver {
     void this.request("turn/start", {
       threadId: this.threadId,
       input: [{ type: "text", text, text_elements: [] }],
-      approvalPolicy: "untrusted",
+      approvalPolicy: this.config.permissionMode ?? "untrusted",
       sandboxPolicy: {
         type: "workspaceWrite",
         writableRoots: [],
@@ -67,6 +186,8 @@ export class CodexDriver extends BaseDriver {
         excludeTmpdirEnvVar: false,
         excludeSlashTmp: false,
       },
+      ...(this.sendModel ? { model: this.config.model } : {}),
+      ...(this.sendEffort ? { effort: this.config.effort } : {}),
     }).then((result) => {
       if (result?.turn?.id) this.turnId = result.turn.id;
     }).catch((error) => {
@@ -217,5 +338,16 @@ export class CodexDriver extends BaseDriver {
     if (method.includes("commandExecution")) return "commandExecution";
     if (method.includes("fileChange")) return "fileChange";
     return "permissions";
+  }
+
+  private validateConfig(config: SessionConfig): void {
+    for (const [id, value] of Object.entries(config)) {
+      if (value === undefined) continue;
+      const option = this.configSchema.options.find((item) => item.id === id);
+      if (!option) throw new Error(`Codex 不支持配置项：${id}`);
+      if (!option.values.some((item) => item.value === value)) {
+        throw new Error(`Codex ${id} 不合法：${value}`);
+      }
+    }
   }
 }

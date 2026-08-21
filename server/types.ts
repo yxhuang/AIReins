@@ -13,6 +13,7 @@ export const EVENT_TYPES = [
   "tool_call_completed",
   "permission_request",
   "permission_resolved",
+  "config_updated",
   "usage_updated",
   "turn_completed",
   "session_error",
@@ -23,6 +24,34 @@ export const EVENT_TYPES = [
 export type EventType = (typeof EVENT_TYPES)[number];
 export type SessionStatus = "starting" | "idle" | "running" | "dead" | "error";
 export type PermissionDecision = "allow" | "deny" | "always";
+
+export const CONFIG_OPTION_IDS = ["model", "effort", "permissionMode"] as const;
+export type ConfigOptionId = (typeof CONFIG_OPTION_IDS)[number];
+
+export interface SessionConfig {
+  model?: string;
+  effort?: string;
+  permissionMode?: string;
+}
+
+export interface ConfigOptionValue {
+  value: string;
+  label: string;
+  description?: string;
+}
+
+export interface DriverConfigOption {
+  id: ConfigOptionId;
+  name: string;
+  values: ConfigOptionValue[];
+  default: string;
+  mutable: boolean;
+}
+
+export interface DriverConfigSchema {
+  options: DriverConfigOption[];
+  source: string;
+}
 
 export interface UnifiedEvent {
   type: EventType;
@@ -47,6 +76,10 @@ export interface SessionRecord {
   nativeTranscriptPath?: string;
   processId?: number;
   model?: string;
+  effort?: string;
+  permissionMode?: string;
+  config: SessionConfig;
+  riskyMode: boolean;
 }
 
 export interface DriverCapabilities {
@@ -66,7 +99,11 @@ export interface DriverCapabilities {
 
 export interface DriverCallbacks {
   emit(type: EventType, payload?: Record<string, unknown>): UnifiedEvent | undefined;
-  metadata(metadata: { nativeSessionId?: string; nativeTranscriptPath?: string }): void;
+  metadata(metadata: {
+    nativeSessionId?: string;
+    nativeTranscriptPath?: string;
+    config?: SessionConfig;
+  }): void;
   status(status: SessionStatus): void;
   exited(info: { code: number | null; signal: NodeJS.Signals | null; expected: boolean }): void;
 }
@@ -74,9 +111,8 @@ export interface DriverCallbacks {
 export interface DriverOptions {
   sessionId: string;
   cwd: string;
-  model?: string;
+  config: SessionConfig;
   resumeSessionId?: string;
-  kimiMode?: "default" | "plan" | "auto" | "yolo";
   callbacks: DriverCallbacks;
 }
 
@@ -84,6 +120,8 @@ export interface Driver {
   readonly kind: AgentKind;
   readonly child?: ChildProcessWithoutNullStreams;
   start(): Promise<void>;
+  getConfigSchema(): DriverConfigSchema;
+  setConfig(config: SessionConfig): Promise<SessionConfig>;
   sendUserMessage(text: string): Promise<void>;
   resolvePermission(
     requestId: string,
@@ -98,8 +136,11 @@ export interface CreateSessionInput {
   agent: AgentKind;
   cwd: string;
   agentId?: string;
+  config?: SessionConfig;
+  /** @deprecated Use config.model. */
   model?: string;
   resumeSessionId?: string;
+  /** @deprecated Use config.permissionMode. */
   kimiMode?: "default" | "plan" | "auto" | "yolo";
   initialMessage?: string;
 }
