@@ -1,4 +1,11 @@
 /* 设计令牌：暖色只留给「需要人出手」的审批元素；其余一律冷色或中性。 */
+/* 配色不变量（改色前务必读）：
+   三家身份色 = 各自品牌色，与 ai-usage 面板(8788)的进度条保持一致：
+     claude 珊瑚橙 #D97757 / codex 青绿 #10A37F / kimi 蓝 #1A73E8
+   闸门专用色 = 琥珀金（浅 #A16207 / 深 #F2B32C），全站仅审批相关元素可用。
+   claude 的珊瑚橙与琥珀金色相相邻但明度饱和度差异大，不要把两者互相靠近。
+   --danger 冷调洋红仅用于「拒绝」与错误；--diff-del* 仅用于 diff 删除行。
+   新增任何颜色前先问：它会不会被误读成「有闸门在等我」。 */
 :root {
   --bg:            #F2F4F7;
   --surface:       #FFFFFF;
@@ -8,12 +15,13 @@
   --text:          #171C24;
   --text-muted:    #5C6779;
   --text-faint:    #8B95A6;
-  --agent-claude:  #2E7FA6;
-  --agent-codex:   #6B5CC4;
-  --agent-kimi:    #17806B;
-  --gate:          #C25415;
-  --gate-bg:       #FDF0E6;
-  --gate-border:   #E39A63;
+  --agent-claude:  #D97757;
+  --agent-codex:   #10A37F;
+  --agent-kimi:    #1A73E8;
+  --gate:          #A16207;
+  --gate-bg:       #FDF8E8;
+  --gate-on:       #FFFFFF;
+  --gate-border:   #D4A72C;
   --ok:      #17806B;
   --dead:    #8B95A6;
   --busy:    #2E7FA6;
@@ -40,12 +48,13 @@
     --text:          #E4E9F0;
     --text-muted:    #96A1B2;
     --text-faint:    #5C6779;
-    --agent-claude:  #4FA8D0;
-    --agent-codex:   #8E7EE8;
-    --agent-kimi:    #2BA88C;
-    --gate:          #F08A3E;
-    --gate-bg:       #2A1A0E;
-    --gate-border:   #8A4E22;
+    --agent-claude:  #E08B6F;
+    --agent-codex:   #2BC49C;
+    --agent-kimi:    #5AA9FF;
+    --gate:          #F2B32C;
+    --gate-bg:       #2B2109;
+    --gate-on:       #1A1204;
+    --gate-border:   #8A6A1C;
     --ok:      #2BA88C;
     --dead:    #5C6779;
     --busy:    #4FA8D0;
@@ -311,7 +320,7 @@ body {
   padding: 0 5px;
   border-radius: 9px;
   background: var(--gate);
-  color: #fff;
+  color: var(--gate-on);
   font-size: 11.5px;
   font-weight: 700;
   display: inline-flex;
@@ -590,7 +599,7 @@ body {
 .btn-gate {
   background: var(--gate);
   border-color: var(--gate);
-  color: #fff;
+  color: var(--gate-on);
 }
 
 .btn-danger {
