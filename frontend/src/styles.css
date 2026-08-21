@@ -20,17 +20,19 @@
   --agent-claude:     #D97757;
   --agent-claude-ink: #A8471F;
   --agent-codex:      #10A37F;
+  --agent-codex-ink:  #0A7A5E;   /* 作文字用：#10A37F 在象牙白上仅 3.04 */
   --agent-kimi:       #1A73E8;
+  --agent-kimi-ink:   #1663C6;   /* 作文字用：#1A73E8 在象牙白上仅 4.28 */
   --gate:             #8F5806;
   --gate-bg:          #F6E3AE;
   --gate-border:      #C08A1E;
   --gate-on:          #FFFFFF;
   --ok:      #17806B;
   --dead:    #8B95A6;
-  --busy:    #2E7FA6;
+  --busy:    #276C8D;
   --danger:  #B3234A;
   /* diff 行：新增用 --ok 同色相，删除用冷调红；都不是暖色，也不复用 --danger */
-  --diff-add:    #17806B;
+  --diff-add:    #126B59;
   --diff-add-bg: #E2F1EC;
   --diff-del:    #A63D57;
   --diff-del-bg: #F6E9ED;
@@ -52,17 +54,19 @@
     --text-muted:       #A8A59D;
     --text-faint:       #8C8981;
     --agent-claude:     #E08B6F;
-    --agent-claude-ink: #E08B6F;
+    --agent-claude-ink: #EDA88E;   /* 比身份脊亮 1.35×，让文字与色脊分层 */
     --agent-codex:      #2BC49C;
+    --agent-codex-ink:  #2BC49C;
     --agent-kimi:       #5AA9FF;
+    --agent-kimi-ink:   #5AA9FF;
     --gate:             #F2B32C;
     --gate-bg:          #3A2E10;
     --gate-border:      #8A6A1C;
     --gate-on:          #1A1204;
     --ok:      #2BA88C;
-    --dead:    #5C6779;
+    --dead:    #78829A;
     --busy:    #4FA8D0;
-    --danger:  #E5577E;
+    --danger:  #EE7093;
     --diff-add:    #2BA88C;
     --diff-add-bg: #14251F;
     --diff-del:    #D9708A;
@@ -212,8 +216,8 @@ body {
 }
 
 .new-agent.agent-claude.selected { border-color: var(--agent-claude); color: var(--agent-claude-ink); box-shadow: inset 0 0 0 1px var(--agent-claude); }
-.new-agent.agent-codex.selected  { border-color: var(--agent-codex);  color: var(--agent-codex);  box-shadow: inset 0 0 0 1px var(--agent-codex); }
-.new-agent.agent-kimi.selected   { border-color: var(--agent-kimi);   color: var(--agent-kimi);   box-shadow: inset 0 0 0 1px var(--agent-kimi); }
+.new-agent.agent-codex.selected  { border-color: var(--agent-codex);  color: var(--agent-codex-ink);  box-shadow: inset 0 0 0 1px var(--agent-codex); }
+.new-agent.agent-kimi.selected   { border-color: var(--agent-kimi);   color: var(--agent-kimi-ink);   box-shadow: inset 0 0 0 1px var(--agent-kimi); }
 
 .new-field {
   display: flex;
@@ -324,8 +328,8 @@ body {
 }
 
 .agent-claude .agent-name, .session-title-line.agent-claude .agent-name { color: var(--agent-claude-ink); }
-.agent-codex .agent-name { color: var(--agent-codex); }
-.agent-kimi .agent-name { color: var(--agent-kimi); }
+.agent-codex .agent-name { color: var(--agent-codex-ink); }
+.agent-kimi .agent-name { color: var(--agent-kimi-ink); }
 
 .status-dot {
   width: 7px;
