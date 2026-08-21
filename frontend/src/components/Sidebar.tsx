@@ -79,18 +79,20 @@ export function Sidebar({ collapsed, onToggle, newOpen, onNewOpenChange }: Sideb
                     }${session.status === "dead" ? " dead" : ""}`}
                     onClick={() => store.navigate(session.id)}
                   >
-                    <span className="row-top">
-                      <span className="agent-name">{AGENT_LABELS[session.agent]}</span>
-                      <span className={`status-dot status-${session.status}`} />
-                      <span className="row-time">{relativeTime(session.lastActivityAt, store.now)}</span>
+                    <span className="row-title-line">
+                      <span className="row-title">{sessionTitle(session, data?.events)}</span>
                       {pending > 0 && (
                         <span className="gate-badge" title={`${pending} 个闸门等待处理`}>
                           {pending}
                         </span>
                       )}
                     </span>
-                    <span className="row-title">{sessionTitle(session, data?.events)}</span>
-                    <span className="row-status">{STATUS_LABELS[session.status] ?? session.status}</span>
+                    <span className="row-meta">
+                      <span className={`status-dot status-${session.status}`} />
+                      <span className="row-meta-text">
+                        {AGENT_LABELS[session.agent]} · {STATUS_LABELS[session.status] ?? session.status} · {relativeTime(session.lastActivityAt, store.now)}
+                      </span>
+                    </span>
                   </button>
                 </li>
               );

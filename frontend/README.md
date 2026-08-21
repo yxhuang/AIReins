@@ -53,7 +53,7 @@ frontend/
 
 - `sessions`：`GET /api/sessions` 初始加载；任何 WS 事件都本地刷新该会话的 `lastActivityAt` 并推断状态（`user_message`→running、`process_exited`→dead 等），另有 2 秒防抖的列表重拉对齐权威状态；列表刷新发现会话变 dead 时清空其未决闸门（进程已不在，闸门不可操作）；
 - `data: Map<sessionId, {events, seq, dropped, pendingGates, latestUsage}>`：进入会话时先 `GET /api/sessions/:id/snapshot` 拿全量 events + seq；`pendingGates` = permission_request − permission_resolved（按 requestId 匹配），既驱动闸门块状态也驱动左栏徽标；`events` 有 2000 条内存上限，超出丢弃最旧并计数（流顶部提示一行），快照重取即可恢复全量；
-- 启动时为列表里每个会话取一次快照——后端没有标题字段，左栏标题用该会话第一条 `user_message` 派生（没有则用 cwd 末段 + 短 id），快照同时给出各会话的未决闸门数。
+- 启动时为列表里每个会话取一次快照——后端没有标题字段，左栏标题用该会话第一条 `user_message` 派生（空白压缩为单空格、按显示宽度截断，还没有首条消息时显示占位「新会话」），快照同时给出各会话的未决闸门数。
 
 ### 连接与恢复
 
@@ -92,6 +92,12 @@ frontend/
 - [x] **15. 审批 smoke 假阳性（M3）。** smoke 改用必然触发审批的消息（Shell 写 `smoke-<时间戳>.txt`），自动 allow 所有闸门，通过条件要求 `sawPermission && resolvedBroadcast && turn_completed && 文件落盘校验`，结尾只删除自己创建的文件。证据：本轮实测输出 `SMOKE_OK`（permission seq 12 → resolved seq 13 → turn_completed seq 17，文件内容逐字校验为 SMOKE，快照 18 条连续）。
 - [x] **16. 审批重复提交（M4）。** GateBlock 点击决策后进入提交中态，所有决策按钮禁用，直到 `permission_resolved` 到达。证据：类型检查通过。
 - [x] **17. 左栏收起总未决徽标（M5）。** 收起态在收起按钮旁显示全部会话未决闸门总数的暖色徽标（为 0 不显示），点击展开左栏。证据：类型检查 + 构建通过；视觉效果未在浏览器人工确认。
+
+### M2 打磨（2026-08-21）
+
+- [x] **18. 主题换 Claude 网页版风格底色。** 浅色象牙白 `#FAF9F5` / 深色暖深灰 `#1F1E1D`（非纯黑），深浅两套令牌整体替换（`--ok/--dead/--busy/--danger/--diff-*` 与字体栈不动）；claude 珊瑚橙作文字一律用 `-ink` 变体（浅 `#A8471F` / 深 `#E08B6F`，原色在象牙白上对比度仅 2.96），命中 `.new-agent.agent-claude.selected` 与会话头/会话行的 `.agent-name`，身份脊与选中边框保留原色；未决 `.gate-block` 边框加粗为 `2px solid var(--gate-border)`（已处理/失效态维持 1px；相邻块各有 10px 间隔、不共边，无需补偿对齐）。证据：构建 + 双 tsc 通过；配色视觉效果未在浏览器人工确认。
+- [x] **19. 左栏会话行压成两行 ≤44px。** 第 1 行标题（14px / `--text` / 单行省略）+ 待审批徽标钉最右（`margin-left: auto`、`flex: 0 0 auto`）；第 2 行 `agent · 状态 · 相对时间`（12px / `--text-muted`），状态点保留行首；删除独立 row-status 行。盒模型：padding 4 + 标题行 line-height 18 + 行距 margin-top 2 + 元信息行 line-height 16 + padding 4 = **44px**（3px 身份脊是水平边，不占高度）。3px 身份脊、dead 行 opacity 0.55、active/hover 背景、收起态总徽标逻辑不变。证据：构建 + 双 tsc 通过；视觉未人工确认。
+- [x] **20. 会话标题派生规则收紧。** `sessionTitle`：`\s+` 压成单空格后 trim；按显示宽度截断（CJK/全角计 2、其余计 1，上限 30，超出加 `…`）；首条 user_message 未到时返回占位「新会话」，不再用 cwd + 短 id 兜底。证据：tsx 单测 8 例（无事件 / 空事件 / 纯空白 / 换行压缩 / 40 个 ASCII / 20 个汉字 / 短标题 / 中英混合）输出全部符合预期；构建 + 双 tsc 通过。
 
 ## 已知取舍
 

@@ -1,27 +1,30 @@
 /* 设计令牌：暖色只留给「需要人出手」的审批元素；其余一律冷色或中性。 */
 /* 配色不变量（改色前务必读）：
+   底色前提 = Claude 网页版风格：浅色 = 象牙白 #FAF9F5、深色 = 暖深灰 #1F1E1D（非纯黑）。
    三家身份色 = 各自品牌色，与 ai-usage 面板(8788)的进度条保持一致：
      claude 珊瑚橙 #D97757 / codex 青绿 #10A37F / kimi 蓝 #1A73E8
-   闸门专用色 = 琥珀金（浅 #A16207 / 深 #F2B32C），全站仅审批相关元素可用。
+   claude 珊瑚橙作文字时用 -ink 变体（原色在象牙白上对比度仅 2.96）。
+   闸门专用色 = 琥珀金（浅 #8F5806 / 底 #F6E3AE，深 #F2B32C / 底 #3A2E10），全站仅审批相关元素可用。
    claude 的珊瑚橙与琥珀金色相相邻但明度饱和度差异大，不要把两者互相靠近。
    --danger 冷调洋红仅用于「拒绝」与错误；--diff-del* 仅用于 diff 删除行。
    新增任何颜色前先问：它会不会被误读成「有闸门在等我」。 */
 :root {
-  --bg:            #F2F4F7;
-  --surface:       #FFFFFF;
-  --surface-sunk:  #E8ECF2;
-  --border:        #D3DAE4;
-  --border-strong: #B4BECD;
-  --text:          #171C24;
-  --text-muted:    #5C6779;
-  --text-faint:    #8B95A6;
-  --agent-claude:  #D97757;
-  --agent-codex:   #10A37F;
-  --agent-kimi:    #1A73E8;
-  --gate:          #A16207;
-  --gate-bg:       #FDF8E8;
-  --gate-on:       #FFFFFF;
-  --gate-border:   #D4A72C;
+  --bg:               #FAF9F5;
+  --surface:          #FFFFFF;
+  --surface-sunk:     #F0EEE6;
+  --border:           #E3E0D6;
+  --border-strong:    #C9C5B8;
+  --text:             #1F1E1D;
+  --text-muted:       #5C5A54;
+  --text-faint:       #6E6B63;
+  --agent-claude:     #D97757;
+  --agent-claude-ink: #A8471F;
+  --agent-codex:      #10A37F;
+  --agent-kimi:       #1A73E8;
+  --gate:             #8F5806;
+  --gate-bg:          #F6E3AE;
+  --gate-border:      #C08A1E;
+  --gate-on:          #FFFFFF;
   --ok:      #17806B;
   --dead:    #8B95A6;
   --busy:    #2E7FA6;
@@ -40,21 +43,22 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg:            #0F1319;
-    --surface:       #161C24;
-    --surface-sunk:  #0B0F14;
-    --border:        #28313D;
-    --border-strong: #3A4655;
-    --text:          #E4E9F0;
-    --text-muted:    #96A1B2;
-    --text-faint:    #5C6779;
-    --agent-claude:  #E08B6F;
-    --agent-codex:   #2BC49C;
-    --agent-kimi:    #5AA9FF;
-    --gate:          #F2B32C;
-    --gate-bg:       #2B2109;
-    --gate-on:       #1A1204;
-    --gate-border:   #8A6A1C;
+    --bg:               #1F1E1D;
+    --surface:          #262624;
+    --surface-sunk:     #191817;
+    --border:           #3A3936;
+    --border-strong:    #55534E;
+    --text:             #F2F0EA;
+    --text-muted:       #A8A59D;
+    --text-faint:       #8C8981;
+    --agent-claude:     #E08B6F;
+    --agent-claude-ink: #E08B6F;
+    --agent-codex:      #2BC49C;
+    --agent-kimi:       #5AA9FF;
+    --gate:             #F2B32C;
+    --gate-bg:          #3A2E10;
+    --gate-border:      #8A6A1C;
+    --gate-on:          #1A1204;
     --ok:      #2BA88C;
     --dead:    #5C6779;
     --busy:    #4FA8D0;
@@ -207,7 +211,7 @@ body {
   color: var(--text);
 }
 
-.new-agent.agent-claude.selected { border-color: var(--agent-claude); color: var(--agent-claude); box-shadow: inset 0 0 0 1px var(--agent-claude); }
+.new-agent.agent-claude.selected { border-color: var(--agent-claude); color: var(--agent-claude-ink); box-shadow: inset 0 0 0 1px var(--agent-claude); }
 .new-agent.agent-codex.selected  { border-color: var(--agent-codex);  color: var(--agent-codex);  box-shadow: inset 0 0 0 1px var(--agent-codex); }
 .new-agent.agent-kimi.selected   { border-color: var(--agent-kimi);   color: var(--agent-kimi);   box-shadow: inset 0 0 0 1px var(--agent-kimi); }
 
@@ -261,7 +265,8 @@ body {
   border: none;
   background: transparent;
   border-radius: 8px;
-  padding: 6px 8px 6px 10px;
+  /* 两行 ≤44px：4 + 18(标题行) + 2(行距) + 16(元信息行) + 4 = 44 */
+  padding: 4px 8px 4px 10px;
   cursor: pointer;
   color: var(--text);
   /* 左侧 3px 身份色脊：辨识 agent 的主要手段 */
@@ -276,10 +281,40 @@ body {
 .session-row.active { background: var(--surface-sunk); }
 .session-row.dead { opacity: 0.55; }
 
-.row-top {
+.row-title-line {
   display: flex;
   align-items: center;
   gap: 6px;
+}
+
+.row-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 14px;
+  line-height: 18px;
+  color: var(--text);
+}
+
+/* 待审批徽标钉在标题行最右侧，不随标题缩 */
+.row-title-line .gate-badge { margin-left: auto; flex: 0 0 auto; }
+
+.row-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 2px;
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--text-muted);
+}
+
+.row-meta-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .agent-name {
@@ -288,31 +323,9 @@ body {
   letter-spacing: 0.03em;
 }
 
-.agent-claude .agent-name, .session-title-line.agent-claude .agent-name { color: var(--agent-claude); }
+.agent-claude .agent-name, .session-title-line.agent-claude .agent-name { color: var(--agent-claude-ink); }
 .agent-codex .agent-name { color: var(--agent-codex); }
 .agent-kimi .agent-name { color: var(--agent-kimi); }
-
-.row-time {
-  margin-left: auto;
-  font-size: 12px;
-  color: var(--text-faint);
-  white-space: nowrap;
-}
-
-.row-title {
-  display: block;
-  margin-top: 2px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.row-status {
-  display: block;
-  font-size: 12px;
-  color: var(--text-muted);
-  margin-top: 1px;
-}
 
 .status-dot {
   width: 7px;
@@ -534,7 +547,8 @@ body {
 /* ── 闸门块：暖色 + 直角，签名元素 ─────────── */
 .gate-block {
   background: var(--gate-bg);
-  border: 1px solid var(--gate-border);
+  /* 未决态 2px 硬边：流内最重的视觉权重；相邻块各有 10px 间隔，不与别人共边，无需补偿 */
+  border: 2px solid var(--gate-border);
   border-radius: 0; /* 硬边对比：其余卡片一律 8px 圆角 */
   padding: 12px;
   display: flex;
