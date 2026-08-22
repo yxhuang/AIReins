@@ -27,6 +27,10 @@ export interface PageHealth {
   reason: string;
   status?: number;
   durationMs: number;
+  /** 目标站点是否允许被 iframe 嵌入。null = 无法确定（有 frame-ancestors 但不是 'none'）。 */
+  embeddable?: boolean | null;
+  /** embeddable 的判定依据，用于前端如实告知用户。 */
+  embedReason?: string;
 }
 
 export function scanPages(root = DEFAULT_PAGES_ROOT): PageManifest[] {
@@ -60,6 +64,28 @@ export function scanPages(root = DEFAULT_PAGES_ROOT): PageManifest[] {
   return pages;
 }
 
+/**
+ * 读响应头判断目标能否被 iframe 嵌入。
+ * 动机：ai-usage(8788) 带 X-Frame-Options: DENY —— 健康检查报 reachable:true，
+ * 但 iframe 里是 Chrome 的「拒绝了我们的连接请求」。渲染一个必然报错的 iframe
+ * 比直接给降级面板更糟，所以这里把可嵌性也一并告诉前端。
+ */
+function detectEmbeddable(headers: Headers): { embeddable: boolean | null; embedReason: string } {
+  const xfo = headers.get("x-frame-options")?.trim().toLowerCase();
+  if (xfo === "deny") return { embeddable: false, embedReason: "目标站点设置了 X-Frame-Options: DENY" };
+  // workbench 与目标端口不同即为跨源，SAMEORIGIN 同样会被浏览器拦下
+  if (xfo === "sameorigin") return { embeddable: false, embedReason: "目标站点设置了 X-Frame-Options: SAMEORIGIN（端口不同即跨源）" };
+
+  const csp = headers.get("content-security-policy") ?? "";
+  const directive = csp.split(";").map((d) => d.trim()).find((d) => d.toLowerCase().startsWith("frame-ancestors"));
+  if (directive) {
+    const value = directive.slice("frame-ancestors".length).trim().toLowerCase();
+    if (value === "'none'") return { embeddable: false, embedReason: "目标站点 CSP 设置了 frame-ancestors 'none'" };
+    return { embeddable: null, embedReason: `目标站点 CSP 限制了 frame-ancestors（${directive}），能否嵌入取决于其取值` };
+  }
+  return { embeddable: true, embedReason: "未发现 X-Frame-Options 或 frame-ancestors 限制" };
+}
+
 export async function checkPageHealth(
   page: PageManifest,
   timeoutMs = PAGE_HEALTH_TIMEOUT_MS,
@@ -73,11 +99,14 @@ export async function checkPageHealth(
       signal: AbortSignal.timeout(timeoutMs),
     });
     await response.body?.cancel().catch(() => undefined);
+    const embed = detectEmbeddable(response.headers);
     return {
       id: page.id,
       reachable: true,
       reason: `HTTP ${response.status}`,
       status: response.status,
+      embeddable: embed.embeddable,
+      embedReason: embed.embedReason,
       durationMs: Math.round(performance.now() - started),
     };
   } catch (error) {
