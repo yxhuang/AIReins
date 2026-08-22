@@ -111,10 +111,12 @@ export class ClaudeDriver extends BaseDriver {
     try {
       await this.refreshCommands();
     } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
       this.callbacks.emit("raw_event", {
         source: "claude",
-        warning: `无法枚举 Claude 命令：${error instanceof Error ? error.message : String(error)}`,
+        warning: `无法枚举 Claude 命令：${message}`,
       });
+      if (this.resumeSessionId) throw new Error(`Claude 续接 worker 初始化失败：${message}`);
     }
     this.callbacks.metadata({ config: { ...this.config } });
     this.callbacks.status("idle");

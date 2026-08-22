@@ -269,7 +269,7 @@ interface PageHealth {
 
 Codex 的首次 `config_updated.effectiveFrom` 为 `next_turn`，Claude 与 Kimi 为 `immediate`。Codex 下一次 `turn/start` 接受该配置后还会广播第二个 `config_updated`：`effectiveFrom:"current_turn"` 表示已经在该轮生效，`effectiveConfig` 是该轮确认生效的完整配置，`appliedFields` 是本次由“待生效”转为“已生效”的字段，另带原生 `turnId`。清除 Codex model/effort 覆盖时，下一次 `turn/start` 显式发送对应的 `null` 来清除 app-server 的 sticky override；报告值则回到 `config/read(cwd)` 得到的有效默认值。
 
-Claude 的 model/effort 切换先广播 `config_update_started`，其 payload 含 `message:"正在切换模型…"`、`mutableVia:"restart"`、旧/新配置与 native ID；新 worker 完成启动后再广播 `config_updated`，并带 `mutableVia:"restart"`、`workerRestarted:true`。同一个 Workbench session 不变，事件 `seq` 继续递增，原生会话仍是同一 ID。若当前状态为 `running`，明确拒绝并返回“当前回合尚未结束，请等待或中断后再切换”，不会停止 worker；若首轮前尚无 `nativeSessionId`，也会明确拒绝。重启参数始终重新带上 `--permission-mode` 与 `--permission-prompt-tool stdio`，因此审批 control_request 边界不会因换模型丢失。Codex/Kimi 继续使用既有原生活改路径，不经过重启。
+Claude 的 model/effort 切换先广播 `config_update_started`，其 payload 含 `message:"正在切换模型…"`、`mutableVia:"restart"`、旧/新配置与 native ID；新 worker 的初始化 control request 成功后再广播 `config_updated`，并带 `mutableVia:"restart"`、`workerRestarted:true`。同一个 Workbench session 不变，事件 `seq` 继续递增，原生会话仍是同一 ID。若续接 worker 初始化失败，会进入 `session_error`，不会假装切换完成。若当前状态为 `running`，明确拒绝并返回“当前回合尚未结束，请等待或中断后再切换”，不会停止 worker；若首轮前尚无 `nativeSessionId`，也会明确拒绝。重启参数始终重新带上 `--permission-mode` 与 `--permission-prompt-tool stdio`，因此审批 control_request 边界不会因换模型丢失。Codex/Kimi 继续使用既有原生活改路径，不经过重启。
 
 ## 文件检索
 
