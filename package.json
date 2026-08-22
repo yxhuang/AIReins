@@ -14,7 +14,9 @@
     "spike:kimi": "tsx spikes/kimi-loop.ts",
     "check:theme": "node frontend/scripts/check-theme-parity.mjs",
     "test:mentions": "tsx frontend/scripts/mentions.test.mjs",
-    "test:store": "tsx frontend/scripts/store-flow.test.mjs"
+    "test:store": "tsx frontend/scripts/store-flow.test.mjs",
+    "test:pages": "tsx frontend/scripts/pages-flow.test.mjs",
+    "test": "npm run check:theme && npm run test:mentions && npm run test:store && npm run test:pages"
   },
   "devDependencies": {
     "@types/node": "^26.2.0",
