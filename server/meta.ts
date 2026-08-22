@@ -34,6 +34,9 @@ export function getMeta(): Promise<Record<string, unknown>> {
     getDriverMetadata(process.cwd()),
   ]).then(([claude, codex, kimi, drivers]) => ({
     serverVersion: SERVER_VERSION,
+    // 新建会话表单的 cwd 默认值：没有它前端只能留空，而空 cwd 会让「创建」按钮永久禁用，
+    // 用户在全新环境下会被锁在应用外面（2026-08-22 实测踩到）。
+    defaultCwd: process.cwd(),
     cliVersions: { claude, codex, kimi },
     capabilities: {
       websocket: true,
