@@ -70,7 +70,7 @@ export function scanPages(root = DEFAULT_PAGES_ROOT): PageManifest[] {
  * 但 iframe 里是 Chrome 的「拒绝了我们的连接请求」。渲染一个必然报错的 iframe
  * 比直接给降级面板更糟，所以这里把可嵌性也一并告诉前端。
  */
-function detectEmbeddable(headers: Headers): { embeddable: boolean | null; embedReason: string } {
+function detectEmbeddable(headers: Headers, selfOrigin: string): { embeddable: boolean | null; embedReason: string } {
   const xfo = headers.get("x-frame-options")?.trim().toLowerCase();
   if (xfo === "deny") return { embeddable: false, embedReason: "目标站点设置了 X-Frame-Options: DENY" };
   // workbench 与目标端口不同即为跨源，SAMEORIGIN 同样会被浏览器拦下
@@ -81,7 +81,13 @@ function detectEmbeddable(headers: Headers): { embeddable: boolean | null; embed
   if (directive) {
     const value = directive.slice("frame-ancestors".length).trim().toLowerCase();
     if (value === "'none'") return { embeddable: false, embedReason: "目标站点 CSP 设置了 frame-ancestors 'none'" };
-    return { embeddable: null, embedReason: `目标站点 CSP 限制了 frame-ancestors（${directive}），能否嵌入取决于其取值` };
+    // 白名单里如果明确列了 workbench 自己的源，就能判准，不必含糊成 null。
+    // 注意 'self' 指的是目标站自己的源（8788），不是我们，所以不算数。
+    const tokens = value.split(/\s+/u).filter(Boolean);
+    if (tokens.includes(selfOrigin.toLowerCase())) {
+      return { embeddable: true, embedReason: `目标站点 CSP 已显式放行 ${selfOrigin}` };
+    }
+    return { embeddable: null, embedReason: `目标站点 CSP 限制了 frame-ancestors（${directive}），未见放行 ${selfOrigin}` };
   }
   return { embeddable: true, embedReason: "未发现 X-Frame-Options 或 frame-ancestors 限制" };
 }
@@ -89,6 +95,7 @@ function detectEmbeddable(headers: Headers): { embeddable: boolean | null; embed
 export async function checkPageHealth(
   page: PageManifest,
   timeoutMs = PAGE_HEALTH_TIMEOUT_MS,
+  selfOrigin = `http://127.0.0.1:${process.env.WORKBENCH_PORT ?? "8790"}`,
 ): Promise<PageHealth> {
   const started = performance.now();
   try {
@@ -99,7 +106,7 @@ export async function checkPageHealth(
       signal: AbortSignal.timeout(timeoutMs),
     });
     await response.body?.cancel().catch(() => undefined);
-    const embed = detectEmbeddable(response.headers);
+    const embed = detectEmbeddable(response.headers, selfOrigin);
     return {
       id: page.id,
       reachable: true,
