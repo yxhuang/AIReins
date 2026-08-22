@@ -17,6 +17,9 @@ export interface IframePageManifest {
   url: string;
   healthCheck?: string;
   description?: string;
+  /** 内容区最大宽度（任意合法 CSS 长度/百分比）。省略即撑满主窗口。
+      动机：ai-usage 是窄面板，拉满整个宽屏主窗口反而难看。 */
+  maxWidth?: string;
 }
 
 export type PageManifest = IframePageManifest;
@@ -144,6 +147,9 @@ function parseManifest(value: unknown): PageManifest {
   const description = input.description === undefined
     ? undefined
     : requiredString(input.description, "description");
+  const maxWidth = input.maxWidth === undefined
+    ? undefined
+    : cssLength(input.maxWidth, "maxWidth");
 
   return {
     id,
@@ -153,7 +159,17 @@ function parseManifest(value: unknown): PageManifest {
     url,
     ...(healthCheck ? { healthCheck } : {}),
     ...(description ? { description } : {}),
+    ...(maxWidth ? { maxWidth } : {}),
   };
+}
+
+/** 只放行简单的 CSS 长度/百分比，挡住把任意字符串塞进 style 的路径。 */
+function cssLength(value: unknown, field: string): string {
+  const raw = requiredString(value, field).trim();
+  if (!/^\d+(?:\.\d+)?(?:px|rem|em|%|vw|ch)$/u.test(raw)) {
+    throw new Error(`${field} 必须是简单的 CSS 长度，如 480px / 33% / 60ch`);
+  }
+  return raw;
 }
 
 function requiredString(value: unknown, field: string): string {

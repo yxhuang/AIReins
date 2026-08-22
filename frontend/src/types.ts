@@ -139,6 +139,8 @@ export interface PageManifest {
   url: string;
   healthCheck?: string;
   description?: string;
+  /** 内容区最大宽度（CSS 长度），省略即撑满 */
+  maxWidth?: string;
 }
 
 /** GET /api/pages/:id/health：只回答「服务在不在」，收到任何 HTTP 响应即 reachable。 */

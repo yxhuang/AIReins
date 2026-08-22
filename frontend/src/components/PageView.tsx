@@ -78,7 +78,8 @@ export function PageView({ page }: { page: PageManifest }) {
     // "iframe"（embeddable:true）：不再挂空白提示；"uncertain"（null/缺省）：保留提示与新标签页出口
     if (mode === "iframe" || mode === "uncertain") {
       return (
-        <div className="page-view">
+        // maxWidth 由后端按简单 CSS 长度校验过；窄面板拉满宽屏反而难看
+        <div className="page-view" style={page.maxWidth ? { maxWidth: page.maxWidth } : undefined}>
           <div className="page-toolbar">
             <span className="page-toolbar-title">
               <PageIcon icon={page.icon} />
