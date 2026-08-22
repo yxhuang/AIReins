@@ -172,7 +172,9 @@ export function ResumedHistory({
             ))}
           </ul>
           <div className="session-history-divider" role="separator">
-            <span>以上为导入前的历史对话</span>
+            {/* 必须如实说明省略了什么：历史只有消息文本，看不到工具调用。
+                否则用户向上翻看到「已写入。」这类回复，会以为 agent 凭空声称做了事。 */}
+            <span>以上为导入前的历史对话 · 仅消息文本，不含工具调用与思考过程</span>
           </div>
         </>
       )}
