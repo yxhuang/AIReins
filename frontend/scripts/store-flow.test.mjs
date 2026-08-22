@@ -139,6 +139,43 @@ await t("旧快照晚到不回滚已推进的 seq（in-flight 所有权）", asy
   assert.equal(data?.events.length, 5, "旧快照晚到改写了事件列表");
 });
 
+// --- 用例 4：socket 非 OPEN 时发送不静默——所有发送路径返回 false、不上行、置 lastError ---
+// 背景缺陷：send() 在非 OPEN 时丢帧只置 lastError，Composer 却已清空输入框，文本凭空消失。
+// store 层契约：发送方法返回 false，UI 据此把文本还回输入框（本用例只测 store 层）。
+await t("socket 非 OPEN：sendUserMessage / sendCommand / sendComposerInput 全路径返回失败", async () => {
+  const session = makeSession("s-off");
+  stubFetch(session);
+  const s = new Store();
+  s.sessions = [session];
+  s.meta = { drivers: { kimi: { commands: true, mentions: true } } };
+  s.commands.set(session.id, [{ name: "help", description: "", source: "kimi" }]);
+
+  // 两种非 OPEN 形态：socket 未建立（null）与已关闭（readyState=CLOSED）
+  for (const socket of [null, { readyState: 3, send() { sent.push("不应触达"); } }]) {
+    const sent = [];
+    s.socket = socket;
+    s.lastError = null;
+
+    assert.equal(s.sendUserMessage(session.id, "hi"), false, "sendUserMessage 未返回 false");
+    assert.ok(s.lastError, "失败后未置 lastError 提示");
+    assert.equal(s.sendCommand(session.id, "help", ""), false, "sendCommand 未返回 false");
+
+    // sendComposerInput 三分支：纯文本 / 命中命令表的结构化 command / mentions 异步路径
+    assert.equal(await s.sendComposerInput(session.id, "普通文本"), false, "纯文本分支未返回 false");
+    assert.equal(await s.sendComposerInput(session.id, "/help"), false, "结构化命令分支未返回 false");
+    // @a.ts 不存在（files 接口未打桩，resolveFile 失败不缓存结论），mentions 为空仍要发出文本
+    assert.equal(await s.sendComposerInput(session.id, "看看 @a.ts 这个"), false, "mentions 分支未返回 false");
+    assert.equal(sent.length, 0, "非 OPEN 时不应有任何上行帧");
+  }
+
+  // 对照：OPEN 时同一调用返回 true 且帧写出
+  const sent = [];
+  s.socket = fakeSocket(sent);
+  assert.equal(s.sendUserMessage(session.id, "hi"), true, "OPEN 时 sendUserMessage 应返回 true");
+  assert.equal(await s.sendComposerInput(session.id, "/help"), true, "OPEN 时命令分支应返回 true");
+  assert.equal(sent.length, 2, "OPEN 时上行帧未写出");
+});
+
 if (!process.exitCode) console.log(`✅ store 流程回归全过（${pass} 例）`);
 else console.error(`部分用例失败（通过 ${pass} 例）`);
 // store 内部有 2s 防抖计时器，直接退出不等它

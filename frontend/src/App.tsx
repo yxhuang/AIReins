@@ -52,6 +52,22 @@ export function App() {
           </button>
         </div>
       )}
+      {/* 删除成功一次性提示：说清原生记录仍在；路径有则等宽小字附上 */}
+      {store.removalNotice && (
+        <div className="toast removal-notice" role="status">
+          <span>{store.removalNotice.message}</span>
+          {store.removalNotice.path && (
+            <code className="mono removal-path">{store.removalNotice.path}</code>
+          )}
+          <button
+            type="button"
+            className="toast-close"
+            onClick={() => store.dismissRemovalNotice()}
+          >
+            知道了
+          </button>
+        </div>
+      )}
     </div>
   );
 }

@@ -1022,6 +1022,19 @@ body {
   white-space: nowrap;
 }
 
+/* 删除成功提示：成功信息不用 danger 红，走中性边框/正文色 */
+.removal-notice {
+  border-color: var(--border-strong);
+  color: var(--text);
+  flex-wrap: wrap;
+}
+
+.removal-path {
+  font-size: 11.5px;
+  color: var(--text-muted);
+  word-break: break-all;
+}
+
 /* ── 设置入口与浮层 ─────────────────────────── */
 .sidebar-foot {
   margin-top: auto; /* 顶住左栏底部 */

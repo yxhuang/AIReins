@@ -46,6 +46,8 @@ export class Store {
   data = new Map<string, SessionData>();
   wsState: WsState = "closed";
   lastError: string | null = null;
+  /** 删除成功后的一次性提示（原生记录仍在 + 可选 transcript 路径），用户手动关闭 */
+  removalNotice: { message: string; path?: string } | null = null;
   /** set_config 发送中的控件（sessionId → 选项 id 集合）；等 config_updated 回来才解除 */
   configPending = new Map<string, Set<ConfigOptionId>>();
   /** set_config 失败错误（sessionId → 消息），显示在输入框上方配置控件旁 */
@@ -389,8 +391,9 @@ export class Store {
     return false;
   }
 
-  sendUserMessage(sessionId: string, text: string, mentions?: FileMention[]): void {
-    this.send({
+  /** 上行失败（socket 非 OPEN）返回 false 并置 lastError，调用方据此把文本还回输入框。 */
+  sendUserMessage(sessionId: string, text: string, mentions?: FileMention[]): boolean {
+    return this.send({
       type: "user_message",
       sessionId,
       text,
@@ -399,16 +402,17 @@ export class Store {
   }
 
   /** 结构化斜杠命令上行：command 与 text 互斥（后端对不支持的 driver 明确报错）。 */
-  sendCommand(sessionId: string, name: string, args: string): void {
-    this.send({ type: "user_message", sessionId, command: { name, arguments: args } });
+  sendCommand(sessionId: string, name: string, args: string): boolean {
+    return this.send({ type: "user_message", sessionId, command: { name, arguments: args } });
   }
 
   /**
    * 输入框统一入口：行首「/命令表内名称 + 可选参数」走结构化 command（不附 mentions），
    * 其余一律按普通文本（能力位为 false 的 driver 绝不拼结构化 command）。
    * mentions 能力位 true 时解析 @token：仅确认存在的路径进 mentions，文本原样发送。
+   * 全部路径返回是否真正上行（mentions 分支是异步解析，故整体为 Promise）。
    */
-  sendComposerInput(sessionId: string, text: string): void {
+  sendComposerInput(sessionId: string, text: string): Promise<boolean> {
     const session = this.session(sessionId);
     const caps = session ? this.meta?.drivers[session.agent] : undefined;
     if (caps?.commands) {
@@ -416,16 +420,14 @@ export class Store {
       if (match) {
         const hit = (this.commands.get(sessionId) ?? []).find((c) => c.name === match[1]);
         if (hit) {
-          this.sendCommand(sessionId, hit.name, (match[2] ?? "").trim());
-          return;
+          return Promise.resolve(this.sendCommand(sessionId, hit.name, (match[2] ?? "").trim()));
         }
       }
     }
     if (!caps?.mentions) {
-      this.sendUserMessage(sessionId, text);
-      return;
+      return Promise.resolve(this.sendUserMessage(sessionId, text));
     }
-    void this.sendWithMentions(sessionId, text);
+    return this.sendWithMentions(sessionId, text);
   }
 
   /** 检索结果整体记入缓存：返回过的路径确认存在。 */
@@ -473,7 +475,7 @@ export class Store {
   }
 
   /** 发送前解析 @token：只把确认存在的路径放进 mentions（去重、≤20），文本原样发送。 */
-  private async sendWithMentions(sessionId: string, text: string): Promise<void> {
+  private async sendWithMentions(sessionId: string, text: string): Promise<boolean> {
     const tokens = extractMentionTokens(text).slice(0, MAX_MENTIONS);
     const mentions: FileMention[] = [];
     for (const token of tokens) {
@@ -481,7 +483,7 @@ export class Store {
         mentions.push({ type: "file", path: token });
       }
     }
-    this.sendUserMessage(sessionId, text, mentions);
+    return this.sendUserMessage(sessionId, text, mentions);
   }
 
   resolvePermission(
@@ -535,7 +537,8 @@ export class Store {
    * （与左栏同序：lastActivityAt 最新），无剩余则回空态。失败抛错由调用方展示。
    */
   async remove(id: string): Promise<void> {
-    await deleteSession(id);
+    const agent = this.session(id)?.agent ?? "";
+    const result = await deleteSession(id);
     this.removed.add(id);
     this.sessions = this.sessions.filter((s) => s.id !== id);
     this.data.delete(id);
@@ -558,6 +561,16 @@ export class Store {
       )[0];
       this.navigate(next?.id ?? null);
     }
+    // 删除只动注册表：明示原生对话记录仍在，可凭原生 id 续接
+    this.removalNotice = {
+      message: `已从工作台移除。${agent} 的原生对话记录仍在，可新建会话时填入原生 id 续接。`,
+      ...(result.nativeTranscriptPath ? { path: result.nativeTranscriptPath } : {}),
+    };
+    this.notify();
+  }
+
+  dismissRemovalNotice(): void {
+    this.removalNotice = null;
     this.notify();
   }
 

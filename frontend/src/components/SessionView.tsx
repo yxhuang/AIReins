@@ -7,6 +7,7 @@ import { fetchFiles } from "../api";
 import { MAX_MENTIONS, store } from "../store";
 import { useStore } from "../useStore";
 import { GateBlock, RawLine, SystemLine, TextBlockView, ThoughtBlockView, ToolCard, UserBlockView } from "./StreamItems";
+import { STATUS_HINTS, STATUS_LABELS } from "./Sidebar";
 
 export function SessionView({ session }: { session: SessionRecord }) {
   const store = useStore();
@@ -74,6 +75,9 @@ export function SessionView({ session }: { session: SessionRecord }) {
             <UsageView agent={session.agent} usage={data?.latestUsage} meta={store.meta} />
             <span> · 用时 {duration(session.createdAt, session.lastActivityAt)}</span>
             <span> · seq {data?.seq ?? session.seq}</span>
+            <span title={STATUS_HINTS[session.status] ?? session.status}>
+              {" · "}{STATUS_LABELS[session.status] ?? session.status}
+            </span>
             <ConfigSummary session={session} />
           </div>
         </div>
@@ -142,7 +146,7 @@ export function SessionView({ session }: { session: SessionRecord }) {
         </button>
       )}
 
-      <Composer session={session} dead={dead} />
+      <Composer session={session} dead={dead} errored={session.status === "error"} />
     </div>
   );
 }
@@ -298,12 +302,12 @@ function UsageView({
   return <span>{parts.join(" · ")}</span>;
 }
 
-function Composer({ session, dead }: { session: SessionRecord; dead: boolean }) {
+function Composer({ session, dead, errored }: { session: SessionRecord; dead: boolean; errored: boolean }) {
   const store = useStore();
   const [text, setText] = useState("");
   const [cursor, setCursor] = useState(0);
   const [selected, setSelected] = useState(0);
-  // dead 会话的「新建会话并续接」提交态
+  // dead/error 会话的「新建会话并续接」提交态
   const [resumeBusy, setResumeBusy] = useState(false);
   const [resumeError, setResumeError] = useState<string | null>(null);
   // Esc 关闭面板后，到下一次输入变化前不再自动弹出
@@ -415,9 +419,8 @@ function Composer({ session, dead }: { session: SessionRecord; dead: boolean }) 
 
   const confirm = (cmd: CommandInfo, fillOnly: boolean) => {
     if (!fillOnly && !cmd.argHint) {
-      // 无参数命令：确认即直接发（结构化 command，不拼 text）
-      store.sendCommand(session.id, cmd.name, "");
-      setText("");
+      // 无参数命令：确认即直接发（结构化 command，不拼 text）；失败保留文本，错误条提示
+      if (store.sendCommand(session.id, cmd.name, "")) setText("");
     } else {
       // 有参数（或 Tab 只填充）：填入「/name 」，光标留在末尾参数位等用户补完
       setText(`/${cmd.name} `);
@@ -440,12 +443,17 @@ function Composer({ session, dead }: { session: SessionRecord; dead: boolean }) 
   const send = () => {
     const trimmed = text.trim();
     if (!trimmed || dead) return;
-    store.sendComposerInput(session.id, trimmed);
+    // 先清空（mentions 异步路径下「确认成功」不好定义）；失败时把文本还回输入框。
+    // 失败提示走 send() 已置的 lastError 全局错误条，不静默。
     setText("");
     setDismissed(false);
+    void store.sendComposerInput(session.id, trimmed).then((ok) => {
+      // 用户趁间隙输入了新内容时不覆盖，只在自己清出的空框里还回
+      if (!ok) setText((current) => (current === "" ? trimmed : current));
+    });
   };
 
-  // dead 会话的出口：同 agent + 同 cwd + 原生会话 id 续接，成功后进入新会话
+  // dead/error 会话的出口：同 agent + 同 cwd + 原生会话 id 续接，成功后进入新会话
   const resume = async () => {
     if (resumeBusy || !session.nativeSessionId) return;
     setResumeBusy(true);
@@ -527,9 +535,10 @@ function Composer({ session, dead }: { session: SessionRecord; dead: boolean }) 
     <div className="composer">
       {/* 配置控件行：从会话头挪到输入框正上方；可交互控件只此一处，会话头留只读摘要 */}
       <ConfigControls session={session} />
-      {dead && (
+      {(dead || errored) && (
         <div className="composer-dead">
-          <span>会话已结束。</span>
+          {/* error 与 dead 共用续接出口（同 agent/cwd/nativeSessionId），文案区分 */}
+          <span>{dead ? "会话已结束。" : "会话出错了。"}</span>
           <button
             type="button"
             className="btn btn-primary"

@@ -217,6 +217,21 @@ frontend/
 - [x] **57. 修复前失败 / 修复后通过。** **实测**：对未修复代码跑 `npx tsx frontend/scripts/store-flow.test.mjs` 三例全红（「create 返回后 data 没有该会话条目」「等待后 data 仍没有该会话条目」「旧请求的 finally 误删了新请求的 in-flight 条目」，exit=1）；修复后三例全过（`✅ store 流程回归全过（3 例）`，exit=0）。「建会话 → 立即发送」的手工回放由用例 1 覆盖（打桩 WS 上行帧 + echo 事件，断言 data 事件与 seq）。
 - [x] **58. 构建与检查全绿。** **实测**：`npm run build`、`npm run typecheck`、`npm run typecheck:frontend`、`npm run check:theme`、`npm run test:mentions`、`npm run test:store` 六条全部退出码 0。
 
+### M10 发送失败不丢消息 / error 续接出口 / 删除提示与退路 / 状态说明（2026-08-22）
+
+- **发送失败不再静默丢消息**：`store.send()` 在 socket 非 OPEN 时本已返回 false 并置 `lastError`，但 `sendUserMessage` / `sendCommand` / `sendComposerInput` / `sendWithMentions` 全部把返回值吞掉，Composer 又先发送再 `setText("")`——输入框已清空、帧没上去，文本凭空消失。修法：四个发送方法全部透出失败（`sendWithMentions` 改 `Promise<boolean>`，`sendComposerInput` 因 mentions 异步分支整体改 `Promise<boolean>`，纯文本/结构化命令分支同步出结果包 Promise）；Composer 先清空、失败后把原文还回输入框（`setText` 函数式更新，用户趁间隙输入了新内容则不覆盖），失败提示走 `send()` 已置的 `lastError` 全局错误条；命令面板「无参数命令确认即发」路径同样失败不清空。覆盖路径：纯文本、命中命令表的结构化 command、mentions 异步解析、命令面板直接确认，共四条。
+- **error 态纳入续接出口**：error 与 dead 共用「新建会话并续接」按钮（同 agent/cwd/nativeSessionId 逻辑与禁用条件不变），文案区分——dead「会话已结束。」/ error「会话出错了。」。error 会话输入框保持可用（进程可能仍在），只有 dead 禁用。
+- **删除成功提示说清记录还在**：`store.remove` 成功后置一次性 `removalNotice`（App 底部提示条，手动关闭）：「已从工作台移除。<agent> 的原生对话记录仍在，可新建会话时填入原生 id 续接。」DELETE 响应的 `nativeTranscriptPath` 有则以等宽小字附上；删当前会话被导航走后提示依然可见（挂在 App 层，不随会话视图卸载）。失败路径原有的行内就地报错不动。
+- **删除确认态给退路**：Esc 取消（焦点本就在行内按钮上，按键冒泡到确认容器处理；busy 中不响应），取消按钮补 `title="取消（Esc）"`；30 秒超时自动还原未做（二选一，Esc 已满足）。
+- **状态语义轻量版**：`STATUS_HINTS` 五状态各一句「你现在可以……」（starting/idle/running/error/dead），挂在左栏状态行（`row-meta-text` 的 `title`）与会话头新增的状态文字（`session-sub` 内 `seq` 之后的 `title`）；未重构状态系统、未做引导。
+
+- [x] **59. send 失败回归：修复前红 / 修复后绿。** **实测**：新用例「socket 非 OPEN：sendUserMessage / sendCommand / sendComposerInput 全路径返回失败」对未修复代码跑出 `❌ … sendUserMessage 未返回 false（actual undefined, expected false），部分用例失败（通过 3 例）`，exit=1；修复后 `✅ store 流程回归全过（4 例）`，exit=0。用例覆盖两种非 OPEN 形态（socket null / readyState=CLOSED）× 三条分支（纯文本 / 结构化命令 / mentions 异步），断言返回 false、`lastError` 已置、零上行帧；并有 OPEN 对照（返回 true、帧写出）。
+- [x] **60. error 态续接出口 + 文案区分。** **代码复核**：`SessionView.tsx` 的 Composer 以 `dead || errored` 渲染续接块，文案 `dead ? "会话已结束。" : "会话出错了。"`，按钮禁用条件（无 `nativeSessionId`）与 resume 逻辑未动。
+- [x] **61. 删除成功提示含「原生记录仍在」。** **代码复核**：`store.remove` 置 `removalNotice`（`api.deleteSession` 改返回响应 data 以取 `nativeTranscriptPath`），`App.tsx` 渲染提示条 + 等宽小字路径 + 手动关闭。
+- [x] **62. 确认态 Esc 取消。** **代码复核**：`Sidebar.tsx` 的 `.session-confirm` 容器 `onKeyDown` 处理 Escape → `cancelConfirm`（与取消按钮同一函数，含焦点还回 ×）。
+- [x] **63. 五状态说明。** **代码复核**：`STATUS_HINTS`（Sidebar.tsx 导出）五 key 齐全，左栏 `row-meta-text` 与会话头状态文字各挂 `title`。
+- [x] **64. 构建与检查全绿。** **实测**：`npm run build`（vite 8.2.2，退出码 0）、`npm run typecheck` 退出码 0、`npm run typecheck:frontend` 退出码 0、`npm run check:theme` 输出「✅ 深色令牌两份一致（26 项）」（未新增令牌，提示条用既有 `--border-strong`/`--text`/`--text-muted`）、`npm run test:mentions` 输出「✅ mentions 解析单测全过（19 例）」、`npm run test:store` 输出「✅ store 流程回归全过（4 例）」。
+
 ## 已知取舍
 
 - `@token` 严格按空白切段：句末紧跟标点（如 `@a.ts，`）会把标点并入 token 导致「未找到，不会附加」，需要用户在引用后敲空格。

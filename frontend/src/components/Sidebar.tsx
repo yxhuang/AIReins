@@ -11,12 +11,21 @@ const AGENT_LABELS: Record<AgentKind, string> = {
   kimi: "kimi",
 };
 
-const STATUS_LABELS: Record<string, string> = {
+export const STATUS_LABELS: Record<string, string> = {
   starting: "启动中",
   idle: "空闲",
   running: "忙",
   dead: "已结束",
   error: "出错",
+};
+
+/** 五状态一句「你现在可以……」说明：左栏状态文字与会话头的 hover title 共用（SessionView 也导入）。 */
+export const STATUS_HINTS: Record<string, string> = {
+  starting: "启动中：会话正在拉起 agent 进程。你现在可以等它就绪，或切去别的会话。",
+  idle: "空闲：agent 就绪。你现在可以发消息、用 / 命令或 @ 引用文件。",
+  running: "忙：agent 正在执行。你现在可以继续发消息，或点「中断」停掉当前执行。",
+  error: "出错：会话遇到错误。你现在可以看错误条里的原因，或「新建会话并续接」恢复上下文。",
+  dead: "已结束：进程已退出。你现在可以「新建会话并续接」，或点行右 × 从工作台移除（原生记录保留）。",
 };
 
 const CWD_STORAGE_KEY = "workbench-last-cwd";
@@ -136,10 +145,25 @@ function SessionRow({ session }: { session: SessionRecord }) {
     }
   };
 
+  const cancelConfirm = () => {
+    setConfirming(false);
+    // 焦点还给 ×（等下一轮渲染后按钮重新挂载）
+    requestAnimationFrame(() => deleteBtnRef.current?.focus());
+  };
+
   if (confirming) {
     const running = session.status === "starting" || session.status === "running";
     return (
-      <div className="session-confirm">
+      <div
+        className="session-confirm"
+        onKeyDown={(e) => {
+          // 确认态给退路：Esc 取消（焦点在行内按钮上，按键冒泡到此处）
+          if (e.key === "Escape") {
+            e.preventDefault();
+            if (!busy) cancelConfirm();
+          }
+        }}
+      >
         <p className="session-confirm-text">
           从工作台移除此会话？{AGENT_LABELS[session.agent]} 自己的对话记录不会被删除。
           {running && "该会话仍在运行，移除会停止它。"}
@@ -159,11 +183,8 @@ function SessionRow({ session }: { session: SessionRecord }) {
             className="btn"
             ref={cancelBtnRef}
             disabled={busy}
-            onClick={() => {
-              setConfirming(false);
-              // 焦点还给 ×（等下一轮渲染后按钮重新挂载）
-              requestAnimationFrame(() => deleteBtnRef.current?.focus());
-            }}
+            title="取消（Esc）"
+            onClick={cancelConfirm}
           >
             取消
           </button>
@@ -196,7 +217,7 @@ function SessionRow({ session }: { session: SessionRecord }) {
               !
             </span>
           )}
-          <span className="row-meta-text">
+          <span className="row-meta-text" title={STATUS_HINTS[session.status] ?? session.status}>
             {AGENT_LABELS[session.agent]} · {STATUS_LABELS[session.status] ?? session.status} · {relativeTime(session.lastActivityAt, store.now)}
           </span>
         </span>
