@@ -202,6 +202,21 @@ frontend/
 - [x] **55. 键盘可达与焦点管理。** **代码复核**：`×` 为真实 `<button>` 带 `aria-label`，`opacity: 0` → `.session-item:hover / :focus-within` 显现，全局 `:focus-visible` 描边生效；确认态焦点默认落「取消」，取消后焦点回 `×`。
 - [x] **56. 构建与检查全绿。** **实测**：`npm run build`（vite 8.2.2，退出码 0）、`npm run typecheck` 退出码 0、`npm run typecheck:frontend` 退出码 0、`npm run check:theme` 输出「✅ 深色令牌两份一致（26 项）」（本轮未新增令牌）、`npm run test:mentions` 输出「✅ mentions 解析单测全过（19 例）」。
 
+### M9 store 快照对齐三缺陷修复（2026-08-22）
+
+背景：用户实测「新建会话后发送没反应，界面永远空白」。Codex 只读诊断 + 复核确认三个叠加缺陷全在 `store.ts`，只修第一个会露出二、三个：
+
+- **缺陷 1（确定性，100% 必现）**：`alignSnapshot` 里 `snapshotGen.get(id) ?? 0` 把缺省 generation 归一为 0 但不写回 Map，校验处 `snapshotGen.get(id) === gen` 取回的仍是 `undefined`，`undefined === 0` 为 false ⇒ 新会话首次快照必被静默丢弃，`data` 永远建不起条目，事件全落「未加载」分支再 ensureLoaded 再被丢弃——死循环。**修法**：新增单调自增计数器 `nextSnapshotGen`，每个新快照请求分配唯一 generation 并立即写入 Map，不再依赖「缺省 0」；`resync` 不再手动自增（新请求的唯一 generation 天然作废旧响应），`remove` 的作废也改用同一计数器。
+- **缺陷 2（竞态）**：`create()` 用 `void this.ensureLoaded(...)` 没 await 就返回，用户建完立刻发送，事件在 data 建立前到达被吞。**修法**：`create()` 改为 `await this.resync(session.id)`——等创建完成后强制重取的新快照落地再返回（resync 语义，不复用创建期间可能已发出的旧快照）。
+- **缺陷 3（竞态）**：`alignSnapshot` 的 `finally { snapshotInflight.delete(id) }` 无条件删除——旧请求的 finally 误删新请求的 in-flight 条目。**修法**：所有权校验 `if (this.snapshotInflight.get(id) === promise)` 才删。
+
+顺带把 `Store` 类具名导出（既有 `store` 单例导出不变），供回归测试直接实例化。
+
+回归测试 `frontend/scripts/store-flow.test.mjs`（`npm run test:store`，tsx 直接 import store 模块，WebSocket/fetch 全部打桩、不需要真实 server）覆盖：① 新建会话后立即发送 → data 出现该会话、事件按 seq 累积、上行帧写出；② 新建会话后等待再发送；③ 旧快照晚到不回滚已推进的 seq + finally 不误删新请求 in-flight 条目。
+
+- [x] **57. 修复前失败 / 修复后通过。** **实测**：对未修复代码跑 `npx tsx frontend/scripts/store-flow.test.mjs` 三例全红（「create 返回后 data 没有该会话条目」「等待后 data 仍没有该会话条目」「旧请求的 finally 误删了新请求的 in-flight 条目」，exit=1）；修复后三例全过（`✅ store 流程回归全过（3 例）`，exit=0）。「建会话 → 立即发送」的手工回放由用例 1 覆盖（打桩 WS 上行帧 + echo 事件，断言 data 事件与 seq）。
+- [x] **58. 构建与检查全绿。** **实测**：`npm run build`、`npm run typecheck`、`npm run typecheck:frontend`、`npm run check:theme`、`npm run test:mentions`、`npm run test:store` 六条全部退出码 0。
+
 ## 已知取舍
 
 - `@token` 严格按空白切段：句末紧跟标点（如 `@a.ts，`）会把标点并入 token 导致「未找到，不会附加」，需要用户在引用后敲空格。

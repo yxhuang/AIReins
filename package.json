@@ -13,7 +13,8 @@
     "spike:codex": "tsx spikes/codex-loop.ts",
     "spike:kimi": "tsx spikes/kimi-loop.ts",
     "check:theme": "node frontend/scripts/check-theme-parity.mjs",
-    "test:mentions": "tsx frontend/scripts/mentions.test.mjs"
+    "test:mentions": "tsx frontend/scripts/mentions.test.mjs",
+    "test:store": "tsx frontend/scripts/store-flow.test.mjs"
   },
   "devDependencies": {
     "@types/node": "^26.2.0",

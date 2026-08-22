@@ -39,7 +39,7 @@ interface SessionData {
   latestUsage?: Record<string, unknown>;
 }
 
-class Store {
+export class Store {
   sessions: SessionRecord[] = [];
   meta: MetaInfo | null = null;
   currentId: string | null = null;
@@ -66,8 +66,10 @@ class Store {
   private reconnectDelay = 1000;
   private reconnectTimer: ReturnType<typeof setTimeout> | undefined;
   private listRefreshTimer: ReturnType<typeof setTimeout> | undefined;
-  /** 每会话快照版本戳：作废旧响应（重取快照前先自增） */
+  /** 每会话快照版本戳：作废旧响应（值来自 nextSnapshotGen，每次请求唯一且写入 Map） */
   private snapshotGen = new Map<string, number>();
+  /** 快照 generation 分配器：单调自增，杜绝「缺省 0」不写 Map 导致校验取回 undefined 的碰撞 */
+  private nextSnapshotGen = 0;
   /** 每会话 in-flight 快照请求：并发对齐复用同一 Promise */
   private snapshotInflight = new Map<string, Promise<void>>();
   private configHintTimers = new Map<string, ReturnType<typeof setTimeout>>();
@@ -152,8 +154,13 @@ class Store {
   private alignSnapshot(id: string): Promise<void> {
     const inflight = this.snapshotInflight.get(id);
     if (inflight) return inflight;
-    const gen = this.snapshotGen.get(id) ?? 0;
-    const promise = (async () => {
+    // 每个新快照请求分配唯一 generation 并立即写入 Map——缺省归一为 0 但不写入时，
+    // 校验处取回的仍是 undefined，新会话首次快照必被误丢（界面永远空白的根因）。
+    const gen = ++this.nextSnapshotGen;
+    this.snapshotGen.set(id, gen);
+    // 先声明再赋值（! 断言）：finally 里的所有权校验要引用 promise 自身，赋值在闭包执行前完成
+    let promise!: Promise<void>;
+    promise = (async () => {
       try {
         const snapshot = await fetchSnapshot(id);
         if (this.snapshotGen.get(id) === gen) {
@@ -162,7 +169,8 @@ class Store {
       } catch (error) {
         this.lastError = error instanceof Error ? error.message : String(error);
       } finally {
-        this.snapshotInflight.delete(id);
+        // 所有权校验：旧请求的 finally 不得误删新请求的 in-flight 条目
+        if (this.snapshotInflight.get(id) === promise) this.snapshotInflight.delete(id);
       }
       // REST 首取实时命令表（覆盖快照里可能过期的 commands_updated 结果）；
       // dead 会话等失败场景保留快照内的结果，不打扰全局错误条。
@@ -180,7 +188,7 @@ class Store {
 
   /** 作废 in-flight 快照响应并强制重取（seq 缺口 / resync_required / WS open 对齐）。 */
   private resync(id: string): Promise<void> {
-    this.snapshotGen.set(id, (this.snapshotGen.get(id) ?? 0) + 1);
+    // 作废旧响应靠 alignSnapshot 新分配的唯一 generation（旧响应必不匹配），无需手动自增
     this.snapshotInflight.delete(id);
     this.data.delete(id);
     return this.alignSnapshot(id);
@@ -515,7 +523,9 @@ class Store {
   async create(input: CreateSessionInput): Promise<SessionRecord> {
     const session = await createSession(input);
     await this.refreshSessions();
-    void this.ensureLoaded(session.id);
+    // 等创建完成后强制重取的新快照落地再返回（resync 语义，不复用创建期间
+    // 可能已发出的旧快照）：用户建完立刻发送时，事件到达前 data 必须已建好。
+    await this.resync(session.id);
     return session;
   }
 
@@ -540,7 +550,7 @@ class Store {
       this.configHintTimers.delete(id);
     }
     // 作废该会话 in-flight 快照，防止过期响应把已删会话写回列表
-    this.snapshotGen.set(id, (this.snapshotGen.get(id) ?? 0) + 1);
+    this.snapshotGen.set(id, ++this.nextSnapshotGen);
     this.snapshotInflight.delete(id);
     if (this.currentId === id) {
       const next = [...this.sessions].sort(
