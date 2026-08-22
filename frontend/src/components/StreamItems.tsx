@@ -13,7 +13,6 @@ import { store } from "../store";
 export function UserBlockView({ item }: { item: UserBlock }) {
   return (
     <div className="user-block">
-      <span className="user-tag">你</span>
       <span className="user-text">{item.text}</span>
     </div>
   );

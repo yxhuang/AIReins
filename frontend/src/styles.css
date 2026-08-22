@@ -631,13 +631,6 @@ body {
   padding: 8px 12px;
 }
 
-.user-tag {
-  font-size: 12px;
-  font-weight: 700;
-  color: var(--text-muted);
-  flex: 0 0 auto;
-}
-
 .user-text { white-space: pre-wrap; }
 
 .text-block {
