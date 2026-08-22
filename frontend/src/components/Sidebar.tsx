@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { AgentKind, ConfigOptionId } from "../types";
+import type { AgentKind, ConfigOptionId, SessionRecord } from "../types";
 import { relativeTime, sessionTitle } from "../format";
 import { store } from "../store";
 import { useStore } from "../useStore";
@@ -90,41 +90,11 @@ export function Sidebar({ collapsed, onToggle, newOpen, onNewOpenChange }: Sideb
           </button>
           {newOpen && <NewSessionForm onDone={() => onNewOpenChange(false)} />}
           <ul className="session-list">
-            {sessions.map((session) => {
-              const pending = store.pendingCount(session.id);
-              const data = store.data.get(session.id);
-              return (
-                <li key={session.id}>
-                  <button
-                    type="button"
-                    className={`session-row agent-${session.agent}${
-                      session.id === store.currentId ? " active" : ""
-                    }${session.status === "dead" ? " dead" : ""}`}
-                    onClick={() => store.navigate(session.id)}
-                  >
-                    <span className="row-title-line">
-                      <span className="row-title">{sessionTitle(session, data?.events)}</span>
-                      {pending > 0 && (
-                        <span className="gate-badge" title={`${pending} 个闸门等待处理`}>
-                          {pending}
-                        </span>
-                      )}
-                    </span>
-                    <span className="row-meta">
-                      <span className={`status-dot status-${session.status}`} />
-                      {session.riskyMode && (
-                        <span className="risky-mark" title="该会话已关闭 agent 主动询问">
-                          !
-                        </span>
-                      )}
-                      <span className="row-meta-text">
-                        {AGENT_LABELS[session.agent]} · {STATUS_LABELS[session.status] ?? session.status} · {relativeTime(session.lastActivityAt, store.now)}
-                      </span>
-                    </span>
-                  </button>
-                </li>
-              );
-            })}
+            {sessions.map((session) => (
+              <li key={session.id}>
+                <SessionRow session={session} />
+              </li>
+            ))}
             {sessions.length === 0 && <li className="session-list-empty">还没有会话</li>}
           </ul>
         </>
@@ -133,6 +103,119 @@ export function Sidebar({ collapsed, onToggle, newOpen, onNewOpenChange }: Sideb
         <SettingsMenu />
       </div>
     </aside>
+  );
+}
+
+function SessionRow({ session }: { session: SessionRecord }) {
+  const store = useStore();
+  const [confirming, setConfirming] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const deleteBtnRef = useRef<HTMLButtonElement>(null);
+  const cancelBtnRef = useRef<HTMLButtonElement>(null);
+  const pending = store.pendingCount(session.id);
+  const data = store.data.get(session.id);
+  const title = sessionTitle(session, data?.events);
+
+  // 进入确认态把焦点收进行内按钮：默认落「取消」，连按 Enter 不会误删
+  useEffect(() => {
+    if (confirming) cancelBtnRef.current?.focus();
+  }, [confirming]);
+
+  const confirm = async () => {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await store.remove(session.id);
+      // 成功后该行随列表一起卸载，无需清状态
+    } catch (e) {
+      // 失败留在确认态：错误就地显示，可重试或取消
+      setError(e instanceof Error ? e.message : String(e));
+      setBusy(false);
+    }
+  };
+
+  if (confirming) {
+    const running = session.status === "starting" || session.status === "running";
+    return (
+      <div className="session-confirm">
+        <p className="session-confirm-text">
+          从工作台移除此会话？{AGENT_LABELS[session.agent]} 自己的对话记录不会被删除。
+          {running && "该会话仍在运行，移除会停止它。"}
+        </p>
+        {error && <p className="session-confirm-error">{error}</p>}
+        <div className="session-confirm-actions">
+          <button
+            type="button"
+            className="btn btn-danger"
+            disabled={busy}
+            onClick={() => void confirm()}
+          >
+            {busy ? "移除中…" : "确认删除"}
+          </button>
+          <button
+            type="button"
+            className="btn"
+            ref={cancelBtnRef}
+            disabled={busy}
+            onClick={() => {
+              setConfirming(false);
+              // 焦点还给 ×（等下一轮渲染后按钮重新挂载）
+              requestAnimationFrame(() => deleteBtnRef.current?.focus());
+            }}
+          >
+            取消
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="session-item">
+      <button
+        type="button"
+        className={`session-row agent-${session.agent}${
+          session.id === store.currentId ? " active" : ""
+        }${session.status === "dead" ? " dead" : ""}`}
+        onClick={() => store.navigate(session.id)}
+      >
+        <span className="row-title-line">
+          <span className="row-title">{title}</span>
+          {pending > 0 && (
+            <span className="gate-badge" title={`${pending} 个闸门等待处理`}>
+              {pending}
+            </span>
+          )}
+        </span>
+        <span className="row-meta">
+          <span className={`status-dot status-${session.status}`} />
+          {session.riskyMode && (
+            <span className="risky-mark" title="该会话已关闭 agent 主动询问">
+              !
+            </span>
+          )}
+          <span className="row-meta-text">
+            {AGENT_LABELS[session.agent]} · {STATUS_LABELS[session.status] ?? session.status} · {relativeTime(session.lastActivityAt, store.now)}
+          </span>
+        </span>
+      </button>
+      {/* 删除入口在行外右侧：永不挤占/遮挡行内右侧的闸门徽标（徽标优先级更高） */}
+      <button
+        type="button"
+        className="row-delete"
+        ref={deleteBtnRef}
+        title={`从工作台移除（${AGENT_LABELS[session.agent]} 的对话记录不会被删除）`}
+        aria-label={`移除会话 ${title}`}
+        onClick={() => {
+          setError(null);
+          setConfirming(true);
+        }}
+      >
+        ×
+      </button>
+    </div>
   );
 }
 

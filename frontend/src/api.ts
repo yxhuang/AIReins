@@ -45,6 +45,13 @@ export interface CreateSessionInput {
   initialMessage?: string;
 }
 
+/** 移除注册表条目并停 worker；各家 CLI 的原生 transcript 不受影响。 */
+export function deleteSession(id: string): Promise<void> {
+  return call<unknown>(`/api/sessions/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  }).then(() => undefined);
+}
+
 export function createSession(input: CreateSessionInput): Promise<SessionRecord> {
   return call<{ session: SessionRecord }>("/api/sessions", {
     method: "POST",

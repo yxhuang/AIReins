@@ -9,7 +9,7 @@ import type {
   SessionStatus,
   UnifiedEvent,
 } from "./types";
-import { createSession, fetchCommands, fetchFiles, fetchMeta, fetchSessions, fetchSnapshot, type CreateSessionInput } from "./api";
+import { createSession, deleteSession, fetchCommands, fetchFiles, fetchMeta, fetchSessions, fetchSnapshot, type CreateSessionInput } from "./api";
 import { extractMentionTokens } from "./mentions";
 
 // 全局状态与连接恢复：
@@ -73,6 +73,8 @@ class Store {
   private configHintTimers = new Map<string, ReturnType<typeof setTimeout>>();
   /** @ 引用精确查询 in-flight 去重（key = sessionId + \n + path） */
   private fileKnownInflight = new Map<string, Promise<boolean>>();
+  /** 已移除会话：DELETE 后残留 WS 事件/快照直接忽略，不再重取（会 404 污染全局错误条） */
+  private removed = new Set<string>();
 
   subscribe = (listener: () => void): (() => void) => {
     this.listeners.add(listener);
@@ -137,6 +139,7 @@ class Store {
 
   /** 会话事件是否已加载；未加载则取快照。 */
   async ensureLoaded(id: string): Promise<void> {
+    if (this.removed.has(id)) return; // 已移除的会话不再取快照
     if (this.data.has(id)) return;
     await this.alignSnapshot(id);
     this.notify();
@@ -276,6 +279,7 @@ class Store {
   }
 
   private handleEvent(event: UnifiedEvent): void {
+    if (this.removed.has(event.sessionId)) return; // DELETE 后残留事件直接忽略
     const data = this.data.get(event.sessionId);
     if (data) {
       // 快照语义：只追加 seq 更大的事件；出现缺口则重取快照。
@@ -513,6 +517,38 @@ class Store {
     await this.refreshSessions();
     void this.ensureLoaded(session.id);
     return session;
+  }
+
+  /**
+   * 从工作台移除会话：DELETE 注册表条目 + 停 worker（原生 transcript 不动）。
+   * 成功后清该会话全部本地状态；删的是当前会话时导航到列表剩余的第一个
+   * （与左栏同序：lastActivityAt 最新），无剩余则回空态。失败抛错由调用方展示。
+   */
+  async remove(id: string): Promise<void> {
+    await deleteSession(id);
+    this.removed.add(id);
+    this.sessions = this.sessions.filter((s) => s.id !== id);
+    this.data.delete(id);
+    this.commands.delete(id);
+    this.fileKnown.delete(id);
+    this.configPending.delete(id);
+    this.configErrors.delete(id);
+    this.configHints.delete(id);
+    const hintTimer = this.configHintTimers.get(id);
+    if (hintTimer) {
+      clearTimeout(hintTimer);
+      this.configHintTimers.delete(id);
+    }
+    // 作废该会话 in-flight 快照，防止过期响应把已删会话写回列表
+    this.snapshotGen.set(id, (this.snapshotGen.get(id) ?? 0) + 1);
+    this.snapshotInflight.delete(id);
+    if (this.currentId === id) {
+      const next = [...this.sessions].sort(
+        (a, b) => Date.parse(b.lastActivityAt) - Date.parse(a.lastActivityAt),
+      )[0];
+      this.navigate(next?.id ?? null);
+    }
+    this.notify();
   }
 
   dismissError(): void {

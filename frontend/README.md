@@ -42,7 +42,7 @@ frontend/
     useStore.ts         useSyncExternalStore 订阅 hook
     App.tsx             布局骨架、hash 路由、错误提示条
     components/
-      Sidebar.tsx       会话列表（身份色脊 / 状态点 / 闸门徽标 / 危险模式「!」标记）+ 新建会话表单（含三个配置下拉；cwd 三级预填回退 + 空 cwd 可见禁用原因）+ 底部设置入口
+      Sidebar.tsx       会话列表（身份色脊 / 状态点 / 闸门徽标 / 危险模式「!」标记 / 行右删除入口 ×：hover/focus 显现、Tab 可达，点击后就地变行内二次确认）+ 新建会话表单（含三个配置下拉；cwd 三级预填回退 + 空 cwd 可见禁用原因）+ 底部设置入口
       SettingsMenu.tsx  设置齿轮 + 锚定浮层（分组/条目结构，60vh 限高滚动 + focus trap）；主题三选一写 <html data-theme>、localStorage 持久化（读写均 try/catch）
       SessionView.tsx   会话头（usage 分家渲染 / 配置只读摘要 / 中断）+ 危险模式警示条 + 事件流 + 输入框（配置控件行在输入框正上方；行首 / 命令面板、@ 文件引用面板与待附加预览条、结构化 command 上行、codex 降级说明；dead 会话「新建会话并续接」出口）+ 未决闸门贴条
       StreamItems.tsx   用户消息 / 文本块 / 思考折叠块 / 工具卡片 / 闸门块 / 系统行
@@ -170,6 +170,37 @@ frontend/
 - [x] **48. 控件在输入框上方、会话头只读摘要。** **代码复核 + 构建**：`ConfigControls` 仅在 `Composer` 内渲染；会话头渲染 `ConfigSummary` 纯 `<span>` 文本（无可交互元素）。
 - [x] **49. 禁用原因不 hover 可见。** **代码复核**：`mutable:false` 标签内联「（建会话时定）」；无原生 id 时续接按钮旁写明原因；空 cwd 时按钮下方写明原因。
 - [x] **50. 构建与检查全绿。** **实测**：`npm run build`（vite 8.2.2，26 modules，退出码 0）、`npm run typecheck` 退出码 0、`npm run typecheck:frontend` 退出码 0、`npm run check:theme` 输出「✅ 深色令牌两份一致（26 项）」（本轮未新增令牌）、`npm run test:mentions` 输出「✅ mentions 解析单测全过（19 例）」。
+
+### M8 左栏会话删除入口（2026-08-22）
+
+每个会话行右侧一个 `×` 删除入口（Unicode，无图标库），行内二次确认，不弹模态。语义如实反映后端边界：`DELETE /api/sessions/:id` 只移除 workbench 注册表条目并停 worker，**各家 CLI 的原生 transcript 永不删除**（确认文案「从工作台移除此会话？<agent> 自己的对话记录不会被删除。」；运行中 starting/running 会话追加「该会话仍在运行，移除会停止它。」）。
+
+- **布局取舍（徽标优先）**：`×` 渲染在会话行**之外**右侧（`.session-item` flex 容器内与 `.session-row` 并列，`flex: 0 0 auto`），不在标题行内部，因此待审批徽标钉在行内最右的布局不变，二者永不挤占/遮挡；进入确认态时整行替换为确认文案，徽标随原行一起临时消失，取消即还原。
+- **键盘可达**：`×` 是真实 `<button>`，始终在 Tab 序里（`opacity: 0` 不阻止聚焦）；行 `:hover` 或行内任意元素 `:focus-within`（含 `×` 自身聚焦）时显现，聚焦走全局 `:focus-visible` 描边。进入确认态焦点收到行内按钮（默认落「取消」，连按 Enter 不会误删）；取消后 `requestAnimationFrame` 把焦点还给 `×`。
+- **store.remove(id)**：调 `DELETE` 成功后清该会话全部本地状态（`sessions` / `data` / `commands` / `fileKnown` / `configPending` / `configErrors` / `configHints` + 计时器），并作废 in-flight 快照（版本戳自增）；`removed` 集合拦截 DELETE 后残留的 WS 事件/快照（不再重取，避免 404 污染全局错误条）。删的是当前会话时导航到剩余列表第一个（与左栏同序：`lastActivityAt` 最新），无剩余回空态。失败：错误留在行内确认态显示，可重试或取消，不静默。
+- **配色**：删除入口、确认框边框、行内错误均用既有 `--danger` 冷调洋红（销毁语义，与「拒绝/错误」同类），未新增令牌，暖色仍是闸门专用。
+
+接口侧实测（隔离实例 `WORKBENCH_PORT=8795`，完事 `ss -tlnp | grep 8795` 找 pid kill，端口确认关闭）：
+
+- [x] **51. 自建 kimi 测试会话 → DELETE → 列表确认消失。** **实测**：POST 建会话 `01J00000000000000000000003`（kimi，status idle，processId 17440）→ DELETE 返回 `{"code":0,"data":{"removedSessionId":"01J00000000000000000000003","transcriptsDeleted":false,"workbenchTranscriptPreserved":true}}` → `GET /api/sessions` 25 条中该 id 已不在。UI 行内确认流为**代码复核**（无头环境未启浏览器）。只删了这一个自建会话，未动任何既有会话。
+- [x] **52. DELETE 前后原生 transcript 仍在。** **实测**：响应无 `nativeTranscriptPath`，由 `nativeSessionId` 推至 `~/.kimi-code/sessions/wd_workbench_0123456789ab/session_00000000-…/`。DELETE 前 `ls -la`：`state.json` 365 字节（19:04）+ `agents/`；DELETE 后再 `ls -la`：逐字节一致（同尺寸同 mtime），目录未被移除。两段输出：
+
+  ```
+  === DELETE 前 ===
+  drwx------  3 user user 4096 Aug 22 19:04 .
+  drwx------ 45 user user 4096 Aug 22 19:04 ..
+  drwx------  3 user user 4096 Aug 22 19:04 agents
+  -rw-------  1 user user  365 Aug 22 19:04 state.json
+  === DELETE 后 ===
+  drwx------  3 user user 4096 Aug 22 19:04 .
+  drwx------ 45 user user 4096 Aug 22 19:04 ..
+  drwx------  3 user user 4096 Aug 22 19:04 agents
+  -rw-------  1 user user  365 Aug 22 19:04 state.json
+  ```
+- [x] **53. 删当前会话的导航逻辑。** **代码复核**：`store.remove` 在 `currentId === id` 时按左栏同序（`lastActivityAt` 降序）取剩余第一个 `navigate(next.id)`，无剩余 `navigate(null)` 回空态；删非当前会话只原地移除、不动 hash。
+- [x] **54. 徽标与删除入口共存不互相遮挡。** **代码复核 + CSS**：`×` 在 `.session-row` 之外的 flex 兄弟位，徽标仍在标题行内 `margin-left: auto` 钉最右，两者各占其位。
+- [x] **55. 键盘可达与焦点管理。** **代码复核**：`×` 为真实 `<button>` 带 `aria-label`，`opacity: 0` → `.session-item:hover / :focus-within` 显现，全局 `:focus-visible` 描边生效；确认态焦点默认落「取消」，取消后焦点回 `×`。
+- [x] **56. 构建与检查全绿。** **实测**：`npm run build`（vite 8.2.2，退出码 0）、`npm run typecheck` 退出码 0、`npm run typecheck:frontend` 退出码 0、`npm run check:theme` 输出「✅ 深色令牌两份一致（26 项）」（本轮未新增令牌）、`npm run test:mentions` 输出「✅ mentions 解析单测全过（19 例）」。
 
 ## 已知取舍
 
