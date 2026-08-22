@@ -6,6 +6,7 @@ import { WebSocket, WebSocketServer } from "ws";
 import { log } from "./logger.js";
 import { normalizeFileQuery, searchFiles } from "./file-search.js";
 import { getMeta, SERVER_VERSION } from "./meta.js";
+import { checkPageHealth, scanPages } from "./pages.js";
 import { SessionManager } from "./session-manager.js";
 import {
   AGENTS,
@@ -46,6 +47,8 @@ interface WsClientState {
 }
 
 const manager = new SessionManager();
+const pages = scanPages();
+const pagesById = new Map(pages.map((page) => [page.id, page]));
 void getMeta(); // 启动时探测一次并缓存，不让首个 /api/meta 承担延迟。
 const wss = new WebSocketServer({ noServer: true });
 const clients = new Set<WsClientState>();
@@ -122,6 +125,8 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse)
     const method = request.method ?? "GET";
     if (method === "GET" && url.pathname === "/api/meta") {
       respond(response, 200, 0, "success", await getMeta(), requestId);
+    } else if (method === "GET" && url.pathname === "/api/pages") {
+      respond(response, 200, 0, "success", { pages }, requestId);
     } else if (method === "GET" && url.pathname === "/api/sessions") {
       respond(response, 200, 0, "success", { sessions: manager.list() }, requestId);
     } else if (method === "POST" && url.pathname === "/api/sessions") {
@@ -133,7 +138,13 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse)
       const commandsMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/commands$/);
       const filesMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/files$/);
       const detailMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)$/);
-      if (method === "GET" && snapshotMatch) {
+      const pageHealthMatch = url.pathname.match(/^\/api\/pages\/([^/]+)\/health$/);
+      if (method === "GET" && pageHealthMatch) {
+        const id = decodeURIComponent(pageHealthMatch[1]);
+        const page = pagesById.get(id);
+        if (!page) throw new ApiError(404, 40410, `页面不存在：${id}`);
+        respond(response, 200, 0, "success", await checkPageHealth(page), requestId);
+      } else if (method === "GET" && snapshotMatch) {
         const id = decodeURIComponent(snapshotMatch[1]);
         const snapshot = manager.getSnapshot(id);
         if (!snapshot) throw new ApiError(404, 40401, `会话不存在：${id}`);

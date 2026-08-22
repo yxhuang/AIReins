@@ -37,6 +37,8 @@ npm run server
 - `GET /api/sessions/:id/files?q=<关键词>&limit=<默认50>`：在会话 `cwd` 内检索可引用的普通文件
 - `DELETE /api/sessions/:id`：停止 worker 并移除注册表条目；不删除 Workbench 或原生 CLI transcript
 - `GET /api/meta`：server/CLI 实测版本、全局能力、三 driver 能力位与配置 schema
+- `GET /api/pages`：启动时已注册的扩展页面列表
+- `GET /api/pages/:id/health`：限时探测一个扩展页面的目标服务
 
 建会话时，三家统一使用 `config.model / config.effort / config.permissionMode`：
 
@@ -88,6 +90,40 @@ Claude 的模型或推理强度不显式覆盖时，schema 默认值和初始 se
 Codex 0.148.0 的 `approvalPolicy` 实测只接受 `untrusted / on-request / never`（另支持结构化 `granular`，不属于当前三档 UI）。`on-failure` 请求会被 app-server 以 `unknown variant` 拒绝，因此 schema 不暴露该值。
 
 `snapshot` 的 `data` 为 `{session, seq, events}`。`events` 是重建会话视图所需的全量统一事件；客户端完成快照后连接 `/ws?sessionId=<id>&afterSeq=<seq>`。连接期间产生的缺口由每会话 1,000 条 ring buffer 补发；超出 ring 时服务端发送 `resync_required`，客户端重新取快照。
+
+## `pages/` 扩展页面
+
+仓库根目录的 `pages/` 每个直接子目录代表一个页面，子目录内必须有 `manifest.json`。server 仅在启动时扫描一次；增删或修改 manifest 后需重启，不做热插拔、沙箱或版本管理。单个 manifest 缺失、JSON 语法错误、字段无效或 `id` 重复时，该页面会被跳过并记录一条 warn 日志，不影响 server 启动。
+
+本轮唯一支持的字段形状如下；没有额外的嵌套配置：
+
+```ts
+interface IframePageManifest {
+  id: string;           // 唯一；小写字母、数字、连字符，前端入口约定为 /pages/<id>
+  name: string;         // 中文显示名
+  icon: string;         // emoji 或以 <svg...>...</svg> 表示的内联 SVG 字符串
+  type: "iframe";       // 本轮只支持 iframe
+  url: string;          // iframe 直接加载的 http/https 地址；server 不代理
+  healthCheck?: string; // 可选 http/https 探测地址；省略时探测 url
+  description?: string; // 可选的页面说明或降级提示背景
+}
+```
+
+`GET /api/pages` 的 `data` 为 `{pages: IframePageManifest[]}`，字段就是上述已校验的 manifest 字段。例如首个页面 `ai-usage` 指向 `http://127.0.0.1:8788`。它不是常驻服务：未按需启动时整页不可达；未开启 代理客户端 时页面本身仍可能可达，但部分数据卡片会报错。因此健康接口只判断目标服务是否响应，不能判断数据是否完整。
+
+`GET /api/pages/:id/health` 最多等待 2 秒，`data` 形状为：
+
+```ts
+interface PageHealth {
+  id: string;
+  reachable: boolean;
+  reason: string;       // 如 "HTTP 200"、"连接被拒绝"、"超过 2000 ms 未响应"
+  status?: number;      // 收到 HTTP 响应时存在
+  durationMs: number;
+}
+```
+
+只要收到 HTTP 响应（包括非 2xx），`reachable` 就为 `true`，因为该检查只回答“服务在不在”；HTTP 状态仍通过 `status` 和 `reason` 原样提供。iframe 始终由前端直接加载 manifest 的 `url`，server 不提供反向代理。
 
 ## WebSocket
 
