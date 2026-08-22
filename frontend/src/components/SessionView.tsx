@@ -74,8 +74,8 @@ export function SessionView({ session }: { session: SessionRecord }) {
             <UsageView agent={session.agent} usage={data?.latestUsage} meta={store.meta} />
             <span> · 用时 {duration(session.createdAt, session.lastActivityAt)}</span>
             <span> · seq {data?.seq ?? session.seq}</span>
+            <ConfigSummary session={session} />
           </div>
-          <ConfigControls session={session} />
         </div>
         <div className="session-head-actions">
           <span className={`ws-dot ws-${store.wsState}`} title={`连接：${store.wsState}`} />
@@ -147,8 +147,25 @@ export function SessionView({ session }: { session: SessionRecord }) {
   );
 }
 
-// 会话头的模型/推理强度/审批模式控件：选项全部来自 /api/meta 的 options，
+// 会话头的只读配置摘要（如「opus · xhigh · manual」，未覆盖项显示「跟随配置」）；
+// 可交互控件只在输入框上方一处，会话头不再放可点的，避免两处不一致。
+function ConfigSummary({ session }: { session: SessionRecord }) {
+  const store = useStore();
+  const options = store.meta?.drivers[session.agent]?.options ?? [];
+  if (options.length === 0) return null;
+  const parts = options.map((option) => {
+    const current = session.config?.[option.id];
+    if (current) return current;
+    // claude 首轮 init 后才报实际模型：跟随配置时摘要并入实际值
+    if (option.id === "model" && session.model) return session.model;
+    return "跟随配置";
+  });
+  return <span title="当前配置摘要；可更改的项在输入框上方"> · {parts.join(" · ")}</span>;
+}
+
+// 模型/推理强度/审批模式控件：选项全部来自 /api/meta 的 options，
 // 前端不硬编码任何值；活改走 WS set_config，等 config_updated 广播回来才更新显示。
+// 渲染位置在 Composer 内（输入框正上方一行）。
 function ConfigControls({ session }: { session: SessionRecord }) {
   const store = useStore();
   const options = store.meta?.drivers[session.agent]?.options ?? [];
@@ -175,7 +192,11 @@ function ConfigControls({ session }: { session: SessionRecord }) {
             : undefined;
         return (
           <label className="config-select" key={option.id} title={title}>
-            <span className="config-select-name">{option.name}</span>
+            <span className="config-select-name">
+              {option.name}
+              {/* 禁用原因直接写在标签里，不 hover 也能看到；title 作补充 */}
+              {!option.mutable && "（建会话时定）"}
+            </span>
             <select
               value={currentKey}
               disabled={disabled}
@@ -282,6 +303,9 @@ function Composer({ session, dead }: { session: SessionRecord; dead: boolean }) 
   const [text, setText] = useState("");
   const [cursor, setCursor] = useState(0);
   const [selected, setSelected] = useState(0);
+  // dead 会话的「新建会话并续接」提交态
+  const [resumeBusy, setResumeBusy] = useState(false);
+  const [resumeError, setResumeError] = useState<string | null>(null);
   // Esc 关闭面板后，到下一次输入变化前不再自动弹出
   const [dismissed, setDismissed] = useState(false);
   // IME 组合输入期间：不触发检索、不弹/不更新面板、Enter 不当确认（很多输入法用 Enter 上屏组合串）
@@ -421,6 +445,24 @@ function Composer({ session, dead }: { session: SessionRecord; dead: boolean }) 
     setDismissed(false);
   };
 
+  // dead 会话的出口：同 agent + 同 cwd + 原生会话 id 续接，成功后进入新会话
+  const resume = async () => {
+    if (resumeBusy || !session.nativeSessionId) return;
+    setResumeBusy(true);
+    setResumeError(null);
+    try {
+      const next = await store.create({
+        agent: session.agent,
+        cwd: session.cwd,
+        resumeSessionId: session.nativeSessionId,
+      });
+      store.navigate(next.id);
+    } catch (e) {
+      setResumeError(e instanceof Error ? e.message : String(e));
+      setResumeBusy(false);
+    }
+  };
+
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     // IME 组合期间：Enter/Tab 等都是输入法上屏键，不当确认也不发送
     if (e.nativeEvent.isComposing) return;
@@ -483,6 +525,35 @@ function Composer({ session, dead }: { session: SessionRecord; dead: boolean }) 
 
   return (
     <div className="composer">
+      {/* 配置控件行：从会话头挪到输入框正上方；可交互控件只此一处，会话头留只读摘要 */}
+      <ConfigControls session={session} />
+      {dead && (
+        <div className="composer-dead">
+          <span>会话已结束。</span>
+          <button
+            type="button"
+            className="btn btn-primary"
+            disabled={resumeBusy || !session.nativeSessionId}
+            title={
+              session.nativeSessionId
+                ? "用同一 agent、同一工作目录新建会话并续接原生会话"
+                : "该会话没有可续接的原生会话 id"
+            }
+            onClick={() => void resume()}
+          >
+            {resumeBusy ? "新建中…" : "新建会话并续接"}
+          </button>
+          {/* 没有原生会话 id（如没跑起来就死了）时写明禁用原因，不只靠 title */}
+          {!session.nativeSessionId && (
+            <span>该会话没有可续接的原生会话 id</span>
+          )}
+          {resumeError && (
+            <span className="config-error" role="alert">
+              {resumeError}
+            </span>
+          )}
+        </div>
+      )}
       {slashOpen && (
         <div className="cmd-panel" role="listbox" aria-label="斜杠命令" ref={listRef}>
           {filtered.length === 0 && <div className="cmd-empty">没有匹配的命令</div>}

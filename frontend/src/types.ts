@@ -102,6 +102,8 @@ export interface DriverMeta extends DriverCapabilities {
 
 export interface MetaInfo {
   serverVersion: string;
+  /** server 进程 cwd：新建会话表单 cwd 预填的最后一级回退 */
+  defaultCwd: string;
   cliVersions: Record<AgentKind, string>;
   capabilities: Record<string, unknown>;
   drivers: Record<AgentKind, DriverMeta>;

@@ -48,7 +48,7 @@ class Store {
   lastError: string | null = null;
   /** set_config 发送中的控件（sessionId → 选项 id 集合）；等 config_updated 回来才解除 */
   configPending = new Map<string, Set<ConfigOptionId>>();
-  /** set_config 失败错误（sessionId → 消息），显示在会话头控件旁 */
+  /** set_config 失败错误（sessionId → 消息），显示在输入框上方配置控件旁 */
   configErrors = new Map<string, string>();
   /** codex effectiveFrom:"next_turn" 的一次性提示 */
   configHints = new Map<string, string>();
@@ -261,7 +261,7 @@ class Store {
     if (type === "error") {
       const msg = String(frame.msg ?? "未知错误");
       const sid = typeof frame.sessionId === "string" ? frame.sessionId : "";
-      // 有 set_config 在等结果的会话：错误归到会话头控件旁，不进全局提示条。
+      // 有 set_config 在等结果的会话：错误归到配置控件旁，不进全局提示条。
       if (sid && this.configPending.has(sid)) {
         this.configPending.delete(sid);
         this.configErrors.set(sid, msg);

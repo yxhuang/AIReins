@@ -40,6 +40,8 @@ export interface CreateSessionInput {
   agent: AgentKind;
   cwd: string;
   config?: SessionConfig;
+  /** 原生会话 id 续接：claude --resume / codex thread/resume / kimi session/resume */
+  resumeSessionId?: string;
   initialMessage?: string;
 }
 

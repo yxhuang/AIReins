@@ -42,9 +42,9 @@ frontend/
     useStore.ts         useSyncExternalStore 订阅 hook
     App.tsx             布局骨架、hash 路由、错误提示条
     components/
-      Sidebar.tsx       会话列表（身份色脊 / 状态点 / 闸门徽标 / 危险模式「!」标记）+ 新建会话表单（含三个配置下拉）+ 底部设置入口
+      Sidebar.tsx       会话列表（身份色脊 / 状态点 / 闸门徽标 / 危险模式「!」标记）+ 新建会话表单（含三个配置下拉；cwd 三级预填回退 + 空 cwd 可见禁用原因）+ 底部设置入口
       SettingsMenu.tsx  设置齿轮 + 锚定浮层（分组/条目结构，60vh 限高滚动 + focus trap）；主题三选一写 <html data-theme>、localStorage 持久化（读写均 try/catch）
-      SessionView.tsx   会话头（usage 分家渲染 / 配置控件行 / 中断）+ 危险模式警示条 + 事件流 + 输入框（行首 / 命令面板、@ 文件引用面板与待附加预览条、结构化 command 上行、codex 降级说明）+ 未决闸门贴条
+      SessionView.tsx   会话头（usage 分家渲染 / 配置只读摘要 / 中断）+ 危险模式警示条 + 事件流 + 输入框（配置控件行在输入框正上方；行首 / 命令面板、@ 文件引用面板与待附加预览条、结构化 command 上行、codex 降级说明；dead 会话「新建会话并续接」出口）+ 未决闸门贴条
       StreamItems.tsx   用户消息 / 文本块 / 思考折叠块 / 工具卡片 / 闸门块 / 系统行
     styles.css          设计令牌（深浅两套）与全部样式
 ```
@@ -153,6 +153,23 @@ frontend/
 - [x] **42. 不存在路径 → 预览条「未找到，不会附加」且发送帧不含它。** **代码复核**：`fileKnownSync===false` 渲染 `mention-missing`；`sendWithMentions` 仅 `resolveFile` 返回 true 才 push 进 mentions，文本原样保留。精确存在性判定：检索结果精确 `includes`（子串模糊命中不算存在）。
 - [x] **43. IME 组合期间不误触发。** **代码复核**（无头环境无法驱动真实 IME）：三个处理点——`composing` 态屏蔽触发评估、`isComposing` 屏蔽全部按键确认/发送、`compositionend` 后重新评估。
 - [x] **44. 构建与检查全绿。** 实测：`npm run build`（vite 8.2.2，26 modules，退出码 0）、`npm run typecheck:frontend` 退出码 0、根 `npm run typecheck` 退出码 0、`npm run check:theme` 输出「✅ 深色令牌两份一致（26 项）」（本轮未新增令牌）。
+
+### M7 可用性修复：cwd 预填 / dead 续接出口 / 控件归位（2026-08-22）
+
+背景：cwd 为空时「创建并进入」永久禁用且原因只在 title 里，全新环境下用户被锁在应用外；服务重启后所有旧会话 dead、输入框禁用，没有任何出口。
+
+- **cwd 三级预填回退**（`Sidebar.tsx` 的 `pickInitialCwd`）：① localStorage `workbench-last-cwd`（上次成功建会话的 cwd，读写均 try/catch，与主题同一纪律）→ ② 列表里 `lastActivityAt` 最新会话的 cwd → ③ `GET /api/meta` 新增的 `defaultCwd`（= server 进程 cwd）。`useState(pickInitialCwd)` 惰性初始化；meta/会话列表可能晚于表单挂载到达，另有 effect 在「用户未碰过输入框且仍为空」时补一次预填（用户故意清空后不再回填）。建会话成功后把该 cwd 写回 localStorage。cwd 为空时按钮仍禁用，但按钮下方直接渲染可见文字「请先填写工作目录」（`.new-hint`，title 作补充）。
+- **dead 会话续接出口**（`SessionView.tsx` 的 `Composer`）：dead 时输入框上方渲染「会话已结束。 [新建会话并续接]」——同 agent + 同 cwd + `resumeSessionId: session.nativeSessionId` 调创建接口，成功后 navigate 进新会话；失败错误就地显示在按钮旁。`nativeSessionId` 不存在（没跑起来就死了）时按钮禁用，旁边直接写「该会话没有可续接的原生会话 id」，title 作补充。
+- **配置控件挪到 Composer 正上方**（`@` 预览条/参数提示同一区域）：`ConfigControls` 从会话头移入 `Composer` 顶部；发送中禁用、错误显示（可关）、codex `next_turn`「下一轮生效」提示、`mutable:false` 禁用全部随控件走。会话头改为 `ConfigSummary` 只读摘要（`opus · xhigh · manual`，未覆盖项显示「跟随配置」，model 跟随配置时并入 init 后报出的实际模型），不再放可交互控件。
+- **禁用原因写在标签里**：`mutable:false`（claude 的模型/强度）渲染为「模型（建会话时定）」，不 hover 可见；title「此项需新建会话才能更改」保留作补充。
+- 新增样式 `.new-hint` / `.composer-dead` 全部冷色/中性（`--text-muted` / `--busy` / `--danger`），未新增令牌，暖色仍是闸门专用。
+
+- [x] **45. 清掉 localStorage 打开 → cwd 已预填 → 按钮可点。** **接口侧实测**（隔离实例 `WORKBENCH_PORT=8794`）：`curl /api/meta` 返回 `defaultCwd:"/home/user/dev/workbench"`，与 server 进程 cwd 一致；前端三级回退与 localStorage 读写为**代码复核**（无头环境未启浏览器）。完事 DELETE 自建会话、`ss -tlnp | grep 8794` 找 pid kill，端口确认关闭。
+- [x] **46. cwd 清空 → 禁用按钮旁有可见原因文字。** **代码复核**：`NewSessionForm` 在 `{!cwd.trim() && <p className="new-hint">请先填写工作目录</p>}` 渲染可见文字，输入合法后消失。
+- [x] **47. dead 会话「新建会话并续接」→ 新会话建起且 worker 活着。** **实测**：对列表里现存 dead kimi 会话（`01J00000000000000000000001`，native `session_00000000-…`）POST `/api/sessions` 带 `resumeSessionId`，新会话 `01J00000000000000000000002` 创建成功，`GET` 确认 `status:idle`、`processId:8331`（worker 活着）、`nativeSessionId` 续上原生 id。完事只 DELETE 自建会话，未动任何既有会话/文件。
+- [x] **48. 控件在输入框上方、会话头只读摘要。** **代码复核 + 构建**：`ConfigControls` 仅在 `Composer` 内渲染；会话头渲染 `ConfigSummary` 纯 `<span>` 文本（无可交互元素）。
+- [x] **49. 禁用原因不 hover 可见。** **代码复核**：`mutable:false` 标签内联「（建会话时定）」；无原生 id 时续接按钮旁写明原因；空 cwd 时按钮下方写明原因。
+- [x] **50. 构建与检查全绿。** **实测**：`npm run build`（vite 8.2.2，26 modules，退出码 0）、`npm run typecheck` 退出码 0、`npm run typecheck:frontend` 退出码 0、`npm run check:theme` 输出「✅ 深色令牌两份一致（26 项）」（本轮未新增令牌）、`npm run test:mentions` 输出「✅ mentions 解析单测全过（19 例）」。
 
 ## 已知取舍
 
