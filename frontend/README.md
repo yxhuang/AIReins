@@ -37,7 +37,7 @@ frontend/
     api.ts              REST 信封客户端（code 非 0 抛中文错误消息）
     format.ts           相对时间 / 用时 / token 紧凑格式 / 会话标题派生
     render-items.ts     统一事件 → 渲染条目（文本合并、工具聚合、闸门提取）
-    mentions.ts         @ 引用纯文本 token 提取 / 光标处触发判定（无 DOM 依赖，可单测）
+    mentions.ts         @ 引用纯文本 token 提取 / 光标处触发判定 / 尾部标点剥离候选（无 DOM 依赖，可单测）
     store.ts            全局状态 + WS 连接恢复（见下）
     useStore.ts         useSyncExternalStore 订阅 hook
     App.tsx             布局骨架、hash 路由（#/session/<id> 与 #/page/<id>）、错误提示条
@@ -46,7 +46,7 @@ frontend/
       Sidebar.tsx       会话列表（身份色脊 / 状态点 / 闸门徽标 / 危险模式「!」标记 / 行右删除入口 ×：hover/focus 显现、Tab 可达，点击后就地变行内二次确认）+ 新建会话表单（含三个配置下拉；cwd 三级预填回退 + 空 cwd 可见禁用原因）+ 底部「页面」分区与设置入口
       SettingsMenu.tsx  设置齿轮 + 锚定浮层（分组/条目结构，60vh 限高滚动 + focus trap）；主题三选一写 <html data-theme>、localStorage 持久化（读写均 try/catch）
       PageView.tsx      扩展页面视图：进入先查健康——不可达渲染降级面板（description + reason + 重试），可达渲染 iframe + 常驻工具条（「在新标签页打开」出口）
-      SessionView.tsx   会话头（usage 分家渲染 / 配置只读摘要 / 中断）+ 危险模式警示条 + 事件流 + 输入框（配置控件行在输入框正上方；行首 / 命令面板、@ 文件引用面板与待附加预览条、结构化 command 上行、codex 降级说明；dead 会话「新建会话并续接」出口）+ 未决闸门贴条
+      SessionView.tsx   会话头（usage 分家渲染 / 配置只读摘要 / 中断）+ 危险模式警示条 + 事件流 + 输入框（配置控件行在输入框正上方；行首 / 命令面板、@ 文件引用面板与待附加预览条、结构化 command 上行、codex 降级说明；草稿按会话内存缓存，切走切回不丢；dead 会话「新建会话并续接」出口）+ 未决闸门贴条
       StreamItems.tsx   用户消息 / 文本块 / 思考折叠块 / 工具卡片 / 闸门块 / 系统行
     styles.css          设计令牌（深浅两套）与全部样式
 ```
@@ -254,9 +254,21 @@ frontend/
 - [x] **69. 未知 type 不崩。** **打桩实测**：`pages-flow.test.mjs` 用例 1/5——`type:"widget"` 与缺 url 的残缺条目进 `skippedPages`（带 id/name/type 供小字提示），支持列表只含 ai-usage；store.refreshPages 集成分区结果一致。
 - [x] **70. 构建与检查全绿。** **实测**：`npm run build`（vite 8.2.2，28 modules，退出码 0）、`npm run typecheck` 退出码 0、`npm run typecheck:frontend` 退出码 0、`npm run check:theme` 输出「✅ 深色令牌两份一致（26 项）」（未新增令牌）、`npm run test:mentions` 输出「✅ mentions 解析单测全过（19 例）」、`npm run test:store` 输出「✅ store 流程回归全过（4 例）」；另 `npx tsx frontend/scripts/pages-flow.test.mjs` 输出「✅ pages 前端逻辑回归全过（5 例）」。
 
+### M12 per-session 草稿缓存 + `@` 引用中文标点剥离（2026-08-22）
+
+背景：两条用户实测反馈——① 切会话后输入框草稿消失；② `@a.ts，` 把句末逗号并进 token 判「未找到」。
+
+- **草稿缓存**：store 新增内存级 `drafts: Map<sessionId, string>` 与 `getDraft/setDraft/clearDraft`（空文本即清除条目；不 notify，只有 Composer 读写）。Composer `useState(() => store.getDraft(session.id))` 挂载时恢复（SessionView 本就按会话 id `key` 重挂载，每会话独立、天然不串台）+ `useEffect` 输入即写草稿。`sendComposerInput` 改为对 `dispatchComposerInput`（原方法体重命名）的包装：真正上行成功才清草稿，且**仅当草稿内容仍是本次发送的文本**——mentions 异步解析间隙用户又输入的新内容不能误清；失败时草稿本来就在，Composer 只需把可见文本还回（原「先清空再失败还回」逻辑保留）。`store.remove` 一并删草稿，不泄漏。
+- **标点剥离（证据驱动回退，不盲目剥离）**：`mentions.ts` 新增纯函数 `stripMentionCandidates`（逐级剥尾部标点产出候选，长的在前；`-`/`_` 不剥；`.` 在剥离集内但只在剥后命中真实文件时才被采纳，中段点不受影响）。store 新增 `resolveMentionPath`：**整 token 先查**（文件名真带标点也支持，不冤枉），不存在才逐级剥了再查，一旦命中真实文件即采纳，剥到底仍不中维持「未找到」；结论按 token 缓存（含 null），in-flight 去重 + finally 所有权校验，任一层查询失败不缓存结论（与 `resolveFile` 同一纪律）。预览条显示**最终生效路径**（剥离后的那个）；发送帧 mentions 用生效路径、文本原样（`@` 锚点不动）；不同 token 解析到同一路径时按生效路径去重。
+
+- [x] **71. 草稿：A 存草稿 → 切 B → 切回 A 仍在，互不串台。** **打桩实测**（store-flow 用例「草稿按会话隔离」：两会话各存草稿，`getDraft` 分别取回各自文本）；UI 侧「挂载恢复 + 输入即写」为**代码复核**（`SessionView.tsx` Composer 的 `useState` 惰性初始值与同步 effect；无头环境未启浏览器）。修复前该用例对未修复代码跑出 `s.setDraft is not a function`（exit=1），修复后过。
+- [x] **72. 发送成功清草稿 / 失败保留 / remove 清。** **打桩实测**三例：OPEN socket 发送成功 → 草稿清空（草稿带首尾空白也认得）；socket CLOSED 发送失败 → 草稿原样保留；`remove(id)` → `drafts` 条目删除。另有一例竞态：mentions 异步发送间隙用户又输入新内容，发送成功后新草稿不被误清（守卫 `drafts.get(id)?.trim() === text.trim()`）。
+- [x] **73. 句末标点能剥、真带标点的文件名不被误剥、剥到底不中维持未找到、发送帧用生效路径。** **打桩实测**四例（files 接口按子串检索语义打桩）：文件名真带逗号 `report，final.txt` 整 token 命中 → 原样采用且不再发剥离查询（断言查询序列恰为 1 次）；`a.ts，` 整 token 不中 → 剥后命中 `a.ts` 被采纳（查询序列 `["a.ts，","a.ts"]`）；`ghost.txt，。` 剥到底不中 → null 且缓存「未找到」；发送帧 `text` 原样（`看看 @a.ts， 然后`）、`mentions:[{type:"file",path:"a.ts"}]`。纯函数侧 mentions 单测新增 10 例（句末逗号/连续标点/英文标点/闭括号引号/尾点/无标点无候选/`-` `_` 不剥/中段点不剥/剥空无空候选/纯标点串）。
+- [x] **74. 构建与检查全绿。** **实测**：`npm test`（check:theme「✅ 深色令牌两份一致（26 项）」+ mentions 29 例 + store 13 例 + pages 5 例）退出码 0；`npm run build`（vite 8.2.2，退出码 0）；`npm run typecheck` 与 `npm run typecheck:frontend` 退出码均 0。根 package.json 本轮未动——聚合 `test` 脚本（含 pages）上一轮已就位，与要求等价。
+
 ## 已知取舍
 
-- `@token` 严格按空白切段：句末紧跟标点（如 `@a.ts，`）会把标点并入 token 导致「未找到，不会附加」，需要用户在引用后敲空格。
+- `@token` 严格按空白切段：句末紧跟的标点（如 `@a.ts，`）自 M12 起会在解析时逐级剥尾部标点、剥后命中真实文件才采纳；但标点后无空格直接接文字（如 `@a.ts，然后`）标点不在 token 尾部，仍判「未找到」，需要在引用后敲空格。
 
 - 未引入 UI 组件库、图标库、路由库：图标用 Unicode，路由用 hash（`#/session/<id>`、`#/page/<id>`）。
 - 扩展页面（`pages/`）只在前端启动时取一次列表（server 同样只在启动时扫描）；iframe 直接嵌 manifest 的 `url`，server 不反代；目标站点带 `x-frame-options: DENY` 时浏览器端无法探测，靠工具条常驻「在新标签页打开」出口。

@@ -36,3 +36,24 @@ export function mentionTokenEnd(text: string, cursor: number): number {
   while (end < text.length && !/\s/.test(text.charAt(end))) end++;
   return end;
 }
+
+// 尾部可剥离字符集：中英文标点与常见结束符。
+// 不含 - 与 _：路径常用字符，剥了会冤杀真实文件名。
+// 含 .：剥离候选只在「剥后命中真实文件」时才被采纳（存在性判定在 store 层），
+// 因此 a.ts 这种点在中段的 token 不受影响，只有「@file.」这种尾点才产生候选。
+const TRAILING_STRIP = new Set([..."，。、；：！？）》」』,.;:!?)]}\"'`…"]);
+
+/**
+ * 给定 token 产出逐级剥掉尾部标点的候选列表（长的在前，不含原 token）。
+ * 上层只在整 token 查无此文件时按序查询，命中真实文件才采纳；
+ * 无尾部标点（或会剥成空串）时返回空列表——不产生剥离需求。
+ */
+export function stripMentionCandidates(token: string): string[] {
+  const out: string[] = [];
+  let current = token;
+  while (current.length > 0 && TRAILING_STRIP.has(current.charAt(current.length - 1))) {
+    current = current.slice(0, -1);
+    if (current.length > 0) out.push(current);
+  }
+  return out;
+}

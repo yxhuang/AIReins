@@ -304,7 +304,8 @@ function UsageView({
 
 function Composer({ session, dead, errored }: { session: SessionRecord; dead: boolean; errored: boolean }) {
   const store = useStore();
-  const [text, setText] = useState("");
+  // 草稿随会话恢复：SessionView 按会话 id key 重挂载，useState 惰性初始值即该会话草稿
+  const [text, setText] = useState(() => store.getDraft(session.id));
   const [cursor, setCursor] = useState(0);
   const [selected, setSelected] = useState(0);
   // dead/error 会话的「新建会话并续接」提交态
@@ -352,17 +353,22 @@ function Composer({ session, dead, errored }: { session: SessionRecord; dead: bo
   const cmdMatch = commandsSupported ? /^\/([^\s]+)(?:\s+[\s\S]*)?$/.exec(text) : null;
   const willBeCommand = cmdMatch !== null && table.some((c) => c.name === cmdMatch[1]);
 
-  // 待附加文件预览：当前文本会解析出的 @token（去重、保持出现顺序）
+  // 待附加文件预览：当前文本会解析出的 @token（去重、保持出现顺序）；
+  // 显示「最终生效路径」——尾部标点剥离后命中的，显示剥离后的那个，让用户看得见实际附加了什么。
   const tokens =
     mentionsSupported && !dead && !willBeCommand ? extractMentionTokens(text) : [];
   const attachable: string[] = [];
   const missing: string[] = [];
   let checking = 0;
   tokens.forEach((token, index) => {
-    const known = store.fileKnownSync(session.id, token);
-    if (known === true) {
+    if (store.fileKnownSync(session.id, token) === true) {
       if (index < MAX_MENTIONS) attachable.push(token);
-    } else if (known === false) {
+      return;
+    }
+    const resolved = store.mentionPathSync(session.id, token);
+    if (typeof resolved === "string") {
+      if (index < MAX_MENTIONS) attachable.push(resolved);
+    } else if (resolved === null) {
       missing.push(token);
     } else {
       checking++;
@@ -393,12 +399,20 @@ function Composer({ session, dead, errored }: { session: SessionRecord; dead: bo
     // store 是模块级单例，不进依赖
   }, [mentionOpen, mentionQuery, session.id]);
 
-  // 预览条：对未确认的 token 发起精确存在性查询（store 内缓存 + in-flight 去重）
+  // 输入即草稿：每会话独立（切走再切回文本仍在）；空文本清条目。
+  // 发送成功 store 侧也会清（仅当草稿仍是本次发送内容），这里是输入路径的兜底。
+  useEffect(() => {
+    store.setDraft(session.id, text);
+  }, [text, session.id]);
+
+  // 预览条：对未确认的 token 解析最终生效路径（整 token 优先 → 尾部标点逐级剥离，
+  // store 内缓存 + in-flight 去重）
   useEffect(() => {
     if (!mentionsSupported || dead || willBeCommand) return;
     for (const token of extractMentionTokens(text).slice(0, MAX_MENTIONS)) {
-      if (store.fileKnownSync(session.id, token) === undefined) {
-        void store.resolveFile(session.id, token);
+      if (store.fileKnownSync(session.id, token) === true) continue;
+      if (store.mentionPathSync(session.id, token) === undefined) {
+        void store.resolveMentionPath(session.id, token);
       }
     }
   }, [text, mentionsSupported, dead, willBeCommand, session.id]);
@@ -444,6 +458,8 @@ function Composer({ session, dead, errored }: { session: SessionRecord; dead: bo
     const trimmed = text.trim();
     if (!trimmed || dead) return;
     // 先清空（mentions 异步路径下「确认成功」不好定义）；失败时把文本还回输入框。
+    // 草稿语义统一走草稿缓存：输入即草稿；发送成功由 store 侧清草稿（文本框也已清空）；
+    // 失败时草稿本来就在，这里只需把可见文本还回。
     // 失败提示走 send() 已置的 lastError 全局错误条，不静默。
     setText("");
     setDismissed(false);

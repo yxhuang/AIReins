@@ -11,7 +11,7 @@ import type {
   UnifiedEvent,
 } from "./types";
 import { createSession, deleteSession, fetchCommands, fetchFiles, fetchMeta, fetchPages, fetchSessions, fetchSnapshot, type CreateSessionInput } from "./api";
-import { extractMentionTokens } from "./mentions";
+import { extractMentionTokens, stripMentionCandidates } from "./mentions";
 import { partitionPages, type SkippedPage } from "./pages";
 
 // 全局状态与连接恢复：
@@ -64,6 +64,10 @@ export class Store {
   commands = new Map<string, CommandInfo[]>();
   /** @ 引用存在性结论缓存：sessionId →（路径 → 是否真实文件）；面板检索命中与精确查询都写入 */
   fileKnown = new Map<string, Map<string, boolean>>();
+  /** @token 最终生效路径结论缓存：sessionId →（原 token → 生效路径或 null=未找到）；尾部标点剥离后命中时值是剥离后的路径 */
+  mentionPaths = new Map<string, Map<string, string | null>>();
+  /** 每会话输入框草稿（内存级）：Composer 输入即写入，发送成功清除，remove 时删除 */
+  drafts = new Map<string, string>();
   /** 全局时钟（每秒 tick），驱动相对时间与用时刷新 */
   now = Date.now();
   /** 每次 notify 自增，供 useSyncExternalStore 做快照 */
@@ -83,6 +87,8 @@ export class Store {
   private configHintTimers = new Map<string, ReturnType<typeof setTimeout>>();
   /** @ 引用精确查询 in-flight 去重（key = sessionId + \n + path） */
   private fileKnownInflight = new Map<string, Promise<boolean>>();
+  /** @token 生效路径解析 in-flight 去重（key = sessionId + \n + token） */
+  private mentionPathInflight = new Map<string, Promise<string | null>>();
   /** 已移除会话：DELETE 后残留 WS 事件/快照直接忽略，不再重取（会 404 污染全局错误条） */
   private removed = new Set<string>();
 
@@ -443,8 +449,17 @@ export class Store {
    * 其余一律按普通文本（能力位为 false 的 driver 绝不拼结构化 command）。
    * mentions 能力位 true 时解析 @token：仅确认存在的路径进 mentions，文本原样发送。
    * 全部路径返回是否真正上行（mentions 分支是异步解析，故整体为 Promise）。
+   * 真正上行成功时清掉该会话草稿——仅当草稿内容仍是本次发送的文本
+   * （发送间隙用户又输入的新内容不能误清）；失败时草稿本来就在，不用动。
    */
   sendComposerInput(sessionId: string, text: string): Promise<boolean> {
+    return this.dispatchComposerInput(sessionId, text).then((ok) => {
+      if (ok && this.drafts.get(sessionId)?.trim() === text.trim()) this.clearDraft(sessionId);
+      return ok;
+    });
+  }
+
+  private dispatchComposerInput(sessionId: string, text: string): Promise<boolean> {
     const session = this.session(sessionId);
     const caps = session ? this.meta?.drivers[session.agent] : undefined;
     if (caps?.commands) {
@@ -460,6 +475,21 @@ export class Store {
       return Promise.resolve(this.sendUserMessage(sessionId, text));
     }
     return this.sendWithMentions(sessionId, text);
+  }
+
+  /** 读会话草稿（无草稿返回空串）。 */
+  getDraft(sessionId: string): string {
+    return this.drafts.get(sessionId) ?? "";
+  }
+
+  /** 写草稿：空文本等价于清除。不 notify——草稿只有 Composer 自己读写。 */
+  setDraft(sessionId: string, text: string): void {
+    if (text) this.drafts.set(sessionId, text);
+    else this.drafts.delete(sessionId);
+  }
+
+  clearDraft(sessionId: string): void {
+    this.drafts.delete(sessionId);
   }
 
   /** 检索结果整体记入缓存：返回过的路径确认存在。 */
@@ -506,13 +536,71 @@ export class Store {
     return promise;
   }
 
-  /** 发送前解析 @token：只把确认存在的路径放进 mentions（去重、≤20），文本原样发送。 */
+  /** 同步读 @token 的生效路径结论（undefined = 尚未解析，null = 未找到），供预览条渲染。 */
+  mentionPathSync(sessionId: string, token: string): string | null | undefined {
+    return this.mentionPaths.get(sessionId)?.get(token);
+  }
+
+  /**
+   * 解析 @token 的最终生效路径：整 token 先查（文件名真带标点也支持，不冤枉），
+   * 不存在才按 stripMentionCandidates 逐级剥尾部标点再查，一旦命中真实文件即采纳。
+   * 结论按 token 缓存（含「未找到」null），in-flight 去重；
+   * 任一层查询失败（resolveFile 未落结论）不缓存，下次重试——与 resolveFile 同一纪律。
+   */
+  resolveMentionPath(sessionId: string, token: string): Promise<string | null> {
+    const cached = this.mentionPathSync(sessionId, token);
+    if (cached !== undefined) return Promise.resolve(cached);
+    if (this.fileKnownSync(sessionId, token) === true) return Promise.resolve(token);
+    const key = `${sessionId}\n${token}`;
+    const inflight = this.mentionPathInflight.get(key);
+    if (inflight) return inflight;
+    // 先声明再赋值（! 断言）：finally 里的所有权校验要引用 promise 自身
+    let promise!: Promise<string | null>;
+    promise = (async () => {
+      try {
+        if (await this.resolveFile(sessionId, token)) {
+          return this.noteMentionPath(sessionId, token, token);
+        }
+        // 整 token 未落 false 结论 = 查询失败：不缓存，下次重试
+        if (this.fileKnownSync(sessionId, token) === undefined) return null;
+        for (const candidate of stripMentionCandidates(token)) {
+          if (await this.resolveFile(sessionId, candidate)) {
+            return this.noteMentionPath(sessionId, token, candidate);
+          }
+          if (this.fileKnownSync(sessionId, candidate) === undefined) return null; // 同上
+        }
+        return this.noteMentionPath(sessionId, token, null);
+      } finally {
+        // 所有权校验：旧请求的 finally 不得误删新请求的 in-flight 条目
+        if (this.mentionPathInflight.get(key) === promise) this.mentionPathInflight.delete(key);
+      }
+    })();
+    this.mentionPathInflight.set(key, promise);
+    return promise;
+  }
+
+  private noteMentionPath(sessionId: string, token: string, path: string | null): string | null {
+    if (this.removed.has(sessionId)) return path; // 会话已删，解析结果不再落地
+    let map = this.mentionPaths.get(sessionId);
+    if (!map) {
+      map = new Map();
+      this.mentionPaths.set(sessionId, map);
+    }
+    map.set(token, path);
+    this.notify(); // 预览条等读缓存的视图刷新
+    return path;
+  }
+
+  /** 发送前解析 @token：只把生效路径放进 mentions（去重、≤20），文本原样发送。 */
   private async sendWithMentions(sessionId: string, text: string): Promise<boolean> {
     const tokens = extractMentionTokens(text).slice(0, MAX_MENTIONS);
     const mentions: FileMention[] = [];
+    const seen = new Set<string>(); // 不同 token 可能解析到同一路径（@a.ts 与 @a.ts，），按生效路径去重
     for (const token of tokens) {
-      if (await this.resolveFile(sessionId, token)) {
-        mentions.push({ type: "file", path: token });
+      const path = await this.resolveMentionPath(sessionId, token);
+      if (path && !seen.has(path)) {
+        seen.add(path);
+        mentions.push({ type: "file", path });
       }
     }
     return this.sendUserMessage(sessionId, text, mentions);
@@ -576,6 +664,8 @@ export class Store {
     this.data.delete(id);
     this.commands.delete(id);
     this.fileKnown.delete(id);
+    this.mentionPaths.delete(id);
+    this.drafts.delete(id);
     this.configPending.delete(id);
     this.configErrors.delete(id);
     this.configHints.delete(id);
