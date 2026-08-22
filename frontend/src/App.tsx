@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Sidebar } from "./components/Sidebar";
 import { SessionView } from "./components/SessionView";
+import { PageView } from "./components/PageView";
 import { useStore } from "./useStore";
 
 export function App() {
@@ -9,6 +10,9 @@ export function App() {
   const [newOpen, setNewOpen] = useState(false);
 
   const current = store.currentId ? store.session(store.currentId) : undefined;
+  const currentPage = store.currentPageId
+    ? store.pages.find((p) => p.id === store.currentPageId)
+    : undefined;
 
   return (
     <div className={`app${collapsed ? " sidebar-collapsed" : ""}`}>
@@ -19,7 +23,17 @@ export function App() {
         onNewOpenChange={setNewOpen}
       />
       <main className="main">
-        {current ? (
+        {currentPage ? (
+          <PageView key={currentPage.id} page={currentPage} />
+        ) : store.currentPageId ? (
+          <div className="empty-state">
+            <h1>页面不存在</h1>
+            <p>
+              该页面可能已从 pages/ 移除或 manifest 失效——server 只在启动时扫描一次，
+              改动需重启后生效。
+            </p>
+          </div>
+        ) : current ? (
           <SessionView key={current.id} session={current} />
         ) : (
           <div className="empty-state">

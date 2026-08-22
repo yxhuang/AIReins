@@ -116,6 +116,29 @@ export interface Snapshot {
   events: UnifiedEvent[];
 }
 
+/** GET /api/pages 的页面 manifest（本轮只有 type:"iframe"；未知类型前端跳过并提示）。 */
+export interface PageManifest {
+  id: string;
+  name: string;
+  /** emoji 或以 <svg...>...</svg> 表示的内联 SVG 字符串 */
+  icon: string;
+  type: string;
+  /** iframe 直接加载的地址；server 不代理 */
+  url: string;
+  healthCheck?: string;
+  description?: string;
+}
+
+/** GET /api/pages/:id/health：只回答「服务在不在」，收到任何 HTTP 响应即 reachable。 */
+export interface PageHealth {
+  id: string;
+  reachable: boolean;
+  /** 如 "HTTP 200"、"连接被拒绝"、"超过 2000 ms 未响应" */
+  reason: string;
+  status?: number;
+  durationMs: number;
+}
+
 export interface ApiEnvelope<T> {
   code: number;
   msg: string;

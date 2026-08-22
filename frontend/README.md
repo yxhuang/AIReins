@@ -40,10 +40,12 @@ frontend/
     mentions.ts         @ 引用纯文本 token 提取 / 光标处触发判定（无 DOM 依赖，可单测）
     store.ts            全局状态 + WS 连接恢复（见下）
     useStore.ts         useSyncExternalStore 订阅 hook
-    App.tsx             布局骨架、hash 路由、错误提示条
+    App.tsx             布局骨架、hash 路由（#/session/<id> 与 #/page/<id>）、错误提示条
+    pages.ts            扩展页面纯逻辑：icon 形态判定 / 未知 type 跳过 / 健康结论→渲染模式（无 DOM 依赖，可单测）
     components/
-      Sidebar.tsx       会话列表（身份色脊 / 状态点 / 闸门徽标 / 危险模式「!」标记 / 行右删除入口 ×：hover/focus 显现、Tab 可达，点击后就地变行内二次确认）+ 新建会话表单（含三个配置下拉；cwd 三级预填回退 + 空 cwd 可见禁用原因）+ 底部设置入口
+      Sidebar.tsx       会话列表（身份色脊 / 状态点 / 闸门徽标 / 危险模式「!」标记 / 行右删除入口 ×：hover/focus 显现、Tab 可达，点击后就地变行内二次确认）+ 新建会话表单（含三个配置下拉；cwd 三级预填回退 + 空 cwd 可见禁用原因）+ 底部「页面」分区与设置入口
       SettingsMenu.tsx  设置齿轮 + 锚定浮层（分组/条目结构，60vh 限高滚动 + focus trap）；主题三选一写 <html data-theme>、localStorage 持久化（读写均 try/catch）
+      PageView.tsx      扩展页面视图：进入先查健康——不可达渲染降级面板（description + reason + 重试），可达渲染 iframe + 常驻工具条（「在新标签页打开」出口）
       SessionView.tsx   会话头（usage 分家渲染 / 配置只读摘要 / 中断）+ 危险模式警示条 + 事件流 + 输入框（配置控件行在输入框正上方；行首 / 命令面板、@ 文件引用面板与待附加预览条、结构化 command 上行、codex 降级说明；dead 会话「新建会话并续接」出口）+ 未决闸门贴条
       StreamItems.tsx   用户消息 / 文本块 / 思考折叠块 / 工具卡片 / 闸门块 / 系统行
     styles.css          设计令牌（深浅两套）与全部样式
@@ -232,11 +234,32 @@ frontend/
 - [x] **63. 五状态说明。** **代码复核**：`STATUS_HINTS`（Sidebar.tsx 导出）五 key 齐全，左栏 `row-meta-text` 与会话头状态文字各挂 `title`。
 - [x] **64. 构建与检查全绿。** **实测**：`npm run build`（vite 8.2.2，退出码 0）、`npm run typecheck` 退出码 0、`npm run typecheck:frontend` 退出码 0、`npm run check:theme` 输出「✅ 深色令牌两份一致（26 项）」（未新增令牌，提示条用既有 `--border-strong`/`--text`/`--text-muted`）、`npm run test:mentions` 输出「✅ mentions 解析单测全过（19 例）」、`npm run test:store` 输出「✅ store 流程回归全过（4 例）」。
 
+### M11 `pages/` 扩展页面（2026-08-22）
+
+仓库根 `pages/` 的扩展页面接入前端：左栏底部「页面」分区（齿轮上方，小字分区标题 + 分隔线；收起态只显示图标，title 带名称）+ hash 路由 `#/page/<id>`（与 `#/session/<id>` 互斥，前进后退由浏览器 hash 历史天然支持）。
+
+- **列表来源**：`store.refreshPages()` 在 init 时取一次 `GET /api/pages`（server 也只在启动时扫描，不热插拔，前端同样不轮询）；`pages.ts` 的 `partitionPages` 只放行 `type:"iframe"` 且字段完整的条目，未知类型/残缺条目进 `skippedPages`，左栏分区底部给一行小字「已跳过 N 个暂不支持的页面类型（widget）」，绝不崩掉列表。
+- **icon 两种形态**：emoji 直接文本渲染；内联 SVG 字符串（`<svg...>...</svg>`）用 `dangerouslySetInnerHTML` 渲染（server 已校验 manifest 形状）。`Sidebar.tsx` 导出 `PageIcon`，侧边栏与 PageView 工具条/降级面板共用。
+- **页面视图（`PageView.tsx`）**：进入页面先查一次 `GET /api/pages/:id/health`。`reachable:false` → 降级面板：manifest `description`（ai-usage 的 description 已写明「此面板按需启动，未启动时整页不可达」）+ `reason`（冷调 `--danger` 错误语义）+ 「重试」按钮 + 「在新标签页打开」链接，**不渲染空白 iframe**；健康接口本身失败（server 不可达）走同一面板。`reachable:true` → iframe 撑满内容区 + 顶部常驻工具条：右侧「在新标签页打开」（`target="_blank" rel="noreferrer"`）与小字提示「若下方空白，说明目标站点拒绝被嵌入，请用新标签页打开」。**已渲染的 iframe 不定时不轮询**，只在进入页面与点「重试」时查。
+- **为什么不探测可嵌性**：已实测 `curl -I http://127.0.0.1:8788/` 响应头带 `x-frame-options: DENY` 与 `content-security-policy: frame-ancestors 'none'`——ai-usage 拒绝被 iframe 嵌入，而浏览器端无法可靠探测（跨域 fetch 拿不到头，iframe onerror 不触发）。因此工具条常驻新标签页出口是设计的一部分，不是兜底。
+- **配色**：分区标题/提示用 `--text-faint`，选中态用冷色 `--busy` 内嵌脊（与设置面板选中态同一纪律），不可达 reason 用冷调 `--danger`；未新增令牌，暖色仍是闸门专用。「重试」是真实 `<button>`、新标签页是真实 `<a>`，均走全局 `:focus-visible` 描边。
+- **打桩测试** `frontend/scripts/pages-flow.test.mjs`（根 package.json 本轮不动，直接 `npx tsx frontend/scripts/pages-flow.test.mjs` 跑）：覆盖未知 type 跳过、icon 判定、reachable 两分支、health 信封解析与错误信封、store 集成（refreshPages 分区 + 两类 hash 路由互斥）。
+
+接口侧实测（2026-08-22，本机 8790 实例）：
+
+- [x] **65. 左栏出现「AI 用量 📊」入口。** **接口侧实测**：`curl http://127.0.0.1:8790/api/pages` 返回 `data.pages[0] = {id:"ai-usage", name:"AI 用量", icon:"📊", type:"iframe", url:"http://127.0.0.1:8788", healthCheck:同址, description:"此面板按需启动…"}`。UI 渲染为**代码复核**（`PageNav` 遍历 `store.pages`；无头环境未启浏览器）。
+- [x] **66. 8788 活着时 health 实测可达。** **实测**：`curl http://127.0.0.1:8790/api/pages/ai-usage/health` 返回 `{reachable:true, reason:"HTTP 200", status:200, durationMs:14}`。
+- [x] **67. 不可达降级分支。** **打桩实测**：`pages-flow.test.mjs` 用例 3/4——`reachable:false`（`"超过 2000 ms 未响应"` / `"连接被拒绝"`）→ `pageRenderMode` 返回 `"fallback"`（PageView 据此渲染降级面板而非 iframe）；打桩 fetch 验证 health 信封解析与错误信封抛中文 msg。5 例全过（exit=0）。
+- [x] **68. iframe 可嵌性结论：已实测 DENY。** `curl -I http://127.0.0.1:8788/` 响应头：`x-frame-options: DENY`、`content-security-policy: frame-ancestors 'none'`（HEAD 本身 405 是另一回事，两个禁嵌头照常返回）。故 reachable:true 时工具条常驻「在新标签页打开」。
+- [x] **69. 未知 type 不崩。** **打桩实测**：`pages-flow.test.mjs` 用例 1/5——`type:"widget"` 与缺 url 的残缺条目进 `skippedPages`（带 id/name/type 供小字提示），支持列表只含 ai-usage；store.refreshPages 集成分区结果一致。
+- [x] **70. 构建与检查全绿。** **实测**：`npm run build`（vite 8.2.2，28 modules，退出码 0）、`npm run typecheck` 退出码 0、`npm run typecheck:frontend` 退出码 0、`npm run check:theme` 输出「✅ 深色令牌两份一致（26 项）」（未新增令牌）、`npm run test:mentions` 输出「✅ mentions 解析单测全过（19 例）」、`npm run test:store` 输出「✅ store 流程回归全过（4 例）」；另 `npx tsx frontend/scripts/pages-flow.test.mjs` 输出「✅ pages 前端逻辑回归全过（5 例）」。
+
 ## 已知取舍
 
 - `@token` 严格按空白切段：句末紧跟标点（如 `@a.ts，`）会把标点并入 token 导致「未找到，不会附加」，需要用户在引用后敲空格。
 
-- 未引入 UI 组件库、图标库、路由库：图标用 Unicode，路由用 hash（`#/session/<id>`）。
+- 未引入 UI 组件库、图标库、路由库：图标用 Unicode，路由用 hash（`#/session/<id>`、`#/page/<id>`）。
+- 扩展页面（`pages/`）只在前端启动时取一次列表（server 同样只在启动时扫描）；iframe 直接嵌 manifest 的 `url`，server 不反代；目标站点带 `x-frame-options: DENY` 时浏览器端无法探测，靠工具条常驻「在新标签页打开」出口。
 - 未引入 `@vitejs/plugin-react`：esbuild automatic JSX 够用，dev 下 HMR 退化为整页刷新。
 - 会话状态没有专属 WS 事件，左栏状态靠事件推断 + 2 秒防抖重拉列表对齐，可能有一拍延迟。
 - 「允许并记住」按钮已移除（M2 返工 B3）：后端把 `updatedInput` 直接采信为工具入参（`updatedInput ?? pending.input`），没有承载 `permissionSuggestions` 的通道，前端把 suggestions[0] 当 updatedInput 回传会把用户批准的写文件入参替换成 setMode 对象。在后端有正规通道之前只提供「允许」「拒绝」；`permissionSuggestions` 的提取逻辑保留在 `render-items.ts` 备用。

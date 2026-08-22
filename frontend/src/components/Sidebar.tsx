@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { AgentKind, ConfigOptionId, SessionRecord } from "../types";
 import { relativeTime, sessionTitle } from "../format";
+import { isInlineSvg } from "../pages";
 import { store } from "../store";
 import { useStore } from "../useStore";
 import { SettingsMenu } from "./SettingsMenu";
@@ -109,9 +110,54 @@ export function Sidebar({ collapsed, onToggle, newOpen, onNewOpenChange }: Sideb
         </>
       )}
       <div className="sidebar-foot">
+        <PageNav collapsed={collapsed} />
         <SettingsMenu />
       </div>
     </aside>
+  );
+}
+
+/** manifest icon：emoji 直接文本，内联 SVG 字符串按 HTML 渲染（server 已校验形状）。 */
+export function PageIcon({ icon }: { icon: string }) {
+  if (isInlineSvg(icon)) {
+    return (
+      <span className="page-icon" aria-hidden="true" dangerouslySetInnerHTML={{ __html: icon }} />
+    );
+  }
+  return (
+    <span className="page-icon" aria-hidden="true">
+      {icon}
+    </span>
+  );
+}
+
+/** 左栏底部「页面」分区（齿轮上方）：来自 /api/pages，未知类型跳过并给小字提示。 */
+function PageNav({ collapsed }: { collapsed: boolean }) {
+  const store = useStore();
+  if (store.pages.length === 0 && store.skippedPages.length === 0) return null;
+  return (
+    <nav className="page-nav" aria-label="扩展页面">
+      {!collapsed && <div className="page-nav-title">页面</div>}
+      {store.pages.map((page) => (
+        <button
+          key={page.id}
+          type="button"
+          className={`page-nav-item${store.currentPageId === page.id ? " active" : ""}`}
+          title={collapsed ? page.name : page.description || page.name}
+          aria-label={page.name}
+          onClick={() => store.navigatePage(page.id)}
+        >
+          <PageIcon icon={page.icon} />
+          {!collapsed && <span className="page-nav-name">{page.name}</span>}
+        </button>
+      ))}
+      {!collapsed && store.skippedPages.length > 0 && (
+        <p className="page-nav-skipped">
+          已跳过 {store.skippedPages.length} 个暂不支持的页面类型（
+          {[...new Set(store.skippedPages.map((p) => p.type))].join("、")}）
+        </p>
+      )}
+    </nav>
   );
 }
 

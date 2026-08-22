@@ -3,14 +3,16 @@ import type {
   ConfigOptionId,
   FileMention,
   MetaInfo,
+  PageManifest,
   PermissionDecision,
   SessionConfig,
   SessionRecord,
   SessionStatus,
   UnifiedEvent,
 } from "./types";
-import { createSession, deleteSession, fetchCommands, fetchFiles, fetchMeta, fetchSessions, fetchSnapshot, type CreateSessionInput } from "./api";
+import { createSession, deleteSession, fetchCommands, fetchFiles, fetchMeta, fetchPages, fetchSessions, fetchSnapshot, type CreateSessionInput } from "./api";
 import { extractMentionTokens } from "./mentions";
+import { partitionPages, type SkippedPage } from "./pages";
 
 // 全局状态与连接恢复：
 // - 一条全局 WS（不带 sessionId）收全部会话事件，支撑左栏跨会话待审批徽标；
@@ -43,6 +45,10 @@ export class Store {
   sessions: SessionRecord[] = [];
   meta: MetaInfo | null = null;
   currentId: string | null = null;
+  /** 扩展页面列表（仅 type:"iframe"；未知类型进 skippedPages）与当前打开的页面 id */
+  pages: PageManifest[] = [];
+  skippedPages: SkippedPage[] = [];
+  currentPageId: string | null = null;
   data = new Map<string, SessionData>();
   wsState: WsState = "closed";
   lastError: string | null = null;
@@ -103,6 +109,7 @@ export class Store {
       this.lastError = error instanceof Error ? error.message : String(error);
     }
     await this.refreshSessions();
+    await this.refreshPages();
     // 启动时为每个会话取一次快照：既给左栏标题，也算出跨会话待审批徽标。
     await Promise.allSettled(this.sessions.map((s) => this.ensureLoaded(s.id)));
     this.connect();
@@ -110,6 +117,15 @@ export class Store {
   }
 
   private onHashChange = (): void => {
+    // 两类路由：#/session/<id> 与 #/page/<id>，互斥；其余 hash 回空态。
+    const pageId = window.location.hash.match(/^#\/page\/([^/]+)$/)?.[1];
+    if (pageId) {
+      this.currentPageId = decodeURIComponent(pageId);
+      this.currentId = null;
+      this.notify();
+      return;
+    }
+    this.currentPageId = null;
     const match = window.location.hash.match(/^#\/session\/([^/]+)$/);
     this.currentId = match?.[1] ? decodeURIComponent(match[1]) : null;
     if (this.currentId) void this.ensureLoaded(this.currentId);
@@ -118,6 +134,22 @@ export class Store {
 
   navigate(id: string | null): void {
     window.location.hash = id ? `#/session/${encodeURIComponent(id)}` : "#/";
+  }
+
+  navigatePage(id: string): void {
+    window.location.hash = `#/page/${encodeURIComponent(id)}`;
+  }
+
+  /** 扩展页面列表：只在启动时取一次（server 也只在启动时扫描 pages/，增删要重启才生效）。 */
+  async refreshPages(): Promise<void> {
+    try {
+      const { supported, skipped } = partitionPages(await fetchPages());
+      this.pages = supported;
+      this.skippedPages = skipped;
+    } catch (error) {
+      this.lastError = error instanceof Error ? error.message : String(error);
+    }
+    this.notify();
   }
 
   session(id: string): SessionRecord | undefined {

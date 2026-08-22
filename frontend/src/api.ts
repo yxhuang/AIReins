@@ -1,4 +1,4 @@
-import type { ApiEnvelope, CommandInfo, MetaInfo, SessionConfig, SessionRecord, Snapshot } from "./types";
+import type { ApiEnvelope, CommandInfo, MetaInfo, PageHealth, PageManifest, SessionConfig, SessionRecord, Snapshot } from "./types";
 import type { AgentKind } from "./types";
 
 // REST 信封统一为 {code,msg,data,request_id}；code 非 0 时 msg 是中文错误消息。
@@ -58,4 +58,14 @@ export function createSession(input: CreateSessionInput): Promise<SessionRecord>
     headers: { "content-type": "application/json" },
     body: JSON.stringify(input),
   }).then((data) => data.session);
+}
+
+/** 启动时已注册的扩展页面列表（原始返回，类型过滤在 pages.ts 的 partitionPages）。 */
+export function fetchPages(): Promise<PageManifest[]> {
+  return call<{ pages: PageManifest[] }>("/api/pages").then((data) => data.pages);
+}
+
+/** 限时探测扩展页面目标服务（后端最多等 2 秒）；只回答「服务在不在」。 */
+export function fetchPageHealth(id: string): Promise<PageHealth> {
+  return call<PageHealth>(`/api/pages/${encodeURIComponent(id)}/health`);
 }
