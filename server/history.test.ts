@@ -52,6 +52,26 @@ await writeJsonl(interactiveClaudePath, [
     timestamp: "2026-08-22T00:00:01.000Z",
     message: { role: "assistant", content: [{ type: "text", text: "预览回复" }] },
   },
+  {
+    type: "user",
+    timestamp: "2026-08-22T00:00:02.000Z",
+    message: { role: "user", content: "Claude 第二问" },
+  },
+  {
+    type: "assistant",
+    timestamp: "2026-08-22T00:00:03.000Z",
+    message: { role: "assistant", content: [{ type: "text", text: "Claude 第二答" }] },
+  },
+  {
+    type: "user",
+    timestamp: "2026-08-22T00:00:04.000Z",
+    message: { role: "user", content: "Claude 第三问" },
+  },
+  {
+    type: "assistant",
+    timestamp: "2026-08-22T00:00:05.000Z",
+    message: { role: "assistant", content: [{ type: "text", text: "Claude 第三答" }] },
+  },
 ]);
 await writeJsonl(workbenchClaudePath, [{
   type: "user",
@@ -75,6 +95,25 @@ await writeJsonl(codexPath, [
     timestamp: "2026-08-22T00:00:02.000Z",
     payload: { type: "message", role: "user", content: [{ type: "input_text", text: "Codex 真实标题" }] },
   },
+  { type: "event_msg", timestamp: "2026-08-22T00:00:02.000Z", payload: { type: "user_message", message: "Codex 真实标题" } },
+  {
+    type: "response_item",
+    timestamp: "2026-08-22T00:00:03.000Z",
+    payload: { type: "message", role: "assistant", content: [{ type: "output_text", text: "Codex 第一答" }] },
+  },
+  { type: "event_msg", timestamp: "2026-08-22T00:00:03.000Z", payload: { type: "agent_message", message: "Codex 第一答" } },
+  {
+    type: "response_item",
+    timestamp: "2026-08-22T00:00:04.000Z",
+    payload: { type: "message", role: "user", content: [{ type: "input_text", text: "Codex 第二问" }] },
+  },
+  { type: "event_msg", timestamp: "2026-08-22T00:00:04.000Z", payload: { type: "user_message", message: "Codex 第二问" } },
+  {
+    type: "response_item",
+    timestamp: "2026-08-22T00:00:05.000Z",
+    payload: { type: "message", role: "assistant", content: [{ type: "output_text", text: "Codex 第二答" }] },
+  },
+  { type: "event_msg", timestamp: "2026-08-22T00:00:05.000Z", payload: { type: "agent_message", message: "Codex 第二答" } },
 ]);
 
 const kimiId = "session_kimi_test";
@@ -86,6 +125,9 @@ await writeJsonl(kimiWirePath, [
   { type: "metadata", protocol_version: "1.5" },
   { type: "turn.prompt", input: [{ type: "text", text: "<system-reminder>injected</system-reminder>" }], time: 1_787_400_000_000 },
   { type: "turn.prompt", input: [{ type: "text", text: "Kimi 真实标题" }], time: 1_787_400_000_100 },
+  { type: "context.append_loop_event", event: { type: "content.part", part: { type: "text", text: "Kimi 第一答" } }, time: 1_787_400_000_200 },
+  { type: "turn.prompt", input: [{ type: "text", text: "Kimi 第二问" }], time: 1_787_400_000_300 },
+  { type: "context.append_loop_event", event: { type: "content.part", part: { type: "text", text: "Kimi 第二答" } }, time: 1_787_400_000_400 },
 ]);
 await writeFile(legacyKimiStatePath, JSON.stringify({
   workDir: "/repo/kimi-legacy",
@@ -139,7 +181,49 @@ assert.ok(preview);
 assert.deepEqual(preview.messages.map((message) => `${message.role}:${message.text}`), [
   "user:真正的人类标题",
   "assistant:预览回复",
+  "user:Claude 第二问",
+  "assistant:Claude 第二答",
+  "user:Claude 第三问",
+  "assistant:Claude 第三答",
 ]);
+
+const claudePages = await readAllMessages(history, "claude", interactiveClaudeId, 2);
+assert.deepEqual(claudePages.map((message) => `${message.role}:${message.text}`), [
+  "user:真正的人类标题",
+  "assistant:预览回复",
+  "user:Claude 第二问",
+  "assistant:Claude 第二答",
+  "user:Claude 第三问",
+  "assistant:Claude 第三答",
+]);
+const codexMessages = await readAllMessages(history, "codex", codexId, 2);
+assert.deepEqual(codexMessages.map((message) => `${message.role}:${message.text}`), [
+  "user:Codex 真实标题",
+  "assistant:Codex 第一答",
+  "user:Codex 第二问",
+  "assistant:Codex 第二答",
+]);
+const kimiMessages = await readAllMessages(history, "kimi", kimiId, 2);
+assert.deepEqual(kimiMessages.map((message) => `${message.role}:${message.text}`), [
+  "user:Kimi 真实标题",
+  "assistant:Kimi 第一答",
+  "user:Kimi 第二问",
+  "assistant:Kimi 第二答",
+]);
+assert.ok([...claudePages, ...codexMessages, ...kimiMessages].every((message) => message.timestamp !== null));
+
+await assert.rejects(
+  () => history.messages("codex", codexId, {
+    limit: 2,
+    cursor: Buffer.from(JSON.stringify({
+      version: 1,
+      agent: "claude",
+      nativeSessionId: interactiveClaudeId,
+      offset: 1,
+    })).toString("base64url"),
+  }),
+  (error: unknown) => error instanceof HistoryQueryError,
+);
 
 const capped = await new HistoryIndex({ roots, maxDiscovered: 2 }).list({ limit: 20 });
 assert.equal(capped.discovered, 2);
@@ -158,6 +242,11 @@ console.log(JSON.stringify({
   titles: all.sessions.map((session) => session.title),
   pagination: [firstPage.sessions.length, secondPage.sessions.length],
   previewMessages: preview.messages.length,
+  historyMessages: {
+    claude: claudePages.length,
+    codex: codexMessages.length,
+    kimi: kimiMessages.length,
+  },
 }));
 
 async function writeJsonl(path: string, records: unknown[]): Promise<void> {
@@ -168,4 +257,21 @@ function findSession(result: { sessions: Array<{ agent: string; nativeSessionId:
   const session = result.sessions.find((item) => item.agent === agent && item.nativeSessionId === id);
   assert.ok(session, `${agent}:${id} should exist`);
   return session;
+}
+
+async function readAllMessages(
+  history: HistoryIndex,
+  agent: "claude" | "codex" | "kimi",
+  nativeSessionId: string,
+  limit: number,
+) {
+  const pages: Array<NonNullable<Awaited<ReturnType<HistoryIndex["messages"]>>>> = [];
+  let cursor: string | undefined;
+  do {
+    const page = await history.messages(agent, nativeSessionId, { limit, ...(cursor ? { cursor } : {}) });
+    assert.ok(page);
+    pages.push(page);
+    cursor = page.nextCursor;
+  } while (cursor);
+  return pages.reverse().flatMap((page) => page.messages);
 }

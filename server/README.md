@@ -38,6 +38,7 @@ npm run server
 - `DELETE /api/sessions/:id`：停止 worker 并移除注册表条目；不删除 Workbench 或原生 CLI transcript
 - `GET /api/history`：只读列出三家 CLI 自己保存的历史会话
 - `GET /api/history/:agent/:nativeSessionId`：有界读取会话头部，返回导入前预览
+- `GET /api/history/:agent/:nativeSessionId/messages`：从最新消息向前分页读取完整原生历史
 - `GET /api/meta`：server/CLI 实测版本、全局能力、三 driver 能力位与配置 schema
 - `GET /api/pages`：启动时已注册的扩展页面列表
 - `GET /api/pages/:id/health`：限时探测一个扩展页面的目标服务
@@ -77,9 +78,9 @@ npm run server
 
 `riskyMode` 在 Claude 的 `bypassPermissions / dontAsk`、Codex 的 `never`、Kimi 的 `yolo` 下为 `true`。这是每会话标记，不存在全局 yolo 开关。
 
-`GET /api/meta` 的 `data.drivers.<agent>.options` 是前端配置控件的唯一事实源。每项结构为 `{id,name,values,default,mutable}`；`default` 可以是 `null`，对应 values 中“跟随 … 配置”的标签；`mutable:false` 表示只能建会话时设置。来源如下：
+`GET /api/meta` 的 `data.drivers.<agent>.options` 是前端配置控件的唯一事实源。每项结构为 `{id,name,values,default,mutable,mutableVia?}`；`default` 可以是 `null`，对应 values 中“跟随 … 配置”的标签；`mutable:false` 表示只能建会话时设置。`mutableVia:"restart"` 表示界面上允许修改，但代价是停止并重启底层 worker。来源如下：
 
-- Claude：CLI 启动 flag 与 stream-json control protocol；模型和推理强度不可活改，审批模式可活改。
+- Claude：CLI 启动 flag 与 stream-json control protocol；审批模式原生活改。模型和推理强度的 schema 为 `mutable:true, mutableVia:"restart"`，仅在空闲且已有 `nativeSessionId` 时通过“停止 worker → `--resume` 同一原生会话 → 带新 `--model / --effort` 重启”实现，属于重启切换，不是 Claude 协议原生活改。
 - Codex：模型选项来自 `model/list`；默认 model/effort 来自 `config/read(cwd)` 返回的有效合并配置，而不是模型内建默认。创建或续接线程后，再以 `thread/start` / `thread/resume` 返回的实际 `model / reasoningEffort / approvalPolicy` 更新 session。若旧版 app-server 无法提供 `config/read`，schema 的 model/effort 默认值为 `null`，不会猜值。effort 可选覆盖仍限定为 `minimal / low / medium / high / xhigh`；三项活修改在下一次 `turn/start` 生效。
 - Kimi：三项和值全部从一次真实 `session/new` 返回的 `configOptions` 转换，不在 Workbench 手抄；三项均通过 `session/set_config_option` 活改。
 
@@ -138,6 +139,27 @@ interface HistoryListData {
 
 `GET /api/history/:agent/:nativeSessionId` 值得保留：前端可在把原生 ID 交给创建接口前展示“导入前看一眼”。它返回 `{session, messages, truncated}`，`messages` 最多 8 条，只读文件头部最多 2 MiB；Kimi wire 缺失时仍返回 session 元数据、空 messages 和 `truncated:true`。ID 只接受 1–128 位字母、数字、下划线和连字符，后端先在对应事实源中解析匹配候选，不会把 URL 片段直接拼成任意文件路径。
 
+完整历史使用 `GET /api/history/:agent/:nativeSessionId/messages?limit=<默认50>&cursor=<可选>`。`limit` 范围 1–200；不传 cursor 时读取最新一页，带回服务端给出的不透明 `nextCursor` 可继续向更早消息翻页。每页内部仍按时间正序返回，前端可直接 prepend 到现有消息列表。单次最多倒读 4 MiB 原生 NDJSON，不会为了取一页全文解析巨大 transcript，也不会在三家原生目录或 Workbench 目录写索引、缓存或修复文件。
+
+成功响应的 `data` 为：
+
+```ts
+interface HistoryMessagesPage {
+  session: HistorySession;
+  messages: Array<{
+    role: "user" | "assistant";
+    text: string;
+    timestamp: string | null; // 原生记录缺失时间时为 null
+  }>;
+  nextCursor?: string;
+  hasMore: boolean;
+  truncated: boolean;        // 当前页受条数或 4 MiB 窗口限制
+  durationMs: number;
+}
+```
+
+Claude 从非 meta/sidechain 的 `user` 和含文本块的 `assistant` 记录归一；Codex 优先读干净的 `event_msg.user_message / agent_message`，旧 transcript 缺少这些记录时回退到 `response_item.message`；Kimi 读取 `turn.prompt` 与 `context.append_loop_event/content.part(text)`。思考、工具调用及工具结果当前不进入消息数组，避免为它们引入跨文件、全量或高成本解析。
+
 历史列表本身严格只读；用户选择后，就地续接仍复用现有 `POST /api/sessions`，直接把列表项的 `nativeSessionId` 传为 `resumeSessionId`：
 
 ```json
@@ -149,6 +171,20 @@ interface HistoryListData {
 ```
 
 这里没有 fork 语义：Claude 用 `--resume`，Codex 用 `thread/resume`，Kimi 用 `session/resume`。代价也必须由前端明确提示：续接后，Workbench 中的新回合会由原生 CLI 追写进用户选择的真实会话；其中 Claude 的 Workbench 回合以 `sdk-cli` 身份落盘。若用户不希望改变原会话，应取消续接，而不是调用本接口后期待自动分叉。
+
+使用 `resumeSessionId` 成功建出的 session 会同时包含：
+
+```json
+{
+  "nativeSessionId": "00000000-0000-4000-8000-000000000040",
+  "resumedFrom": {
+    "agent": "claude",
+    "nativeSessionId": "00000000-0000-4000-8000-000000000040"
+  }
+}
+```
+
+`resumedFrom.messageCount` 为可选字段；当前创建路径不为统计它而全文扫描 transcript，因此默认省略。
 
 ## `pages/` 扩展页面
 
@@ -199,7 +235,7 @@ interface PageHealth {
 }
 ```
 
-事件最小集为 `session_created / user_message / agent_text_delta / thought_delta / tool_call_started / tool_call_updated / tool_call_completed / permission_request / permission_resolved / commands_updated / config_updated / usage_updated / turn_completed / session_error / process_exited`；另有容错用 `raw_event`。每个 session 独立计数，`seq` 单调递增。
+事件最小集为 `session_created / config_update_started / user_message / agent_text_delta / thought_delta / tool_call_started / tool_call_updated / tool_call_completed / permission_request / permission_resolved / commands_updated / config_updated / usage_updated / turn_completed / session_error / process_exited`；另有容错用 `raw_event`。每个 session 独立计数，`seq` 单调递增。
 
 上行至少支持：
 
@@ -232,6 +268,8 @@ interface PageHealth {
 每条可解析的 WS 上行都可带字符串 `clientRequestId`。随后返回的 `ack` 或 `error` 会同时原样回显 `clientRequestId`、`action` 与 `sessionId`，因此同一会话内的并发请求不需要靠 pending 顺序猜测归因。不可改字段、未知值或没有活动 worker 时返回 WS `error`，不会假装成功。
 
 Codex 的首次 `config_updated.effectiveFrom` 为 `next_turn`，Claude 与 Kimi 为 `immediate`。Codex 下一次 `turn/start` 接受该配置后还会广播第二个 `config_updated`：`effectiveFrom:"current_turn"` 表示已经在该轮生效，`effectiveConfig` 是该轮确认生效的完整配置，`appliedFields` 是本次由“待生效”转为“已生效”的字段，另带原生 `turnId`。清除 Codex model/effort 覆盖时，下一次 `turn/start` 显式发送对应的 `null` 来清除 app-server 的 sticky override；报告值则回到 `config/read(cwd)` 得到的有效默认值。
+
+Claude 的 model/effort 切换先广播 `config_update_started`，其 payload 含 `message:"正在切换模型…"`、`mutableVia:"restart"`、旧/新配置与 native ID；新 worker 完成启动后再广播 `config_updated`，并带 `mutableVia:"restart"`、`workerRestarted:true`。同一个 Workbench session 不变，事件 `seq` 继续递增，原生会话仍是同一 ID。若当前状态为 `running`，明确拒绝并返回“当前回合尚未结束，请等待或中断后再切换”，不会停止 worker；若首轮前尚无 `nativeSessionId`，也会明确拒绝。重启参数始终重新带上 `--permission-mode` 与 `--permission-prompt-tool stdio`，因此审批 control_request 边界不会因换模型丢失。Codex/Kimi 继续使用既有原生活改路径，不经过重启。
 
 ## 文件检索
 

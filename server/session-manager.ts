@@ -17,6 +17,7 @@ import {
 import type {
   CreateSessionInput,
   Driver,
+  DriverCallbacks,
   EventType,
   PermissionDecision,
   SessionConfig,
@@ -29,6 +30,7 @@ import type {
 import { ulid } from "./ulid.js";
 
 const RING_SIZE = 1_000;
+export type DriverFactory = typeof createDriver;
 
 export class SessionManager {
   private readonly sessions = new Map<string, SessionRecord>();
@@ -36,8 +38,9 @@ export class SessionManager {
   private readonly rings = new Map<string, UnifiedEvent[]>();
   private readonly commands = new Map<string, UnifiedCommand[]>();
   private readonly listeners = new Set<(event: UnifiedEvent) => void>();
+  private readonly restartingSessions = new Set<string>();
 
-  constructor() {
+  constructor(private readonly driverFactory: DriverFactory = createDriver) {
     const loaded = loadRegistry();
     for (const stored of loaded) {
       const events = readTranscript(stored.transcriptPath);
@@ -66,13 +69,13 @@ export class SessionManager {
 
   list(): SessionRecord[] {
     return [...this.sessions.values()]
-      .map((session) => ({ ...session, config: { ...session.config } }))
+      .map(cloneSession)
       .sort((left, right) => right.lastActivityAt.localeCompare(left.lastActivityAt));
   }
 
   get(id: string): SessionRecord | undefined {
     const session = this.sessions.get(id);
-    return session ? { ...session, config: { ...session.config } } : undefined;
+    return session ? cloneSession(session) : undefined;
   }
 
   getCommands(id: string): UnifiedCommand[] | undefined {
@@ -84,7 +87,7 @@ export class SessionManager {
     const session = this.sessions.get(id);
     if (!session) return undefined;
     const events = readTranscript(session.transcriptPath);
-    return { session: { ...session, config: { ...session.config } }, seq: session.seq, events };
+    return { session: cloneSession(session), seq: session.seq, events };
   }
 
   getEventsAfter(id: string, afterSeq: number): { events: UnifiedEvent[]; requiresSnapshot: boolean; currentSeq: number } | undefined {
@@ -120,6 +123,13 @@ export class SessionManager {
       lastActivityAt: now,
       seq: 0,
       transcriptPath: transcriptPathFor(id),
+      ...(input.resumeSessionId ? { nativeSessionId: input.resumeSessionId } : {}),
+      ...(input.resumeSessionId ? {
+        resumedFrom: {
+          agent: input.agent,
+          nativeSessionId: input.resumeSessionId,
+        },
+      } : {}),
       model: config.model,
       effort: config.effort,
       permissionMode: config.permissionMode,
@@ -134,41 +144,14 @@ export class SessionManager {
       agent: input.agent,
       cwd: record.cwd,
       resumedNativeSessionId: input.resumeSessionId,
+      resumedFrom: record.resumedFrom,
       config: record.config,
       riskyMode: record.riskyMode,
     });
 
-    const callbacks = {
-      emit: (type: EventType, payload: Record<string, unknown> = {}) => this.emit(id, type, payload),
-      metadata: (metadata: {
-        nativeSessionId?: string;
-        nativeTranscriptPath?: string;
-        config?: SessionConfig;
-      }) => {
-        const current = this.sessions.get(id);
-        if (!current) return;
-        if (metadata.nativeSessionId) current.nativeSessionId = metadata.nativeSessionId;
-        if (metadata.nativeTranscriptPath) current.nativeTranscriptPath = metadata.nativeTranscriptPath;
-        if (metadata.config) this.applyConfig(current, metadata.config);
-        const pid = this.workers.get(id)?.child?.pid;
-        if (pid) current.processId = pid;
-        this.persistRegistry();
-      },
-      commands: (commands: UnifiedCommand[]) => {
-        if (!this.sessions.has(id)) return;
-        const current = commands.map((command) => ({ ...command }));
-        this.commands.set(id, current);
-        this.emit(id, "commands_updated", { commands: current });
-      },
-      status: (status: SessionStatus) => this.setStatus(id, status),
-      exited: (info: { code: number | null; signal: NodeJS.Signals | null; expected: boolean }) => {
-        if (!this.sessions.has(id)) return;
-        this.emit(id, "process_exited", info as unknown as Record<string, unknown>);
-        this.setStatus(id, "dead");
-        this.workers.delete(id);
-      },
-    };
-    const worker = createDriver(input.agent, {
+    let worker!: Driver;
+    const callbacks = this.driverCallbacks(id, () => worker);
+    worker = this.driverFactory(input.agent, {
       sessionId: id,
       cwd: record.cwd,
       config,
@@ -181,7 +164,7 @@ export class SessionManager {
       record.processId = worker.child?.pid;
       this.persistRegistry();
       if (input.initialMessage) await this.sendUserMessage(id, { text: input.initialMessage });
-      return { ...record, config: { ...record.config } };
+      return cloneSession(record);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       this.emit(id, "session_error", { message, source: "startup" });
@@ -193,6 +176,7 @@ export class SessionManager {
   }
 
   async sendUserMessage(id: string, input: UserMessageInput): Promise<void> {
+    if (this.restartingSessions.has(id)) throw new Error("正在切换模型，请稍候再发送消息");
     const worker = this.requireWorker(id);
     const message = this.normalizeUserMessage(id, input);
     await worker.sendUserMessage(message);
@@ -219,6 +203,7 @@ export class SessionManager {
       entry[1] === null || (typeof entry[1] === "string" && entry[1].length > 0)
     ));
     if (entries.length === 0) throw new Error("set_config.config 至少包含一个配置项");
+    if (this.restartingSessions.has(id)) throw new Error("正在切换模型，请稍候");
     const worker = this.requireWorker(id);
     const schema = worker.getConfigSchema();
     for (const [key, value] of entries) {
@@ -232,6 +217,9 @@ export class SessionManager {
         throw new Error(`${worker.kind}.${key} 不支持值：${value}`);
       }
     }
+    if (worker.kind === "claude" && entries.some(([key]) => key === "model" || key === "effort")) {
+      return await this.restartClaudeWorker(id, Object.fromEntries(entries) as SessionConfig);
+    }
     const updated = await worker.setConfig(Object.fromEntries(entries) as SessionConfig);
     const record = this.sessions.get(id)!;
     this.applyConfig(record, updated);
@@ -244,7 +232,7 @@ export class SessionManager {
       riskyMode: record.riskyMode,
       effectiveFrom: record.agent === "codex" ? "next_turn" : "immediate",
     });
-    return { ...record, config: { ...record.config } };
+    return cloneSession(record);
   }
 
   async interrupt(id: string): Promise<void> {
@@ -261,7 +249,7 @@ export class SessionManager {
     this.rings.delete(id);
     this.commands.delete(id);
     this.persistRegistry();
-    return { ...record, status: "dead", processId: undefined };
+    return cloneSession({ ...record, status: "dead", processId: undefined });
   }
 
   async shutdown(): Promise<void> {
@@ -317,6 +305,110 @@ export class SessionManager {
     session.effort = session.config.effort;
     session.permissionMode = session.config.permissionMode;
     session.riskyMode = isRiskyConfig(session.agent, session.config);
+  }
+
+  private async restartClaudeWorker(id: string, update: SessionConfig): Promise<SessionRecord> {
+    const record = this.sessions.get(id)!;
+    if (record.status === "running") {
+      throw new Error("当前回合尚未结束，请等待或中断后再切换");
+    }
+    if (!record.nativeSessionId) {
+      throw new Error("Claude 首轮完成前尚无 nativeSessionId，无法通过续接切换模型或推理强度");
+    }
+    if (record.status !== "idle") {
+      throw new Error(`Claude 会话当前状态为 ${record.status}，只能在回合结束后切换`);
+    }
+
+    const previousConfig = { ...record.config };
+    const targetConfig = mergeSessionConfig(previousConfig, update);
+    const nativeSessionId = record.nativeSessionId;
+    const oldWorker = this.requireWorker(id);
+    this.restartingSessions.add(id);
+    this.emit(id, "config_update_started", {
+      message: "正在切换模型…",
+      mutableVia: "restart",
+      nativeSessionId,
+      previousConfig,
+      targetConfig,
+    });
+    this.setStatus(id, "starting");
+    this.workers.delete(id);
+
+    let replacement: Driver | undefined;
+    try {
+      await oldWorker.stop();
+      let nextWorker!: Driver;
+      const callbacks = this.driverCallbacks(id, () => nextWorker);
+      nextWorker = this.driverFactory("claude", {
+        sessionId: id,
+        cwd: record.cwd,
+        config: targetConfig,
+        resumeSessionId: nativeSessionId,
+        callbacks,
+      });
+      replacement = nextWorker;
+      this.workers.set(id, nextWorker);
+      await nextWorker.start();
+      record.processId = nextWorker.child?.pid;
+      this.persistRegistry();
+      this.emit(id, "config_updated", {
+        config: { ...record.config },
+        model: record.model,
+        effort: record.effort,
+        permissionMode: record.permissionMode,
+        riskyMode: record.riskyMode,
+        effectiveFrom: "immediate",
+        mutableVia: "restart",
+        workerRestarted: true,
+        nativeSessionId,
+      });
+      return cloneSession(record);
+    } catch (error) {
+      if (replacement && this.workers.get(id) === replacement) this.workers.delete(id);
+      if (replacement) await replacement.stop().catch(() => undefined);
+      this.applyConfig(record, previousConfig);
+      record.processId = undefined;
+      this.emit(id, "session_error", {
+        message: error instanceof Error ? error.message : String(error),
+        source: "config_restart",
+      });
+      this.setStatus(id, "error");
+      throw error;
+    } finally {
+      this.restartingSessions.delete(id);
+    }
+  }
+
+  private driverCallbacks(id: string, worker: () => Driver): DriverCallbacks {
+    const current = () => this.workers.get(id) === worker();
+    return {
+      emit: (type, payload = {}) => current() ? this.emit(id, type, payload) : undefined,
+      metadata: (metadata) => {
+        const session = this.sessions.get(id);
+        if (!session || !current()) return;
+        if (metadata.nativeSessionId) session.nativeSessionId = metadata.nativeSessionId;
+        if (metadata.nativeTranscriptPath) session.nativeTranscriptPath = metadata.nativeTranscriptPath;
+        if (metadata.config) this.applyConfig(session, metadata.config);
+        const pid = worker().child?.pid;
+        if (pid) session.processId = pid;
+        this.persistRegistry();
+      },
+      commands: (commands) => {
+        if (!this.sessions.has(id) || !current()) return;
+        const normalized = commands.map((command) => ({ ...command }));
+        this.commands.set(id, normalized);
+        this.emit(id, "commands_updated", { commands: normalized });
+      },
+      status: (status) => {
+        if (current()) this.setStatus(id, status);
+      },
+      exited: (info) => {
+        if (!this.sessions.has(id) || !current()) return;
+        this.emit(id, "process_exited", info as unknown as Record<string, unknown>);
+        this.setStatus(id, "dead");
+        this.workers.delete(id);
+      },
+    };
   }
 
   private requireWorker(id: string): Driver {
@@ -376,4 +468,12 @@ export class SessionManager {
   private persistRegistry(): void {
     saveRegistry([...this.sessions.values()]);
   }
+}
+
+function cloneSession(session: SessionRecord): SessionRecord {
+  return {
+    ...session,
+    config: { ...session.config },
+    ...(session.resumedFrom ? { resumedFrom: { ...session.resumedFrom } } : {}),
+  };
 }

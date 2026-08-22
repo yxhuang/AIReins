@@ -40,7 +40,8 @@ export const CLAUDE_CONFIG_SCHEMA: DriverConfigSchema = {
         { value: "haiku", label: "Haiku（最新）" },
       ],
       default: null,
-      mutable: false,
+      mutable: true,
+      mutableVia: "restart",
     },
     {
       id: "effort",
@@ -50,7 +51,8 @@ export const CLAUDE_CONFIG_SCHEMA: DriverConfigSchema = {
         ...["low", "medium", "high", "xhigh", "max"].map((value) => ({ value, label: value })),
       ],
       default: null,
-      mutable: false,
+      mutable: true,
+      mutableVia: "restart",
     },
     {
       id: "permissionMode",
@@ -69,6 +71,23 @@ export const CLAUDE_CONFIG_SCHEMA: DriverConfigSchema = {
   ],
 };
 
+export function claudeLaunchArgs(config: SessionConfig, resumeSessionId?: string): string[] {
+  const args = [
+    "--print",
+    "--input-format", "stream-json",
+    "--output-format", "stream-json",
+    "--verbose",
+    "--include-partial-messages",
+    "--replay-user-messages",
+    "--permission-mode", config.permissionMode ?? "manual",
+    "--permission-prompt-tool", "stdio",
+  ];
+  if (resumeSessionId) args.push("--resume", resumeSessionId);
+  if (config.model) args.push("--model", config.model);
+  if (config.effort) args.push("--effort", config.effort);
+  return args;
+}
+
 export class ClaudeDriver extends BaseDriver {
   readonly kind = "claude" as const;
   private readonly pendingPermissions = new Map<string, ClaudePermission>();
@@ -85,20 +104,7 @@ export class ClaudeDriver extends BaseDriver {
       permissionMode: this.config.permissionMode ?? "manual",
     };
     this.validateConfig(this.config);
-    const permissionMode = this.config.permissionMode!;
-    const args = [
-      "--print",
-      "--input-format", "stream-json",
-      "--output-format", "stream-json",
-      "--verbose",
-      "--include-partial-messages",
-      "--replay-user-messages",
-      "--permission-mode", permissionMode,
-      "--permission-prompt-tool", "stdio",
-    ];
-    if (this.resumeSessionId) args.push("--resume", this.resumeSessionId);
-    if (this.config.model) args.push("--model", this.config.model);
-    if (this.config.effort) args.push("--effort", this.config.effort);
+    const args = claudeLaunchArgs(this.config, this.resumeSessionId);
     const env = { ...process.env };
     delete env.CLAUDE_CODE_ENTRYPOINT;
     this.spawnProcess("claude", args, { env });
@@ -120,7 +126,7 @@ export class ClaudeDriver extends BaseDriver {
 
   async setConfig(config: SessionConfig): Promise<SessionConfig> {
     if (config.model !== undefined || config.effort !== undefined) {
-      throw new Error("Claude 的 model 与 effort 只能在建会话时设置");
+      throw new Error("Claude 的 model 与 effort 由会话管理层重启 worker 后生效");
     }
     if (!config.permissionMode) throw new Error("Claude set_config 缺少 permissionMode");
     const option = CLAUDE_CONFIG_SCHEMA.options.find((item) => item.id === "permissionMode");

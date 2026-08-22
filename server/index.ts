@@ -148,6 +148,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse)
       const commandsMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/commands$/);
       const filesMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/files$/);
       const detailMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)$/);
+      const historyMessagesMatch = url.pathname.match(/^\/api\/history\/([^/]+)\/([^/]+)\/messages$/);
       const historyPreviewMatch = url.pathname.match(/^\/api\/history\/([^/]+)\/([^/]+)$/);
       const pageHealthMatch = url.pathname.match(/^\/api\/pages\/([^/]+)\/health$/);
       if (method === "GET" && pageHealthMatch) {
@@ -173,12 +174,20 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse)
         const limit = validateFileLimit(url.searchParams.get("limit"));
         const files = await searchFiles(session.cwd, query, limit);
         respond(response, 200, 0, "success", { files }, requestId);
+      } else if (method === "GET" && historyMessagesMatch) {
+        const agent = validateHistoryAgent(decodeHistorySegment(historyMessagesMatch[1]));
+        const nativeSessionId = validateNativeSessionId(decodeHistorySegment(historyMessagesMatch[2]));
+        try {
+          const page = await history.messages(agent, nativeSessionId, validateHistoryMessagesQuery(url.searchParams));
+          if (!page) throw new ApiError(404, 40430, "历史会话不存在或无法读取");
+          respond(response, 200, 0, "success", page, requestId);
+        } catch (error) {
+          if (error instanceof HistoryQueryError) throw new ApiError(400, 40034, error.message);
+          throw error;
+        }
       } else if (method === "GET" && historyPreviewMatch) {
         const agent = validateHistoryAgent(decodeHistorySegment(historyPreviewMatch[1]));
-        const nativeSessionId = decodeHistorySegment(historyPreviewMatch[2]);
-        if (!/^[A-Za-z0-9_-]{1,128}$/.test(nativeSessionId)) {
-          throw new ApiError(400, 40033, "nativeSessionId 格式无效");
-        }
+        const nativeSessionId = validateNativeSessionId(decodeHistorySegment(historyPreviewMatch[2]));
         const preview = await history.preview(agent, nativeSessionId);
         if (!preview) throw new ApiError(404, 40430, "历史会话不存在或无法读取");
         respond(response, 200, 0, "success", preview, requestId);
@@ -326,6 +335,24 @@ function validateHistoryAgent(value: string): CreateSessionInput["agent"] {
   return value as CreateSessionInput["agent"];
 }
 
+function validateHistoryMessagesQuery(searchParams: URLSearchParams): { limit: number; cursor?: string } {
+  const limitValue = searchParams.get("limit");
+  const limit = limitValue === null || limitValue === "" ? 50 : Number(limitValue);
+  if (!Number.isInteger(limit) || limit < 1 || limit > 200) {
+    throw new ApiError(400, 40034, "消息 limit 必须是 1 到 200 的整数");
+  }
+  const cursor = searchParams.get("cursor") ?? "";
+  if (cursor.length > 4_096) throw new ApiError(400, 40034, "消息 cursor 过长");
+  return { limit, ...(cursor ? { cursor } : {}) };
+}
+
+function validateNativeSessionId(value: string): string {
+  if (!/^[A-Za-z0-9_-]{1,128}$/.test(value)) {
+    throw new ApiError(400, 40033, "nativeSessionId 格式无效");
+  }
+  return value;
+}
+
 function decodeHistorySegment(value: string): string {
   try {
     return decodeURIComponent(value);
@@ -389,6 +416,12 @@ function validateCreateSession(value: unknown): CreateSessionInput {
   if (input.agentId !== undefined && typeof input.agentId !== "string") throw new ApiError(400, 40003, "agentId 必须是字符串");
   if (input.initialMessage !== undefined && typeof input.initialMessage !== "string") throw new ApiError(400, 40004, "initialMessage 必须是字符串");
   if (input.model !== undefined && typeof input.model !== "string") throw new ApiError(400, 40005, "model 必须是字符串");
+  if (input.resumeSessionId !== undefined) {
+    if (typeof input.resumeSessionId !== "string") {
+      throw new ApiError(400, 40005, "resumeSessionId 必须是字符串");
+    }
+    validateNativeSessionId(input.resumeSessionId);
+  }
   if (input.kimiMode !== undefined && !["default", "plan", "auto", "yolo"].includes(String(input.kimiMode))) {
     throw new ApiError(400, 40006, "kimiMode 必须是 default、plan、auto 或 yolo");
   }

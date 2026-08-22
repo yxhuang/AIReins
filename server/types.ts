@@ -5,6 +5,7 @@ export type AgentKind = (typeof AGENTS)[number];
 
 export const EVENT_TYPES = [
   "session_created",
+  "config_update_started",
   "user_message",
   "agent_text_delta",
   "thought_delta",
@@ -47,6 +48,7 @@ export interface DriverConfigOption {
   values: ConfigOptionValue[];
   default: string | null;
   mutable: boolean;
+  mutableVia?: "restart";
 }
 
 export interface DriverConfigSchema {
@@ -99,6 +101,11 @@ export interface SessionRecord {
   transcriptPath: string;
   nativeSessionId?: string;
   nativeTranscriptPath?: string;
+  resumedFrom?: {
+    agent: AgentKind;
+    nativeSessionId: string;
+    messageCount?: number;
+  };
   processId?: number;
   model?: string | null;
   effort?: string | null;
