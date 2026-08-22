@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { WebSocket, WebSocketServer } from "ws";
 import { log } from "./logger.js";
 import { normalizeFileQuery, searchFiles } from "./file-search.js";
+import { HistoryIndex, HistoryQueryError } from "./history.js";
 import { getMeta, SERVER_VERSION } from "./meta.js";
 import { checkPageHealth, scanPages } from "./pages.js";
 import { SessionManager } from "./session-manager.js";
@@ -47,6 +48,7 @@ interface WsClientState {
 }
 
 const manager = new SessionManager();
+const history = new HistoryIndex();
 const pages = scanPages();
 const pagesById = new Map(pages.map((page) => [page.id, page]));
 void getMeta(); // 启动时探测一次并缓存，不让首个 /api/meta 承担延迟。
@@ -129,6 +131,14 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse)
       respond(response, 200, 0, "success", { pages }, requestId);
     } else if (method === "GET" && url.pathname === "/api/sessions") {
       respond(response, 200, 0, "success", { sessions: manager.list() }, requestId);
+    } else if (method === "GET" && url.pathname === "/api/history") {
+      const input = validateHistoryQuery(url.searchParams);
+      try {
+        respond(response, 200, 0, "success", await history.list(input), requestId);
+      } catch (error) {
+        if (error instanceof HistoryQueryError) throw new ApiError(400, 40032, error.message);
+        throw error;
+      }
     } else if (method === "POST" && url.pathname === "/api/sessions") {
       const input = validateCreateSession(await readJson(request));
       const session = await manager.create(input);
@@ -138,6 +148,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse)
       const commandsMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/commands$/);
       const filesMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/files$/);
       const detailMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)$/);
+      const historyPreviewMatch = url.pathname.match(/^\/api\/history\/([^/]+)\/([^/]+)$/);
       const pageHealthMatch = url.pathname.match(/^\/api\/pages\/([^/]+)\/health$/);
       if (method === "GET" && pageHealthMatch) {
         const id = decodeURIComponent(pageHealthMatch[1]);
@@ -162,6 +173,15 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse)
         const limit = validateFileLimit(url.searchParams.get("limit"));
         const files = await searchFiles(session.cwd, query, limit);
         respond(response, 200, 0, "success", { files }, requestId);
+      } else if (method === "GET" && historyPreviewMatch) {
+        const agent = validateHistoryAgent(decodeHistorySegment(historyPreviewMatch[1]));
+        const nativeSessionId = decodeHistorySegment(historyPreviewMatch[2]);
+        if (!/^[A-Za-z0-9_-]{1,128}$/.test(nativeSessionId)) {
+          throw new ApiError(400, 40033, "nativeSessionId 格式无效");
+        }
+        const preview = await history.preview(agent, nativeSessionId);
+        if (!preview) throw new ApiError(404, 40430, "历史会话不存在或无法读取");
+        respond(response, 200, 0, "success", preview, requestId);
       } else if (method === "GET" && detailMatch) {
         const id = decodeURIComponent(detailMatch[1]);
         const session = manager.get(id);
@@ -273,6 +293,45 @@ function validateFileLimit(value: string | null): number {
     throw new ApiError(400, 40021, "limit 必须是 1 到 200 的整数");
   }
   return limit;
+}
+
+function validateHistoryQuery(searchParams: URLSearchParams): {
+  agent?: CreateSessionInput["agent"];
+  q?: string;
+  limit: number;
+  cursor?: string;
+} {
+  const agentValue = searchParams.get("agent");
+  const q = searchParams.get("q") ?? "";
+  const cursor = searchParams.get("cursor") ?? "";
+  if (q.length > 500) throw new ApiError(400, 40030, "q 最多 500 个字符");
+  if (cursor.length > 4_096) throw new ApiError(400, 40031, "cursor 过长");
+  const limitValue = searchParams.get("limit");
+  const limit = limitValue === null || limitValue === "" ? 50 : Number(limitValue);
+  if (!Number.isInteger(limit) || limit < 1 || limit > 200) {
+    throw new ApiError(400, 40031, "history limit 必须是 1 到 200 的整数");
+  }
+  return {
+    ...(agentValue ? { agent: validateHistoryAgent(agentValue) } : {}),
+    ...(q ? { q } : {}),
+    limit,
+    ...(cursor ? { cursor } : {}),
+  };
+}
+
+function validateHistoryAgent(value: string): CreateSessionInput["agent"] {
+  if (!AGENTS.includes(value as CreateSessionInput["agent"])) {
+    throw new ApiError(400, 40030, "history agent 必须是 claude、codex 或 kimi");
+  }
+  return value as CreateSessionInput["agent"];
+}
+
+function decodeHistorySegment(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    throw new ApiError(400, 40033, "history 路径参数编码无效");
+  }
 }
 
 function sendEvent(client: WsClientState, event: UnifiedEvent): void {

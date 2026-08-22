@@ -36,6 +36,8 @@ npm run server
 - `GET /api/sessions/:id/commands`：当前活动会话的实时归一命令表
 - `GET /api/sessions/:id/files?q=<关键词>&limit=<默认50>`：在会话 `cwd` 内检索可引用的普通文件
 - `DELETE /api/sessions/:id`：停止 worker 并移除注册表条目；不删除 Workbench 或原生 CLI transcript
+- `GET /api/history`：只读列出三家 CLI 自己保存的历史会话
+- `GET /api/history/:agent/:nativeSessionId`：有界读取会话头部，返回导入前预览
 - `GET /api/meta`：server/CLI 实测版本、全局能力、三 driver 能力位与配置 schema
 - `GET /api/pages`：启动时已注册的扩展页面列表
 - `GET /api/pages/:id/health`：限时探测一个扩展页面的目标服务
@@ -90,6 +92,63 @@ Claude 的模型或推理强度不显式覆盖时，schema 默认值和初始 se
 Codex 0.148.0 的 `approvalPolicy` 实测只接受 `untrusted / on-request / never`（另支持结构化 `granular`，不属于当前三档 UI）。`on-failure` 请求会被 app-server 以 `unknown variant` 拒绝，因此 schema 不暴露该值。
 
 `snapshot` 的 `data` 为 `{session, seq, events}`。`events` 是重建会话视图所需的全量统一事件；客户端完成快照后连接 `/ws?sessionId=<id>&afterSeq=<seq>`。连接期间产生的缺口由每会话 1,000 条 ring buffer 补发；超出 ring 时服务端发送 `resync_required`，客户端重新取快照。
+
+## 三家 CLI 原生历史
+
+`GET /api/history` 直接只读扫描以下事实源，不创建索引文件，也不会写入这些目录：
+
+- Claude：`~/.claude/projects/**/*.jsonl`
+- Codex：`~/.codex/sessions/**/rollout-*.jsonl`
+- Kimi：`~/.kimi-code/sessions/**/state.json`；标题缺失时只读同会话的 `agents/main/wire.jsonl` 头部
+
+查询参数：
+
+- `agent` 可省略，或为 `claude / codex / kimi`。
+- `q` 可省略，对归一后的 `title` 和 `cwd` 做大小写不敏感的子串匹配，最长 500 字符。
+- `limit` 默认 50，范围 1–200。
+- `cursor` 是服务端返回的不透明分页位置；翻页时必须原样带回，并继续使用相同的 `agent`、`q`。
+
+成功响应的 `data` 形状如下。`messageCount` 只有在原生头部能廉价取得时才会出现；当前三家都不为这个可选字段全文读取 transcript。
+
+```ts
+interface HistoryListData {
+  sessions: Array<{
+    agent: "claude" | "codex" | "kimi";
+    nativeSessionId: string;
+    cwd: string;
+    title: string;             // 第一条真实用户输入，折叠空白后最多 160 字符
+    lastActivityAt: string;    // 原生事实文件 mtime，ISO 8601
+    messageCount?: number;
+    source: "interactive" | "workbench" | "unknown";
+    filePath: string;
+  }>;
+  nextCursor?: string;
+  truncated: boolean;          // 3 秒总预算或 20,000 个候选硬上限被触发
+  skipped: number;             // 本页遇到的坏/空/不可读/缺关键元数据候选数
+  discovered: number;          // 本次发现的候选文件总数
+  durationMs: number;
+}
+```
+
+结果先按原生事实文件 mtime 倒序排列，再分页。服务端只枚举候选和读取最多 512 KiB 的文件头；默认页拿满后停止解析。解析结果保存在进程内存中，以“路径 + mtime + size”（Kimi 另含 wire 指纹）失效，不需要预热，也不会在三家目录或 `~/.workbench/` 生成缓存文件。坏 JSON 行、正在追加产生的尾部半行、空文件和权限错误不会使整个接口 500；不能形成含 `nativeSessionId + cwd` 的会话才计入 `skipped`。测试可用 `WORKBENCH_CLAUDE_HISTORY_DIR / WORKBENCH_CODEX_HISTORY_DIR / WORKBENCH_KIMI_HISTORY_DIR` 指向隔离夹具，生产默认不需要设置。
+
+标题提取不会把注入包装当成人类输入：Claude 跳过 `isMeta`、sidechain、`local-command-caveat / local-command-stdout / system-reminder / task-notification / ide_selection / ide_opened_file`；斜杠命令包装只提取真正的 `command-args`，无参数时退化为 `command-name`。Codex 跳过 role 非 user 的记录，以及 `recommended_plugins / AGENTS.md instructions / environment_context / skills / permissions / apps / plugins / multi_agent_mode` 等注入块。Kimi 优先使用有效的原生 `state.title`，否则从第一条非 `system-reminder` 的 `turn.prompt` 取标题。
+
+`source` 表示原生会话的可识别创建来源，而不是当前读取者。Claude 首个 `entrypoint:"sdk-cli"` 为 `workbench`，普通 CLI/VS Code 入口为 `interactive`；Codex 的 `originator` 以 `workbench` 开头为 `workbench`，其他已知 originator 为 `interactive`；Kimi 的多代落盘格式没有稳定的客户端来源字段，只能用仍在 `~/.workbench/sessions.json` 的原生 ID 作 `workbench` 回退，其余诚实返回 `unknown`。
+
+`GET /api/history/:agent/:nativeSessionId` 值得保留：前端可在把原生 ID 交给创建接口前展示“导入前看一眼”。它返回 `{session, messages, truncated}`，`messages` 最多 8 条，只读文件头部最多 2 MiB；Kimi wire 缺失时仍返回 session 元数据、空 messages 和 `truncated:true`。ID 只接受 1–128 位字母、数字、下划线和连字符，后端先在对应事实源中解析匹配候选，不会把 URL 片段直接拼成任意文件路径。
+
+历史列表本身严格只读；用户选择后，就地续接仍复用现有 `POST /api/sessions`，直接把列表项的 `nativeSessionId` 传为 `resumeSessionId`：
+
+```json
+{
+  "agent": "claude",
+  "cwd": "/home/user/dev/workbench",
+  "resumeSessionId": "00000000-0000-4000-8000-000000000040"
+}
+```
+
+这里没有 fork 语义：Claude 用 `--resume`，Codex 用 `thread/resume`，Kimi 用 `session/resume`。代价也必须由前端明确提示：续接后，Workbench 中的新回合会由原生 CLI 追写进用户选择的真实会话；其中 Claude 的 Workbench 回合以 `sdk-cli` 身份落盘。若用户不希望改变原会话，应取消续接，而不是调用本接口后期待自动分叉。
 
 ## `pages/` 扩展页面
 
