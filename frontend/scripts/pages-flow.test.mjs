@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // pages/ 扩展机制前端逻辑的打桩回归测试（验收 3 与 5 的前端侧证据）：
 // - health 信封解析与「不可达 → 降级面板」渲染分支（不渲染空白 iframe）；
+// - embeddable 三态：true→iframe、false→blocked（完全不渲染 iframe）、null/缺省→uncertain（iframe+提示）；
 // - 未知 type（如 "widget"）跳过 + 记录提示，绝不崩掉整个列表；
 // - store 集成：refreshPages 分区结果、#/page/<id> 与 #/session/<id> 路由互斥。
 // 浏览器依赖（window / WebSocket / fetch）全部打桩，不需要真实 server。
@@ -56,7 +57,7 @@ await t("isInlineSvg：emoji 为 false，内联 SVG 字符串为 true", async ()
 });
 
 // --- 用例 3（验收 3 渲染分支）：reachable:false → fallback，不渲染空白 iframe ---
-await t("pageRenderMode：不可达 → fallback（降级面板），可达 → iframe", async () => {
+await t("pageRenderMode：不可达 → fallback（降级面板）", async () => {
   assert.equal(
     pageRenderMode({ id: "ai-usage", reachable: false, reason: "超过 2000 ms 未响应", durationMs: 2001 }),
     "fallback",
@@ -65,14 +66,29 @@ await t("pageRenderMode：不可达 → fallback（降级面板），可达 → 
     pageRenderMode({ id: "ai-usage", reachable: false, reason: "连接被拒绝", durationMs: 3 }),
     "fallback",
   );
+});
+
+// --- 用例 3b：embeddable 三态 → iframe / blocked / uncertain ---
+await t("pageRenderMode：embeddable true→iframe，false→blocked，null/缺省→uncertain", async () => {
+  const base = { id: "ai-usage", reachable: true, reason: "HTTP 200", status: 200, durationMs: 14 };
+  assert.equal(pageRenderMode({ ...base, embeddable: true }), "iframe", "明确允许嵌入 → 正常 iframe");
   assert.equal(
-    pageRenderMode({ id: "ai-usage", reachable: true, reason: "HTTP 200", status: 200, durationMs: 14 }),
+    pageRenderMode({ ...base, embeddable: false, embedReason: "目标站点设置了 X-Frame-Options: DENY" }),
+    "blocked",
+    "明确拒绝嵌入 → 降级面板，不渲染 iframe",
+  );
+  assert.equal(pageRenderMode({ ...base, embeddable: null }), "uncertain", "无法确定 → iframe + 提示");
+  // 旧后端没有 embeddable 字段：按「无法确定」处理（仍渲染 iframe + 提示），不猜
+  assert.equal(pageRenderMode(base), "uncertain", "字段缺省同样按 uncertain");
+  // 非 2xx 也算可达（后端语义：只回答「服务在不在」），可嵌性照常走 embeddable
+  assert.equal(
+    pageRenderMode({ id: "ai-usage", reachable: true, reason: "HTTP 503", status: 503, durationMs: 9, embeddable: true }),
     "iframe",
   );
-  // 非 2xx 也算可达（后端语义：只回答「服务在不在」）
+  // embeddable:false 但不可达：不可达优先（服务都不在，谈不上嵌入）
   assert.equal(
-    pageRenderMode({ id: "ai-usage", reachable: true, reason: "HTTP 503", status: 503, durationMs: 9 }),
-    "iframe",
+    pageRenderMode({ id: "ai-usage", reachable: false, reason: "连接被拒绝", durationMs: 3, embeddable: false }),
+    "fallback",
   );
 });
 

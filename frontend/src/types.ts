@@ -137,6 +137,13 @@ export interface PageHealth {
   reason: string;
   status?: number;
   durationMs: number;
+  /**
+   * 后端对「能否被 iframe 嵌入」的判定（看 X-Frame-Options / CSP frame-ancestors）：
+   * true = 允许嵌入；false = 明确拒绝；null/缺省 = 无法确定（前端不猜）。
+   */
+  embeddable?: boolean | null;
+  /** embeddable:false 时的原因，如 "目标站点设置了 X-Frame-Options: DENY" */
+  embedReason?: string | null;
 }
 
 export interface ApiEnvelope<T> {

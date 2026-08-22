@@ -1233,6 +1233,10 @@ body {
   color: var(--text-faint);
 }
 
+/* embeddable:true 时无 hint，链接自己靠右；有 hint 时由 hint 的 margin-left:auto 顶过去 */
+.page-toolbar > .page-open-blank { margin-left: auto; }
+.page-toolbar-hint ~ .page-open-blank { margin-left: 0; }
+
 .page-open-blank {
   font-size: 12.5px;
   color: var(--busy);
@@ -1276,6 +1280,19 @@ body {
   color: var(--danger);
   font-size: 12.5px;
   line-height: 1.6;
+}
+
+/* 「服务正常但不允许被嵌入」不是错误：中性灰说明文字，不用 --danger，不碰暖色 */
+.page-fallback-info {
+  color: var(--text-muted);
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+
+/* 降级面板里的主按钮是 <a>：补 inline-block、去下划线，复用 .btn / .btn-primary（冷调 --busy） */
+.page-fallback-actions a.btn {
+  display: inline-block;
+  text-decoration: none;
 }
 
 .page-fallback-actions {

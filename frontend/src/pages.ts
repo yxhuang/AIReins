@@ -41,11 +41,21 @@ export function partitionPages(list: PageManifest[]): {
   return { supported, skipped };
 }
 
+/** 健康检查结论 → 渲染模式（见 pageRenderMode）。 */
+export type PageRenderMode = "iframe" | "fallback" | "blocked" | "uncertain";
+
 /**
- * 健康检查结论 → 渲染模式。reachable 只表示服务在响应（收到任何 HTTP 响应即为 true），
- * 不代表目标允许被 iframe 嵌入——x-frame-options:DENY 浏览器端无法可靠探测，
- * 所以 iframe 模式下工具条常驻「在新标签页打开」出口。
+ * reachable 只表示服务在响应（收到任何 HTTP 响应即为 true），不代表允许被嵌入。
+ * embeddable 三态：
+ * - true  → "iframe"：正常渲染 iframe，工具条不再挂「若下方空白」提示；
+ * - false → "blocked"：完全不渲染 iframe，降级面板说明「服务是好的，但拒绝被嵌入」
+ *   （embedReason 原样展示），主按钮「在新标签页打开」；
+ * - null/缺省 → "uncertain"：无法确定（或旧后端没这个字段），仍渲染 iframe，
+ *   但保留空白提示与常驻新标签页出口。
  */
-export function pageRenderMode(health: PageHealth): "iframe" | "fallback" {
-  return health.reachable ? "iframe" : "fallback";
+export function pageRenderMode(health: PageHealth): PageRenderMode {
+  if (!health.reachable) return "fallback";
+  if (health.embeddable === true) return "iframe";
+  if (health.embeddable === false) return "blocked";
+  return "uncertain";
 }

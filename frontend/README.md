@@ -45,7 +45,7 @@ frontend/
     components/
       Sidebar.tsx       会话列表（身份色脊 / 状态点 / 闸门徽标 / 危险模式「!」标记 / 行右删除入口 ×：hover/focus 显现、Tab 可达，点击后就地变行内二次确认）+ 新建会话表单（含三个配置下拉；cwd 三级预填回退 + 空 cwd 可见禁用原因）+ 底部「页面」分区与设置入口
       SettingsMenu.tsx  设置齿轮 + 锚定浮层（分组/条目结构，60vh 限高滚动 + focus trap）；主题三选一写 <html data-theme>、localStorage 持久化（读写均 try/catch）
-      PageView.tsx      扩展页面视图：进入先查健康——不可达渲染降级面板（description + reason + 重试），可达渲染 iframe + 常驻工具条（「在新标签页打开」出口）
+      PageView.tsx      扩展页面视图：进入先查健康，按 embeddable 三态渲染——不可达降级面板（reason + 重试）；embeddable:false 完全不渲染 iframe 改降级面板（服务正常但目标拒绝嵌入 + 主按钮新标签页打开）；embeddable:true 正常 iframe；null/缺省 iframe + 空白提示与常驻新标签页出口
       SessionView.tsx   会话头（usage 分家渲染 / 配置只读摘要 / 中断）+ 危险模式警示条 + 事件流 + 输入框（配置控件行在输入框正上方；行首 / 命令面板、@ 文件引用面板与待附加预览条、结构化 command 上行、codex 降级说明；草稿按会话内存缓存，切走切回不丢；dead 会话「新建会话并续接」出口）+ 未决闸门贴条
       StreamItems.tsx   用户消息 / 文本块 / 思考折叠块 / 工具卡片 / 闸门块 / 系统行
     styles.css          设计令牌（深浅两套）与全部样式
@@ -266,12 +266,28 @@ frontend/
 - [x] **73. 句末标点能剥、真带标点的文件名不被误剥、剥到底不中维持未找到、发送帧用生效路径。** **打桩实测**四例（files 接口按子串检索语义打桩）：文件名真带逗号 `report，final.txt` 整 token 命中 → 原样采用且不再发剥离查询（断言查询序列恰为 1 次）；`a.ts，` 整 token 不中 → 剥后命中 `a.ts` 被采纳（查询序列 `["a.ts，","a.ts"]`）；`ghost.txt，。` 剥到底不中 → null 且缓存「未找到」；发送帧 `text` 原样（`看看 @a.ts， 然后`）、`mentions:[{type:"file",path:"a.ts"}]`。纯函数侧 mentions 单测新增 10 例（句末逗号/连续标点/英文标点/闭括号引号/尾点/无标点无候选/`-` `_` 不剥/中段点不剥/剥空无空候选/纯标点串）。
 - [x] **74. 构建与检查全绿。** **实测**：`npm test`（check:theme「✅ 深色令牌两份一致（26 项）」+ mentions 29 例 + store 13 例 + pages 5 例）退出码 0；`npm run build`（vite 8.2.2，退出码 0）；`npm run typecheck` 与 `npm run typecheck:frontend` 退出码均 0。根 package.json 本轮未动——聚合 `test` 脚本（含 pages）上一轮已就位，与要求等价。
 
+### M13 扩展页面按 `embeddable` 三态渲染（2026-08-22）
+
+背景：ai-usage 的 8788 服务带 `X-Frame-Options: DENY`，iframe 里渲染的是 Chrome 原始报错页（「拒绝了我们的连接请求」），上一轮的工具条小字提示救不了它。后端 health 接口本轮补了判定字段：`embeddable`（true/false/null，null = 无法确定，不猜）与 `embedReason`。
+
+- **三态**（`pages.ts` 的 `pageRenderMode` 扩为 `"iframe" | "fallback" | "blocked" | "uncertain"`，`types.ts` 的 `PageHealth` 加 `embeddable?: boolean | null` 与 `embedReason?: string | null`）：
+  - `reachable:false` → `"fallback"`：既有不可达降级面板，不变；
+  - `embeddable === true` → `"iframe"`：正常渲染 iframe，工具条不再挂「若下方空白」提示（新标签页出口保留）；
+  - `embeddable === false` → `"blocked"`：**完全不渲染 iframe**，降级面板说清「服务是好的，但目标站点拒绝被嵌入」——reason（HTTP 状态）与 embedReason 原样展示，措辞点明这是目标站点自己的安全策略、双方都正常；主按钮「在新标签页打开」（`.btn-primary` 冷调 `--busy`，`target="_blank" rel="noopener noreferrer"`），另有「重新检查」次按钮；说明文字用中性 `--text-muted`（新增 `.page-fallback-info`），**不用** `--danger`——这不是错误，暖色仍是闸门专用；
+  - `embeddable === null`（或旧后端字段缺省）→ `"uncertain"`：仍渲染 iframe，保留「若下方空白，说明目标站点拒绝被嵌入」提示 + 常驻新标签页出口——这正是那条提示该存在的场景。
+- **CSS**：新增 `.page-fallback-info`（中性说明）与 `.page-fallback-actions a.btn`（`<a>` 主按钮补 inline-block/去下划线）；`.page-toolbar` 无 hint 时新标签页链接自行靠右（`margin-left:auto` 移到链接上、有 hint 时由兄弟选择器还原），未新增设计令牌。
+
+- [x] **75. ai-usage 页渲染降级面板而非 iframe。** **接口实测**（2026-08-22，本机 8790 实例）：`curl http://127.0.0.1:8790/api/pages/ai-usage/health` 返回 `{"reachable":true,"status":200,"embeddable":false,"embedReason":"目标站点设置了 X-Frame-Options: DENY",...}` ——`embeddable:false` 走 `"blocked"` 分支，**代码复核**该分支整树不含 `<iframe>`（PageView.tsx 只在 iframe/uncertain 两分支渲染 iframe）。无头环境未启浏览器看最终渲染。
+- [x] **76. 三态单测通过。** **实测**：`pages-flow.test.mjs` 新增用例 3b——true→`"iframe"`、false（带 embedReason）→`"blocked"`、null 与字段缺省→`"uncertain"`，另覆盖 HTTP 503 仍可达与「不可达优先于 embeddable:false」；输出「✅ pages 前端逻辑回归全过（6 例）」，exit=0。
+- [x] **77. 「在新标签页打开」带 `rel="noopener noreferrer"`。** **代码复核**：blocked 面板主按钮 `<a className="btn btn-primary" href={page.url} target="_blank" rel="noopener noreferrer">`（PageView.tsx）。
+- [x] **78. 四条命令全绿。** **实测**：`npm test`（check:theme「✅ 深色令牌两份一致（26 项）」+ mentions 29 例 + store 13 例 + pages 6 例）退出码 0；`npm run build`（vite 8.2.2，28 modules，退出码 0）；`npm run typecheck` 与 `npm run typecheck:frontend` 退出码均 0。
+
 ## 已知取舍
 
 - `@token` 严格按空白切段：句末紧跟的标点（如 `@a.ts，`）自 M12 起会在解析时逐级剥尾部标点、剥后命中真实文件才采纳；但标点后无空格直接接文字（如 `@a.ts，然后`）标点不在 token 尾部，仍判「未找到」，需要在引用后敲空格。
 
 - 未引入 UI 组件库、图标库、路由库：图标用 Unicode，路由用 hash（`#/session/<id>`、`#/page/<id>`）。
-- 扩展页面（`pages/`）只在前端启动时取一次列表（server 同样只在启动时扫描）；iframe 直接嵌 manifest 的 `url`，server 不反代；目标站点带 `x-frame-options: DENY` 时浏览器端无法探测，靠工具条常驻「在新标签页打开」出口。
+- 扩展页面（`pages/`）只在前端启动时取一次列表（server 同样只在启动时扫描）；iframe 直接嵌 manifest 的 `url`，server 不反代；目标站点带 `x-frame-options: DENY` 时浏览器端无法探测，自 M13 起由后端 health 接口的 `embeddable` 判定（false → 完全不渲染 iframe 的降级面板；null/无法确定 → iframe + 空白提示 + 常驻新标签页出口）。
 - 未引入 `@vitejs/plugin-react`：esbuild automatic JSX 够用，dev 下 HMR 退化为整页刷新。
 - 会话状态没有专属 WS 事件，左栏状态靠事件推断 + 2 秒防抖重拉列表对齐，可能有一拍延迟。
 - 「允许并记住」按钮已移除（M2 返工 B3）：后端把 `updatedInput` 直接采信为工具入参（`updatedInput ?? pending.input`），没有承载 `permissionSuggestions` 的通道，前端把 suggestions[0] 当 updatedInput 回传会把用户批准的写文件入参替换成 setMode 对象。在后端有正规通道之前只提供「允许」「拒绝」；`permissionSuggestions` 的提取逻辑保留在 `render-items.ts` 备用。
