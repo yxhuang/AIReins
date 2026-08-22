@@ -1,0 +1,66 @@
+#!/usr/bin/env bash
+# workbench —— 个人 Agent 工作台的启动器。
+# 用法：workbench [start|stop|status|restart|logs]   （不带参数 = start）
+set -uo pipefail
+
+REPO="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
+PORT="${WORKBENCH_PORT:-8790}"
+LOG="${WORKBENCH_LOG:-$HOME/.workbench/server.log}"
+URL="http://127.0.0.1:$PORT"
+
+port_pid() { ss -ltnp 2>/dev/null | grep -oP "127\.0\.0\.1:$PORT\b.*pid=\K[0-9]+" | head -1; }
+
+is_ours() {                       # 占用 $PORT 的进程是不是本工作台
+  local pid="$1" cmd
+  cmd="$(tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null)" || return 1
+  [[ "$cmd" == *"server/index.ts"* ]]
+}
+
+start() {
+  local pid; pid="$(port_pid)"
+  if [[ -n "$pid" ]]; then
+    if is_ours "$pid"; then
+      echo "工作台已在运行（PID $pid） → $URL"; return 0
+    fi
+    echo "❌ 端口 $PORT 被别的程序占用（PID $pid）：" >&2
+    tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null | cut -c1-120 >&2
+    echo "   换端口：WORKBENCH_PORT=8791 workbench" >&2
+    return 1
+  fi
+  mkdir -p "$(dirname "$LOG")"
+  ( cd "$REPO" && WORKBENCH_PORT="$PORT" nohup npm run server >>"$LOG" 2>&1 & )
+  for _ in $(seq 1 40); do
+    pid="$(port_pid)"; [[ -n "$pid" ]] && { echo "已启动（PID $pid） → $URL"; return 0; }
+    sleep 0.25
+  done
+  echo "❌ 15 秒内没起来，看日志：$LOG" >&2; tail -5 "$LOG" >&2; return 1
+}
+
+stop() {
+  local pid; pid="$(port_pid)"
+  [[ -z "$pid" ]] && { echo "没有在运行"; return 0; }
+  if ! is_ours "$pid"; then echo "❌ 端口 $PORT 上不是本工作台，拒绝停它（PID $pid）" >&2; return 1; fi
+  kill "$pid"
+  for _ in $(seq 1 20); do [[ -z "$(port_pid)" ]] && { echo "已停止"; return 0; }; sleep 0.25; done
+  echo "⚠ 仍未退出，可手动：kill -9 $pid" >&2; return 1
+}
+
+status() {
+  local pid; pid="$(port_pid)"
+  if [[ -z "$pid" ]]; then echo "未运行（端口 $PORT 空闲）"; return 1; fi
+  if is_ours "$pid"; then
+    echo "运行中（PID $pid） → $URL"
+    curl -s --noproxy "*" --max-time 2 "$URL/api/meta" | python3 -c 'import json,sys,re; d=json.load(sys.stdin)["data"]; g=lambda v: (re.search(r"[0-9][0-9.]*", v) or [None]) and (re.search(r"[0-9][0-9.]*", v).group(0) if re.search(r"[0-9][0-9.]*", v) else "?"); print("  CLI: " + ", ".join(k + "=" + g(v) for k, v in d["cliVersions"].items()))' 2>/dev/null
+  else
+    echo "端口 $PORT 被别的程序占用（PID $pid）"; return 1
+  fi
+}
+
+case "${1:-start}" in
+  start)   start ;;
+  stop)    stop ;;
+  restart) stop; start ;;
+  status)  status ;;
+  logs)    tail -f "$LOG" ;;
+  *) echo "用法：workbench [start|stop|restart|status|logs]" >&2; exit 2 ;;
+esac
