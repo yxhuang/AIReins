@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Sidebar } from "./components/Sidebar";
 import { SessionView } from "./components/SessionView";
 import { PageView } from "./components/PageView";
+import { HistoryView } from "./components/HistoryView";
 import { useStore } from "./useStore";
 
 export function App() {
@@ -23,7 +24,9 @@ export function App() {
         onNewOpenChange={setNewOpen}
       />
       <main className="main">
-        {currentPage ? (
+        {store.historyOpen ? (
+          <HistoryView />
+        ) : currentPage ? (
           <PageView key={currentPage.id} page={currentPage} />
         ) : store.currentPageId ? (
           <div className="empty-state">

@@ -110,10 +110,45 @@ export function Sidebar({ collapsed, onToggle, newOpen, onNewOpenChange }: Sideb
         </>
       )}
       <div className="sidebar-foot">
+        <HistoryNav collapsed={collapsed} />
         <PageNav collapsed={collapsed} />
         <SettingsMenu />
       </div>
     </aside>
+  );
+}
+
+/** 左栏底部「历史会话」入口（页面分区上方，同一套分区语言；收起态只显图标）。 */
+function HistoryNav({ collapsed }: { collapsed: boolean }) {
+  const store = useStore();
+  return (
+    <nav className="page-nav" aria-label="历史会话">
+      <button
+        type="button"
+        className={`page-nav-item${store.historyOpen ? " active" : ""}`}
+        title="历史会话：浏览三家 CLI 自己保存的历史会话并导入续接"
+        aria-label="历史会话"
+        onClick={() => store.navigateHistory()}
+      >
+        <span className="page-icon" aria-hidden="true">
+          <svg
+            viewBox="0 0 24 24"
+            width="16"
+            height="16"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <polyline points="1 4 1 10 7 10" />
+            <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" />
+            <polyline points="12 7 12 12 15.5 14" />
+          </svg>
+        </span>
+        {!collapsed && <span className="page-nav-name">历史会话</span>}
+      </button>
+    </nav>
   );
 }
 

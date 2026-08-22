@@ -49,6 +49,8 @@ export class Store {
   pages: PageManifest[] = [];
   skippedPages: SkippedPage[] = [];
   currentPageId: string | null = null;
+  /** hash 路由 #/history：历史会话浏览视图（与 session/page 两路互斥） */
+  historyOpen = false;
   data = new Map<string, SessionData>();
   wsState: WsState = "closed";
   lastError: string | null = null;
@@ -123,7 +125,15 @@ export class Store {
   }
 
   private onHashChange = (): void => {
-    // 两类路由：#/session/<id> 与 #/page/<id>，互斥；其余 hash 回空态。
+    // 三类路由互斥：#/history、#/page/<id>、#/session/<id>；其余 hash 回空态。
+    if (window.location.hash === "#/history") {
+      this.historyOpen = true;
+      this.currentPageId = null;
+      this.currentId = null;
+      this.notify();
+      return;
+    }
+    this.historyOpen = false;
     const pageId = window.location.hash.match(/^#\/page\/([^/]+)$/)?.[1];
     if (pageId) {
       this.currentPageId = decodeURIComponent(pageId);
@@ -144,6 +154,10 @@ export class Store {
 
   navigatePage(id: string): void {
     window.location.hash = `#/page/${encodeURIComponent(id)}`;
+  }
+
+  navigateHistory(): void {
+    window.location.hash = "#/history";
   }
 
   /** 扩展页面列表：只在启动时取一次（server 也只在启动时扫描 pages/，增删要重启才生效）。 */

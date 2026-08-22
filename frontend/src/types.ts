@@ -146,6 +146,46 @@ export interface PageHealth {
   embedReason?: string | null;
 }
 
+/** 三家 CLI 原生历史会话的可识别创建来源；unknown 如实显示「未知」，不猜。 */
+export type HistorySource = "interactive" | "workbench" | "unknown";
+
+/** GET /api/history 的列表项：三家 CLI 自己保存的历史会话（只读扫描结果）。 */
+export interface HistorySession {
+  agent: AgentKind;
+  nativeSessionId: string;
+  cwd: string;
+  title: string;
+  lastActivityAt: string;
+  messageCount?: number;
+  source: HistorySource;
+  filePath: string;
+}
+
+/** GET /api/history 的 data；truncated = 扫描触发时间/数量预算，分页看 nextCursor。 */
+export interface HistoryListData {
+  sessions: HistorySession[];
+  nextCursor?: string;
+  truncated: boolean;
+  /** 本页坏/空/不可读候选数：正常也可能非零，不是错误 */
+  skipped: number;
+  discovered: number;
+  durationMs: number;
+}
+
+/** GET /api/history/:agent/:nativeSessionId 的预览消息（≤8 条，只读文件头部）。 */
+export interface HistoryPreviewMessage {
+  role: "user" | "assistant";
+  text: string;
+  timestamp?: string;
+}
+
+export interface HistoryPreview {
+  session: HistorySession;
+  messages: HistoryPreviewMessage[];
+  /** true 是常态（只读头部），界面写中性说明，不渲染成警告 */
+  truncated: boolean;
+}
+
 export interface ApiEnvelope<T> {
   code: number;
   msg: string;

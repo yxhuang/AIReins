@@ -1,5 +1,6 @@
-import type { ApiEnvelope, CommandInfo, MetaInfo, PageHealth, PageManifest, SessionConfig, SessionRecord, Snapshot } from "./types";
+import type { ApiEnvelope, CommandInfo, HistoryListData, HistoryPreview, MetaInfo, PageHealth, PageManifest, SessionConfig, SessionRecord, Snapshot } from "./types";
 import type { AgentKind } from "./types";
+import { buildHistoryQuery, type HistoryQueryInput } from "./history";
 
 // REST 信封统一为 {code,msg,data,request_id}；code 非 0 时 msg 是中文错误消息。
 async function call<T>(path: string, init?: RequestInit): Promise<T> {
@@ -68,4 +69,20 @@ export function fetchPages(): Promise<PageManifest[]> {
 /** 限时探测扩展页面目标服务（后端最多等 2 秒）；只回答「服务在不在」。 */
 export function fetchPageHealth(id: string): Promise<PageHealth> {
   return call<PageHealth>(`/api/pages/${encodeURIComponent(id)}/health`);
+}
+
+/** 三家 CLI 自己保存的历史会话列表（只读）；翻页原样带回 nextCursor 与相同 agent/q。 */
+export function fetchHistory(input: HistoryQueryInput): Promise<HistoryListData> {
+  const query = buildHistoryQuery(input);
+  return call<HistoryListData>(`/api/history${query ? `?${query}` : ""}`);
+}
+
+/** 导入前预览：有界读取会话头部，messages ≤8 条。 */
+export function fetchHistoryPreview(
+  agent: AgentKind,
+  nativeSessionId: string,
+): Promise<HistoryPreview> {
+  return call<HistoryPreview>(
+    `/api/history/${encodeURIComponent(agent)}/${encodeURIComponent(nativeSessionId)}`,
+  );
 }

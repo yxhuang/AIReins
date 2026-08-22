@@ -40,12 +40,14 @@ frontend/
     mentions.ts         @ 引用纯文本 token 提取 / 光标处触发判定 / 尾部标点剥离候选（无 DOM 依赖，可单测）
     store.ts            全局状态 + WS 连接恢复（见下）
     useStore.ts         useSyncExternalStore 订阅 hook
-    App.tsx             布局骨架、hash 路由（#/session/<id> 与 #/page/<id>）、错误提示条
+    App.tsx             布局骨架、hash 路由（#/session/<id>、#/page/<id>、#/history）、错误提示条
     pages.ts            扩展页面纯逻辑：icon 形态判定 / 未知 type 跳过 / 健康结论→渲染模式（无 DOM 依赖，可单测）
+    history.ts          历史会话纯逻辑：/api/history 查询串构造 / 来源筛选 / 已导入对照（无 DOM 依赖，可单测）
     components/
-      Sidebar.tsx       会话列表（身份色脊 / 状态点 / 闸门徽标 / 危险模式「!」标记 / 行右删除入口 ×：hover/focus 显现、Tab 可达，点击后就地变行内二次确认）+ 新建会话表单（含三个配置下拉；cwd 三级预填回退 + 空 cwd 可见禁用原因）+ 底部「页面」分区与设置入口
+      Sidebar.tsx       会话列表（身份色脊 / 状态点 / 闸门徽标 / 危险模式「!」标记 / 行右删除入口 ×：hover/focus 显现、Tab 可达，点击后就地变行内二次确认）+ 新建会话表单（含三个配置下拉；cwd 三级预填回退 + 空 cwd 可见禁用原因）+ 底部「历史会话」入口、「页面」分区与设置入口
       SettingsMenu.tsx  设置齿轮 + 锚定浮层（分组/条目结构，60vh 限高滚动 + focus trap）；主题三选一写 <html data-theme>、localStorage 持久化（读写均 try/catch）
       PageView.tsx      扩展页面视图：进入先查健康，按 embeddable 三态渲染——不可达降级面板（reason + 重试）；embeddable:false 完全不渲染 iframe 改降级面板（服务正常但目标拒绝嵌入 + 主按钮新标签页打开）；embeddable:true 正常 iframe；null/缺省 iframe + 空白提示与常驻新标签页出口
+      HistoryView.tsx   历史会话浏览（#/history）：筛选（agent / 来源 / 关键词 250ms 防抖）+ nextCursor「加载更多」分页 + 预览面板（≤8 条消息）+「导入并续接」（就地续接代价写在按钮上方）+「已在工作台中」标记与跳转
       SessionView.tsx   会话头（usage 分家渲染 / 配置只读摘要 / 中断）+ 危险模式警示条 + 事件流 + 输入框（配置控件行在输入框正上方；行首 / 命令面板、@ 文件引用面板与待附加预览条、结构化 command 上行、codex 降级说明；草稿按会话内存缓存，切走切回不丢；dead 会话「新建会话并续接」出口）+ 未决闸门贴条
       StreamItems.tsx   用户消息 / 文本块 / 思考折叠块 / 工具卡片 / 闸门块 / 系统行
     styles.css          设计令牌（深浅两套）与全部样式
@@ -282,11 +284,33 @@ frontend/
 - [x] **77. 「在新标签页打开」带 `rel="noopener noreferrer"`。** **代码复核**：blocked 面板主按钮 `<a className="btn btn-primary" href={page.url} target="_blank" rel="noopener noreferrer">`（PageView.tsx）。
 - [x] **78. 四条命令全绿。** **实测**：`npm test`（check:theme「✅ 深色令牌两份一致（26 项）」+ mentions 29 例 + store 13 例 + pages 6 例）退出码 0；`npm run build`（vite 8.2.2，28 modules，退出码 0）；`npm run typecheck` 与 `npm run typecheck:frontend` 退出码均 0。
 
+### M14 历史会话浏览与导入（2026-08-22）
+
+后端 `/api/history` 的前端落地：左栏底部新增「历史会话」入口（页面分区上方，同一套分区语言，收起态只显图标），hash 路由 `#/history`（与 `#/session/<id>`、`#/page/<id>` 互斥，前进后退由浏览器 hash 历史天然支持）。
+
+- **列表**：每行复用 session-row 视觉语言（3px agent 身份色脊 + hover/active 背景），标题单行截断 + 来源徽标（「对话」中性描边 /「工作台」`--busy` 描边加粗一眼可辨 /「未知」虚线浅字如实显示，不猜）+ cwd 等宽小字 + `agent · 相对时间`。
+- **筛选**：agent 三个身份色 chip + 全部；来源筛选（全部来源/对话/工作台）默认「全部」**不过滤任何东西**，且是前端侧过滤（接口没有 source 参数），开启时元信息行明示「来源筛选只作用于已加载的条目」；关键词搜索 250ms 防抖后打到 `q`，请求带代次戳，过期响应丢弃。
+- **分页**：`nextCursor` +「加载更多」（每页 150 条，本机 467 候选约 4 页），不做无限滚动、不引虚拟滚动库；`truncated`（扫描预算触发）与 `skipped`（坏/空/不可读候选数，正常也可能非零）都渲染成 `--text-faint` 中性小字，不当错误；真正的失败（列表/预览/导入）才用冷调 `--danger`。
+- **预览**：点行 → 右侧面板 `GET /api/history/:agent/:id`（≤8 条消息，用户/助手分块）；`truncated:true` 是常态，中性说明「仅显示开头若干条消息（预览只读取会话文件头部），完整内容在原生会话文件中」；消息为空（kimi wire 缺失）同样中性说明。
+- **导入并续接**：`POST /api/sessions` 带 `{agent, cwd, resumeSessionId: nativeSessionId}`（复用 `store.create`，成功后 navigate 进新会话）。按钮上方小字如实写明代价（逐字）：「这是就地续接，不是分叉：导入后，工作台里跑的新回合会追写进这个原生会话文件；其中 Claude 会话里这些回合以 sdk-cli 身份落盘，与你交互式跑出的回合在文件里身份不同。」失败错误就地显示。
+- **已导入标记**：`history.ts` 的 `findImportedSession` 对照 `store.sessions` 的 `agent + nativeSessionId`，命中则行内标「已在工作台中」（`--ok` 冷色小徽标），预览面板给「跳转过去」，不再显示导入按钮。
+- **配色**：全部复用既有令牌（`--busy`/`--ok`/`--danger`/`--text-faint` 等），未新增令牌，暖色仍是闸门专用；筛选 chip 选中态复用 new-agent 的身份色纪律。行是真实 `<button>`，全部走全局 `:focus-visible` 描边。
+- **打桩测试** `frontend/scripts/history-flow.test.mjs`（根 package.json 本轮不动，直接 `npx tsx` 跑；`npm test` 聚合脚本不含它）：6 例覆盖查询串构造（空值省略/cursor 原样带回/中文编码）、来源筛选、已导入对照（agent 不匹配不算）、fetch URL 组装与 truncated/skipped 透传、错误信封抛中文 msg、`#/history` 与既有两类路由互斥。
+
+接口侧实测（2026-08-22，本机 8790 实例）：
+
+- [x] **79. 列表真实数据。** **实测**：`curl 'http://127.0.0.1:8790/api/history?agent=claude&limit=5'` 返回真实 claude interactive 条目：「opus」（`/home/user/dev`）、「帮我把…orca，AOE…彻底清理干净」等；source 分布 interactive/workbench 如实际；`discovered:134`（claude），全量 `discovered:467 / durationMs:193`。
+- [x] **80. agent 筛选 / 关键词搜索 / nextCursor 分页三通。** **实测**（curl 三变体）：`?agent=claude&limit=5` 只含 claude；`?q=opus&limit=5` 命中 3 条（claude「opus」「Tackle your toughest work with Opus 5…」+ kimi 一条，跨 agent 子串匹配 cwd/title，此页 `skipped:32` 非零属正常）；首页 nextCursor 原样带回翻第二页，5 条按 mtime 倒序衔接、`nextCursor` 继续存在。
+- [x] **81. 导入并续接实测一次。** **实测**：从列表挑 `source:"workbench"` 的旧测试会话「1+1」（claude `00000000-…`，cwd 在仓库内），POST 带 `resumeSessionId` → 新会话 `01J00000000000000000000004` 创建成功，`status:idle`、`processId:95174`（worker 活着）、`nativeSessionId` 续上原生 id；预览接口 `GET /api/history/claude/00000000-…` 返回 4 条消息（user「1+1」/ assistant「2」×2）。完事 DELETE 该自建会话（响应 `transcriptsDeleted:false, workbenchTranscriptPreserved:true`），列表确认消失，worker 95174 已停止；未碰任何 interactive 会话与既有会话。
+- [x] **82. 「已在工作台中」标记。** **代码复核 + 构造验证**：导入后 `GET /api/sessions` 中确有 `agent:claude + nativeSessionId:00000000-…` 的注册表条目（`findImportedSession` 的判定输入实测成立；验收 81 删除前顺手验证），打桩测试用例 3 覆盖 agent 不匹配不误判。
+- [x] **83. truncated/skipped 不渲染成错误。** **代码复核**：两者只在 `.history-meta`（`--text-faint` 中性小字）拼一句说明；预览 `truncated:true` 走 `.history-note`（`--text-muted` 中性说明）；`--danger` 只用于列表/预览/导入三类真实失败。
+- [x] **84. 四条命令全绿。** **实测**：`npm test`（check:theme「✅ 深色令牌两份一致（26 项）」+ mentions 29 例 + store 13 例 + pages 6 例）退出码 0；`npm run build`（vite 8.2.2，30 modules，退出码 0）；`npm run typecheck` 与 `npm run typecheck:frontend` 退出码均 0；另 `npx tsx frontend/scripts/history-flow.test.mjs` 输出「✅ history 前端逻辑回归全过（6 例）」。466 条下的渲染表现：分页每页 150 条（DOM 最多约 150 行 + 一个预览面板），无虚拟滚动库；列表接口本身 193ms 返回，UI 交互未在浏览器实测（无头环境）。
+
 ## 已知取舍
 
 - `@token` 严格按空白切段：句末紧跟的标点（如 `@a.ts，`）自 M12 起会在解析时逐级剥尾部标点、剥后命中真实文件才采纳；但标点后无空格直接接文字（如 `@a.ts，然后`）标点不在 token 尾部，仍判「未找到」，需要在引用后敲空格。
 
-- 未引入 UI 组件库、图标库、路由库：图标用 Unicode，路由用 hash（`#/session/<id>`、`#/page/<id>`）。
+- 未引入 UI 组件库、图标库、路由库：图标用 Unicode / 内联 SVG，路由用 hash（`#/session/<id>`、`#/page/<id>`、`#/history`）。
 - 扩展页面（`pages/`）只在前端启动时取一次列表（server 同样只在启动时扫描）；iframe 直接嵌 manifest 的 `url`，server 不反代；目标站点带 `x-frame-options: DENY` 时浏览器端无法探测，自 M13 起由后端 health 接口的 `embeddable` 判定（false → 完全不渲染 iframe 的降级面板；null/无法确定 → iframe + 空白提示 + 常驻新标签页出口）。
 - 未引入 `@vitejs/plugin-react`：esbuild automatic JSX 够用，dev 下 HMR 退化为整页刷新。
 - 会话状态没有专属 WS 事件，左栏状态靠事件推断 + 2 秒防抖重拉列表对齐，可能有一拍延迟。
