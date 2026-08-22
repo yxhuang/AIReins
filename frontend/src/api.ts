@@ -1,4 +1,4 @@
-import type { ApiEnvelope, CommandInfo, HistoryListData, HistoryPreview, MetaInfo, PageHealth, PageManifest, SessionConfig, SessionRecord, Snapshot } from "./types";
+import type { ApiEnvelope, CommandInfo, HistoryListData, HistoryMessagesPage, HistoryPreview, MetaInfo, PageHealth, PageManifest, SessionConfig, SessionRecord, Snapshot } from "./types";
 import type { AgentKind } from "./types";
 import { buildHistoryQuery, type HistoryQueryInput } from "./history";
 
@@ -84,5 +84,23 @@ export function fetchHistoryPreview(
 ): Promise<HistoryPreview> {
   return call<HistoryPreview>(
     `/api/history/${encodeURIComponent(agent)}/${encodeURIComponent(nativeSessionId)}`,
+  );
+}
+
+/**
+ * 续接会话的完整历史分页：不传 cursor 取最新一页；带回 nextCursor 继续向更早翻页。
+ * 每页内部按时间正序，调用方直接 prepend 到已有消息前。
+ */
+export function fetchHistoryMessages(
+  agent: AgentKind,
+  nativeSessionId: string,
+  opts: { limit?: number; cursor?: string } = {},
+): Promise<HistoryMessagesPage> {
+  const params = new URLSearchParams();
+  if (opts.limit !== undefined) params.set("limit", String(opts.limit));
+  if (opts.cursor) params.set("cursor", opts.cursor);
+  const query = params.toString();
+  return call<HistoryMessagesPage>(
+    `/api/history/${encodeURIComponent(agent)}/${encodeURIComponent(nativeSessionId)}/messages${query ? `?${query}` : ""}`,
   );
 }

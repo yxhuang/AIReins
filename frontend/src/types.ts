@@ -28,6 +28,12 @@ export interface DriverConfigOption {
   default: string | null;
   /** false = 只能建会话时设置，活改会被后端拒绝 */
   mutable: boolean;
+  /**
+   * "restart" = 界面上允许修改，但代价是停止并重启底层 worker
+   * （claude 的 model/effort：停 worker → --resume 同一原生会话 → 带新参数重启，
+   * 期间后端先广播 config_update_started，初始化成功后才有 config_updated）。
+   */
+  mutableVia?: "restart";
 }
 
 export interface UnifiedEvent {
@@ -51,6 +57,12 @@ export interface SessionRecord {
   transcriptPath: string;
   nativeSessionId?: string;
   nativeTranscriptPath?: string;
+  /** 以 resumeSessionId 建出的会话带的续接来源；messageCount 可选（后端默认省略） */
+  resumedFrom?: {
+    agent: AgentKind;
+    nativeSessionId: string;
+    messageCount?: number;
+  };
   processId?: number;
   model?: string | null;
   effort?: string | null;
@@ -184,6 +196,27 @@ export interface HistoryPreview {
   messages: HistoryPreviewMessage[];
   /** true 是常态（只读头部），界面写中性说明，不渲染成警告 */
   truncated: boolean;
+}
+
+/** GET …/messages 的归一历史消息：思考/工具调用已被后端丢弃，前端不伪造。 */
+export interface HistoryMessage {
+  role: "user" | "assistant";
+  text: string;
+  /** 原生记录缺失时间时为 null，前端如实不显示时间 */
+  timestamp: string | null;
+}
+
+/** GET /api/history/:agent/:nativeSessionId/messages 的 data：最新一页 + 向更早翻页。 */
+export interface HistoryMessagesPage {
+  session: HistorySession;
+  /** 页内按时间正序，前端直接 prepend 到已有消息前 */
+  messages: HistoryMessage[];
+  /** 不透明分页位置；继续向更早翻页时原样带回 */
+  nextCursor?: string;
+  hasMore: boolean;
+  /** 当前页受条数或 4 MiB 读取窗口限制（中性说明，不是错误） */
+  truncated: boolean;
+  durationMs: number;
 }
 
 export interface ApiEnvelope<T> {

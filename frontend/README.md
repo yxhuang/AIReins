@@ -43,12 +43,15 @@ frontend/
     App.tsx             布局骨架、hash 路由（#/session/<id>、#/page/<id>、#/history）、错误提示条
     pages.ts            扩展页面纯逻辑：icon 形态判定 / 未知 type 跳过 / 健康结论→渲染模式（无 DOM 依赖，可单测）
     history.ts          历史会话纯逻辑：/api/history 查询串构造 / 来源筛选 / 已导入对照（无 DOM 依赖，可单测）
+    config-view.ts      配置控件纯逻辑：mutableVia:"restart" 代价旁注判定与文案（无 DOM 依赖，可单测）
+    resumed-history.ts  续接会话历史区纯逻辑：最新一页打底 / nextCursor 翻页 prepend / DOM 上限（无 DOM 依赖，可单测）
     components/
       Sidebar.tsx       会话列表（身份色脊 / 状态点 / 闸门徽标 / 危险模式「!」标记 / 行右删除入口 ×：hover/focus 显现、Tab 可达，点击后就地变行内二次确认）+ 新建会话表单（含三个配置下拉；cwd 三级预填回退 + 空 cwd 可见禁用原因）+ 底部「历史会话」入口、「页面」分区与设置入口
       SettingsMenu.tsx  设置齿轮 + 锚定浮层（分组/条目结构，60vh 限高滚动 + focus trap）；主题三选一写 <html data-theme>、localStorage 持久化（读写均 try/catch）
       PageView.tsx      扩展页面视图：进入先查健康，按 embeddable 三态渲染——不可达降级面板（reason + 重试）；embeddable:false 完全不渲染 iframe 改降级面板（服务正常但目标拒绝嵌入 + 主按钮新标签页打开）；embeddable:true 正常 iframe；null/缺省 iframe + 空白提示与常驻新标签页出口
       HistoryView.tsx   历史会话浏览（#/history）：筛选（agent / 来源 / 关键词 250ms 防抖）+ nextCursor「加载更多」分页 + 预览面板（≤8 条消息）+「导入并续接」（就地续接代价写在按钮上方）+「已在工作台中」标记与跳转
-      SessionView.tsx   会话头（usage 分家渲染 / 配置只读摘要 / 中断）+ 危险模式警示条 + 事件流 + 输入框（配置控件行在输入框正上方；行首 / 命令面板、@ 文件引用面板与待附加预览条、结构化 command 上行、codex 降级说明；草稿按会话内存缓存，切走切回不丢；dead 会话「新建会话并续接」出口）+ 未决闸门贴条
+      SessionView.tsx   会话头（usage 分家渲染 / 配置只读摘要 / 中断）+ 危险模式警示条 + 历史消息区（resumedFrom 时）+ 事件流 + 输入框（配置控件行在输入框正上方；行首 / 命令面板、@ 文件引用面板与待附加预览条、结构化 command 上行、codex 降级说明；草稿按会话内存缓存，切走切回不丢；dead 会话「新建会话并续接」出口）+ 未决闸门贴条
+      ResumedHistory.tsx 续接会话的历史消息区：实时流上方、默认加载最近一页、「加载更早的消息」nextCursor 翻页 prepend、弱化底色 + 分隔线与实时区区分、用户/助手两态（不伪造工具/思考块）
       StreamItems.tsx   用户消息 / 文本块 / 思考折叠块 / 工具卡片 / 闸门块 / 系统行
     styles.css          设计令牌（深浅两套）与全部样式
 ```
@@ -305,6 +308,35 @@ frontend/
 - [x] **82. 「已在工作台中」标记。** **代码复核 + 构造验证**：导入后 `GET /api/sessions` 中确有 `agent:claude + nativeSessionId:00000000-…` 的注册表条目（`findImportedSession` 的判定输入实测成立；验收 81 删除前顺手验证），打桩测试用例 3 覆盖 agent 不匹配不误判。
 - [x] **83. truncated/skipped 不渲染成错误。** **代码复核**：两者只在 `.history-meta`（`--text-faint` 中性小字）拼一句说明；预览 `truncated:true` 走 `.history-note`（`--text-muted` 中性说明）；`--danger` 只用于列表/预览/导入三类真实失败。
 - [x] **84. 四条命令全绿。** **实测**：`npm test`（check:theme「✅ 深色令牌两份一致（26 项）」+ mentions 29 例 + store 13 例 + pages 6 例）退出码 0；`npm run build`（vite 8.2.2，30 modules，退出码 0）；`npm run typecheck` 与 `npm run typecheck:frontend` 退出码均 0；另 `npx tsx frontend/scripts/history-flow.test.mjs` 输出「✅ history 前端逻辑回归全过（6 例）」。466 条下的渲染表现：分页每页 150 条（DOM 最多约 150 行 + 一个预览面板），无虚拟滚动库；列表接口本身 193ms 返回，UI 交互未在浏览器实测（无头环境）。
+
+### M15 claude model/effort 重启切换 + 续接会话历史消息（2026-08-22）
+
+后端把 claude 的 model/effort 改为 `mutable:true, mutableVia:"restart"`（停 worker → `--resume` 同一原生会话 → 带新参数重启，不是原生活改），并给 resume 建出的会话带 `resumedFrom`；本轮是这两个能力的前端落地。
+
+**需求 1（重启切换）**：
+
+- 两个下拉不再禁用（schema 的 `mutable:true` 直接驱动，前端无硬编码）；`mutableVia:"restart"` 的项控件旁渲染一行中性小字（逐字）：「切换会重启底层进程并续接当前会话」（`config-view.ts` 的 `RESTART_NOTE`，`.config-note` 用 `--text-faint`，事实说明不是警告）。
+- 过渡态：store 新增 `configSwitching: Map<sessionId, string>`。`config_update_started` 到达时置位（payload 的 `message` 原样存入，后端实测文案「正在切换模型…」），ConfigControls 全部控件禁用 + 就地显示该文案（`.config-hint` 冷色 `--busy`，`role="status"`）；`config_updated` 到达才解除并应用新配置（`mutableVia:"restart"` / `workerRestarted:true` 为后端透传字段，前端不消费）。session/seq 不变，事件 `seq` 照常递增。断连重连后若快照里夹着未完成的 `config_update_started`，`applySnapshot` 会重建过渡态；切换中途 `session_error`（续接 worker 初始化失败）解除过渡态并把 payload.message 就地显示在控件旁。
+- 两种拒绝都是刻意保护，走既有 WS error 帧 → `configErrors` 路径就地显示在控件旁（冷调 `--danger` 小字 + 可关闭），不进全局错误条、不渲染成系统故障；措辞原样展示后端的：「当前回合尚未结束，请等待或中断后再切换」「Claude 首轮完成前尚无 nativeSessionId，无法通过续接切换模型或推理强度」。
+
+**需求 2（续接会话历史）**：
+
+- 会话带 `resumedFrom` 时，实时事件流上方渲染 `ResumedHistory` 历史区：进入会话**默认加载最近一页**（`GET /api/history/:agent/:nativeSessionId/messages?limit=50`），顶部「加载更早的消息」按 `nextCursor` 向更早翻页，每页内部时间正序、整页 prepend（`resumed-history.ts` 纯逻辑）；翻完（无 `nextCursor`）按钮消失、显示「已到最早的消息」。prepend 后补偿 `scrollTop`，视图不跳动。不一次拉全。
+- 视觉区分：历史区整体 `--surface-sunk` 弱化底色 + 圆角边框，底部居中分隔线「以上为导入前的历史对话」；**默认展开不折叠**。消息只渲染用户/助手两态（后端归一已丢弃工具调用/思考块，前端不伪造），文本原样，timestamp 等宽小字（缺失时显示「时间未知」）；页面 `truncated:true` 时给中性说明「部分页受单次读取窗口限制，个别消息可能不完整」。
+- 状态不静默：初始加载「正在加载历史消息…」；失败显示「历史消息加载失败：<msg>」+「重试」；翻页中按钮变「加载中…」；翻页失败保留已加载内容、错误就地显示可重试（cursor 未前进）。
+- DOM 量上限：最多加载最近 500 条（10 页），达到后翻页按钮换成说明「为控制页面长度，最多加载最近 500 条；更早的内容在原生会话文件中。」；不引虚拟滚动库。
+- 配色：全部复用既有令牌（`--surface-sunk`/`--text-faint`/`--text-muted`/`--danger`/`--busy`），未新增令牌，暖色仍是闸门专用。
+
+**打桩测试** `frontend/scripts/resume-config-flow.test.mjs`（9 例，本轮新增 `test:resume` 并挂进根 `npm test` 聚合）：`mutableVia` 旁注判定与文案逐字断言 + SessionView 接线源码断言；`config_update_started` → 过渡态 → `config_updated` 恢复；两种拒绝文案经 error 帧原样落 `configErrors`（不污染全局错误条）；`session_error` 解除过渡态；快照重建未完成过渡态；`fetchHistoryMessages` URL 组装与 `hasMore/truncated/timestamp:null` 透传；翻页 prepend 顺序与 DOM 上限；源码接线断言（resumedFrom 才挂历史区、分隔线文案、两态渲染、不伪造工具/思考块、不默认隐藏）。
+
+- [x] **85. 下拉可用 + 旁注存在。** **打桩实测**（用例 1）：`needsRestartNote` 仅对 `mutableVia:"restart"` 为真，`RESTART_NOTE` 逐字为「切换会重启底层进程并续接当前会话」；源码断言 ConfigControls 禁用条件只认 `!option.mutable`（restart 项不再被禁）。UI 实际渲染为**代码复核**（无头环境未启浏览器）。
+- [x] **86. 过渡态置位/恢复 + 两种拒绝就地显示。** **打桩实测**（用例 2/3/4/5）：`config_update_started`（payload.message「正在切换模型…」）→ `configSwitching` 置位；`config_updated` → 解除 + 应用新配置；「当前回合尚未结束，请等待或中断后再切换」与「Claude 首轮完成前尚无 nativeSessionId，无法通过续接切换模型或推理强度」两条 error 帧原样落 `configErrors` 且 `lastError` 保持 null；`session_error` 解除过渡态并就地显示失败原因；含未完成切换的快照能重建过渡态、已完成的快照不残留。
+- [x] **87. 导入历史会话后能看到之前的消息（接口侧实测）。** **实测**（隔离实例 `WORKBENCH_PORT=8796`）：从 `GET /api/history?agent=claude&limit=200` 挑 `source:"workbench"`、cwd 在仓库内的旧测试会话「只回复 OK」（`00000000-0000-…`）；`GET /api/history/claude/00000000-…/messages?limit=5` 返回 4 条真实消息（`[user] 2026-08-22T17:04:58.066Z :: 只回复 OK` / `[assistant] … :: OK` / `[user] :: 用 Write 工具在 server/test-sandbox/…` / `[assistant] :: 已写入。`），`hasMore:false`。POST `/api/sessions` 带 `resumeSessionId` 导入 → 新会话 `01J00000000000000000000005` 的 `resumedFrom` 实测为 `{"agent":"claude","nativeSessionId":"00000000-0000-4000-8000-000000000006"}`、`status:idle`。完事只 DELETE 该自建会话（`code=0, transcriptsDeleted:false, workbenchTranscriptPreserved:true`），列表确认消失；未动任何既有会话。前端渲染链路（resumedFrom → 拉一页 → prepend → 分隔线存在）为**打桩实测**（用例 6/7/9）。
+- [x] **88. 「加载更早的消息」cursor 翻页。** **打桩实测**（用例 7）：更早一页整页 prepend、页内顺序不动、翻完 nextCursor 消失。另做**接口侧只读实测**：对 interactive 会话「opus」（不导入）连取两页，第 2 页末条 `14:12:52` ≤ 第 1 页首条 `14:13:19`，两页无重复，`hasMore` 仍为 true。
+- [x] **89. 历史区/实时区视觉区分 + 默认可见。** **代码复核**：`.session-history` 弱化底色 `--surface-sunk` + 边框；`.session-history-divider` 居中分隔线「以上为导入前的历史对话」；组件无任何折叠/隐藏逻辑（打桩源码断言 `display:none` 不存在）。视觉效果未在浏览器人工确认。
+- [x] **90. 四条命令全绿。** **实测**：`npm test`（check:theme「✅ 深色令牌两份一致（26 项）」+ mentions 29 例 + store 13 例 + pages 6 例 + resume 9 例）退出码 0；`npm run build`（vite 8.2.2，退出码 0）；`npm run typecheck` 与 `npm run typecheck:frontend` 退出码均 0。
+
+**这版历史加载仍会误导用户的点**（如实记录）：① 历史区只有用户/助手文本，原生会话里实际发生过的工具调用与思考完全不可见，「已写入。」这类回复看起来像是凭空说的；② `resumedFrom.messageCount` 后端默认省略，历史区头部「约 N 条消息」通常不出现，用户无法预知历史总量；③ 达到 500 条上限后提示「更早的内容在原生会话文件中」，但界面没给出该文件路径（只有原生 id）；④ 若原生 transcript 被用户在 CLI 侧继续写过，历史区不会自动刷新（仅进会话时取一次 + 手动翻页）。
 
 ## 已知取舍
 

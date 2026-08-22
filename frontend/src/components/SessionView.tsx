@@ -3,10 +3,12 @@ import type { CommandInfo, MetaInfo, SessionRecord } from "../types";
 import { compactTokens, duration, asRecord, truncateDisplayWidth } from "../format";
 import { buildRenderItems, type GateView } from "../render-items";
 import { extractMentionTokens, mentionQueryAt, mentionTokenEnd } from "../mentions";
+import { needsRestartNote, RESTART_NOTE } from "../config-view";
 import { fetchFiles } from "../api";
 import { MAX_MENTIONS, store } from "../store";
 import { useStore } from "../useStore";
 import { GateBlock, RawLine, SystemLine, TextBlockView, ThoughtBlockView, ToolCard, UserBlockView } from "./StreamItems";
+import { ResumedHistory } from "./ResumedHistory";
 import { STATUS_HINTS, STATUS_LABELS } from "./Sidebar";
 
 export function SessionView({ session }: { session: SessionRecord }) {
@@ -102,6 +104,8 @@ export function SessionView({ session }: { session: SessionRecord }) {
       )}
 
       <div className="stream" ref={streamRef} onScroll={updateHiddenPending}>
+        {/* 续接会话：历史消息区在实时事件流上方，向上翻即可见（不默认折叠） */}
+        {session.resumedFrom && <ResumedHistory session={session} streamRef={streamRef} />}
         {!data && <p className="system-line">载入会话…</p>}
         {data && data.dropped > 0 && (
           <p className="system-line">最早的 {data.dropped} 条事件已省略（内存上限）；快照仍保留全量。</p>
@@ -176,6 +180,8 @@ function ConfigControls({ session }: { session: SessionRecord }) {
   const pending = store.configPending.get(session.id);
   const error = store.configErrors.get(session.id);
   const hint = store.configHints.get(session.id);
+  // 重启切换进行中（claude model/effort）：全部控件禁用，就地显示后端给的过渡文案
+  const switching = store.configSwitching.get(session.id);
   const live = Boolean(session.processId) && session.status !== "dead";
   if (options.length === 0 && !error) return null;
 
@@ -188,12 +194,15 @@ function ConfigControls({ session }: { session: SessionRecord }) {
         const followLabel =
           option.values.find((v) => v.value === null)?.label ?? "跟随配置";
         const known = new Set(option.values.map((v) => v.value));
-        const disabled = !option.mutable || !live || Boolean(pending?.has(option.id));
-        const title = !option.mutable
-          ? "此项需新建会话才能更改"
-          : !live
-            ? "会话已结束，无法更改"
-            : undefined;
+        const disabled =
+          !option.mutable || !live || Boolean(switching) || Boolean(pending?.has(option.id));
+        const title = switching
+          ? undefined
+          : !option.mutable
+            ? "此项需新建会话才能更改"
+            : !live
+              ? "会话已结束，无法更改"
+              : undefined;
         return (
           <label className="config-select" key={option.id} title={title}>
             <span className="config-select-name">
@@ -229,9 +238,18 @@ function ConfigControls({ session }: { session: SessionRecord }) {
                   </option>
                 ))}
             </select>
+            {/* mutableVia:"restart" 的代价如实标注在控件旁：事实说明，不是警告 */}
+            {needsRestartNote(option) && (
+              <span className="config-note">{RESTART_NOTE}</span>
+            )}
           </label>
         );
       })}
+      {switching && (
+        <span className="config-hint" role="status">
+          {switching}
+        </span>
+      )}
       {hint && <span className="config-hint">{hint}</span>}
       {error && (
         <span className="config-error" role="alert">

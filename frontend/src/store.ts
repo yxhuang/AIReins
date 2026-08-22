@@ -60,6 +60,11 @@ export class Store {
   configPending = new Map<string, Set<ConfigOptionId>>();
   /** set_config 失败错误（sessionId → 消息），显示在输入框上方配置控件旁 */
   configErrors = new Map<string, string>();
+  /**
+   * claude model/effort 重启切换进行中（sessionId → config_update_started 的 message）。
+   * 控件禁用 + 就地显示该文案；config_updated / session_error / WS error 到达才解除。
+   */
+  configSwitching = new Map<string, string>();
   /** codex effectiveFrom:"next_turn" 的一次性提示 */
   configHints = new Map<string, string>();
   /** 每会话斜杠命令表：快照内 commands_updated 打底 + REST 首取覆盖 + WS 实时全量覆盖 */
@@ -270,6 +275,18 @@ export class Store {
         commands = commandsFromPayload(event.payload);
       }
     }
+    // 快照内可能正好夹着一次未完成的重启切换（config_update_started 之后
+    // 还没有 config_updated/session_error）：重建过渡态，切换中文案不丢。
+    let switching: string | undefined;
+    for (const event of events) {
+      if (event.type === "config_update_started") {
+        switching = switchMessageFromPayload(event.payload);
+      } else if (event.type === "config_updated" || event.type === "session_error") {
+        switching = undefined;
+      }
+    }
+    if (switching) this.configSwitching.set(id, switching);
+    else this.configSwitching.delete(id);
     if (commands) this.commands.set(id, commands);
     const sorted = [...events].sort((a, b) => a.seq - b.seq);
     const dropped = Math.max(0, sorted.length - MAX_EVENTS);
@@ -371,6 +388,20 @@ export class Store {
         } else if (event.type === "commands_updated") {
           // 实时全量覆盖（装新 skill 后立即可见），不是一次性快照。
           this.commands.set(event.sessionId, commandsFromPayload(event.payload));
+        } else if (event.type === "config_update_started") {
+          // claude model/effort 重启切换开始：控件禁用 + 就地显示后端给的过渡文案，
+          // config_updated / session_error 到达才解除（见下方两处）。
+          this.configSwitching.set(event.sessionId, switchMessageFromPayload(event.payload));
+        } else if (event.type === "session_error") {
+          // 切换中途失败（续接 worker 初始化失败等）：解除过渡态，错误就地显示在控件旁，
+          // 不渲染成全局故障。
+          if (this.configSwitching.delete(event.sessionId)) {
+            this.configPending.delete(event.sessionId);
+            this.configErrors.set(
+              event.sessionId,
+              String(event.payload.message ?? "切换失败"),
+            );
+          }
         }
       }
       // event.seq <= data.seq：重发，忽略。
@@ -408,6 +439,7 @@ export class Store {
     if ("permissionMode" in payload) session.permissionMode = payload.permissionMode as string | null;
     if (typeof payload.riskyMode === "boolean") session.riskyMode = payload.riskyMode;
     this.configPending.delete(event.sessionId);
+    this.configSwitching.delete(event.sessionId);
     this.configErrors.delete(event.sessionId);
     if (payload.effectiveFrom === "next_turn") {
       this.configHints.set(event.sessionId, "下一轮生效");
@@ -682,6 +714,7 @@ export class Store {
     this.drafts.delete(id);
     this.configPending.delete(id);
     this.configErrors.delete(id);
+    this.configSwitching.delete(id);
     this.configHints.delete(id);
     const hintTimer = this.configHintTimers.get(id);
     if (hintTimer) {
@@ -720,6 +753,12 @@ export class Store {
 function commandsFromPayload(payload: Record<string, unknown>): CommandInfo[] {
   const list = payload.commands;
   return Array.isArray(list) ? (list as CommandInfo[]) : [];
+}
+
+/** config_update_started 的过渡文案：后端给什么显示什么；缺省兜底。 */
+function switchMessageFromPayload(payload: Record<string, unknown>): string {
+  const message = payload.message;
+  return typeof message === "string" && message ? message : "正在切换配置…";
 }
 
 // 从事件推断会话状态（权威值靠定期 GET /api/sessions 对齐）。
