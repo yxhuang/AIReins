@@ -154,6 +154,7 @@ export function HistoryView() {
             <button
               type="button"
               className={`history-chip${agentFilter === "" ? " selected" : ""}`}
+              aria-pressed={agentFilter === ""}
               onClick={() => setAgentFilter("")}
             >
               全部
@@ -163,6 +164,7 @@ export function HistoryView() {
                 key={agent}
                 type="button"
                 className={`history-chip agent-${agent}${agentFilter === agent ? " selected" : ""}`}
+                aria-pressed={agentFilter === agent}
                 onClick={() => setAgentFilter(agent)}
               >
                 {agent}
@@ -175,6 +177,7 @@ export function HistoryView() {
                 key={source}
                 type="button"
                 className={`history-chip${sourceFilter === source ? " selected" : ""}`}
+                aria-pressed={sourceFilter === source}
                 onClick={() => setSourceFilter(source)}
               >
                 {source === "all" ? "全部来源" : SOURCE_FILTER_LABELS[source]}
@@ -272,6 +275,7 @@ const HistoryRow = memo(function HistoryRow({
     <button
       type="button"
       className={`history-row agent-${item.agent}${active ? " active" : ""}`}
+      aria-current={active ? "true" : undefined}
       onClick={() => onSelect(key)}
     >
       <span className="history-row-line1">
@@ -333,7 +337,7 @@ function HistoryPreviewPane({ item }: { item: HistorySession | undefined }) {
 
   if (!item) {
     return (
-      <aside className="history-preview-pane" aria-label="会话预览">
+      <aside className="history-preview-pane" aria-label="会话预览" aria-live="polite">
         <div className="history-preview-empty">从左侧选一个会话查看预览</div>
       </aside>
     );
@@ -357,7 +361,7 @@ function HistoryPreviewPane({ item }: { item: HistorySession | undefined }) {
   };
 
   return (
-    <aside className="history-preview-pane" aria-label="会话预览">
+    <aside className="history-preview-pane" aria-label="会话预览" aria-live="polite">
       <div className="history-preview-head">
         <h2 className="history-preview-title">{item.title}</h2>
         <p className="history-preview-meta">

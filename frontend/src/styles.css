@@ -307,6 +307,24 @@ body {
   padding: 8px 4px;
 }
 
+/* 「N 个已结束会话」折叠行：中性小字按钮，不压 dead 行本身的可读性 */
+.session-dead-toggle {
+  width: 100%;
+  border: none;
+  background: transparent;
+  border-radius: var(--radius);
+  color: var(--text-faint);
+  font-size: 12.5px;
+  padding: 6px 10px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.session-dead-toggle:hover {
+  background: var(--surface-sunk);
+  color: var(--text-muted);
+}
+
 /* 会话行 + 删除入口：× 在行外右侧，永不挤占/遮挡行内右侧的闸门徽标（徽标优先级更高） */
 .session-item {
   display: flex;
@@ -1061,6 +1079,14 @@ body {
   color: var(--text-faint);
 }
 
+/* 命令面板分段标签（「最近使用」/「全部命令」）：中性小字，与 settings-group-title 同一语言 */
+.cmd-section {
+  padding: 4px 8px 2px;
+  font-size: 11.5px;
+  letter-spacing: 0.04em;
+  color: var(--text-faint);
+}
+
 /* 已确认命令的参数提示行（argHint） */
 .composer-hint {
   font-size: 12px;
@@ -1143,6 +1169,19 @@ body {
   color: var(--text-muted);
   cursor: pointer;
   white-space: nowrap;
+}
+
+/* 带会话上下文的错误本体是可点按钮（点击跳转到出错会话）；外观仍是 toast 的错误文本 */
+.toast-jump {
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  padding: 0;
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 
 /* 删除成功提示：成功信息不用 danger 红，走中性边框/正文色 */

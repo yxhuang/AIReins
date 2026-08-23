@@ -72,11 +72,36 @@ export function Sidebar({ collapsed, onToggle, newOpen, onNewOpenChange }: Sideb
   const currentId = useStore(selectCurrentId);
   // pendingGates 是可变 Map；用可比较的原始字符串捕获“总数相同但分布换了会话”的变化。
   useStore(selectPendingSignature);
-  const sessions = [...sessionRecords].sort(
-    (a, b) => Date.parse(b.lastActivityAt) - Date.parse(a.lastActivityAt),
-  );
+  const [deadExpanded, setDeadExpanded] = useState(false);
+  // 稳定排序：默认按 createdAt，行序不随事件流抖动（此前按 lastActivityAt，正要点的那行会被挤走）。
+  const byCreated = (a: SessionRecord, b: SessionRecord) =>
+    Date.parse(a.createdAt) - Date.parse(b.createdAt);
+  // 有未决闸门的会话抽到顶部「等待处理」区（天然总览）；dead 会话沉底折叠。
+  // 防御性兜底：万一 dead 会话仍带未决计数，也只进等待处理区——未决闸门绝不许被折叠藏起。
+  const waiting = sessionRecords.filter((s) => store.pendingCount(s.id) > 0).sort(byCreated);
+  const active = sessionRecords
+    .filter((s) => store.pendingCount(s.id) === 0 && s.status !== "dead")
+    .sort(byCreated);
+  const dead = sessionRecords
+    .filter((s) => store.pendingCount(s.id) === 0 && s.status === "dead")
+    .sort(byCreated);
+  const totalSessions = sessionRecords.length;
   // 收起态仍要能看到全局待审批压力：全部会话未决闸门总数。
-  const totalPending = sessions.reduce((sum, session) => sum + store.pendingCount(session.id), 0);
+  const totalPending = sessionRecords.reduce(
+    (sum, session) => sum + store.pendingCount(session.id),
+    0,
+  );
+
+  const renderRow = (session: SessionRecord) => (
+    <li key={session.id}>
+      <SessionRow
+        session={session}
+        pending={store.pendingCount(session.id)}
+        active={session.id === currentId}
+        now={now}
+      />
+    </li>
+  );
 
   return (
     <aside className="sidebar">
@@ -112,17 +137,29 @@ export function Sidebar({ collapsed, onToggle, newOpen, onNewOpenChange }: Sideb
           </button>
           {newOpen && <NewSessionForm onDone={() => onNewOpenChange(false)} />}
           <ul className="session-list">
-            {sessions.map((session) => (
-              <li key={session.id}>
-                <SessionRow
-                  session={session}
-                  pending={store.pendingCount(session.id)}
-                  active={session.id === currentId}
-                  now={now}
-                />
+            {waiting.length > 0 && (
+              // 分区标题复用 .page-nav-title 的中性小字语言；暖色仍只出现在行内闸门徽标上
+              <li className="page-nav-title" role="presentation">
+                等待处理（{waiting.length}）
               </li>
-            ))}
-            {sessions.length === 0 && <li className="session-list-empty">还没有会话</li>}
+            )}
+            {waiting.map(renderRow)}
+            {active.map(renderRow)}
+            {dead.length > 0 && (
+              <li>
+                <button
+                  type="button"
+                  className="session-dead-toggle"
+                  aria-expanded={deadExpanded}
+                  title={deadExpanded ? "收起已结束会话" : "展开已结束会话"}
+                  onClick={() => setDeadExpanded((v) => !v)}
+                >
+                  {deadExpanded ? "▾" : "▸"} {dead.length} 个已结束会话
+                </button>
+              </li>
+            )}
+            {deadExpanded && dead.map(renderRow)}
+            {totalSessions === 0 && <li className="session-list-empty">还没有会话</li>}
           </ul>
         </>
       )}

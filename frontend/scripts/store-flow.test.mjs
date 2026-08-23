@@ -129,7 +129,8 @@ await t("缺失闸门 ref 的恢复：先提示并 resync，快照窗口额外�
   s.data.set(session.id, oldData);
 
   const recovering = s.recoverMissingPendingGate(session.id);
-  assert.match(s.lastError, /闸门.*事件窗口.*重新载入/, "找不到 ref 时必须有用户可见提示");
+  assert.match(s.lastError?.message ?? "", /闸门.*事件窗口.*重新载入/, "找不到 ref 时必须有用户可见提示");
+  assert.equal(s.lastError?.sessionId, session.id, "恢复提示必须带会话上下文（toast 可点击跳转）");
   assert.equal(gate.length, 1, "找不到 ref 时必须发起快照 resync");
   assert.equal(s.data.get(session.id), oldData, "resync 等待期间不得删掉旧 data");
 

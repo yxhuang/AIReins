@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import type { CommandInfo, MetaInfo, SessionRecord } from "../types";
 import { compactTokens, duration, asRecord, truncateDisplayWidth } from "../format";
 import { buildRenderItems } from "../render-items";
+import { filterCommands, noteCommandUsed, readRecentCommands, recentInTable } from "../commands";
 import { extractMentionTokens, mentionQueryAt, mentionTokenEnd } from "../mentions";
 import { needsRestartNote, effectiveFor, EFFECTIVE_SOURCE_LABELS, ALIAS_NOTE, RESTART_NOTE } from "../config-view";
 import { fetchFiles } from "../api";
@@ -427,7 +428,15 @@ function Composer({ session, dead, errored }: { session: SessionRecord; dead: bo
   // 仅行首 / 触发（整段文本即「/query」形态）；行中间的 /（如路径）是普通字符
   const slashQuery = /^\/([^\s]*)$/.exec(text)?.[1] ?? null;
   const slashOpen = commandsSupported && !dead && slashQuery !== null && !dismissed;
-  const filtered = slashOpen ? filterCommands(table, slashQuery ?? "") : [];
+  // 最近使用（每 agent 独立记忆；localStorage 不可用时为空数组，静默降级）：
+  // 面板打开期间读一次，空 query 置顶成「最近使用」段，有 query 时作排序加权。
+  const recentNames = useMemo(
+    () => (slashOpen ? readRecentCommands(session.agent) : []),
+    [slashOpen, session.agent],
+  );
+  const filtered = slashOpen ? filterCommands(table, slashQuery ?? "", recentNames) : [];
+  // 空 query 时结果前 recentCount 条是「最近使用」段（渲染分隔标签用）
+  const recentCount = slashOpen && slashQuery === "" ? recentInTable(table, recentNames).length : 0;
   const sel = Math.min(selected, Math.max(filtered.length - 1, 0));
   const active = filtered[sel];
 
@@ -530,6 +539,7 @@ function Composer({ session, dead, errored }: { session: SessionRecord; dead: bo
   const confirm = (cmd: CommandInfo, fillOnly: boolean) => {
     if (!fillOnly && !cmd.argHint) {
       // 无参数命令：确认即直接发（结构化 command，不拼 text）；失败保留文本，错误条提示
+      noteCommandUsed(session.agent, cmd.name);
       if (store.sendCommand(session.id, cmd.name, "")) setText("");
     } else {
       // 有参数（或 Tab 只填充）：填入「/name 」，光标留在末尾参数位等用户补完
@@ -553,6 +563,8 @@ function Composer({ session, dead, errored }: { session: SessionRecord; dead: bo
   const send = () => {
     const trimmed = text.trim();
     if (!trimmed || dead) return;
+    // 「/命令 参数」整行形态经 sendComposerInput 走结构化 command，同样记入最近使用
+    if (willBeCommand && cmdMatch) noteCommandUsed(session.agent, cmdMatch[1]!);
     // 先清空（mentions 异步路径下「确认成功」不好定义）；失败时把文本还回输入框。
     // 草稿语义统一走草稿缓存：输入即草稿；发送成功由 store 侧清草稿（文本框也已清空）；
     // 失败时草稿本来就在，这里只需把可见文本还回。
@@ -679,20 +691,31 @@ function Composer({ session, dead, errored }: { session: SessionRecord; dead: bo
         <div className="cmd-panel" role="listbox" aria-label="斜杠命令" ref={listRef}>
           {filtered.length === 0 && <div className="cmd-empty">没有匹配的命令</div>}
           {filtered.map((cmd, i) => (
-            <div
-              key={cmd.name}
-              role="option"
-              aria-selected={i === sel}
-              className={`cmd-item${i === sel ? " selected" : ""}`}
-              onMouseDown={(e) => {
-                e.preventDefault(); // 不抢输入框焦点，键盘可继续输入
-                confirm(cmd, false);
-              }}
-              onMouseEnter={() => setSelected(i)}
-            >
-              <span className="cmd-name mono">/{cmd.name}</span>
-              <span className="cmd-desc">{truncateDisplayWidth(cmd.description, 48)}</span>
-            </div>
+            <Fragment key={cmd.name}>
+              {recentCount > 0 && i === 0 && (
+                <div className="cmd-section" aria-hidden="true">
+                  最近使用
+                </div>
+              )}
+              {recentCount > 0 && i === recentCount && (
+                <div className="cmd-section" aria-hidden="true">
+                  全部命令
+                </div>
+              )}
+              <div
+                role="option"
+                aria-selected={i === sel}
+                className={`cmd-item${i === sel ? " selected" : ""}`}
+                onMouseDown={(e) => {
+                  e.preventDefault(); // 不抢输入框焦点，键盘可继续输入
+                  confirm(cmd, false);
+                }}
+                onMouseEnter={() => setSelected(i)}
+              >
+                <span className="cmd-name mono">/{cmd.name}</span>
+                <span className="cmd-desc">{truncateDisplayWidth(cmd.description, 48)}</span>
+              </div>
+            </Fragment>
           ))}
         </div>
       )}
@@ -779,29 +802,4 @@ function Composer({ session, dead, errored }: { session: SessionRecord; dead: bo
   );
 }
 
-// 命令筛选：名称前缀 > 名称子序列模糊 > 描述子串；各组内保持命令表原顺序。
-function filterCommands(commands: CommandInfo[], query: string): CommandInfo[] {
-  const q = query.toLowerCase();
-  if (!q) return commands;
-  const prefix: CommandInfo[] = [];
-  const fuzzy: CommandInfo[] = [];
-  const desc: CommandInfo[] = [];
-  for (const cmd of commands) {
-    const name = cmd.name.toLowerCase();
-    if (name.startsWith(q)) prefix.push(cmd);
-    else if (isSubsequence(q, name)) fuzzy.push(cmd);
-    else if (cmd.description.toLowerCase().includes(q)) desc.push(cmd);
-  }
-  return [...prefix, ...fuzzy, ...desc];
-}
-
-function isSubsequence(needle: string, haystack: string): boolean {
-  let i = 0;
-  for (const ch of haystack) {
-    if (ch === needle[i]) {
-      i++;
-      if (i === needle.length) return true;
-    }
-  }
-  return needle.length === 0;
-}
+// 命令筛选与「最近使用」已抽到 ../commands（纯逻辑，单测见 scripts/render-items.test.mjs）。

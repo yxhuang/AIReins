@@ -3,6 +3,7 @@ import { Sidebar } from "./components/Sidebar";
 import { SessionView } from "./components/SessionView";
 import { PageView } from "./components/PageView";
 import { HistoryView } from "./components/HistoryView";
+import { sessionTitle } from "./format";
 import { store, type Store } from "./store";
 import { shallowEqual, useStore } from "./useStore";
 
@@ -12,11 +13,21 @@ const selectCurrentPage = (value: Store) =>
   value.currentPageId
     ? value.pages.find((page) => page.id === value.currentPageId)
     : undefined;
+// 带 sessionId 的错误解析出「agent · 会话标题」上下文（纯字符串，selector 比较友好）；
+// 会话已不存在时返回 undefined，toast 退化为不可点击的纯文本。
+const selectErrorContext = (value: Store) => {
+  const error = value.lastError;
+  if (!error?.sessionId) return undefined;
+  const session = value.session(error.sessionId);
+  if (!session) return undefined;
+  return `${session.agent} · ${sessionTitle(session, value.data.get(error.sessionId)?.events)}`;
+};
 const selectAppUi = (value: Store) =>
   [
     value.historyOpen,
     value.currentPageId,
     value.lastError,
+    selectErrorContext(value),
     value.removalNotice,
   ] as const;
 const selectPendingTotal = (value: Store) =>
@@ -27,7 +38,7 @@ export function App() {
   const [newOpen, setNewOpen] = useState(false);
   const current = useStore(selectCurrentSession);
   const currentPage = useStore(selectCurrentPage);
-  const [historyOpen, currentPageId, lastError, removalNotice] = useStore(
+  const [historyOpen, currentPageId, lastError, errorContext, removalNotice] = useStore(
     selectAppUi,
     shallowEqual,
   );
@@ -87,7 +98,22 @@ export function App() {
       </main>
       {lastError && (
         <div className="toast" role="alert">
-          <span>{lastError}</span>
+          {/* 带会话上下文的错误：整体是按钮，点击跳转到出错会话；无 sessionId 或会话已删则退化为纯文本 */}
+          {lastError.sessionId && errorContext ? (
+            <button
+              type="button"
+              className="toast-jump"
+              title="点击跳转到出错的会话"
+              onClick={() => {
+                store.navigate(lastError.sessionId!);
+                store.dismissError();
+              }}
+            >
+              {errorContext}：{lastError.message}
+            </button>
+          ) : (
+            <span>{lastError.message}</span>
+          )}
           <button type="button" className="toast-close" onClick={() => store.dismissError()}>
             知道了
           </button>

@@ -26,6 +26,12 @@ import { partitionPages, type SkippedPage } from "./pages";
 
 export type WsState = "connecting" | "open" | "closed";
 
+/** 全局错误条内容；带 sessionId 的错误在 App.tsx 渲染成可点击跳转（会话标题 + agent 名）。 */
+export interface LastError {
+  message: string;
+  sessionId?: string;
+}
+
 /** 每会话常规事件窗口上限；窗口外未决闸门请求是“不漏审批”的唯一保护项。 */
 const MAX_EVENTS = 2000;
 
@@ -61,7 +67,7 @@ export class Store {
   historyOpen = false;
   data = new Map<string, SessionData>();
   wsState: WsState = "closed";
-  lastError: string | null = null;
+  lastError: LastError | null = null;
   /** 删除成功后的一次性提示（原生记录仍在 + 可选 transcript 路径），用户手动关闭 */
   removalNotice: { message: string; path?: string } | null = null;
   /** set_config 发送中的控件（sessionId → 选项 id 集合）；等 config_updated 回来才解除 */
@@ -154,7 +160,7 @@ export class Store {
     try {
       this.meta = await fetchMeta();
     } catch (error) {
-      this.lastError = error instanceof Error ? error.message : String(error);
+      this.lastError = { message: error instanceof Error ? error.message : String(error) };
     }
     await this.refreshSessions();
     this.startClock();
@@ -208,7 +214,7 @@ export class Store {
       this.pages = supported;
       this.skippedPages = skipped;
     } catch (error) {
-      this.lastError = error instanceof Error ? error.message : String(error);
+      this.lastError = { message: error instanceof Error ? error.message : String(error) };
     }
     this.notify();
   }
@@ -225,7 +231,7 @@ export class Store {
     try {
       this.sessions = await fetchSessions();
     } catch (error) {
-      this.lastError = error instanceof Error ? error.message : String(error);
+      this.lastError = { message: error instanceof Error ? error.message : String(error) };
     }
     // dead 会话的未决闸门已不可操作，清掉避免僵尸暖色徽标。
     for (const session of this.sessions) {
@@ -270,7 +276,10 @@ export class Store {
           this.applySnapshot(id, snapshot.session, snapshot.seq, snapshot.events);
         }
       } catch (error) {
-        this.lastError = error instanceof Error ? error.message : String(error);
+        this.lastError = {
+          message: error instanceof Error ? error.message : String(error),
+          sessionId: id,
+        };
       } finally {
         // 所有权校验：旧请求的 finally 不得误删新请求的 in-flight 条目
         if (this.snapshotInflight.get(id) === promise) this.snapshotInflight.delete(id);
@@ -301,7 +310,10 @@ export class Store {
 
   /** 定位条发现未决闸门不在当前 DOM 时：明确提示并用权威快照恢复。 */
   recoverMissingPendingGate(id: string): Promise<void> {
-    this.lastError = "待处理闸门不在当前事件窗口，正在重新载入会话快照，请稍后再试。";
+    this.lastError = {
+      message: "待处理闸门不在当前事件窗口，正在重新载入会话快照，请稍后再试。",
+      sessionId: id,
+    };
     this.notify();
     return this.resync(id);
   }
@@ -417,7 +429,7 @@ export class Store {
         this.configPending.delete(sid);
         this.configErrors.set(sid, msg);
       } else {
-        this.lastError = msg;
+        this.lastError = sid ? { message: msg, sessionId: sid } : { message: msg };
       }
       this.notify();
       return;
@@ -556,7 +568,12 @@ export class Store {
       this.socket.send(JSON.stringify(frame));
       return true;
     }
-    this.lastError = "连接已断开，正在重连…";
+    // 帧里带 sessionId 时一并记入错误，toast 可跳转到对应会话
+    const sessionId = typeof frame.sessionId === "string" ? frame.sessionId : undefined;
+    this.lastError = {
+      message: "连接已断开，正在重连…",
+      ...(sessionId ? { sessionId } : {}),
+    };
     this.notify();
     return false;
   }
@@ -802,8 +819,9 @@ export class Store {
 
   /**
    * 从工作台移除会话：DELETE 注册表条目 + 停 worker（原生 transcript 不动）。
-   * 成功后清该会话全部本地状态；删的是当前会话时导航到列表剩余的第一个
-   * （与左栏同序：lastActivityAt 最新），无剩余则回空态。失败抛错由调用方展示。
+   * 成功后清该会话全部本地状态；删的是当前会话时导航到左栏顺序的下一个会话
+   * （与左栏同序：有未决闸门的优先，其余按 createdAt 稳定序），无剩余则回空态。
+   * 失败抛错由调用方展示。
    */
   async remove(id: string): Promise<void> {
     const agent = this.session(id)?.agent ?? "";
@@ -829,9 +847,14 @@ export class Store {
     this.snapshotGen.set(id, ++this.nextSnapshotGen);
     this.snapshotInflight.delete(id);
     if (this.currentId === id) {
-      const next = [...this.sessions].sort(
-        (a, b) => Date.parse(b.lastActivityAt) - Date.parse(a.lastActivityAt),
-      )[0];
+      // 与左栏同序：有未决闸门的优先（createdAt 稳定序），其次普通会话，最后才是折叠区的 dead
+      const remaining = [...this.sessions].sort(
+        (a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt),
+      );
+      const next =
+        remaining.filter((s) => this.pendingCount(s.id) > 0)[0] ??
+        remaining.filter((s) => s.status !== "dead")[0] ??
+        remaining[0];
       this.navigate(next?.id ?? null);
     }
     // 删除只动注册表：明示原生对话记录仍在，可凭原生 id 续接

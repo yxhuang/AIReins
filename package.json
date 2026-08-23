@@ -19,7 +19,8 @@
     "test:resume": "tsx frontend/scripts/resume-config-flow.test.mjs",
     "test:effective-ask": "tsx frontend/scripts/effective-ask-flow.test.mjs",
     "test:history": "tsx frontend/scripts/history-flow.test.mjs",
-    "test": "npm run check:theme && npm run test:mentions && npm run test:store && npm run test:pages && npm run test:resume && npm run test:effective-ask && npm run test:history"
+    "test:render-items": "tsx frontend/scripts/render-items.test.mjs",
+    "test": "npm run check:theme && npm run test:mentions && npm run test:store && npm run test:pages && npm run test:resume && npm run test:effective-ask && npm run test:history && npm run test:render-items"
   },
   "devDependencies": {
     "@types/node": "^26.2.0",
