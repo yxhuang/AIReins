@@ -4,9 +4,28 @@ import { buildHistoryQuery, type HistoryQueryInput } from "./history";
 
 // REST 信封统一为 {code,msg,data,request_id}；code 非 0 时 msg 是中文错误消息。
 async function call<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(path, init);
-  const envelope = (await response.json()) as ApiEnvelope<T>;
-  if (envelope.code !== 0) throw new Error(envelope.msg || `请求失败（${envelope.code}）`);
+  let response: Response;
+  try {
+    // 10 秒超时；与调用方传入的 init 合并，不覆盖调用方已有的字段（如自带 signal）
+    response = await fetch(path, { ...init, signal: init?.signal ?? AbortSignal.timeout(10_000) });
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "TimeoutError") {
+      throw new Error("请求超时（10 秒）");
+    }
+    throw error;
+  }
+  let envelope: ApiEnvelope<T> | undefined;
+  try {
+    envelope = (await response.json()) as ApiEnvelope<T>;
+  } catch {
+    throw new Error("服务返回了无法解析的响应");
+  }
+  if (typeof envelope?.code !== "number") throw new Error("服务返回了无法解析的响应");
+  if (envelope.code !== 0) {
+    const err = new Error(envelope.msg || `请求失败（${envelope.code}）`);
+    err.cause = envelope.request_id;
+    throw err;
+  }
   return envelope.data;
 }
 

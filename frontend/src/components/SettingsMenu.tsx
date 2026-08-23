@@ -72,10 +72,10 @@ export function SettingsMenu() {
     if (returnFocus) gearRef.current?.focus();
   };
 
-  // 打开时焦点进面板第一个控件
+  // 打开时焦点落到当前选中项（aria-checked=true），与 roving tabindex 的 tabIndex=0 一致
   useEffect(() => {
     if (!open) return;
-    panelRef.current?.querySelector<HTMLElement>("button")?.focus();
+    panelRef.current?.querySelector<HTMLElement>('button[aria-checked="true"]')?.focus();
   }, [open]);
 
   // Esc 关闭；Tab/Shift+Tab 在面板内循环（focus trap）；点浮层外关闭
@@ -91,7 +91,7 @@ export function SettingsMenu() {
       const panel = panelRef.current;
       if (!panel) return;
       const focusables = panel.querySelectorAll<HTMLElement>(
-        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+        'button:not(:disabled), [href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])',
       );
       if (focusables.length === 0) return;
       const first = focusables.item(0);
@@ -107,8 +107,9 @@ export function SettingsMenu() {
       }
     };
     const onPointerDown = (e: PointerEvent) => {
+      // 点在浮层外只关闭、不抢焦点，让用户点到的目标（如输入框）保有焦点
       if (rootRef.current && !rootRef.current.contains(e.target as Node)) {
-        close(true);
+        close(false);
       }
     };
     document.addEventListener("keydown", onKeyDown);
@@ -147,6 +148,28 @@ export function SettingsMenu() {
                     className="settings-options"
                     role="radiogroup"
                     aria-labelledby={`settings-item-${item.id}`}
+                    onKeyDown={(e) => {
+                      // roving tabindex：方向键在组内循环移动焦点并同时选中
+                      const dir =
+                        e.key === "ArrowDown" || e.key === "ArrowRight"
+                          ? 1
+                          : e.key === "ArrowUp" || e.key === "ArrowLeft"
+                            ? -1
+                            : 0;
+                      if (dir === 0) return;
+                      e.preventDefault();
+                      const buttons = Array.from(
+                        e.currentTarget.querySelectorAll<HTMLButtonElement>("button"),
+                      );
+                      const index = buttons.indexOf(e.target as HTMLButtonElement);
+                      if (index === -1) return;
+                      const nextIndex = (index + dir + buttons.length) % buttons.length;
+                      const nextButton = buttons[nextIndex];
+                      const nextOption = item.options[nextIndex];
+                      if (!nextButton || !nextOption) return;
+                      nextButton.focus();
+                      chooseTheme(nextOption.value);
+                    }}
                   >
                     {item.options.map((option) => (
                       <button
@@ -154,6 +177,7 @@ export function SettingsMenu() {
                         type="button"
                         role="radio"
                         aria-checked={theme === option.value}
+                        tabIndex={theme === option.value ? 0 : -1}
                         className={`settings-option${theme === option.value ? " selected" : ""}`}
                         onClick={() => chooseTheme(option.value)}
                       >

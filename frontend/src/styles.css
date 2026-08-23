@@ -41,6 +41,10 @@
                "PingFang SC", "Noto Sans CJK SC", sans-serif;
   --font-mono: ui-monospace, "Cascadia Code", "JetBrains Mono", Consolas,
                "Noto Sans Mono CJK SC", monospace;
+
+  /* 非颜色令牌：全主题同值，只在 :root 定义一次（不进两份深色块，check:theme 不校验） */
+  --radius:     8px;
+  --shadow-pop: 0 6px 24px rgb(0 0 0 / 0.14);
 }
 
 /* 深色令牌出现两处，内容必须逐字保持一致（改一处务必同步另一处）：
@@ -192,7 +196,7 @@ body {
   border: 1px solid var(--border);
   background: var(--surface);
   color: var(--text-muted);
-  border-radius: 8px;
+  border-radius: var(--radius);
   padding: 2px 8px;
   cursor: pointer;
 }
@@ -201,7 +205,7 @@ body {
   border: 1px solid var(--border-strong);
   background: var(--surface);
   color: var(--text);
-  border-radius: 8px;
+  border-radius: var(--radius);
   padding: 6px 12px;
   font-size: 13px;
   cursor: pointer;
@@ -231,7 +235,7 @@ body {
   gap: 8px;
   padding: 10px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius);
   background: var(--surface-sunk);
 }
 
@@ -241,7 +245,7 @@ body {
   flex: 1;
   border: 1px solid var(--border-strong);
   background: var(--surface);
-  border-radius: 8px;
+  border-radius: var(--radius);
   padding: 5px 0;
   font-family: var(--font-mono);
   font-size: 12px;
@@ -263,7 +267,7 @@ body {
 
 .new-field input, .new-field textarea, .new-field select {
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius);
   background: var(--surface);
   color: var(--text);
   padding: 6px 8px;
@@ -301,6 +305,24 @@ body {
   color: var(--text-faint);
   font-size: 12.5px;
   padding: 8px 4px;
+}
+
+/* 「N 个已结束会话」折叠行：中性小字按钮，不压 dead 行本身的可读性 */
+.session-dead-toggle {
+  width: 100%;
+  border: none;
+  background: transparent;
+  border-radius: var(--radius);
+  color: var(--text-faint);
+  font-size: 12.5px;
+  padding: 6px 10px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.session-dead-toggle:hover {
+  background: var(--surface-sunk);
+  color: var(--text-muted);
 }
 
 /* 会话行 + 删除入口：× 在行外右侧，永不挤占/遮挡行内右侧的闸门徽标（徽标优先级更高） */
@@ -345,7 +367,7 @@ body {
 /* 行内二次确认：整行就地替换（非模态），全冷色 */
 .session-confirm {
   border: 1px solid var(--danger);
-  border-radius: 8px;
+  border-radius: var(--radius);
   padding: 8px 10px;
   display: flex;
   flex-direction: column;
@@ -381,7 +403,7 @@ body {
   text-align: left;
   border: none;
   background: transparent;
-  border-radius: 8px;
+  border-radius: var(--radius);
   /* 两行 ≤44px：4 + 18(标题行) + 2(行距) + 16(元信息行) + 4 = 44 */
   padding: 4px 8px 4px 10px;
   cursor: pointer;
@@ -396,7 +418,10 @@ body {
 
 .session-row:hover { background: var(--surface-sunk); }
 .session-row.active { background: var(--surface-sunk); }
-.session-row.dead { opacity: 0.55; }
+/* dead 行不整体压 opacity（12px 小字会被压到 AA 以下，而找旧会话续接正要看这行），
+   只把标题/元信息降为 --text-faint；状态点保留 --dead 灰 */
+.session-row.dead .row-title,
+.session-row.dead .row-meta { color: var(--text-faint); }
 
 .row-title-line {
   display: flex;
@@ -642,14 +667,18 @@ body {
   gap: 8px;
   align-items: baseline;
   background: var(--surface-sunk);
-  border-radius: 8px;
+  border-radius: var(--radius);
   padding: 8px 12px;
 }
 
-.user-text { white-space: pre-wrap; }
+.user-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere; /* 长 URL/无空格路径不撑出横向滚动 */
+}
 
 .text-block {
   white-space: pre-wrap;
+  overflow-wrap: anywhere; /* 同上：实时流与历史视图同一纪律 */
   line-height: 1.65;
   padding: 0 2px;
 }
@@ -667,7 +696,7 @@ body {
 .thought-block, .tool-card, .raw-line {
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius);
 }
 
 .thought-head, .tool-head, .raw-head {
@@ -720,15 +749,17 @@ body {
   margin: 6px 0 4px;
 }
 
-/* 长命令/长文本在自己的容器里横向滚动，主区不横向滚动 */
+/* 长命令/长文本在自己的容器里横向滚动，主区不横向滚动；限高防超长工具输出占满整屏 */
 .code-block {
   font-family: var(--font-mono);
   font-size: 12.5px;
   background: var(--surface-sunk);
-  border-radius: 8px;
+  border-radius: var(--radius);
   padding: 8px 10px;
   margin: 0;
   overflow-x: auto;
+  max-height: 50vh;
+  overflow-y: auto;
   white-space: pre;
   line-height: 1.5;
 }
@@ -867,7 +898,7 @@ body {
   min-width: 120px;
   max-width: 260px;
   border: 1px solid var(--border-strong);
-  border-radius: 8px;
+  border-radius: var(--radius);
   background: var(--surface);
   color: var(--text);
   padding: 8px 10px;
@@ -929,7 +960,7 @@ body {
 .gate-block.gate-resolved {
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius);
   padding: 8px 12px;
 }
 
@@ -942,7 +973,7 @@ body {
 .gate-block.gate-expired {
   background: var(--surface);
   border: 1px dashed var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius);
   padding: 8px 12px;
 }
 
@@ -978,7 +1009,7 @@ body {
 .composer-row textarea {
   flex: 1;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius);
   background: var(--bg);
   color: var(--text);
   padding: 8px 10px;
@@ -1002,9 +1033,9 @@ body {
   overflow-y: auto;
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius);
   padding: 4px;
-  box-shadow: 0 6px 24px rgb(0 0 0 / 0.14);
+  box-shadow: var(--shadow-pop);
   animation: settings-pop 0.12s ease-out;
 }
 
@@ -1045,6 +1076,14 @@ body {
 .cmd-empty {
   padding: 8px 10px;
   font-size: 12.5px;
+  color: var(--text-faint);
+}
+
+/* 命令面板分段标签（「最近使用」/「全部命令」）：中性小字，与 settings-group-title 同一语言 */
+.cmd-section {
+  padding: 4px 8px 2px;
+  font-size: 11.5px;
+  letter-spacing: 0.04em;
   color: var(--text-faint);
 }
 
@@ -1106,9 +1145,10 @@ body {
 
 .empty-hint { font-size: 12.5px; }
 
-/* 错误提示条 */
+/* 错误提示条：z-index 高于浮层面板（20），出错时必须压过一切可见 */
 .toast {
   position: fixed;
+  z-index: 50;
   bottom: 16px;
   right: 16px;
   display: flex;
@@ -1116,7 +1156,7 @@ body {
   gap: 10px;
   background: var(--surface);
   border: 1px solid var(--danger);
-  border-radius: 8px;
+  border-radius: var(--radius);
   color: var(--danger);
   padding: 8px 12px;
   font-size: 12.5px;
@@ -1129,6 +1169,19 @@ body {
   color: var(--text-muted);
   cursor: pointer;
   white-space: nowrap;
+}
+
+/* 带会话上下文的错误本体是可点按钮（点击跳转到出错会话）；外观仍是 toast 的错误文本 */
+.toast-jump {
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  padding: 0;
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 
 /* 删除成功提示：成功信息不用 danger 红，走中性边框/正文色 */
@@ -1165,7 +1218,7 @@ body {
   border: 1px solid var(--border);
   background: var(--surface);
   color: var(--text-muted);
-  border-radius: 8px;
+  border-radius: var(--radius);
   cursor: pointer;
 }
 
@@ -1185,9 +1238,9 @@ body {
   overflow-y: auto;
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius);
   padding: 10px 12px 12px;
-  box-shadow: 0 6px 24px rgb(0 0 0 / 0.14);
+  box-shadow: var(--shadow-pop);
   animation: settings-pop 0.12s ease-out;
 }
 
@@ -1222,7 +1275,7 @@ body {
   border: 1px solid var(--border-strong);
   background: var(--surface);
   color: var(--text);
-  border-radius: 8px;
+  border-radius: var(--radius);
   padding: 5px 0;
   font-size: 12.5px;
   cursor: pointer;
@@ -1264,7 +1317,7 @@ body {
   border: none;
   background: transparent;
   color: var(--text);
-  border-radius: 8px;
+  border-radius: var(--radius);
   padding: 5px 8px;
   font-size: 13px;
   text-align: left;
@@ -1530,7 +1583,7 @@ body {
   text-align: left;
   border: none;
   background: transparent;
-  border-radius: 8px;
+  border-radius: var(--radius);
   padding: 5px 8px 5px 10px;
   cursor: pointer;
   color: var(--text);
@@ -1698,7 +1751,7 @@ body {
 
 .history-msg {
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius);
   padding: 6px 8px;
 }
 
@@ -1742,7 +1795,7 @@ body {
 .session-history {
   background: var(--surface-sunk);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius);
   padding: 8px 10px;
   margin-bottom: 10px;
   font-size: 12.5px;

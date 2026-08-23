@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { AgentKind, HistoryPreview, HistorySession } from "../types";
 import { fetchHistory, fetchHistoryPreview } from "../api";
 import {
@@ -9,7 +9,8 @@ import {
   type SourceFilter,
 } from "../history";
 import { relativeTime } from "../format";
-import { useStore } from "../useStore";
+import { store, type Store } from "../store";
+import { shallowEqual, useStore } from "../useStore";
 
 const AGENTS: AgentKind[] = ["claude", "codex", "kimi"];
 
@@ -18,6 +19,17 @@ const PAGE_SIZE = 150;
 
 /** 关键词搜索防抖（spec：~250ms）。 */
 const SEARCH_DEBOUNCE_MS = 250;
+
+/** 历史行无需跟随别处 running 会话的秒级 tick；30 秒粒度足够表达相对时间。 */
+const selectHistoryNow = (value: Store) => Math.floor(value.now / 30_000) * 30_000;
+const selectImportedSessionKeys = (value: Store) =>
+  value.sessions
+    .flatMap((session) =>
+      session.nativeSessionId
+        ? [`${session.agent}:${session.nativeSessionId}`]
+        : [],
+    )
+    .sort();
 
 interface ListState {
   items: HistorySession[];
@@ -40,7 +52,8 @@ type PreviewState =
  * 分页用 nextCursor +「加载更多」；truncated/skipped 都渲染成中性小字说明，不当错误。
  */
 export function HistoryView() {
-  const store = useStore();
+  const importedSessionKeys = useStore(selectImportedSessionKeys, shallowEqual);
+  const now = useStore(selectHistoryNow);
   const [agentFilter, setAgentFilter] = useState<AgentKind | "">("");
   const [sourceFilter, setSourceFilter] = useState<SourceFilter>("all");
   const [qInput, setQInput] = useState("");
@@ -109,11 +122,23 @@ export function HistoryView() {
     void load();
   }, [load]);
 
-  const selected = list.items.find(
-    (item) => `${item.agent}:${item.nativeSessionId}` === selectedKey,
+  const selected = useMemo(
+    () =>
+      list.items.find(
+        (item) => `${item.agent}:${item.nativeSessionId}` === selectedKey,
+      ),
+    [list.items, selectedKey],
+  );
+  const importedKeys = useMemo(
+    () => new Set(importedSessionKeys),
+    [importedSessionKeys],
   );
   // 来源筛选只作用于已加载条目（接口没有 source 参数）
-  const visible = filterBySource(list.items, sourceFilter);
+  const visible = useMemo(
+    () => filterBySource(list.items, sourceFilter),
+    [list.items, sourceFilter],
+  );
+  const selectRow = useCallback((key: string) => setSelectedKey(key), []);
 
   return (
     <div className="history-view">
@@ -129,6 +154,7 @@ export function HistoryView() {
             <button
               type="button"
               className={`history-chip${agentFilter === "" ? " selected" : ""}`}
+              aria-pressed={agentFilter === ""}
               onClick={() => setAgentFilter("")}
             >
               全部
@@ -138,6 +164,7 @@ export function HistoryView() {
                 key={agent}
                 type="button"
                 className={`history-chip agent-${agent}${agentFilter === agent ? " selected" : ""}`}
+                aria-pressed={agentFilter === agent}
                 onClick={() => setAgentFilter(agent)}
               >
                 {agent}
@@ -150,6 +177,7 @@ export function HistoryView() {
                 key={source}
                 type="button"
                 className={`history-chip${sourceFilter === source ? " selected" : ""}`}
+                aria-pressed={sourceFilter === source}
                 onClick={() => setSourceFilter(source)}
               >
                 {source === "all" ? "全部来源" : SOURCE_FILTER_LABELS[source]}
@@ -188,11 +216,9 @@ export function HistoryView() {
                   <HistoryRow
                     item={item}
                     active={selectedKey === `${item.agent}:${item.nativeSessionId}`}
-                    imported={findImportedSession(store.sessions, item) !== undefined}
-                    now={store.now}
-                    onSelect={() =>
-                      setSelectedKey(`${item.agent}:${item.nativeSessionId}`)
-                    }
+                    imported={importedKeys.has(`${item.agent}:${item.nativeSessionId}`)}
+                    now={now}
+                    onSelect={selectRow}
                   />
                 </li>
               ))}
@@ -231,7 +257,7 @@ export function HistoryView() {
   );
 }
 
-function HistoryRow({
+const HistoryRow = memo(function HistoryRow({
   item,
   active,
   imported,
@@ -242,13 +268,15 @@ function HistoryRow({
   active: boolean;
   imported: boolean;
   now: number;
-  onSelect: () => void;
+  onSelect: (key: string) => void;
 }) {
+  const key = `${item.agent}:${item.nativeSessionId}`;
   return (
     <button
       type="button"
       className={`history-row agent-${item.agent}${active ? " active" : ""}`}
-      onClick={onSelect}
+      aria-current={active ? "true" : undefined}
+      onClick={() => onSelect(key)}
     >
       <span className="history-row-line1">
         <span className="history-row-title" title={item.title}>
@@ -267,10 +295,15 @@ function HistoryRow({
       </span>
     </button>
   );
-}
+});
 
 function HistoryPreviewPane({ item }: { item: HistorySession | undefined }) {
-  const store = useStore();
+  const now = useStore(selectHistoryNow);
+  const selectImportedId = useCallback(
+    (value: Store) => (item ? findImportedSession(value.sessions, item)?.id : undefined),
+    [item],
+  );
+  const importedId = useStore(selectImportedId);
   const [state, setState] = useState<PreviewState | null>(null);
   const [importing, setImporting] = useState(false);
   const [importError, setImportError] = useState<string | null>(null);
@@ -304,13 +337,11 @@ function HistoryPreviewPane({ item }: { item: HistorySession | undefined }) {
 
   if (!item) {
     return (
-      <aside className="history-preview-pane" aria-label="会话预览">
+      <aside className="history-preview-pane" aria-label="会话预览" aria-live="polite">
         <div className="history-preview-empty">从左侧选一个会话查看预览</div>
       </aside>
     );
   }
-
-  const imported = findImportedSession(store.sessions, item);
 
   const doImport = async () => {
     if (importing) return;
@@ -330,12 +361,12 @@ function HistoryPreviewPane({ item }: { item: HistorySession | undefined }) {
   };
 
   return (
-    <aside className="history-preview-pane" aria-label="会话预览">
+    <aside className="history-preview-pane" aria-label="会话预览" aria-live="polite">
       <div className="history-preview-head">
         <h2 className="history-preview-title">{item.title}</h2>
         <p className="history-preview-meta">
           {item.agent} · {SOURCE_LABELS[item.source]} ·{" "}
-          {relativeTime(item.lastActivityAt, store.now)}
+          {relativeTime(item.lastActivityAt, now)}
         </p>
         <p className="history-preview-id mono" title={item.nativeSessionId}>
           {item.nativeSessionId}
@@ -378,13 +409,13 @@ function HistoryPreviewPane({ item }: { item: HistorySession | undefined }) {
         )}
       </div>
       <div className="history-actions">
-        {imported ? (
+        {importedId ? (
           <>
             <p className="history-note">该会话已在工作台中，无需重复导入。</p>
             <button
               type="button"
               className="btn btn-primary"
-              onClick={() => store.navigate(imported.id)}
+              onClick={() => store.navigate(importedId)}
             >
               跳转过去
             </button>

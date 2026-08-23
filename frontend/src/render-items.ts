@@ -37,6 +37,13 @@ export interface ToolView {
   result: string;
 }
 
+export interface EditChunk {
+  /** 「改动 #n」 */
+  title: string;
+  removed: string;
+  added: string;
+}
+
 export interface GateView {
   kind: "gate";
   key: string;
@@ -53,6 +60,9 @@ export interface GateView {
   /** 编辑型入参（claude Edit/MultiEdit）的删除/新增文本；纯写入时为空 */
   removed: string;
   added: string;
+  /** MultiEdit 按 edit 分组的 diff 块（每块一对 removed/added，标题「改动 #n」）；
+      removed/added 仍保留拼接结果，供不消费本字段的渲染兜底。非 MultiEdit 时缺省 */
+  editChunks?: EditChunk[];
   detail: string;
   suggestions: unknown[];
   decision?: PermissionDecision;
@@ -110,16 +120,23 @@ export function gateFromEvent(event: UnifiedEvent, agent: AgentKind): GateView {
     "";
   const content = typeof input.content === "string" ? input.content : "";
 
-  // 编辑型入参：claude Edit 的 old_string/new_string；MultiEdit 的 edits[] 全部拼接。
+  // 编辑型入参：claude Edit 的 old_string/new_string；MultiEdit 的 edits[] 全部拼接，
+  // 并额外按 edit 分组产出 editChunks（标题「改动 #n」），供 diff 分组渲染。
   let removed = "";
   let added = "";
+  let editChunks: EditChunk[] | undefined;
   if (typeof input.old_string === "string" || typeof input.new_string === "string") {
     removed = typeof input.old_string === "string" ? input.old_string : "";
     added = typeof input.new_string === "string" ? input.new_string : "";
   } else if (Array.isArray(input.edits)) {
     const edits = input.edits.map(asRecord);
-    removed = edits.map((e) => (typeof e.old_string === "string" ? e.old_string : "")).join("\n");
-    added = edits.map((e) => (typeof e.new_string === "string" ? e.new_string : "")).join("\n");
+    editChunks = edits.map((e, i) => ({
+      title: `改动 #${i + 1}`,
+      removed: typeof e.old_string === "string" ? e.old_string : "",
+      added: typeof e.new_string === "string" ? e.new_string : "",
+    }));
+    removed = editChunks.map((c) => c.removed).join("\n");
+    added = editChunks.map((c) => c.added).join("\n");
   }
 
   const label =
@@ -155,6 +172,7 @@ export function gateFromEvent(event: UnifiedEvent, agent: AgentKind): GateView {
     added,
     detail: stringifyBlock(detailSource),
     suggestions,
+    ...(editChunks && editChunks.length > 0 ? { editChunks } : {}),
     ...(questions.length > 0 ? { questions } : {}),
   };
 }

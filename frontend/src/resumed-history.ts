@@ -35,11 +35,21 @@ export function initialHistoryPage(page: HistoryMessagesPage): HistoryPageState 
 /**
  * 用 nextCursor 取到的更早一页 prepend：页内按时间正序，
  * 整页比已加载内容更早，直接拼在前面即可。
+ * 空页不 prepend（空页会让 messages 条数不变、滚动补偿基线滞留）：
+ * messages 原样保留，但 cursor/hasMore 照常推进，否则翻页按钮会卡死在同一个空页上。
  */
 export function prependHistoryPage(
   prev: HistoryPageState,
   page: HistoryMessagesPage,
 ): HistoryPageState {
+  if (page.messages.length === 0) {
+    return {
+      messages: prev.messages,
+      ...(page.nextCursor ? { nextCursor: page.nextCursor } : {}),
+      hasMore: page.hasMore,
+      truncated: prev.truncated || page.truncated,
+    };
+  }
   return {
     messages: [...page.messages, ...prev.messages],
     ...(page.nextCursor ? { nextCursor: page.nextCursor } : {}),

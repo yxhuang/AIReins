@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { PageHealth, PageManifest } from "../types";
 import { fetchPageHealth } from "../api";
 import { pageRenderMode } from "../pages";
@@ -20,13 +20,18 @@ type CheckState =
  */
 export function PageView({ page }: { page: PageManifest }) {
   const [state, setState] = useState<CheckState>({ phase: "checking" });
+  /** 健康检查序号：连点「重新检查」时晚到的旧响应丢弃（同 Composer @ 检索的 searchSeq 模式） */
+  const checkSeq = useRef(0);
 
   const check = useCallback(async () => {
+    const seq = ++checkSeq.current;
     setState({ phase: "checking" });
     try {
       const health = await fetchPageHealth(page.id);
+      if (checkSeq.current !== seq) return; // 晚到的旧响应丢弃
       setState({ phase: "done", health });
     } catch (error) {
+      if (checkSeq.current !== seq) return; // 晚到的旧响应丢弃
       // 健康接口本身失败（server 不可达等）：同样降级面板 + 重试，不崩。
       setState({
         phase: "error",
@@ -38,6 +43,9 @@ export function PageView({ page }: { page: PageManifest }) {
   useEffect(() => {
     void check();
   }, [check]);
+
+  // 检查进行中禁用「重新检查」/「重试」（检查中视图切到下方降级面板，这里是兜底表达）
+  const checking = state.phase === "checking";
 
   if (state.phase === "done") {
     const { health } = state;
@@ -66,7 +74,12 @@ export function PageView({ page }: { page: PageManifest }) {
               <a className="btn btn-primary" href={page.url} target="_blank" rel="noopener noreferrer">
                 在新标签页打开
               </a>
-              <button type="button" className="btn" onClick={() => void check()}>
+              <button
+                type="button"
+                className="btn"
+                disabled={checking}
+                onClick={() => void check()}
+              >
                 重新检查
               </button>
             </div>
@@ -94,7 +107,8 @@ export function PageView({ page }: { page: PageManifest }) {
               在新标签页打开
             </a>
           </div>
-          <iframe className="page-frame" src={page.url} title={page.name} />
+          {/* 有意不加 sandbox：pages/ 里的页面（如 ai-usage）可能需要脚本/同源等完整能力，记录此决策 */}
+          <iframe className="page-frame" src={page.url} title={page.name} loading="lazy" />
         </div>
       );
     }

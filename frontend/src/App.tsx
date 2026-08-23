@@ -1,19 +1,54 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Sidebar } from "./components/Sidebar";
 import { SessionView } from "./components/SessionView";
 import { PageView } from "./components/PageView";
 import { HistoryView } from "./components/HistoryView";
-import { useStore } from "./useStore";
+import { sessionTitle } from "./format";
+import { store, type Store } from "./store";
+import { shallowEqual, useStore } from "./useStore";
+
+const selectCurrentSession = (value: Store) =>
+  value.currentId ? value.session(value.currentId) : undefined;
+const selectCurrentPage = (value: Store) =>
+  value.currentPageId
+    ? value.pages.find((page) => page.id === value.currentPageId)
+    : undefined;
+// 带 sessionId 的错误解析出「agent · 会话标题」上下文（纯字符串，selector 比较友好）；
+// 会话已不存在时返回 undefined，toast 退化为不可点击的纯文本。
+const selectErrorContext = (value: Store) => {
+  const error = value.lastError;
+  if (!error?.sessionId) return undefined;
+  const session = value.session(error.sessionId);
+  if (!session) return undefined;
+  return `${session.agent} · ${sessionTitle(session, value.data.get(error.sessionId)?.events)}`;
+};
+const selectAppUi = (value: Store) =>
+  [
+    value.historyOpen,
+    value.currentPageId,
+    value.lastError,
+    selectErrorContext(value),
+    value.removalNotice,
+  ] as const;
+const selectPendingTotal = (value: Store) =>
+  value.sessions.reduce((sum, session) => sum + value.pendingCount(session.id), 0);
 
 export function App() {
-  const store = useStore();
   const [collapsed, setCollapsed] = useState(false);
   const [newOpen, setNewOpen] = useState(false);
+  const current = useStore(selectCurrentSession);
+  const currentPage = useStore(selectCurrentPage);
+  const [historyOpen, currentPageId, lastError, errorContext, removalNotice] = useStore(
+    selectAppUi,
+    shallowEqual,
+  );
+  const pendingTotal = useStore(selectPendingTotal);
 
-  const current = store.currentId ? store.session(store.currentId) : undefined;
-  const currentPage = store.currentPageId
-    ? store.pages.find((p) => p.id === store.currentPageId)
-    : undefined;
+  // 标签页标题带上全局未决闸门总数：切走也能看到「有闸门在等你」。
+  // 必须写在组件里而不是 store.notify()——store.ts 会被纯 node 测试 import，没有 document。
+  useEffect(() => {
+    document.title = pendingTotal > 0 ? `(${pendingTotal}) 个闸门待处理 · workbench` : "workbench";
+  }, [pendingTotal]);
 
   return (
     <div className={`app${collapsed ? " sidebar-collapsed" : ""}`}>
@@ -24,11 +59,11 @@ export function App() {
         onNewOpenChange={setNewOpen}
       />
       <main className="main">
-        {store.historyOpen ? (
+        {historyOpen ? (
           <HistoryView />
         ) : currentPage ? (
           <PageView key={currentPage.id} page={currentPage} />
-        ) : store.currentPageId ? (
+        ) : currentPageId ? (
           <div className="empty-state">
             <h1>页面不存在</h1>
             <p>
@@ -61,20 +96,35 @@ export function App() {
           </div>
         )}
       </main>
-      {store.lastError && (
+      {lastError && (
         <div className="toast" role="alert">
-          <span>{store.lastError}</span>
+          {/* 带会话上下文的错误：整体是按钮，点击跳转到出错会话；无 sessionId 或会话已删则退化为纯文本 */}
+          {lastError.sessionId && errorContext ? (
+            <button
+              type="button"
+              className="toast-jump"
+              title="点击跳转到出错的会话"
+              onClick={() => {
+                store.navigate(lastError.sessionId!);
+                store.dismissError();
+              }}
+            >
+              {errorContext}：{lastError.message}
+            </button>
+          ) : (
+            <span>{lastError.message}</span>
+          )}
           <button type="button" className="toast-close" onClick={() => store.dismissError()}>
             知道了
           </button>
         </div>
       )}
       {/* 删除成功一次性提示：说清原生记录仍在；路径有则等宽小字附上 */}
-      {store.removalNotice && (
+      {removalNotice && (
         <div className="toast removal-notice" role="status">
-          <span>{store.removalNotice.message}</span>
-          {store.removalNotice.path && (
-            <code className="mono removal-path">{store.removalNotice.path}</code>
+          <span>{removalNotice.message}</span>
+          {removalNotice.path && (
+            <code className="mono removal-path">{removalNotice.path}</code>
           )}
           <button
             type="button"

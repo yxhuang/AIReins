@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { AgentKind, ConfigOptionId, SessionRecord } from "../types";
 import { relativeTime, sessionTitle } from "../format";
 import { isInlineSvg } from "../pages";
-import { store } from "../store";
+import { store, type Store } from "../store";
 import { useStore } from "../useStore";
 import { SettingsMenu } from "./SettingsMenu";
 
@@ -30,6 +30,14 @@ export const STATUS_HINTS: Record<string, string> = {
 };
 
 const CWD_STORAGE_KEY = "workbench-last-cwd";
+
+const selectSessions = (value: Store) => value.sessions;
+const selectNow = (value: Store) => value.now;
+const selectMeta = (value: Store) => value.meta;
+const selectHistoryOpen = (value: Store) => value.historyOpen;
+const selectCurrentId = (value: Store) => value.currentId;
+const selectPendingSignature = (value: Store) =>
+  value.sessions.map((session) => `${session.id}:${value.pendingCount(session.id)}`).join("|");
 
 // 隐私模式下 localStorage 访问器本身就会抛异常，与主题读写同一纪律：try/catch 兜底。
 function readSavedCwd(): string {
@@ -59,12 +67,41 @@ interface SidebarProps {
 }
 
 export function Sidebar({ collapsed, onToggle, newOpen, onNewOpenChange }: SidebarProps) {
-  const store = useStore();
-  const sessions = [...store.sessions].sort(
-    (a, b) => Date.parse(b.lastActivityAt) - Date.parse(a.lastActivityAt),
-  );
+  const sessionRecords = useStore(selectSessions);
+  const now = useStore(selectNow);
+  const currentId = useStore(selectCurrentId);
+  // pendingGates 是可变 Map；用可比较的原始字符串捕获“总数相同但分布换了会话”的变化。
+  useStore(selectPendingSignature);
+  const [deadExpanded, setDeadExpanded] = useState(false);
+  // 稳定排序：默认按 createdAt，行序不随事件流抖动（此前按 lastActivityAt，正要点的那行会被挤走）。
+  const byCreated = (a: SessionRecord, b: SessionRecord) =>
+    Date.parse(a.createdAt) - Date.parse(b.createdAt);
+  // 有未决闸门的会话抽到顶部「等待处理」区（天然总览）；dead 会话沉底折叠。
+  // 防御性兜底：万一 dead 会话仍带未决计数，也只进等待处理区——未决闸门绝不许被折叠藏起。
+  const waiting = sessionRecords.filter((s) => store.pendingCount(s.id) > 0).sort(byCreated);
+  const active = sessionRecords
+    .filter((s) => store.pendingCount(s.id) === 0 && s.status !== "dead")
+    .sort(byCreated);
+  const dead = sessionRecords
+    .filter((s) => store.pendingCount(s.id) === 0 && s.status === "dead")
+    .sort(byCreated);
+  const totalSessions = sessionRecords.length;
   // 收起态仍要能看到全局待审批压力：全部会话未决闸门总数。
-  const totalPending = sessions.reduce((sum, session) => sum + store.pendingCount(session.id), 0);
+  const totalPending = sessionRecords.reduce(
+    (sum, session) => sum + store.pendingCount(session.id),
+    0,
+  );
+
+  const renderRow = (session: SessionRecord) => (
+    <li key={session.id}>
+      <SessionRow
+        session={session}
+        pending={store.pendingCount(session.id)}
+        active={session.id === currentId}
+        now={now}
+      />
+    </li>
+  );
 
   return (
     <aside className="sidebar">
@@ -100,12 +137,29 @@ export function Sidebar({ collapsed, onToggle, newOpen, onNewOpenChange }: Sideb
           </button>
           {newOpen && <NewSessionForm onDone={() => onNewOpenChange(false)} />}
           <ul className="session-list">
-            {sessions.map((session) => (
-              <li key={session.id}>
-                <SessionRow session={session} />
+            {waiting.length > 0 && (
+              // 分区标题复用 .page-nav-title 的中性小字语言；暖色仍只出现在行内闸门徽标上
+              <li className="page-nav-title" role="presentation">
+                等待处理（{waiting.length}）
               </li>
-            ))}
-            {sessions.length === 0 && <li className="session-list-empty">还没有会话</li>}
+            )}
+            {waiting.map(renderRow)}
+            {active.map(renderRow)}
+            {dead.length > 0 && (
+              <li>
+                <button
+                  type="button"
+                  className="session-dead-toggle"
+                  aria-expanded={deadExpanded}
+                  title={deadExpanded ? "收起已结束会话" : "展开已结束会话"}
+                  onClick={() => setDeadExpanded((v) => !v)}
+                >
+                  {deadExpanded ? "▾" : "▸"} {dead.length} 个已结束会话
+                </button>
+              </li>
+            )}
+            {deadExpanded && dead.map(renderRow)}
+            {totalSessions === 0 && <li className="session-list-empty">还没有会话</li>}
           </ul>
         </>
       )}
@@ -120,12 +174,12 @@ export function Sidebar({ collapsed, onToggle, newOpen, onNewOpenChange }: Sideb
 
 /** 左栏底部「历史会话」入口（页面分区上方，同一套分区语言；收起态只显图标）。 */
 function HistoryNav({ collapsed }: { collapsed: boolean }) {
-  const store = useStore();
+  const historyOpen = useStore(selectHistoryOpen);
   return (
     <nav className="page-nav" aria-label="历史会话">
       <button
         type="button"
-        className={`page-nav-item${store.historyOpen ? " active" : ""}`}
+        className={`page-nav-item${historyOpen ? " active" : ""}`}
         title="历史会话：浏览三家 CLI 自己保存的历史会话并导入续接"
         aria-label="历史会话"
         onClick={() => store.navigateHistory()}
@@ -168,16 +222,18 @@ export function PageIcon({ icon }: { icon: string }) {
 
 /** 左栏底部「页面」分区（齿轮上方）：来自 /api/pages，未知类型跳过并给小字提示。 */
 function PageNav({ collapsed }: { collapsed: boolean }) {
-  const store = useStore();
-  if (store.pages.length === 0 && store.skippedPages.length === 0) return null;
+  const pages = useStore((value) => value.pages);
+  const skippedPages = useStore((value) => value.skippedPages);
+  const currentPageId = useStore((value) => value.currentPageId);
+  if (pages.length === 0 && skippedPages.length === 0) return null;
   return (
     <nav className="page-nav" aria-label="扩展页面">
       {!collapsed && <div className="page-nav-title">页面</div>}
-      {store.pages.map((page) => (
+      {pages.map((page) => (
         <button
           key={page.id}
           type="button"
-          className={`page-nav-item${store.currentPageId === page.id ? " active" : ""}`}
+          className={`page-nav-item${currentPageId === page.id ? " active" : ""}`}
           title={collapsed ? page.name : page.description || page.name}
           aria-label={page.name}
           onClick={() => store.navigatePage(page.id)}
@@ -186,24 +242,32 @@ function PageNav({ collapsed }: { collapsed: boolean }) {
           {!collapsed && <span className="page-nav-name">{page.name}</span>}
         </button>
       ))}
-      {!collapsed && store.skippedPages.length > 0 && (
+      {!collapsed && skippedPages.length > 0 && (
         <p className="page-nav-skipped">
-          已跳过 {store.skippedPages.length} 个暂不支持的页面类型（
-          {[...new Set(store.skippedPages.map((p) => p.type))].join("、")}）
+          已跳过 {skippedPages.length} 个暂不支持的页面类型（
+          {[...new Set(skippedPages.map((p) => p.type))].join("、")}）
         </p>
       )}
     </nav>
   );
 }
 
-function SessionRow({ session }: { session: SessionRecord }) {
-  const store = useStore();
+function SessionRow({
+  session,
+  pending,
+  active,
+  now,
+}: {
+  session: SessionRecord;
+  pending: number;
+  active: boolean;
+  now: number;
+}) {
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const deleteBtnRef = useRef<HTMLButtonElement>(null);
   const cancelBtnRef = useRef<HTMLButtonElement>(null);
-  const pending = store.pendingCount(session.id);
   const data = store.data.get(session.id);
   const title = sessionTitle(session, data?.events);
 
@@ -279,7 +343,7 @@ function SessionRow({ session }: { session: SessionRecord }) {
       <button
         type="button"
         className={`session-row agent-${session.agent}${
-          session.id === store.currentId ? " active" : ""
+          active ? " active" : ""
         }${session.status === "dead" ? " dead" : ""}`}
         onClick={() => store.navigate(session.id)}
       >
@@ -299,7 +363,7 @@ function SessionRow({ session }: { session: SessionRecord }) {
             </span>
           )}
           <span className="row-meta-text" title={STATUS_HINTS[session.status] ?? session.status}>
-            {AGENT_LABELS[session.agent]} · {STATUS_LABELS[session.status] ?? session.status} · {relativeTime(session.lastActivityAt, store.now)}
+            {AGENT_LABELS[session.agent]} · {STATUS_LABELS[session.status] ?? session.status} · {relativeTime(session.lastActivityAt, now)}
           </span>
         </span>
       </button>
@@ -322,7 +386,9 @@ function SessionRow({ session }: { session: SessionRecord }) {
 }
 
 function NewSessionForm({ onDone }: { onDone: () => void }) {
-  const store = useStore();
+  const meta = useStore(selectMeta);
+  // 会话列表可能在表单挂载后才到；保留该订阅以触发 cwd 三级回退的补填 effect。
+  useStore(selectSessions);
   const [agent, setAgent] = useState<AgentKind>("claude");
   const [cwd, setCwdState] = useState(pickInitialCwd);
   // 用户动过 cwd 输入框后不再自动预填（含故意清空）
@@ -336,7 +402,7 @@ function NewSessionForm({ onDone }: { onDone: () => void }) {
   const [error, setError] = useState<string | null>(null);
   // 三个配置下拉的已选值；"" = 跟随配置（不传该字段）。切 agent 时整体重置。
   const [configSel, setConfigSel] = useState<Partial<Record<ConfigOptionId, string>>>({});
-  const options = store.meta?.drivers[agent]?.options ?? [];
+  const options = meta?.drivers[agent]?.options ?? [];
 
   // meta/会话列表可能晚于表单挂载到达：用户未动手且仍为空时补一次预填
   useEffect(() => {
