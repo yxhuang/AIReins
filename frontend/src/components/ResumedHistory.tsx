@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
 import type { SessionRecord } from "../types";
 import { fetchHistoryMessages } from "../api";
 import {
@@ -30,8 +30,13 @@ export function ResumedHistory({
   const [phase, setPhase] = useState<Phase>("loading");
   const [error, setError] = useState<string | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
-  /** prepend 前的滚动高度：加载更早一页后补偿 scrollTop，视图不跳动 */
-  const prevScrollHeight = useRef<number | null>(null);
+  /**
+   * prepend 补偿基线：fetch 前采样历史区底部参照节点（分隔线）的 offsetTop。
+   * 不采样 scrollHeight——fetch 等待期间实时流往下方追加会撑大 scrollHeight，
+   * 而底部节点只被 prepend 推动，补偿量恰好等于新增高度。
+   */
+  const dividerTopBefore = useRef<number | null>(null);
+  const dividerRef = useRef<HTMLDivElement | null>(null);
   /** 请求代次：resumedFrom 变化（组件按会话 key 重挂载，正常不会变）时作废旧响应 */
   const reqGen = useRef(0);
 
@@ -64,7 +69,7 @@ export function ResumedHistory({
   const loadOlder = async () => {
     const cursor = state?.nextCursor;
     if (!cursor || loadingMore) return;
-    prevScrollHeight.current = streamRef.current?.scrollHeight ?? null;
+    dividerTopBefore.current = dividerRef.current?.offsetTop ?? null;
     setLoadingMore(true);
     setError(null);
     try {
@@ -72,22 +77,27 @@ export function ResumedHistory({
         limit: HISTORY_PAGE_SIZE,
         cursor,
       });
+      // 空页不 prepend（见 prependHistoryPage），messages 条数不变，补偿 effect 不会触发
+      if (page.messages.length === 0) dividerTopBefore.current = null;
       setState((prev) => (prev ? prependHistoryPage(prev, page) : initialHistoryPage(page)));
     } catch (e) {
       // 翻页失败不丢已加载内容：错误就地显示，可重试（cursor 没变）
-      prevScrollHeight.current = null;
+      dividerTopBefore.current = null;
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setLoadingMore(false);
     }
   };
 
-  // prepend 完成后补偿滚动位置，用户视线停在原来的消息上
-  useEffect(() => {
+  // prepend 完成后补偿滚动位置，用户视线停在原来的消息上。
+  // useLayoutEffect 在绘制前执行，避免 useEffect 先画一帧未补偿画面造成的闪烁。
+  useLayoutEffect(() => {
+    const before = dividerTopBefore.current;
+    dividerTopBefore.current = null;
     const container = streamRef.current;
-    if (prevScrollHeight.current !== null && container) {
-      container.scrollTop += container.scrollHeight - prevScrollHeight.current;
-      prevScrollHeight.current = null;
+    const divider = dividerRef.current;
+    if (before !== null && container && divider) {
+      container.scrollTop += divider.offsetTop - before;
     }
   }, [state?.messages.length, streamRef]);
 
@@ -158,7 +168,10 @@ export function ResumedHistory({
           )}
           <ul className="session-history-list">
             {state.messages.map((message, index) => (
-              <li key={index} className={`history-msg history-msg-${message.role}`}>
+              <li
+                key={`${message.role}:${message.timestamp ?? "null"}:${index}`}
+                className={`history-msg history-msg-${message.role}`}
+              >
                 <span className="history-msg-role">
                   {message.role === "user" ? "用户" : "助手"}
                 </span>
@@ -171,7 +184,7 @@ export function ResumedHistory({
               </li>
             ))}
           </ul>
-          <div className="session-history-divider" role="separator">
+          <div className="session-history-divider" role="separator" ref={dividerRef}>
             {/* 必须如实说明省略了什么：历史只有消息文本，看不到工具调用。
                 否则用户向上翻看到「已写入。」这类回复，会以为 agent 凭空声称做了事。 */}
             <span>以上为导入前的历史对话 · 仅消息文本，不含工具调用与思考过程</span>

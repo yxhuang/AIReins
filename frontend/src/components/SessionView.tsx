@@ -1,32 +1,47 @@
-import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import type { CommandInfo, MetaInfo, SessionRecord } from "../types";
 import { compactTokens, duration, asRecord, truncateDisplayWidth } from "../format";
-import { buildRenderItems, type GateView } from "../render-items";
+import { buildRenderItems } from "../render-items";
 import { extractMentionTokens, mentionQueryAt, mentionTokenEnd } from "../mentions";
 import { needsRestartNote, effectiveFor, EFFECTIVE_SOURCE_LABELS, ALIAS_NOTE, RESTART_NOTE } from "../config-view";
 import { fetchFiles } from "../api";
-import { MAX_MENTIONS, store } from "../store";
-import { useStore } from "../useStore";
+import { MAX_MENTIONS, store, type Store } from "../store";
+import { shallowEqual, useStore } from "../useStore";
 import { GateBlock, QuestionBlock, RawLine, SystemLine, TextBlockView, ThoughtBlockView, ToolCard, UserBlockView } from "./StreamItems";
 import { ResumedHistory } from "./ResumedHistory";
 import { STATUS_HINTS, STATUS_LABELS } from "./Sidebar";
 
+const selectMeta = (value: Store) => value.meta;
+const selectWsState = (value: Store) => value.wsState;
+
 export function SessionView({ session }: { session: SessionRecord }) {
-  const store = useStore();
-  const data = store.data.get(session.id);
-  const items = data ? buildRenderItems(data.events, session.agent) : [];
   const running = session.status === "running" || session.status === "starting";
   const dead = session.status === "dead";
-  const caps = store.meta?.drivers[session.agent];
+  const selectData = useCallback((value: Store) => value.data.get(session.id), [session.id]);
+  const data = useStore(selectData);
+  const meta = useStore(selectMeta);
+  const wsState = useStore(selectWsState);
+  const caps = meta?.drivers[session.agent];
+  const items = useMemo(
+    () => (data ? buildRenderItems(data.events, session.agent) : []),
+    // resync 可以用相同 seq 原子替换事件窗口，所以 events 引用也是必要失效键。
+    [data?.seq, data?.dropped, data?.events, session.agent],
+  );
 
   const streamRef = useRef<HTMLDivElement>(null);
   const gateRefs = useRef(new Map<string, HTMLElement>());
   const [hiddenPending, setHiddenPending] = useState(0);
 
   // dead 会话的未决闸门渲染为「已失效」中性态，不计入待处理数。
-  const pendingGates = dead
-    ? []
-    : items.filter((item): item is GateView => item.kind === "gate" && !item.decision);
+  const pendingGateIds = useMemo(
+    () =>
+      dead
+        ? []
+        : [...(data?.pendingGates.entries() ?? [])]
+            .sort((a, b) => a[1] - b[1])
+            .map(([requestId]) => requestId),
+    [data?.seq, data?.pendingGates, dead],
+  );
 
   // 未决闸门滚出视口时，底部贴暖色细条提示。
   const updateHiddenPending = useCallback(() => {
@@ -34,18 +49,22 @@ export function SessionView({ session }: { session: SessionRecord }) {
     if (!container) return;
     const box = container.getBoundingClientRect();
     let hidden = 0;
-    for (const gate of pendingGates) {
-      const el = gateRefs.current.get(gate.requestId);
-      if (!el) continue;
+    for (const requestId of pendingGateIds) {
+      const el = gateRefs.current.get(requestId);
+      // 全量 pending 集合里存在、当前 2000 条窗口却没有 ref，也属于不可见闸门。
+      if (!el) {
+        hidden++;
+        continue;
+      }
       const rect = el.getBoundingClientRect();
       if (rect.bottom < box.top || rect.top > box.bottom) hidden++;
     }
     setHiddenPending(hidden);
-  }, [pendingGates]);
+  }, [pendingGateIds]);
 
   useEffect(() => {
     updateHiddenPending();
-  }, [updateHiddenPending, items.length, store.version]);
+  }, [updateHiddenPending, items.length]);
 
   // 新事件到达时，若用户本就在底部附近则跟随滚动。
   const lastSeq = data?.seq ?? 0;
@@ -58,9 +77,14 @@ export function SessionView({ session }: { session: SessionRecord }) {
   }, [lastSeq]);
 
   const scrollToFirstPending = () => {
-    const first = pendingGates[0];
-    if (!first) return;
-    gateRefs.current.get(first.requestId)?.scrollIntoView({ block: "center" });
+    const firstRequestId = pendingGateIds[0];
+    if (!firstRequestId) return;
+    const target = gateRefs.current.get(firstRequestId);
+    if (target) {
+      target.scrollIntoView({ block: "center" });
+      return;
+    }
+    void store.recoverMissingPendingGate(session.id);
   };
 
   const canInterrupt = Boolean(caps?.interrupt && session.processId && !dead);
@@ -74,8 +98,8 @@ export function SessionView({ session }: { session: SessionRecord }) {
             <span className="session-cwd mono">{session.cwd}</span>
           </div>
           <div className="session-sub mono">
-            <UsageView agent={session.agent} usage={data?.latestUsage} meta={store.meta} />
-            <span> · 用时 {duration(session.createdAt, session.lastActivityAt)}</span>
+            <UsageView agent={session.agent} usage={data?.latestUsage} meta={meta} />
+            <ElapsedTime session={session} running={running} />
             <span> · seq {data?.seq ?? session.seq}</span>
             <span title={STATUS_HINTS[session.status] ?? session.status}>
               {" · "}{STATUS_LABELS[session.status] ?? session.status}
@@ -84,7 +108,7 @@ export function SessionView({ session }: { session: SessionRecord }) {
           </div>
         </div>
         <div className="session-head-actions">
-          <span className={`ws-dot ws-${store.wsState}`} title={`连接：${store.wsState}`} />
+          <span className={`ws-dot ws-${wsState}`} title={`连接：${wsState}`} />
           <button
             type="button"
             className="btn"
@@ -108,7 +132,7 @@ export function SessionView({ session }: { session: SessionRecord }) {
         {session.resumedFrom && <ResumedHistory session={session} streamRef={streamRef} />}
         {!data && <p className="system-line">载入会话…</p>}
         {data && data.dropped > 0 && (
-          <p className="system-line">最早的 {data.dropped} 条事件已省略（内存上限）；快照仍保留全量。</p>
+          <p className="system-line">有 {data.dropped} 条较早事件已省略（内存上限）；快照仍保留全量。</p>
         )}
         {items.map((item, index) => {
           const isLast = index === items.length - 1;
@@ -147,9 +171,9 @@ export function SessionView({ session }: { session: SessionRecord }) {
         })}
       </div>
 
-      {pendingGates.length > 0 && hiddenPending > 0 && (
+      {pendingGateIds.length > 0 && hiddenPending > 0 && (
         <button type="button" className="pending-bar" onClick={scrollToFirstPending}>
-          {pendingGates.length} 个闸门等待处理 ↑
+          {pendingGateIds.length} 个闸门等待处理 ↑
         </button>
       )}
 
@@ -158,11 +182,29 @@ export function SessionView({ session }: { session: SessionRecord }) {
   );
 }
 
+/** running 时只有这一个小组件订阅秒级 now，避免时钟击穿整个 SessionView 子树。 */
+function ElapsedTime({ session, running }: { session: SessionRecord; running: boolean }) {
+  const selectNow = useCallback(
+    (value: Store) => (running ? value.now : 0),
+    [running],
+  );
+  const now = useStore(selectNow);
+  return (
+    <span>
+      {" · 用时 "}
+      {duration(
+        session.createdAt,
+        running ? new Date(now).toISOString() : session.lastActivityAt,
+      )}
+    </span>
+  );
+}
+
 // 会话头的只读配置摘要（如「opus · xhigh · manual」，未覆盖项显示实际生效值或「跟随配置」）；
 // 可交互控件只在输入框上方一处，会话头不再放可点的，避免两处不一致。
 function ConfigSummary({ session }: { session: SessionRecord }) {
-  const store = useStore();
-  const options = store.meta?.drivers[session.agent]?.options ?? [];
+  const meta = useStore(selectMeta);
+  const options = meta?.drivers[session.agent]?.options ?? [];
   if (options.length === 0) return null;
   const parts = options.map((option) => {
     const current = session.config?.[option.id];
@@ -179,13 +221,20 @@ function ConfigSummary({ session }: { session: SessionRecord }) {
 // 前端不硬编码任何值；活改走 WS set_config，等 config_updated 广播回来才更新显示。
 // 渲染位置在 Composer 内（输入框正上方一行）。
 function ConfigControls({ session }: { session: SessionRecord }) {
-  const store = useStore();
-  const options = store.meta?.drivers[session.agent]?.options ?? [];
+  const meta = useStore(selectMeta);
+  const selectConfigState = useCallback(
+    (value: Store) => [
+      [...(value.configPending.get(session.id) ?? [])].sort().join(","),
+      value.configErrors.get(session.id),
+      value.configHints.get(session.id),
+      value.configSwitching.get(session.id),
+    ] as const,
+    [session.id],
+  );
+  const [, error, hint, switching] = useStore(selectConfigState, shallowEqual);
+  const options = meta?.drivers[session.agent]?.options ?? [];
   const pending = store.configPending.get(session.id);
-  const error = store.configErrors.get(session.id);
-  const hint = store.configHints.get(session.id);
   // 重启切换进行中（claude model/effort）：全部控件禁用，就地显示后端给的过渡文案
-  const switching = store.configSwitching.get(session.id);
   const live = Boolean(session.processId) && session.status !== "dead";
   if (options.length === 0 && !error) return null;
 
@@ -344,7 +393,13 @@ function UsageView({
 }
 
 function Composer({ session, dead, errored }: { session: SessionRecord; dead: boolean; errored: boolean }) {
-  const store = useStore();
+  const meta = useStore(selectMeta);
+  const selectCommands = useCallback(
+    (value: Store) => value.commands.get(session.id),
+    [session.id],
+  );
+  const commands = useStore(selectCommands);
+  useStore((value) => value.mentionVersion);
   // 草稿随会话恢复：SessionView 按会话 id key 重挂载，useState 惰性初始值即该会话草稿
   const [text, setText] = useState(() => store.getDraft(session.id));
   const [cursor, setCursor] = useState(0);
@@ -364,10 +419,10 @@ function Composer({ session, dead, errored }: { session: SessionRecord; dead: bo
   /** @ 检索序号：晚到的旧响应丢弃 */
   const searchSeq = useRef(0);
 
-  const caps = store.meta?.drivers[session.agent];
+  const caps = meta?.drivers[session.agent];
   const commandsSupported = caps?.commands === true;
   const mentionsSupported = caps?.mentions === true;
-  const table = store.commands.get(session.id) ?? [];
+  const table = commands ?? [];
 
   // 仅行首 / 触发（整段文本即「/query」形态）；行中间的 /（如路径）是普通字符
   const slashQuery = /^\/([^\s]*)$/.exec(text)?.[1] ?? null;

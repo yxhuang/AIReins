@@ -8,7 +8,17 @@ import type {
   ToolView,
   UserBlock,
 } from "../render-items";
-import { allAnswered, buildQuestionAnswers, toggleOption, type AskSelection } from "../ask";
+import {
+  allAnswered,
+  buildQuestionAnswers,
+  clearOther,
+  hasOther,
+  setOtherText,
+  toggleOption,
+  toggleOther,
+  type AskOther,
+  type AskSelection,
+} from "../ask";
 import { store } from "../store";
 
 export function UserBlockView({ item }: { item: UserBlock }) {
@@ -173,6 +183,8 @@ export const QuestionBlock = forwardRef<HTMLDivElement, { item: GateView; sessio
     const questions = item.questions ?? [];
     // 每题选中集合：key 逐字 = 问题原文（回传协议要求），value = 已选 label 数组
     const [selection, setSelection] = useState<AskSelection>({});
+    // 「其他…」自由文本：key 逐字 = 问题原文，键存在即选中（与选项互斥，见 ask.ts）
+    const [other, setOther] = useState<AskOther>({});
     // 提交后进入提交中态：禁用全部控件，直到 permission_resolved 到达
     const [submitting, setSubmitting] = useState(false);
 
@@ -203,7 +215,7 @@ export const QuestionBlock = forwardRef<HTMLDivElement, { item: GateView; sessio
     }
 
     const submit = () => {
-      if (submitting || !allAnswered(questions, selection)) return;
+      if (submitting || !allAnswered(questions, selection, other)) return;
       // 发送成功才进提交中态（断线失败时不禁用按钮，错误走全局 lastError 条）
       if (
         store.resolvePermission(
@@ -211,7 +223,7 @@ export const QuestionBlock = forwardRef<HTMLDivElement, { item: GateView; sessio
           item.requestId,
           "allow",
           undefined,
-          buildQuestionAnswers(questions, selection),
+          buildQuestionAnswers(questions, selection, other),
         )
       ) setSubmitting(true);
     };
@@ -222,13 +234,14 @@ export const QuestionBlock = forwardRef<HTMLDivElement, { item: GateView; sessio
       if (store.resolvePermission(sessionId, item.requestId, "deny")) setSubmitting(true);
     };
 
-    const ready = allAnswered(questions, selection);
+    const ready = allAnswered(questions, selection, other);
 
     return (
       <div className="gate-block question-block" ref={ref}>
         <div className="gate-title">{item.agent} 在问你</div>
         {questions.map((q, qi) => {
           const picked = selection[q.question] ?? [];
+          const otherActive = hasOther(other, q);
           return (
             <div className="question-item" key={qi}>
               {q.header && <div className="question-header">{q.header}</div>}
@@ -243,7 +256,11 @@ export const QuestionBlock = forwardRef<HTMLDivElement, { item: GateView; sessio
                       className={`question-option${active ? " selected" : ""}`}
                       aria-pressed={active}
                       disabled={submitting}
-                      onClick={() => setSelection((current) => toggleOption(current, q, option.label))}
+                      onClick={() => {
+                        setSelection((current) => toggleOption(current, q, option.label));
+                        // 选项与「其他」互斥（单选语义）：点选项即取消该题的「其他」
+                        setOther((current) => clearOther(current, q));
+                      }}
                     >
                       <span className="question-option-label">{option.label}</span>
                       {option.description && (
@@ -252,8 +269,47 @@ export const QuestionBlock = forwardRef<HTMLDivElement, { item: GateView; sessio
                     </button>
                   );
                 })}
+                {/* 「其他…」自由文本出口：选项都不合适时用自己的话回答，与选项互斥 */}
+                <button
+                  type="button"
+                  className={`question-option question-other${otherActive ? " selected" : ""}`}
+                  aria-pressed={otherActive}
+                  disabled={submitting}
+                  onClick={() => {
+                    const next = toggleOther(selection, other, q);
+                    setSelection(next.selection);
+                    setOther(next.other);
+                  }}
+                >
+                  <span className="question-option-label">其他…</span>
+                  <span className="question-option-desc">自己输入回答</span>
+                </button>
               </div>
-              {q.multiSelect && <div className="question-multi-hint">可多选</div>}
+              {otherActive && (
+                // 复用 .config-select 控件的紧凑视觉语言；input 没有对应 CSS 规则，
+                // 同款令牌（边框/圆角/底色/字号）只能内联。
+                <span className="config-select question-other-input">
+                  <input
+                    type="text"
+                    value={other[q.question] ?? ""}
+                    disabled={submitting}
+                    placeholder="输入你的回答…"
+                    aria-label={`${q.question}（其他）`}
+                    style={{
+                      border: "1px solid var(--border)",
+                      borderRadius: 6,
+                      background: "var(--surface)",
+                      color: "var(--text)",
+                      fontSize: 12,
+                      fontFamily: "inherit",
+                      padding: "4px 8px",
+                      minWidth: 260,
+                    }}
+                    onChange={(e) => setOther((current) => setOtherText(current, q, e.target.value))}
+                  />
+                </span>
+              )}
+              {q.multiSelect && !otherActive && <div className="question-multi-hint">可多选</div>}
             </div>
           );
         })}

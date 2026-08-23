@@ -18,16 +18,20 @@ import { partitionPages, type SkippedPage } from "./pages";
 // 全局状态与连接恢复：
 // - 一条全局 WS（不带 sessionId）收全部会话事件，支撑左栏跨会话待审批徽标；
 //   服务端只对带 sessionId&afterSeq 的连接补发，全局连接没有任何补发——
-//   因此 WS open 后对每个会话都重取快照对齐（不只当前会话），覆盖
-//   「快照完成、WS 未建立」与断连期间的审批事件；
+//   因此断线重连后的 WS open 对每个会话都重取快照对齐（不只当前会话）；
+//   只有启动首连复用 init 已成功取得的快照，避免同一快照紧接着取第二遍；
 // - 进入会话先 GET snapshot 拿全量 events + seq，WS 上 seq 更大的事件追加；
 // - 快照请求按会话去重（in-flight 复用同一 Promise）并带版本戳（过期响应丢弃）；
 // - WS 断线指数退避重连；收到 resync_required 或 seq 缺口时对该会话重取快照。
 
 export type WsState = "connecting" | "open" | "closed";
 
-/** 每会话内存事件上限：超出丢弃最旧并计数，快照重取即可恢复全量。 */
+/** 每会话常规事件窗口上限；窗口外未决闸门请求是“不漏审批”的唯一保护项。 */
 const MAX_EVENTS = 2000;
+
+/** 有活跃会话时保持用时读数秒级；全局空闲后把唤醒频率降到 30 秒。 */
+export const ACTIVE_TICK_MS = 1000;
+export const IDLE_TICK_MS = 30_000;
 
 /** 单条消息的 mentions 上限（后端硬限制，超出截断并在预览条提示）。 */
 export const MAX_MENTIONS = 20;
@@ -38,7 +42,7 @@ const DRAFT_STORAGE_PREFIX = "workbench-draft-";
 interface SessionData {
   events: UnifiedEvent[];
   seq: number;
-  /** 因 MAX_EVENTS 上限被丢弃的最旧事件数（>0 时流顶部提示） */
+  /** 因 MAX_EVENTS 常规窗口被省略的较早事件数（>0 时流顶部提示） */
   dropped: number;
   /** requestId → 请求事件 seq，用于闸门块定位与排序 */
   pendingGates: Map<string, number>;
@@ -79,8 +83,10 @@ export class Store {
   mentionPaths = new Map<string, Map<string, string | null>>();
   /** 每会话输入框草稿：内存 + localStorage 持久化（刷新不丢），remove 时两处都清 */
   drafts = new Map<string, string>();
-  /** 全局时钟（每秒 tick），驱动相对时间与用时刷新 */
+  /** 全局时钟：有 running/starting 会话时每秒 tick，否则每 30 秒 tick。 */
   now = Date.now();
+  /** @ 路径结论版本；嵌套 Map 原地更新时供 selector 取得可比较的原始值。 */
+  mentionVersion = 0;
   /** 每次 notify 自增，供 useSyncExternalStore 做快照 */
   version = 0;
 
@@ -89,6 +95,11 @@ export class Store {
   private reconnectDelay = 1000;
   private reconnectTimer: ReturnType<typeof setTimeout> | undefined;
   private listRefreshTimer: ReturnType<typeof setTimeout> | undefined;
+  private clockStarted = false;
+  private tickTimer: ReturnType<typeof setTimeout> | undefined;
+  private tickDelay: number | undefined;
+  /** 首次 open 可复用启动快照；此后每次 open 都是断线重连，必须全量对齐。 */
+  private hasOpenedSocket = false;
   /** 每会话快照版本戳：作废旧响应（值来自 nextSnapshotGen，每次请求唯一且写入 Map） */
   private snapshotGen = new Map<string, number>();
   /** 快照 generation 分配器：单调自增，杜绝「缺省 0」不写 Map 导致校验取回 undefined 的碰撞 */
@@ -109,23 +120,44 @@ export class Store {
   };
 
   private notify(): void {
+    this.refreshTickSchedule();
     this.version++;
     for (const listener of this.listeners) listener();
+  }
+
+  private startClock(): void {
+    if (this.clockStarted) return;
+    this.clockStarted = true;
+    this.refreshTickSchedule();
+  }
+
+  /** 状态跨 running/starting 边界时立即切换频率；同档位不重置现有 timer。 */
+  private refreshTickSchedule(): void {
+    if (!this.clockStarted) return;
+    const active = this.sessions.some(
+      (session) => session.status === "running" || session.status === "starting",
+    );
+    const delay = active ? ACTIVE_TICK_MS : IDLE_TICK_MS;
+    if (this.tickTimer !== undefined && this.tickDelay === delay) return;
+    if (this.tickTimer !== undefined) clearTimeout(this.tickTimer);
+    this.tickDelay = delay;
+    this.tickTimer = setTimeout(() => {
+      this.tickTimer = undefined;
+      this.now = Date.now();
+      this.notify();
+    }, delay);
   }
 
   async init(): Promise<void> {
     window.addEventListener("hashchange", this.onHashChange);
     this.onHashChange();
-    setInterval(() => {
-      this.now = Date.now();
-      this.notify();
-    }, 1000);
     try {
       this.meta = await fetchMeta();
     } catch (error) {
       this.lastError = error instanceof Error ? error.message : String(error);
     }
     await this.refreshSessions();
+    this.startClock();
     await this.refreshPages();
     // 启动时为每个会话取一次快照：既给左栏标题，也算出跨会话待审批徽标。
     await Promise.allSettled(this.sessions.map((s) => this.ensureLoaded(s.id)));
@@ -197,7 +229,15 @@ export class Store {
     }
     // dead 会话的未决闸门已不可操作，清掉避免僵尸暖色徽标。
     for (const session of this.sessions) {
-      if (session.status === "dead") this.data.get(session.id)?.pendingGates.clear();
+      const data = this.data.get(session.id);
+      if (session.status === "dead" && data && data.pendingGates.size > 0) {
+        data.pendingGates.clear();
+        const retained = retainEventWindow(data.events, data.pendingGates);
+        data.events = retained.events;
+        data.dropped += retained.omitted;
+        // Map 本身可变；替换外层对象，selector 才能可靠观察到该会话数据变化。
+        this.data.set(session.id, { ...data });
+      }
     }
     this.notify();
   }
@@ -249,12 +289,21 @@ export class Store {
     return promise;
   }
 
-  /** 作废 in-flight 快照响应并强制重取（seq 缺口 / resync_required / WS open 对齐）。 */
-  private resync(id: string): Promise<void> {
+  /**
+   * 作废 in-flight 快照响应并强制重取（seq 缺口 / resync_required / WS open 对齐）。
+   * 旧 data 保留到新快照完整落地，避免当前会话闪回「载入会话…」并破坏滚动/展开状态。
+   */
+  resync(id: string): Promise<void> {
     // 作废旧响应靠 alignSnapshot 新分配的唯一 generation（旧响应必不匹配），无需手动自增
     this.snapshotInflight.delete(id);
-    this.data.delete(id);
     return this.alignSnapshot(id);
+  }
+
+  /** 定位条发现未决闸门不在当前 DOM 时：明确提示并用权威快照恢复。 */
+  recoverMissingPendingGate(id: string): Promise<void> {
+    this.lastError = "待处理闸门不在当前事件窗口，正在重新载入会话快照，请稍后再试。";
+    this.notify();
+    return this.resync(id);
   }
 
   private applySnapshot(
@@ -293,11 +342,16 @@ export class Store {
     else this.configSwitching.delete(id);
     if (commands) this.commands.set(id, commands);
     const sorted = [...events].sort((a, b) => a.seq - b.seq);
-    const dropped = Math.max(0, sorted.length - MAX_EVENTS);
-    this.data.set(id, { events: sorted.slice(dropped), seq, dropped, pendingGates, latestUsage });
+    const { events: retained, omitted: dropped } = retainEventWindow(sorted, pendingGates);
+    this.data.set(id, { events: retained, seq, dropped, pendingGates, latestUsage });
     const index = this.sessions.findIndex((s) => s.id === id);
-    if (index >= 0) this.sessions[index] = session;
-    else this.sessions.push(session);
+    if (index >= 0) {
+      const next = [...this.sessions];
+      next[index] = session;
+      this.sessions = next;
+    } else {
+      this.sessions = [...this.sessions, session];
+    }
   }
 
   private connect(): void {
@@ -311,11 +365,9 @@ export class Store {
     socket.addEventListener("open", () => {
       this.wsState = "open";
       this.reconnectDelay = 1000;
-      // 全局连接没有补发能力：断连期间（含启动时快照与 WS 建立之间的窗口）
-      // 任何会话的事件都可能丢失，open 后对每个会话重取快照对齐。
-      void this.refreshSessions().then(() => {
-        for (const session of this.sessions) void this.resync(session.id);
-      });
+      const reconnected = this.hasOpenedSocket;
+      this.hasOpenedSocket = true;
+      void this.alignAfterSocketOpen(reconnected);
       this.notify();
     });
     socket.addEventListener("message", (messageEvent) => {
@@ -333,6 +385,19 @@ export class Store {
       this.reconnectDelay = Math.min(this.reconnectDelay * 2, 15_000);
     });
     socket.addEventListener("error", () => socket.close());
+  }
+
+  private async alignAfterSocketOpen(reconnected: boolean): Promise<void> {
+    await this.refreshSessions();
+    // 全局 WS 没有 afterSeq 补发：任何一次断线重连都必须为全部会话重取快照，
+    // 否则会静默漏掉断连期间的审批事件。唯一可省的是启动首连：它发生在 init
+    // 等完首轮 ensureLoaded 之后，成功落地的 data 就是启动基线，复用可避免紧接着
+    // 再取同一份快照和当前视图闪烁；首取失败（data 不存在）或首连才发现的新会话
+    // 仍然立即补取。hasOpenedSocket 一旦为 true，后续 open 一律按“可能漏事件”处理。
+    const needsSnapshot = this.sessions.filter(
+      (session) => reconnected || !this.data.has(session.id),
+    );
+    await Promise.allSettled(needsSnapshot.map((session) => this.resync(session.id)));
   }
 
   private handleFrame(frame: Record<string, unknown>): void {
@@ -372,11 +437,6 @@ export class Store {
       }
       if (event.seq === data.seq + 1) {
         data.events.push(event);
-        if (data.events.length > MAX_EVENTS) {
-          const excess = data.events.length - MAX_EVENTS;
-          data.events.splice(0, excess);
-          data.dropped += excess;
-        }
         data.seq = event.seq;
         if (event.type === "permission_request") {
           if (this.session(event.sessionId)?.status !== "dead") {
@@ -407,6 +467,13 @@ export class Store {
             );
           }
         }
+        // 默认只保留最近 2000 条，但任何仍未决的 permission_request 都是保护项：
+        // 即使它更老，也必须留在渲染窗口里，避免左栏有徽标而流内无闸门。
+        const retained = retainEventWindow(data.events, data.pendingGates);
+        data.events = retained.events;
+        data.dropped += retained.omitted;
+        // SessionData 内含可变数组/Map；每次有效增量替换外层引用，供 selector 正确比较。
+        this.data.set(event.sessionId, { ...data });
       }
       // event.seq <= data.seq：重发，忽略。
     } else {
@@ -415,12 +482,18 @@ export class Store {
     }
 
     // 任何事件都刷新该会话的本地视图（lastActivityAt / 状态推断）。
-    const session = this.session(event.sessionId);
-    if (session) {
-      session.lastActivityAt = event.timestamp;
+    const sessionIndex = this.sessions.findIndex((item) => item.id === event.sessionId);
+    if (sessionIndex >= 0) {
+      const session: SessionRecord = {
+        ...this.sessions[sessionIndex]!,
+        lastActivityAt: event.timestamp,
+      };
       const status = statusFromEvent(event);
       if (status) session.status = status;
       if (event.type === "config_updated") this.applyConfigUpdated(event, session);
+      const sessions = [...this.sessions];
+      sessions[sessionIndex] = session;
+      this.sessions = sessions;
     } else {
       // 新会话（别的客户端建的）：刷新列表。
       void this.refreshSessions();
@@ -585,6 +658,7 @@ export class Store {
         this.noteFiles(sessionId, files);
         const exists = files.includes(path);
         this.fileKnown.get(sessionId)?.set(path, exists);
+        this.mentionVersion++;
         this.notify(); // 预览条等读缓存的视图刷新
         return exists;
       } catch {
@@ -648,6 +722,7 @@ export class Store {
       this.mentionPaths.set(sessionId, map);
     }
     map.set(token, path);
+    this.mentionVersion++;
     this.notify(); // 预览条等读缓存的视图刷新
     return path;
   }
@@ -776,6 +851,24 @@ export class Store {
     this.lastError = null;
     this.notify();
   }
+}
+
+/**
+ * 最近 MAX_EVENTS 条是常规窗口；窗口之外仍未决的 permission_request 作为极少量保护项保留。
+ * 这不会过滤 pendingGates（审批数绝不缩小），只让对应闸门仍有可渲染事件。
+ */
+function retainEventWindow(
+  events: UnifiedEvent[],
+  pendingGates: Map<string, number>,
+): { events: UnifiedEvent[]; omitted: number } {
+  if (events.length <= MAX_EVENTS) return { events, omitted: 0 };
+  const recentStart = events.length - MAX_EVENTS;
+  const pendingSeqs = new Set(pendingGates.values());
+  const rescued = events
+    .slice(0, recentStart)
+    .filter((event) => event.type === "permission_request" && pendingSeqs.has(event.seq));
+  const retained = [...rescued, ...events.slice(recentStart)];
+  return { events: retained, omitted: events.length - retained.length };
 }
 
 /** commands_updated 的 payload 是 {commands: UnifiedCommand[]}；取不出时按空表处理。 */

@@ -282,5 +282,47 @@ await t("源码接线：resumedFrom 才挂历史区；分隔线文案；用户/�
   assert.ok(!/display:\s*"?none/.test(history), "历史区不应默认折叠隐藏");
 });
 
+// --- P1-6：prependHistoryPage 空页拦截（空页是补偿滞留的触发源） ---
+await t("prependHistoryPage：空页不 prepend，messages 原样保留；cursor/hasMore/truncated 照常推进", async () => {
+  const latest = page([msg("user", "第3条"), msg("assistant", "第4条")], {
+    nextCursor: "C1",
+    hasMore: true,
+  });
+  const state = initialHistoryPage(latest);
+
+  // 空页带 nextCursor：不碰 messages（条数不变 → 不触发滚动补偿），cursor 推进避免卡死重取同一页
+  const next = prependHistoryPage(state, page([], { nextCursor: "C0", hasMore: true, truncated: true }));
+  assert.deepEqual(next.messages.map((m) => m.text), ["第3条", "第4条"], "空页不应改动已加载消息");
+  assert.equal(next.messages, state.messages, "空页应保留原 messages 引用（长度不变才不触发补偿）");
+  assert.equal(next.nextCursor, "C0", "空页的 cursor 应照常推进，否则按钮卡死在同一页");
+  assert.equal(next.hasMore, true);
+  assert.equal(next.truncated, true, "空页的 truncated 也应并入标注");
+
+  // 空页且无 nextCursor：翻到尽头，cursor 清掉（按钮随之消失）
+  const done = prependHistoryPage(state, page([], { hasMore: false }));
+  assert.equal(done.messages.length, state.messages.length, "空页到尽头也不应改动消息");
+  assert.equal(done.nextCursor, undefined, "空页到尽头应清掉 cursor");
+  assert.equal(done.hasMore, false);
+
+  // 空页拦截后，下一页非空仍正常 prepend（拦截不污染后续翻页）
+  const older = page([msg("user", "第1条")], { hasMore: false });
+  const resumed = prependHistoryPage(next, older);
+  assert.deepEqual(
+    resumed.messages.map((m) => m.text),
+    ["第1条", "第3条", "第4条"],
+    "空页之后非空页应正常 prepend",
+  );
+});
+
+// --- P1-6 源码接线：补偿改 useLayoutEffect + offsetTop 基线 + 稳定 key ---
+await t("源码接线：滚动补偿 useLayoutEffect；offsetTop 基线（非 scrollHeight）；key 不再是 key={index}", async () => {
+  const history = readFileSync(new URL("../src/components/ResumedHistory.tsx", import.meta.url), "utf8");
+  assert.ok(/useLayoutEffect/.test(history), "滚动补偿应改用 useLayoutEffect（绘制前执行，避免闪烁）");
+  assert.ok(!/key=\{index\}/.test(history), "列表 key 不应再是 key={index}（prepend 后全量错位复用 DOM）");
+  assert.ok(/key=\{`/.test(history), "列表 key 应为 role+timestamp+index 形式的稳定 key");
+  assert.ok(!/prevScrollHeight|scrollHeight\s*-\s*/.test(history), "不应再以 scrollHeight 差作补偿基线");
+  assert.ok(/offsetTop/.test(history), "补偿基线应改为底部参照节点的 offsetTop 差");
+});
+
 console.log(`✅ resume/config 前端逻辑回归全过（${pass} 例）`);
 process.exit(process.exitCode ?? 0);

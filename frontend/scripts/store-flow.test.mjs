@@ -26,8 +26,8 @@ function makeSession(id) {
   };
 }
 
-function makeEvent(sessionId, seq, type = "agent_text") {
-  return { type, sessionId, agentId: `${sessionId}-agent`, seq, timestamp: new Date().toISOString(), payload: {} };
+function makeEvent(sessionId, seq, type = "agent_text", payload = {}) {
+  return { type, sessionId, agentId: `${sessionId}-agent`, seq, timestamp: new Date().toISOString(), payload };
 }
 
 function envelope(data) {
@@ -78,6 +78,102 @@ function stubFetchFull(session, { knownFiles = [], queries = null } = {}) {
     return Promise.reject(new Error(`未打桩的请求：${path}`));
   };
 }
+
+// --- P0-4：全局 tick 按活跃状态变频 ---
+await t("tick 变频：空闲 30 秒，running/starting 1 秒，回到空闲立即降频", async () => {
+  const realSetTimeout = globalThis.setTimeout;
+  const realClearTimeout = globalThis.clearTimeout;
+  const delays = [];
+  let timerId = 0;
+  globalThis.setTimeout = (_fn, delay) => {
+    delays.push(delay);
+    return ++timerId;
+  };
+  globalThis.clearTimeout = () => {};
+  try {
+    const s = new Store();
+    s.sessions = [makeSession("s-tick-idle")];
+    s["startClock"]();
+    assert.equal(delays.at(-1), 30_000, "全局空闲时应使用 30 秒 tick");
+
+    s.sessions = [{ ...s.sessions[0], status: "running" }];
+    s["notify"]();
+    assert.equal(delays.at(-1), 1000, "存在 running 会话时应切到 1 秒 tick");
+
+    s.sessions = [{ ...s.sessions[0], status: "starting" }];
+    s["notify"]();
+    assert.equal(delays.filter((delay) => delay === 1000).length, 1, "同档位不应反复重置 timer");
+
+    s.sessions = [{ ...s.sessions[0], status: "idle" }];
+    s["notify"]();
+    assert.equal(delays.at(-1), 30_000, "离开活跃态后应立即恢复 30 秒 tick");
+  } finally {
+    globalThis.setTimeout = realSetTimeout;
+    globalThis.clearTimeout = realClearTimeout;
+  }
+});
+
+// --- P2-8：pendingGates 不因事件窗口截断而失去可定位的闸门事件 ---
+await t("缺失闸门 ref 的恢复：先提示并 resync，快照窗口额外保留旧未决闸门", async () => {
+  const session = makeSession("s-old-gate");
+  const gate = [];
+  stubFetch(session, gate);
+  const s = new Store();
+  s.sessions = [session];
+  const oldData = {
+    events: [makeEvent(session.id, 1, "permission_request", { requestId: "gate-old" })],
+    seq: 1,
+    dropped: 0,
+    pendingGates: new Map([["gate-old", 1]]),
+  };
+  s.data.set(session.id, oldData);
+
+  const recovering = s.recoverMissingPendingGate(session.id);
+  assert.match(s.lastError, /闸门.*事件窗口.*重新载入/, "找不到 ref 时必须有用户可见提示");
+  assert.equal(gate.length, 1, "找不到 ref 时必须发起快照 resync");
+  assert.equal(s.data.get(session.id), oldData, "resync 等待期间不得删掉旧 data");
+
+  const events = [
+    makeEvent(session.id, 1, "permission_request", { requestId: "gate-old" }),
+    ...Array.from({ length: 2001 }, (_, index) => makeEvent(session.id, index + 2)),
+  ];
+  gate[0](envelope({ session, seq: 2002, events }));
+  await recovering;
+  const data = s.data.get(session.id);
+  assert.equal(data.pendingGates.size, 1, "窗口截断不得少算未决闸门");
+  assert.ok(data.events.some((event) => event.seq === 1), "旧未决闸门请求必须留在渲染窗口");
+  assert.equal(data.events.length, 2001, "常规 2000 条窗口外只额外保留未决闸门保护项");
+});
+
+// --- P2-9：启动首连复用成功快照；真正重连仍对全部会话重取 ---
+await t("WS open 对齐：启动已加载会话跳过快照，断线重连仍强制重取", async () => {
+  const session = makeSession("s-open-align");
+  let snapshotCalls = 0;
+  globalThis.fetch = (path) => {
+    path = String(path);
+    if (path === "/api/sessions") return Promise.resolve(envelope({ sessions: [session] }));
+    if (path.endsWith("/snapshot")) {
+      snapshotCalls++;
+      return Promise.resolve(envelope({ session, seq: 0, events: [] }));
+    }
+    if (path.endsWith("/commands")) return Promise.resolve(envelope({ commands: [] }));
+    return Promise.reject(new Error(`未打桩的请求：${path}`));
+  };
+  const s = new Store();
+  s.sessions = [session];
+  s.data.set(session.id, { events: [], seq: 0, dropped: 0, pendingGates: new Map() });
+
+  await s["alignAfterSocketOpen"](false);
+  assert.equal(snapshotCalls, 0, "启动 ensureLoaded 已成功的会话不应重复取快照");
+
+  await s["alignAfterSocketOpen"](true);
+  assert.equal(snapshotCalls, 1, "断线重连必须重取全部会话快照，不能静默漏事件");
+
+  const missing = new Store();
+  missing.sessions = [session];
+  await missing["alignAfterSocketOpen"](false);
+  assert.equal(snapshotCalls, 2, "启动首取失败、data 不存在的会话仍必须在首次 open 补取");
+});
 
 await t("新建会话后立即发送：data 建起、事件按 seq 累积、上行帧写出", async () => {
   const session = makeSession("s-new-1");

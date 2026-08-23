@@ -7,6 +7,7 @@
 //  4. gateFromEvent 识别 interactionType 并提取 questions；非提问 permission_request 不受影响；
 //  5. toggleOption / allAnswered / buildQuestionAnswers：key 逐字 = question（不用 header）、
 //     多选合并为逗号分隔的一个字符串、按选项顺序；
+//  5b. 「其他…」自由文本（P1-5）：与选项互斥、未填文本不算已回答、答案取输入文本（trim）；
 //  6. permission_resolved 广播带回的 questionAnswers 落到闸门视图（「已选择：…」降级态数据源）；
 //  7. store.resolvePermission 带 questionAnswers 上行（与 updatedInput 互斥——调用方保证，帧不含它）；
 //  8. 源码接线：SessionView 提问走 QuestionBlock 且共用 pendingGates 贴条、有效值显示形态、
@@ -20,7 +21,7 @@ globalThis.WebSocket = { CONNECTING: 0, OPEN: 1, CLOSING: 2, CLOSED: 3 };
 
 const { Store } = await import("../src/store.ts");
 const { gateFromEvent, buildRenderItems } = await import("../src/render-items.ts");
-const { normalizeQuestions, toggleOption, allAnswered, buildQuestionAnswers } = await import("../src/ask.ts");
+const { normalizeQuestions, toggleOption, toggleOther, setOtherText, clearOther, hasOther, allAnswered, buildQuestionAnswers } = await import("../src/ask.ts");
 const { effectiveFor, EFFECTIVE_SOURCE_LABELS, ALIAS_NOTE } = await import("../src/config-view.ts");
 
 let pass = 0;
@@ -265,6 +266,62 @@ await t("toggleOption/allAnswered/buildQuestionAnswers：单选替换、多选 t
   assert.equal(multi["配菜要哪些？"], "咸菜,煎蛋", "多选应按选项顺序逗号合并");
 });
 
+// --- 验收 5b 打桩侧：「其他…」自由文本（P1-5）---
+await t("toggleOther/setOtherText/clearOther：与选项互斥、空文本不算已回答、答案取输入文本", async () => {
+  const qs = normalizeQuestions(ASK_PAYLOAD.questions);
+  let sel = {};
+  let other = {};
+
+  // 选中「其他」：清空该题已选选项（互斥，单选语义）
+  sel = toggleOption(sel, qs[0], "吃粥");
+  ({ selection: sel, other } = toggleOther(sel, other, qs[0]));
+  assert.deepEqual(sel[qs[0].question], [], "选中「其他」应清空已选选项");
+  assert.ok(hasOther(other, qs[0]), "「其他」应处于选中态");
+  assert.equal(allAnswered(qs, sel, other), false, "「其他」未填文本不算已回答（不能提交）");
+
+  other = setOtherText(other, qs[0], "   ");
+  assert.equal(allAnswered(qs, sel, other), false, "纯空白文本不算已回答");
+
+  other = setOtherText(other, qs[0], "都不吃，喝咖啡");
+  sel = toggleOption(sel, qs[1], "咸菜");
+  assert.equal(allAnswered(qs, sel, other), true);
+
+  const answers = buildQuestionAnswers(qs, sel, other);
+  assert.ok(!("早餐选择" in answers), "key 不能用 header");
+  assert.equal(answers["早餐吃粥还是吃面？"], "都不吃，喝咖啡", "选中「其他」的题答案取输入文本");
+  assert.equal(answers["配菜要哪些？"], "咸菜", "其余题不受影响");
+
+  // 反向互斥：「其他」激活时点选项 → 该题「其他」被取消
+  sel = toggleOption(sel, qs[0], "吃面");
+  other = clearOther(other, qs[0]);
+  assert.ok(!hasOther(other, qs[0]), "点选项后「其他」应被取消");
+  const back = buildQuestionAnswers(qs, sel, other);
+  assert.equal(back["早餐吃粥还是吃面？"], "吃面", "取消「其他」后答案回落到选项");
+
+  // 再点一次「其他…」= 取消：键删除，该题回到未答
+  ({ selection: sel, other } = toggleOther(sel, other, qs[0]));
+  assert.deepEqual(sel[qs[0].question], []);
+  ({ selection: sel, other } = toggleOther(sel, other, qs[0]));
+  assert.ok(!hasOther(other, qs[0]), "取消后「其他」键应删除");
+  assert.equal(allAnswered(qs, sel, other), false, "取消「其他」且未选选项时该题未答");
+
+  // 未选中「其他」时 setOtherText 不生效（返回原对象）
+  assert.equal(setOtherText(other, qs[0], "x"), other, "未选中「其他」时 setOtherText 原样返回");
+  assert.equal(clearOther(other, qs[0]), other, "未选中「其他」时 clearOther 原样返回");
+
+  // 多选题的「其他」同样互斥，且答案不逗号合并、直接取文本
+  sel = toggleOption(sel, qs[1], "豆浆"); // 配菜：咸菜 + 豆浆
+  ({ selection: sel, other } = toggleOther(sel, other, qs[1]));
+  assert.deepEqual(sel[qs[1].question], [], "多选题选中「其他」也清空全部已选");
+  other = setOtherText(other, qs[1], "自带");
+  const multiOther = buildQuestionAnswers(qs, sel, other);
+  assert.equal(multiOther["配菜要哪些？"], "自带", "多选题的「其他」直接取文本，不逗号合并");
+
+  // 输入文本去首尾空白后回传
+  const trimmed = buildQuestionAnswers(qs, {}, { [qs[0].question]: "  随便  " });
+  assert.equal(trimmed["早餐吃粥还是吃面？"], "随便", "答案文本应 trim");
+});
+
 // --- 验收 3/6 打桩侧：resolved 广播的 questionAnswers 落到视图（已选择降级态数据源） ---
 await t("buildRenderItems：permission_resolved 带回的 questionAnswers 落到闸门视图", async () => {
   const items = buildRenderItems([
@@ -312,10 +369,17 @@ await t("源码接线：提问走 QuestionBlock 且共用 pendingGates 贴条；
     /item\.questions\?\.length \? QuestionBlock : GateBlock/.test(sessionView),
     "SessionView 未按 questions 路由到 QuestionBlock",
   );
-  // pendingGates 按 kind==="gate" 计，提问卡片天然覆盖（贴条「N 个闸门等待处理 ↑」）
+  // pendingGates 按 kind==="gate" 计，提问卡片天然覆盖（贴条「N 个闸门等待处理 ↑」）。
+  // P0-4 重构后 pendingGates 移入 store（按 permission_request/resolved 事件构建，
+  // 提问卡片同为 permission_request，覆盖不变）；SessionView 从 data.pendingGates 取贴条数。
   assert.ok(
-    sessionView.includes('item.kind === "gate" && !item.decision'),
-    "pendingGates 逻辑被改动",
+    sessionView.includes("data?.pendingGates"),
+    "SessionView 未从 store data 取 pendingGates",
+  );
+  const storeSrc = readFileSync(new URL("../src/store.ts", import.meta.url), "utf8");
+  assert.ok(
+    storeSrc.includes('event.type === "permission_request"') && storeSrc.includes("pendingGates.set"),
+    "store 未按 permission_request 事件构建 pendingGates（贴条覆盖被破坏）",
   );
   // ref 注册在两种卡片上都存在（贴条滚动定位依赖）
   assert.ok(
@@ -328,7 +392,7 @@ await t("源码接线：提问走 QuestionBlock 且共用 pendingGates 贴条；
   assert.ok(block.includes("q.header"), "header 未渲染");
   assert.ok(block.includes("question-option-label"), "选项 label 未加粗渲染");
   assert.ok(block.includes("question-option-desc"), "选项 description 小字缺失");
-  assert.ok(block.includes("buildQuestionAnswers(questions, selection)"), "提交未走 buildQuestionAnswers");
+  assert.ok(block.includes("buildQuestionAnswers(questions, selection, other)"), "提交未走 buildQuestionAnswers（含 other）");
   assert.ok(block.includes("aria-pressed"), "选项按钮缺少 aria-pressed");
   // 跳过出口存在但次要：小字按钮而非 btn-danger
   assert.ok(block.includes("question-skip"), "跳过出口缺失");
@@ -341,6 +405,22 @@ await t("源码接线：提问走 QuestionBlock 且共用 pendingGates 贴条；
   assert.ok(!qBody.includes("btn-danger"), "提问卡片不应有拒绝样式按钮");
   assert.ok(qBody.includes("已选择："), "已处理的提问卡片应有「已选择」降级态");
   assert.ok(qBody.includes("已跳过"), "已处理的提问卡片应有「已跳过」降级态");
+});
+
+// --- 验收 5b 打桩侧：QuestionBlock「其他…」源码接线（P1-5）---
+await t("源码接线：每题选项末尾追加「其他…」按钮，选中展开输入框，提交/闸门带上 other", async () => {
+  const block = readFileSync(new URL("../src/components/StreamItems.tsx", import.meta.url), "utf8");
+  const qStart = block.indexOf("export const QuestionBlock");
+  const qEnd = block.indexOf("export function SystemLine");
+  const qBody = block.slice(qStart, qEnd);
+  assert.ok(qBody.includes("其他…"), "「其他…」按钮缺失");
+  assert.ok(qBody.includes("question-other"), "「其他」按钮/输入区缺少 question-other 类");
+  assert.ok(qBody.includes("toggleOther(selection, other, q)"), "「其他…」按钮未走 toggleOther");
+  assert.ok(qBody.includes("setOtherText(current, q,"), "输入框未走 setOtherText");
+  assert.ok(qBody.includes("clearOther(current, q)"), "点选项未清「其他」（互斥缺失）");
+  assert.ok(qBody.includes("config-select"), "「其他」输入区未复用 .config-select 视觉语言");
+  assert.ok(qBody.includes("allAnswered(questions, selection, other)"), "提交闸门未带 other（空文本可提交）");
+  assert.ok(qBody.includes("buildQuestionAnswers(questions, selection, other)"), "答案合成未带 other");
 });
 
 console.log(`✅ effective/ask 前端逻辑回归全过（${pass} 例）`);
