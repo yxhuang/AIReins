@@ -73,13 +73,13 @@ export const GateBlock = forwardRef<HTMLDivElement, { item: GateView; sessionId:
   function GateBlock({ item, sessionId, dead }, ref) {
     const [detailOpen, setDetailOpen] = useState(false);
     const [contentOpen, setContentOpen] = useState(false);
-    // 点击决策后进入提交中态：禁用所有决策按钮，直到 permission_resolved 到达。
+    // 发送成功才进提交中态：禁用所有决策按钮，直到 permission_resolved 到达；
+    // 断线发送失败时不进提交中态（按钮保持可点，错误由全局 lastError 条提示），避免永久卡死。
     const [submitting, setSubmitting] = useState(false);
 
     const decide = (decision: "allow" | "deny") => {
       if (submitting || dead) return;
-      setSubmitting(true);
-      store.resolvePermission(sessionId, item.requestId, decision);
+      if (store.resolvePermission(sessionId, item.requestId, decision)) setSubmitting(true);
     };
 
     if (item.decision) {
@@ -204,21 +204,22 @@ export const QuestionBlock = forwardRef<HTMLDivElement, { item: GateView; sessio
 
     const submit = () => {
       if (submitting || !allAnswered(questions, selection)) return;
-      setSubmitting(true);
-      store.resolvePermission(
-        sessionId,
-        item.requestId,
-        "allow",
-        undefined,
-        buildQuestionAnswers(questions, selection),
-      );
+      // 发送成功才进提交中态（断线失败时不禁用按钮，错误走全局 lastError 条）
+      if (
+        store.resolvePermission(
+          sessionId,
+          item.requestId,
+          "allow",
+          undefined,
+          buildQuestionAnswers(questions, selection),
+        )
+      ) setSubmitting(true);
     };
 
     const skip = () => {
       if (submitting) return;
-      setSubmitting(true);
       // 跳过 = deny：模型收到「用户拒绝了此操作」，可继续别的路径
-      store.resolvePermission(sessionId, item.requestId, "deny");
+      if (store.resolvePermission(sessionId, item.requestId, "deny")) setSubmitting(true);
     };
 
     const ready = allAnswered(questions, selection);

@@ -307,6 +307,25 @@ await t("remove 后草稿清除不泄漏", async () => {
   assert.equal(s.drafts.has(session.id), false, "drafts 条目应删除");
 });
 
+// --- 用例 7：resolvePermission 暴露发送结果（闸门「提交中…」永久卡死的回归防线） ---
+// 背景缺陷：resolvePermission 返回 void 丢掉 send() 的结果，UI 先无条件进提交中态——
+// 断线瞬间点「允许」帧没发出去、按钮却永久禁用。契约：非 OPEN 返回 false，OPEN 返回 true。
+await t("socket 非 OPEN：resolvePermission 返回 false 且不上行；OPEN 返回 true 且帧写出", async () => {
+  const s = new Store();
+  s.socket = { readyState: 3, send() { throw new Error("不应触达"); } };
+  s.lastError = null;
+  assert.equal(s.resolvePermission("s-gate", "req-1", "allow"), false, "非 OPEN 应返回 false");
+  assert.ok(s.lastError, "失败后未置 lastError 提示");
+
+  const sent = [];
+  s.socket = fakeSocket(sent);
+  assert.equal(s.resolvePermission("s-gate", "req-1", "deny"), true, "OPEN 应返回 true");
+  assert.equal(sent.length, 1, "OPEN 时上行帧未写出");
+  assert.equal(sent[0].type, "permission_resolved", "帧类型应为 permission_resolved");
+  assert.equal(sent[0].requestId, "req-1");
+  assert.equal(sent[0].decision, "deny");
+});
+
 if (!process.exitCode) console.log(`✅ store 流程回归全过（${pass} 例）`);
 else console.error(`部分用例失败（通过 ${pass} 例）`);
 // store 内部有 2s 防抖计时器，直接退出不等它

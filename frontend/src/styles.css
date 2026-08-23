@@ -646,10 +646,14 @@ body {
   padding: 8px 12px;
 }
 
-.user-text { white-space: pre-wrap; }
+.user-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere; /* 长 URL/无空格路径不撑出横向滚动 */
+}
 
 .text-block {
   white-space: pre-wrap;
+  overflow-wrap: anywhere; /* 同上：实时流与历史视图同一纪律 */
   line-height: 1.65;
   padding: 0 2px;
 }
@@ -720,7 +724,7 @@ body {
   margin: 6px 0 4px;
 }
 
-/* 长命令/长文本在自己的容器里横向滚动，主区不横向滚动 */
+/* 长命令/长文本在自己的容器里横向滚动，主区不横向滚动；限高防超长工具输出占满整屏 */
 .code-block {
   font-family: var(--font-mono);
   font-size: 12.5px;
@@ -729,6 +733,8 @@ body {
   padding: 8px 10px;
   margin: 0;
   overflow-x: auto;
+  max-height: 50vh;
+  overflow-y: auto;
   white-space: pre;
   line-height: 1.5;
 }
@@ -1106,9 +1112,10 @@ body {
 
 .empty-hint { font-size: 12.5px; }
 
-/* 错误提示条 */
+/* 错误提示条：z-index 高于浮层面板（20），出错时必须压过一切可见 */
 .toast {
   position: fixed;
+  z-index: 50;
   bottom: 16px;
   right: 16px;
   display: flex;

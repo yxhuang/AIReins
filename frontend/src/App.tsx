@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Sidebar } from "./components/Sidebar";
 import { SessionView } from "./components/SessionView";
 import { PageView } from "./components/PageView";
@@ -14,6 +14,13 @@ export function App() {
   const currentPage = store.currentPageId
     ? store.pages.find((p) => p.id === store.currentPageId)
     : undefined;
+
+  // 标签页标题带上全局未决闸门总数：切走也能看到「有闸门在等你」。
+  // 必须写在组件里而不是 store.notify()——store.ts 会被纯 node 测试 import，没有 document。
+  useEffect(() => {
+    const n = store.sessions.reduce((sum, s) => sum + store.pendingCount(s.id), 0);
+    document.title = n > 0 ? `(${n}) 个闸门待处理 · workbench` : "workbench";
+  }, [store.version]);
 
   return (
     <div className={`app${collapsed ? " sidebar-collapsed" : ""}`}>

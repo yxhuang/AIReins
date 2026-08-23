@@ -32,6 +32,9 @@ const MAX_EVENTS = 2000;
 /** 单条消息的 mentions 上限（后端硬限制，超出截断并在预览条提示）。 */
 export const MAX_MENTIONS = 20;
 
+/** 草稿在 localStorage 的 key 前缀：workbench-draft-<sessionId>。 */
+const DRAFT_STORAGE_PREFIX = "workbench-draft-";
+
 interface SessionData {
   events: UnifiedEvent[];
   seq: number;
@@ -74,7 +77,7 @@ export class Store {
   fileKnown = new Map<string, Map<string, boolean>>();
   /** @token 最终生效路径结论缓存：sessionId →（原 token → 生效路径或 null=未找到）；尾部标点剥离后命中时值是剥离后的路径 */
   mentionPaths = new Map<string, Map<string, string | null>>();
-  /** 每会话输入框草稿（内存级）：Composer 输入即写入，发送成功清除，remove 时删除 */
+  /** 每会话输入框草稿：内存 + localStorage 持久化（刷新不丢），remove 时两处都清 */
   drafts = new Map<string, string>();
   /** 全局时钟（每秒 tick），驱动相对时间与用时刷新 */
   now = Date.now();
@@ -533,19 +536,21 @@ export class Store {
     return this.sendWithMentions(sessionId, text);
   }
 
-  /** 读会话草稿（无草稿返回空串）。 */
+  /** 读会话草稿（无草稿返回空串）。内存未命中时回落 localStorage（刷新后恢复）。 */
   getDraft(sessionId: string): string {
-    return this.drafts.get(sessionId) ?? "";
+    return this.drafts.get(sessionId) ?? readSavedDraft(sessionId);
   }
 
-  /** 写草稿：空文本等价于清除。不 notify——草稿只有 Composer 自己读写。 */
+  /** 写草稿：空文本等价于清除。同步落 localStorage；不 notify——草稿只有 Composer 自己读写。 */
   setDraft(sessionId: string, text: string): void {
     if (text) this.drafts.set(sessionId, text);
     else this.drafts.delete(sessionId);
+    writeSavedDraft(sessionId, text || null);
   }
 
   clearDraft(sessionId: string): void {
     this.drafts.delete(sessionId);
+    writeSavedDraft(sessionId, null);
   }
 
   /** 检索结果整体记入缓存：返回过的路径确认存在。 */
@@ -662,6 +667,10 @@ export class Store {
     return this.sendUserMessage(sessionId, text, mentions);
   }
 
+  /**
+   * 闸门决策上行：socket 非 OPEN 时返回 false 并置 lastError（UI 据此不进「提交中」态），
+   * 发送成功返回 true。闸门语义本身不变，这里只暴露发送结果。
+   */
   resolvePermission(
     sessionId: string,
     requestId: string,
@@ -669,8 +678,8 @@ export class Store {
     updatedInput?: unknown,
     /** AskUserQuestion 的回答：key 逐字 = 问题原文；与 updatedInput 互斥（后端同时拒绝两者同发） */
     questionAnswers?: Record<string, string>,
-  ): void {
-    this.send({
+  ): boolean {
+    return this.send({
       type: "permission_resolved",
       sessionId,
       requestId,
@@ -731,6 +740,7 @@ export class Store {
     this.fileKnown.delete(id);
     this.mentionPaths.delete(id);
     this.drafts.delete(id);
+    writeSavedDraft(id, null);
     this.configPending.delete(id);
     this.configErrors.delete(id);
     this.configSwitching.delete(id);
@@ -772,6 +782,28 @@ export class Store {
 function commandsFromPayload(payload: Record<string, unknown>): CommandInfo[] {
   const list = payload.commands;
   return Array.isArray(list) ? (list as CommandInfo[]) : [];
+}
+
+// 草稿持久化：纯 node 测试环境没有 localStorage，隐私模式下访问器本身会抛异常——
+// 两处都必须 typeof 判定 + try/catch，拿不到时无声降级为纯内存行为（与 Sidebar/SettingsMenu 同一纪律）。
+function readSavedDraft(sessionId: string): string {
+  try {
+    if (typeof localStorage === "undefined") return "";
+    return localStorage.getItem(DRAFT_STORAGE_PREFIX + sessionId) ?? "";
+  } catch {
+    return "";
+  }
+}
+
+/** text 为 null 时清除对应 key。 */
+function writeSavedDraft(sessionId: string, text: string | null): void {
+  try {
+    if (typeof localStorage === "undefined") return;
+    if (text === null) localStorage.removeItem(DRAFT_STORAGE_PREFIX + sessionId);
+    else localStorage.setItem(DRAFT_STORAGE_PREFIX + sessionId, text);
+  } catch {
+    /* localStorage 不可用时仅内存生效 */
+  }
 }
 
 /** config_update_started 的过渡文案：后端给什么显示什么；缺省兜底。 */
