@@ -4,6 +4,7 @@ import type {
   DriverConfigSchema,
   DriverOptions,
   PermissionDecision,
+  QuestionAnswers,
   SessionConfig,
   UnifiedCommand,
   UserMessageInput,
@@ -12,6 +13,7 @@ import { BaseDriver, parseJsonLine, readMentionText, userMessageText, withTimeou
 
 interface ClaudePermission {
   protocolRequestId: string;
+  toolName: string;
   input: unknown;
 }
 
@@ -178,12 +180,40 @@ export class ClaudeDriver extends BaseDriver {
     });
   }
 
-  async resolvePermission(requestId: string, decision: PermissionDecision, updatedInput?: unknown): Promise<void> {
+  async resolvePermission(
+    requestId: string,
+    decision: PermissionDecision,
+    updatedInput?: unknown,
+    questionAnswers?: QuestionAnswers,
+  ): Promise<void> {
     const pending = this.pendingPermissions.get(requestId);
     if (!pending) throw new Error(`Claude permission_request 不存在：${requestId}`);
     const allow = decision === "allow" || decision === "always";
+    let resolvedInput = updatedInput ?? pending.input;
+    if (questionAnswers !== undefined) {
+      if (!allow) throw new Error("Claude questionAnswers 只能与 allow 或 always 一起发送");
+      if (pending.toolName !== "AskUserQuestion") {
+        throw new Error(`Claude ${pending.toolName} 不接受 questionAnswers`);
+      }
+      if (!pending.input || typeof pending.input !== "object" || Array.isArray(pending.input)) {
+        throw new Error("Claude AskUserQuestion 入参不是 JSON 对象");
+      }
+      const input = pending.input as Record<string, unknown>;
+      if (!Array.isArray(input.questions)) throw new Error("Claude AskUserQuestion 入参缺少 questions");
+      const questionTexts = new Set(input.questions.flatMap((question): string[] => {
+        if (!question || typeof question !== "object") return [];
+        const text = (question as Record<string, unknown>).question;
+        return typeof text === "string" ? [text] : [];
+      }));
+      for (const question of Object.keys(questionAnswers)) {
+        if (!questionTexts.has(question)) {
+          throw new Error(`questionAnswers 的 key 必须逐字匹配问题文本：${question}`);
+        }
+      }
+      resolvedInput = { ...input, answers: questionAnswers };
+    }
     const response: Record<string, unknown> = allow
-      ? { behavior: "allow", updatedInput: updatedInput ?? pending.input }
+      ? { behavior: "allow", updatedInput: resolvedInput }
       : { behavior: "deny", message: "用户拒绝了此操作" };
     this.send({
       type: "control_response",
@@ -284,8 +314,13 @@ export class ClaudeDriver extends BaseDriver {
       const requestId = String(message.request_id);
       this.pendingPermissions.set(requestId, {
         protocolRequestId: requestId,
+        toolName: String(message.request.tool_name ?? ""),
         input: message.request.input,
       });
+      const isUserQuestion = message.request.tool_name === "AskUserQuestion"
+        && message.request.input
+        && typeof message.request.input === "object"
+        && Array.isArray(message.request.input.questions);
       this.callbacks.emit("permission_request", {
         requestId,
         gate: "control_request",
@@ -295,6 +330,11 @@ export class ClaudeDriver extends BaseDriver {
         toolCallId: message.request.tool_use_id,
         input: message.request.input,
         permissionSuggestions: message.request.permission_suggestions ?? [],
+        ...(isUserQuestion ? {
+          interactionType: "ask_user_question",
+          questionProtocol: "claude_updated_input_answers_v1",
+          questions: message.request.input.questions,
+        } : {}),
       });
       return;
     }

@@ -9,6 +9,7 @@ import type {
   DriverConfigSchema,
   DriverOptions,
   PermissionDecision,
+  QuestionAnswers,
   SessionConfig,
   FileMention,
   UserMessageInput,
@@ -38,7 +39,12 @@ export abstract class BaseDriver implements Driver {
   abstract getConfigSchema(): DriverConfigSchema;
   abstract setConfig(config: SessionConfig): Promise<SessionConfig>;
   abstract sendUserMessage(message: UserMessageInput): Promise<void>;
-  abstract resolvePermission(requestId: string, decision: PermissionDecision, updatedInput?: unknown): Promise<void>;
+  abstract resolvePermission(
+    requestId: string,
+    decision: PermissionDecision,
+    updatedInput?: unknown,
+    questionAnswers?: QuestionAnswers,
+  ): Promise<void>;
 
   protected spawnProcess(command: string, args: string[], options: SpawnOptionsWithoutStdio = {}): void {
     const child = spawn(command, args, {

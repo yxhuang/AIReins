@@ -14,6 +14,7 @@ import {
   CONFIG_OPTION_IDS,
   type CreateSessionInput,
   type PermissionDecision,
+  type QuestionAnswers,
   type SessionConfig,
   type UnifiedEvent,
   type UserMessageInput,
@@ -262,11 +263,19 @@ async function handleWsMessage(client: WsClientState, text: string): Promise<voi
     } else if (message.type === "permission_resolved") {
       const decisions = new Set(["allow", "deny", "always"]);
       if (!decisions.has(message.decision)) throw new Error("decision 必须是 allow、deny 或 always");
+      const questionAnswers = validateQuestionAnswers(message.questionAnswers);
+      if (questionAnswers && message.decision === "deny") {
+        throw new Error("questionAnswers 只能与 allow 或 always 一起发送");
+      }
+      if (questionAnswers && message.updatedInput !== undefined) {
+        throw new Error("questionAnswers 与 updatedInput 不能同时发送");
+      }
       await manager.resolvePermission(
         sessionId,
         String(message.requestId ?? ""),
         message.decision as PermissionDecision,
         message.updatedInput,
+        questionAnswers,
       );
     } else if (message.type === "interrupt") {
       await manager.interrupt(sessionId);
@@ -285,6 +294,26 @@ async function handleWsMessage(client: WsClientState, text: string): Promise<voi
       ...context,
     });
   }
+}
+
+function validateQuestionAnswers(value: unknown): QuestionAnswers | undefined {
+  if (value === undefined) return undefined;
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("questionAnswers 必须是问题文本到答案字符串的 JSON 对象");
+  }
+  const entries = Object.entries(value);
+  if (entries.length < 1 || entries.length > 4) {
+    throw new Error("questionAnswers 必须包含 1 到 4 个答案");
+  }
+  for (const [question, answer] of entries) {
+    if (!question.trim() || question.length > 2_000) {
+      throw new Error("questionAnswers 的问题文本必须为 1 到 2000 个字符");
+    }
+    if (typeof answer !== "string" || !answer.trim() || answer.length > 10_000) {
+      throw new Error("questionAnswers 的答案必须为 1 到 10000 个字符的字符串");
+    }
+  }
+  return Object.fromEntries(entries) as QuestionAnswers;
 }
 
 function validateFileQuery(cwd: string, value: string): string {

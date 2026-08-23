@@ -266,6 +266,7 @@ interface PageHealth {
 {"type":"user_message","sessionId":"...","command":{"name":"compact","arguments":"可选参数"}}
 {"type":"user_message","sessionId":"...","text":"概括引用内容","mentions":[{"type":"file","path":"server/README.md"}]}
 {"type":"permission_resolved","sessionId":"...","requestId":"...","decision":"allow"}
+{"type":"permission_resolved","sessionId":"...","requestId":"...","decision":"allow","questionAnswers":{"早餐吃粥还是吃面？":"吃面"}}
 {"type":"set_config","sessionId":"...","clientRequestId":"cfg-01","config":{"permissionMode":"plan"}}
 {"type":"set_config","sessionId":"...","clientRequestId":"cfg-02","config":{"effort":null}}
 {"type":"interrupt","sessionId":"..."}
@@ -357,11 +358,37 @@ Claude 的 model/effort 切换先广播 `config_update_started`，其 payload �
 
 Claude 与 Kimi 需要把内容嵌入 prompt，因此只接受不超过 1 MiB 的 UTF-8 文本；不满足条件会在发送前明确报错。任何 driver 的 `mentions:false` 也会明确拒绝引用，不会把引用静默降级为普通文本。
 
-协议诊断均来自真实进程（2026-08-21）：
+Claude 的 `AskUserQuestion` 仍通过原 `permission_request` 审批闸门下行，但事件会额外带上：
+
+```json
+{
+  "interactionType": "ask_user_question",
+  "questionProtocol": "claude_updated_input_answers_v1",
+  "questions": [{
+    "question": "早餐吃粥还是吃面？",
+    "header": "早餐选择",
+    "options": [
+      {"label":"吃粥","description":"温和清淡，容易消化"},
+      {"label":"吃面","description":"饱腹有劲，顶饿"}
+    ],
+    "multiSelect": false
+  }]
+}
+```
+
+前端选择后发送上面的 `questionAnswers` 形式；key 必须逐字使用 `question`，不能使用 `header`。多选答案按 Claude 协议合并为逗号分隔的一个字符串。Server 校验答案后把它合成为原控制应答的 `updatedInput.answers`，不会绕开审批闸门，也不会把 `updatedInput` 错当成独立工具结果；`questionAnswers` 与原始 `updatedInput` 不能同时发送。当前该便捷字段只由 Claude driver 支持。
+
+协议诊断来自真实进程（2026-08-21、2026-08-23）：
 
 - Claude Code 2.1.238：完整 `system/init` 含 102 个 `slash_commands`；控制请求 `initialize` 返回 102 个带描述和参数提示的 `commands`，包括用户 skills/plugins。直接发送 `/compact` 产生 `system {status:"compacting"}` 与 `compact_result`；未公布的 `/help` 则明确回复不可用。原始 `@server/test-sandbox/mention-fixture.txt` 文本会由 CLI 展开，显式 `document` block 也被模型正确读到。
 - Codex CLI 0.148.0：对 `listPrompts / customPrompts / slashCommands / commands/list / prompts/list` 等实际请求全部返回未知方法；`skills/list` 可返回 skills，但它们是独立的 `skill` input，不是斜杠命令表。发送文本 `/compact` 只得到模型文本回复，没有压缩协议事件。生成的 v2 schema 与真实 `turn/start` 均确认 `text_elements` 只是文本中特殊元素的 UI 字节范围，文件载体是单独的 `mention {name,path}` input。
 - Kimi Code CLI 0.38.0：`initialize.agentCapabilities.promptCapabilities.embeddedContext` 为 `true`；实测命令更新为 51 条，含 `/compact` 参数提示与 `/skill:*`，并用 `session/prompt` 成功执行 `/help`。实际 embedded resource 文件返回了文件内的唯一标记。
+
+针对结构化提问的补充诊断（2026-08-23）：
+
+- Claude Code 2.1.238：`control_response` 的 `allow` 只接受并使用 `updatedInput`；在其中加入 `answers: {"完整问题文本":"答案"}` 后，`AskUserQuestion` 返回正常工具结果并让模型继续。额外塞入 `result / toolResult / content / message` 不会成为工具结果。`deny.message` 会原样成为 `is_error:true` 的工具结果，可作降级，但会同时留下拒绝语义。无答案放行后再发一条明确关联的 user message 也能继续，但会多出一个用户回合。
+- Codex CLI 0.148.0：实验性 app-server schema 已有专用 `item/tool/requestUserInput` server request，客户端按 question `id` 返回 `answers[]`；当前 Workbench Codex driver 尚未接入该方法。
+- Kimi Code CLI 0.38.0：引擎对支持 ACP form elicitation 的客户端可用 `elicitation/create`；当前 Workbench 未声明该能力，因此会降级到 `session/request_permission`，只能表达第一问且多选退化为单选。当前通用审批应答也不能让前端指定同为 `allow_once` 的具体答案选项，尚不构成完整等价能力。
 
 `decision` 可为 `allow / deny / always`，也可附 `updatedInput`。Claude 的 `request_id` 原样保留并回填，`permissionSuggestions` 透传；Codex 按 server request 的 JSON-RPC `id` 应答；Kimi 每次 `terminal/create` 和 `fs/write_text_file` 都会额外产生不可绕过的最终审批事件。
 

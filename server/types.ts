@@ -26,6 +26,7 @@ export const EVENT_TYPES = [
 export type EventType = (typeof EVENT_TYPES)[number];
 export type SessionStatus = "starting" | "idle" | "running" | "dead" | "error";
 export type PermissionDecision = "allow" | "deny" | "always";
+export type QuestionAnswers = Record<string, string>;
 
 export const CONFIG_OPTION_IDS = ["model", "effort", "permissionMode"] as const;
 export type ConfigOptionId = (typeof CONFIG_OPTION_IDS)[number];
@@ -179,6 +180,7 @@ export interface Driver {
     requestId: string,
     decision: PermissionDecision,
     updatedInput?: unknown,
+    questionAnswers?: QuestionAnswers,
   ): Promise<void>;
   interrupt(): Promise<void>;
   stop(): Promise<void>;

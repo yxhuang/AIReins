@@ -22,6 +22,7 @@ import type {
   EffectiveConfigUpdate,
   EventType,
   PermissionDecision,
+  QuestionAnswers,
   SessionConfig,
   SessionRecord,
   SessionStatus,
@@ -204,10 +205,19 @@ export class SessionManager {
     requestId: string,
     decision: PermissionDecision,
     updatedInput?: unknown,
+    questionAnswers?: QuestionAnswers,
   ): Promise<void> {
     const worker = this.requireWorker(id);
-    await worker.resolvePermission(requestId, decision, updatedInput);
-    this.emit(id, "permission_resolved", { requestId, decision, updatedInput });
+    if (questionAnswers !== undefined && worker.kind !== "claude") {
+      throw new Error(`${worker.kind} driver 尚不支持 questionAnswers`);
+    }
+    await worker.resolvePermission(requestId, decision, updatedInput, questionAnswers);
+    this.emit(id, "permission_resolved", {
+      requestId,
+      decision,
+      ...(updatedInput !== undefined ? { updatedInput } : {}),
+      ...(questionAnswers !== undefined ? { questionAnswers } : {}),
+    });
   }
 
   async setConfig(id: string, config: SessionConfig): Promise<SessionRecord> {
