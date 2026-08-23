@@ -3,11 +3,11 @@ import type { CommandInfo, MetaInfo, SessionRecord } from "../types";
 import { compactTokens, duration, asRecord, truncateDisplayWidth } from "../format";
 import { buildRenderItems, type GateView } from "../render-items";
 import { extractMentionTokens, mentionQueryAt, mentionTokenEnd } from "../mentions";
-import { needsRestartNote, RESTART_NOTE } from "../config-view";
+import { needsRestartNote, effectiveFor, EFFECTIVE_SOURCE_LABELS, ALIAS_NOTE, RESTART_NOTE } from "../config-view";
 import { fetchFiles } from "../api";
 import { MAX_MENTIONS, store } from "../store";
 import { useStore } from "../useStore";
-import { GateBlock, RawLine, SystemLine, TextBlockView, ThoughtBlockView, ToolCard, UserBlockView } from "./StreamItems";
+import { GateBlock, QuestionBlock, RawLine, SystemLine, TextBlockView, ThoughtBlockView, ToolCard, UserBlockView } from "./StreamItems";
 import { ResumedHistory } from "./ResumedHistory";
 import { STATUS_HINTS, STATUS_LABELS } from "./Sidebar";
 
@@ -121,9 +121,11 @@ export function SessionView({ session }: { session: SessionRecord }) {
               return <ThoughtBlockView key={item.key} item={item} />;
             case "tool":
               return <ToolCard key={item.key} item={item} />;
-            case "gate":
+            case "gate": {
+              // AskUserQuestion 渲染为提问选择卡片；与普通闸门共用 pendingGates/贴条机制
+              const Block = item.questions?.length ? QuestionBlock : GateBlock;
               return (
-                <GateBlock
+                <Block
                   key={item.key}
                   item={item}
                   sessionId={session.id}
@@ -134,6 +136,7 @@ export function SessionView({ session }: { session: SessionRecord }) {
                   }}
                 />
               );
+            }
             case "system":
               return <SystemLine key={item.key} item={item} />;
             case "raw":
@@ -155,7 +158,7 @@ export function SessionView({ session }: { session: SessionRecord }) {
   );
 }
 
-// 会话头的只读配置摘要（如「opus · xhigh · manual」，未覆盖项显示「跟随配置」）；
+// 会话头的只读配置摘要（如「opus · xhigh · manual」，未覆盖项显示实际生效值或「跟随配置」）；
 // 可交互控件只在输入框上方一处，会话头不再放可点的，避免两处不一致。
 function ConfigSummary({ session }: { session: SessionRecord }) {
   const store = useStore();
@@ -164,8 +167,9 @@ function ConfigSummary({ session }: { session: SessionRecord }) {
   const parts = options.map((option) => {
     const current = session.config?.[option.id];
     if (current) return current;
-    // claude 首轮 init 后才报实际模型：跟随配置时摘要并入实际值
-    if (option.id === "model" && session.model) return session.model;
+    // claude 跟随配置时并入实际生效值（首轮前是设置别名，init 后是精确 id；精度差异见控件旁标注）
+    const effective = effectiveFor(session, option.id);
+    if (effective) return effective.value;
     return "跟随配置";
   });
   return <span title="当前配置摘要；可更改的项在输入框上方"> · {parts.join(" · ")}</span>;
@@ -196,13 +200,19 @@ function ConfigControls({ session }: { session: SessionRecord }) {
         const known = new Set(option.values.map((v) => v.value));
         const disabled =
           !option.mutable || !live || Boolean(switching) || Boolean(pending?.has(option.id));
+        // claude 跟随配置时，把控件上的实际生效值与来源一并显示（codex/kimi 恒 null，不追加）。
+        // 首轮前只能是设置里的别名（source=settings），首轮 init 后升级为精确 id（source=init），
+        // 精度差异是真实的，用极小字标来源，不伪装成一致。
+        const effective = currentKey === "" ? effectiveFor(session, option.id) : null;
+        const aliasNote =
+          session.agent === "claude" && option.id === "model" ? ALIAS_NOTE : undefined;
         const title = switching
           ? undefined
           : !option.mutable
             ? "此项需新建会话才能更改"
             : !live
               ? "会话已结束，无法更改"
-              : undefined;
+              : aliasNote;
         return (
           <label className="config-select" key={option.id} title={title}>
             <span className="config-select-name">
@@ -221,10 +231,8 @@ function ConfigControls({ session }: { session: SessionRecord }) {
             >
               {currentKey === "" && (
                 <option value="" disabled>
-                  {/* claude 首轮 init 后才报实际模型：跟随配置时把实际值并进同一处显示 */}
-                  {option.id === "model" && session.model
-                    ? `${followLabel}（${session.model}）`
-                    : followLabel}
+                  {/* 跟随配置时把实际生效值并进同一处显示（别名/精确 id 的精度差异由旁边的来源小字标注） */}
+                  {effective ? `${followLabel}（${effective.value}）` : followLabel}
                 </option>
               )}
               {currentKey !== "" && !known.has(currentKey) && (
@@ -238,6 +246,21 @@ function ConfigControls({ session }: { session: SessionRecord }) {
                   </option>
                 ))}
             </select>
+            {/* 有效值的来源标注（极小字）：设置=首轮前的别名/合并值，运行时=init 回报的精确值 */}
+            {effective && (
+              <span
+                className="config-effective-src"
+                title={
+                  effective.source === "init"
+                    ? "Claude 运行时回报的精确值"
+                    : effective.source === "settings" && option.id === "model"
+                      ? ALIAS_NOTE
+                      : "来自 Claude 分层设置合并"
+                }
+              >
+                {EFFECTIVE_SOURCE_LABELS[effective.source]}
+              </span>
+            )}
             {/* mutableVia:"restart" 的代价如实标注在控件旁：事实说明，不是警告 */}
             {needsRestartNote(option) && (
               <span className="config-note">{RESTART_NOTE}</span>

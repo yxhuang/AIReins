@@ -7,6 +7,9 @@ export type PermissionDecision = "allow" | "deny" | "always";
 
 export type ConfigOptionId = "model" | "effort" | "permissionMode";
 
+/** claude 实际生效值（effectiveModel/effectiveEffort）的来源；null = 该项无有效值 */
+export type EffectiveSource = "session" | "settings" | "init" | null;
+
 /** 会话级配置覆盖；字段为 null 表示不覆盖、跟随 CLI 有效配置。 */
 export interface SessionConfig {
   model?: string | null;
@@ -45,6 +48,23 @@ export interface UnifiedEvent {
   payload: Record<string, unknown>;
 }
 
+/** Claude AskUserQuestion 的单个选项（label 必填，description 可选）。 */
+export interface AskQuestionOption {
+  label: string;
+  description?: string;
+}
+
+/**
+ * Claude AskUserQuestion 的单条问题（permission_request 上 interactionType:"ask_user_question"
+ * 时随事件下行）。question 是回传 questionAnswers 的 key，必须逐字使用，不能用 header。
+ */
+export interface AskQuestion {
+  question: string;
+  header?: string;
+  options: AskQuestionOption[];
+  multiSelect: boolean;
+}
+
 export interface SessionRecord {
   id: string;
   agent: AgentKind;
@@ -67,6 +87,11 @@ export interface SessionRecord {
   model?: string | null;
   effort?: string | null;
   permissionMode?: string | null;
+  /** claude 额外固定返回：当前能确认的实际生效值与来源（codex/kimi 恒缺省，不是异常） */
+  effectiveModel?: string | null;
+  effectiveEffort?: string | null;
+  effectiveModelSource?: EffectiveSource;
+  effectiveEffortSource?: EffectiveSource;
   config: SessionConfig;
   /** true = 该会话已关闭 agent 主动询问（claude bypass/dontAsk、codex never、kimi yolo） */
   riskyMode: boolean;

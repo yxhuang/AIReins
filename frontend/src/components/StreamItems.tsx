@@ -8,6 +8,7 @@ import type {
   ToolView,
   UserBlock,
 } from "../render-items";
+import { allAnswered, buildQuestionAnswers, toggleOption, type AskSelection } from "../ask";
 import { store } from "../store";
 
 export function UserBlockView({ item }: { item: UserBlock }) {
@@ -157,6 +158,116 @@ export const GateBlock = forwardRef<HTMLDivElement, { item: GateView; sessionId:
           </button>
           <button type="button" className="btn btn-danger" disabled={disabled} onClick={() => decide("deny")}>
             拒绝
+          </button>
+        </div>
+      </div>
+    );
+  },
+);
+
+// 提问卡片（Claude AskUserQuestion）：仍是闸门暖色系（它在等人出手），但视觉是
+// 「问题卡片」而非「危险操作卡片」——选项是并列可点卡片，没有允许/拒绝二元按钮，
+// 跳过出口是小字次按钮。与闸门块共用 .gate-block 的暖色底与 2px 硬边。
+export const QuestionBlock = forwardRef<HTMLDivElement, { item: GateView; sessionId: string; dead: boolean }>(
+  function QuestionBlock({ item, sessionId, dead }, ref) {
+    const questions = item.questions ?? [];
+    // 每题选中集合：key 逐字 = 问题原文（回传协议要求），value = 已选 label 数组
+    const [selection, setSelection] = useState<AskSelection>({});
+    // 提交后进入提交中态：禁用全部控件，直到 permission_resolved 到达
+    const [submitting, setSubmitting] = useState(false);
+
+    if (item.decision) {
+      const answers = item.questionAnswers ? Object.values(item.questionAnswers) : [];
+      const label = item.decision === "deny"
+        ? "已跳过"
+        : answers.length > 0
+          ? `已选择：${answers.join(" · ")}`
+          : "已回答";
+      return (
+        <div className="gate-block gate-resolved" ref={ref}>
+          <span className="gate-resolved-label">
+            {item.agent} 的提问 —— {label}
+          </span>
+        </div>
+      );
+    }
+
+    if (dead) {
+      return (
+        <div className="gate-block gate-expired" ref={ref}>
+          <span className="gate-resolved-label">
+            {item.agent} 的提问 —— 会话已结束，此提问已失效
+          </span>
+        </div>
+      );
+    }
+
+    const submit = () => {
+      if (submitting || !allAnswered(questions, selection)) return;
+      setSubmitting(true);
+      store.resolvePermission(
+        sessionId,
+        item.requestId,
+        "allow",
+        undefined,
+        buildQuestionAnswers(questions, selection),
+      );
+    };
+
+    const skip = () => {
+      if (submitting) return;
+      setSubmitting(true);
+      // 跳过 = deny：模型收到「用户拒绝了此操作」，可继续别的路径
+      store.resolvePermission(sessionId, item.requestId, "deny");
+    };
+
+    const ready = allAnswered(questions, selection);
+
+    return (
+      <div className="gate-block question-block" ref={ref}>
+        <div className="gate-title">{item.agent} 在问你</div>
+        {questions.map((q, qi) => {
+          const picked = selection[q.question] ?? [];
+          return (
+            <div className="question-item" key={qi}>
+              {q.header && <div className="question-header">{q.header}</div>}
+              <div className="question-text">{q.question}</div>
+              <div className="question-options" role="group" aria-label={q.header ?? q.question}>
+                {q.options.map((option) => {
+                  const active = picked.includes(option.label);
+                  return (
+                    <button
+                      type="button"
+                      key={option.label}
+                      className={`question-option${active ? " selected" : ""}`}
+                      aria-pressed={active}
+                      disabled={submitting}
+                      onClick={() => setSelection((current) => toggleOption(current, q, option.label))}
+                    >
+                      <span className="question-option-label">{option.label}</span>
+                      {option.description && (
+                        <span className="question-option-desc">{option.description}</span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+              {q.multiSelect && <div className="question-multi-hint">可多选</div>}
+            </div>
+          );
+        })}
+        <div className="question-actions">
+          <button
+            type="button"
+            className="btn btn-gate"
+            disabled={submitting || !ready}
+            title={ready ? undefined : "每题至少选择一项后才能提交"}
+            onClick={submit}
+          >
+            {submitting ? "提交中…" : questions.length > 1 ? "提交全部回答" : "提交回答"}
+          </button>
+          <button type="button" className="question-skip" disabled={submitting} onClick={skip}>
+            跳过（不回答）
           </button>
         </div>
       </div>

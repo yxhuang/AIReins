@@ -1,6 +1,7 @@
 import type {
   CommandInfo,
   ConfigOptionId,
+  EffectiveSource,
   FileMention,
   MetaInfo,
   PageManifest,
@@ -438,6 +439,15 @@ export class Store {
     if ("effort" in payload) session.effort = payload.effort as string | null;
     if ("permissionMode" in payload) session.permissionMode = payload.permissionMode as string | null;
     if (typeof payload.riskyMode === "boolean") session.riskyMode = payload.riskyMode;
+    // claude 的实际生效值与来源随广播一并吸收（codex/kimi 不带这些字段，不动）
+    if ("effectiveModel" in payload) session.effectiveModel = payload.effectiveModel as string | null;
+    if ("effectiveEffort" in payload) session.effectiveEffort = payload.effectiveEffort as string | null;
+    if ("effectiveModelSource" in payload) {
+      session.effectiveModelSource = payload.effectiveModelSource as EffectiveSource;
+    }
+    if ("effectiveEffortSource" in payload) {
+      session.effectiveEffortSource = payload.effectiveEffortSource as EffectiveSource;
+    }
     this.configPending.delete(event.sessionId);
     this.configSwitching.delete(event.sessionId);
     this.configErrors.delete(event.sessionId);
@@ -657,8 +667,17 @@ export class Store {
     requestId: string,
     decision: PermissionDecision,
     updatedInput?: unknown,
+    /** AskUserQuestion 的回答：key 逐字 = 问题原文；与 updatedInput 互斥（后端同时拒绝两者同发） */
+    questionAnswers?: Record<string, string>,
   ): void {
-    this.send({ type: "permission_resolved", sessionId, requestId, decision, ...(updatedInput !== undefined ? { updatedInput } : {}) });
+    this.send({
+      type: "permission_resolved",
+      sessionId,
+      requestId,
+      decision,
+      ...(updatedInput !== undefined ? { updatedInput } : {}),
+      ...(questionAnswers !== undefined ? { questionAnswers } : {}),
+    });
   }
 
   interrupt(sessionId: string): void {

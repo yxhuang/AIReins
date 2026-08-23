@@ -1,5 +1,6 @@
-import type { AgentKind, PermissionDecision, UnifiedEvent } from "./types";
+import type { AgentKind, AskQuestion, PermissionDecision, UnifiedEvent } from "./types";
 import { asRecord, stringifyBlock } from "./format";
+import { normalizeQuestions } from "./ask";
 
 // 把统一事件折叠成渲染条目：同一 turn 内的文本增量、思考增量合并成块；
 // 工具调用按 toolCallId 聚合三阶段；闸门按 requestId 聚合请求与结果。
@@ -55,6 +56,10 @@ export interface GateView {
   detail: string;
   suggestions: unknown[];
   decision?: PermissionDecision;
+  /** interactionType:"ask_user_question" 时归一后的结构化提问（渲染成选择卡片而非审批卡片） */
+  questions?: AskQuestion[];
+  /** 提问的回答回执：permission_resolved 广播原样带回的 questionAnswers（key 逐字 = 问题原文） */
+  questionAnswers?: Record<string, string>;
 }
 
 export interface SystemBlock {
@@ -125,6 +130,10 @@ export function gateFromEvent(event: UnifiedEvent, agent: AgentKind): GateView {
 
   const suggestions = Array.isArray(p.permissionSuggestions) ? p.permissionSuggestions : [];
 
+  // Claude AskUserQuestion：interactionType 标记 + 结构化 questions[]；归一后为空则回退普通审批卡片。
+  const questions =
+    p.interactionType === "ask_user_question" ? normalizeQuestions(p.questions) : [];
+
   // 兜底详情：优先展示 input，其次 toolCall，再次整个 payload。
   const detailSource =
     Object.keys(input).length > 0 ? input : Object.keys(toolCall).length > 0 ? toolCall : p;
@@ -146,6 +155,7 @@ export function gateFromEvent(event: UnifiedEvent, agent: AgentKind): GateView {
     added,
     detail: stringifyBlock(detailSource),
     suggestions,
+    ...(questions.length > 0 ? { questions } : {}),
   };
 }
 
@@ -243,7 +253,13 @@ export function buildRenderItems(events: UnifiedEvent[], agent: AgentKind): Rend
       }
       case "permission_resolved": {
         const view = gates.get(String(p.requestId ?? ""));
-        if (view) view.decision = p.decision as PermissionDecision;
+        if (view) {
+          view.decision = p.decision as PermissionDecision;
+          // 提问卡片的回答回执：广播原样带回 questionAnswers，供「已选择：…」降级态展示
+          if (p.questionAnswers && typeof p.questionAnswers === "object" && !Array.isArray(p.questionAnswers)) {
+            view.questionAnswers = p.questionAnswers as Record<string, string>;
+          }
+        }
         break;
       }
       case "session_created":

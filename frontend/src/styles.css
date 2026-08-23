@@ -574,6 +574,15 @@ body {
   color: var(--text-faint);
 }
 
+/* 跟随配置时有效值的来源标注（设置/运行时）：极小字，精度差异如实可见 */
+.config-effective-src {
+  font-size: 10.5px;
+  color: var(--text-faint);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0 4px;
+}
+
 .config-error {
   display: inline-flex;
   align-items: center;
@@ -820,6 +829,100 @@ body {
   background: transparent;
   border-color: var(--danger);
   color: var(--danger);
+}
+
+/* ── 提问卡片（AskUserQuestion）：闸门暖色系，但做成「问题卡片」──
+   选项是并列卡片而非允许/拒绝二元按钮；不用 --danger。 */
+.question-block .gate-title { margin-bottom: 2px; }
+
+.question-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.question-header {
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--text-faint);
+}
+
+.question-text {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.question-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.question-option {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 120px;
+  max-width: 260px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  padding: 8px 10px;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.question-option:hover { border-color: var(--gate-border); }
+
+/* 选中态用闸门暖色描边（它仍在等人出手），不用 --busy/--danger */
+.question-option.selected {
+  border-color: var(--gate);
+  box-shadow: inset 0 0 0 1px var(--gate);
+}
+
+.question-option:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.question-option-label { font-weight: 700; }
+
+.question-option-desc {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.question-multi-hint {
+  font-size: 11.5px;
+  color: var(--text-faint);
+}
+
+.question-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 2px;
+}
+
+/* 跳过出口：存在但不喧宾夺主——小字次按钮，不是 --danger 拒绝样式 */
+.question-skip {
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 12.5px;
+  cursor: pointer;
+  padding: 4px 2px;
+}
+
+.question-skip:hover { text-decoration: underline; }
+
+.question-skip:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 /* 已处理的闸门降级为中性样式 */

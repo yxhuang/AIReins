@@ -36,7 +36,8 @@ frontend/
     types.ts            与 server/types.ts 对应的纯前端类型（后端是唯一事实源）
     api.ts              REST 信封客户端（code 非 0 抛中文错误消息）
     format.ts           相对时间 / 用时 / token 紧凑格式 / 会话标题派生
-    render-items.ts     统一事件 → 渲染条目（文本合并、工具聚合、闸门提取）
+    render-items.ts     统一事件 → 渲染条目（文本合并、工具聚合、闸门提取；AskUserQuestion 提问识别）
+    ask.ts              AskUserQuestion 纯逻辑：questions 归一 / 选择状态 / questionAnswers 合成（无 DOM 依赖，可单测）
     mentions.ts         @ 引用纯文本 token 提取 / 光标处触发判定 / 尾部标点剥离候选（无 DOM 依赖，可单测）
     store.ts            全局状态 + WS 连接恢复（见下）
     useStore.ts         useSyncExternalStore 订阅 hook
@@ -50,9 +51,9 @@ frontend/
       SettingsMenu.tsx  设置齿轮 + 锚定浮层（分组/条目结构，60vh 限高滚动 + focus trap）；主题三选一写 <html data-theme>、localStorage 持久化（读写均 try/catch）
       PageView.tsx      扩展页面视图：进入先查健康，按 embeddable 三态渲染——不可达降级面板（reason + 重试）；embeddable:false 完全不渲染 iframe 改降级面板（服务正常但目标拒绝嵌入 + 主按钮新标签页打开）；embeddable:true 正常 iframe；null/缺省 iframe + 空白提示与常驻新标签页出口
       HistoryView.tsx   历史会话浏览（#/history）：筛选（agent / 来源 / 关键词 250ms 防抖）+ nextCursor「加载更多」分页 + 预览面板（≤8 条消息）+「导入并续接」（就地续接代价写在按钮上方）+「已在工作台中」标记与跳转
-      SessionView.tsx   会话头（usage 分家渲染 / 配置只读摘要 / 中断）+ 危险模式警示条 + 历史消息区（resumedFrom 时）+ 事件流 + 输入框（配置控件行在输入框正上方；行首 / 命令面板、@ 文件引用面板与待附加预览条、结构化 command 上行、codex 降级说明；草稿按会话内存缓存，切走切回不丢；dead 会话「新建会话并续接」出口）+ 未决闸门贴条
+      SessionView.tsx   会话头（usage 分家渲染 / 配置只读摘要（跟随配置时并入有效值）/ 中断）+ 危险模式警示条 + 历史消息区（resumedFrom 时）+ 事件流（AskUserQuestion 走提问选择卡片）+ 输入框（配置控件行在输入框正上方，跟随配置时显示实际生效值与来源小字；行首 / 命令面板、@ 文件引用面板与待附加预览条、结构化 command 上行、codex 降级说明；草稿按会话内存缓存，切走切回不丢；dead 会话「新建会话并续接」出口）+ 未决闸门贴条
       ResumedHistory.tsx 续接会话的历史消息区：实时流上方、默认加载最近一页、「加载更早的消息」nextCursor 翻页 prepend、弱化底色 + 分隔线与实时区区分、用户/助手两态（不伪造工具/思考块）
-      StreamItems.tsx   用户消息 / 文本块 / 思考折叠块 / 工具卡片 / 闸门块 / 系统行
+      StreamItems.tsx   用户消息 / 文本块 / 思考折叠块 / 工具卡片 / 闸门块 / 提问选择卡片（AskUserQuestion）/ 系统行
     styles.css          设计令牌（深浅两套）与全部样式
 ```
 
@@ -337,6 +338,24 @@ frontend/
 - [x] **90. 四条命令全绿。** **实测**：`npm test`（check:theme「✅ 深色令牌两份一致（26 项）」+ mentions 29 例 + store 13 例 + pages 6 例 + resume 9 例）退出码 0；`npm run build`（vite 8.2.2，退出码 0）；`npm run typecheck` 与 `npm run typecheck:frontend` 退出码均 0。
 
 **这版历史加载仍会误导用户的点**（如实记录）：① 历史区只有用户/助手文本，原生会话里实际发生过的工具调用与思考完全不可见，「已写入。」这类回复看起来像是凭空说的；② `resumedFrom.messageCount` 后端默认省略，历史区头部「约 N 条消息」通常不出现，用户无法预知历史总量；③ 达到 500 条上限后提示「更早的内容在原生会话文件中」，但界面没给出该文件路径（只有原生 id）；④ 若原生 transcript 被用户在 CLI 侧继续写过，历史区不会自动刷新（仅进会话时取一次 + 手动翻页）。
+
+### M16 claude 实际生效值显示 + AskUserQuestion 提问选择卡片（2026-08-23）
+
+**需求 1（effective* 显示）**：`types.ts` 的 `SessionRecord` 补 `effectiveModel / effectiveEffort / effectiveModelSource / effectiveEffortSource`（可选，codex/kimi 缺省属正常）；`store.applyConfigUpdated` 在现有 config 回写之外吸收这四个字段（`"effectiveModel" in payload` 判定，codex/kimi 的广播不带、不会被写入）。`config-view.ts` 新增纯逻辑 `effectiveFor(session, optionId)`（仅 model/effort 有，值为 null 或 source 为 null 时返回 null）、`EFFECTIVE_SOURCE_LABELS`（session=会话 / settings=设置 / init=运行时）与 `ALIAS_NOTE`（「别名为 Claude 设置的最新该档位模型」）。显示形态（逐字）：跟随配置时下拉占位项显示「跟随 Claude 配置（opus）」/ init 后「跟随 Claude 配置（claude-haiku-4-5-20251001）」，控件旁极小字来源标注「设置」/「运行时」（`.config-effective-src`，title 带别名说明/精度解释）；有效值为 null 时仍只显示「跟随 Claude 配置」，不编造。会话头 `ConfigSummary` 同样并入有效值（取代旧的 `session.model` 特判，effort 也覆盖）。`config.model` 语义不动：null = 未被会话级覆盖。
+
+**需求 2（提问选择卡片）**：`permission_request` 带 `interactionType:"ask_user_question"` + `questions[]` 时，`render-items.ts` 的 `gateFromEvent` 经 `ask.ts` 的 `normalizeQuestions` 归一（无 header/description 不伪造、无效条目过滤、归一为空回退普通审批卡片），SessionView 路由到 `QuestionBlock`（StreamItems.tsx）而非 GateBlock。卡片渲染 header（如有）/question/并列可点选项卡片（label 加粗 + description 小字，真实 `<button>`，Tab+Enter 可达，aria-pressed）；单选点选替换，多选 toggle（卡片旁小字「可多选」）；多问题全部答完（每题 ≥1 项）后底部「提交回答」一次回传。回传走 `store.resolvePermission(sessionId, requestId, "allow", undefined, questionAnswers)`（store 新增第五参，与 updatedInput 互斥）：`buildQuestionAnswers` 保证 **key 逐字 = question 原文**、**多选按选项顺序合并为逗号分隔的一个字符串**。配色：共用闸门暖色系（`.gate-block` 底 + 2px 硬边，它确实在等人出手），但视觉是问题卡片——选项是并列卡片（选中态暖色描边），**没有允许/拒绝二元按钮，不用 `--danger`**；跳过出口是小字次按钮「跳过（不回答）」（deny，模型收到拒绝），不喧宾夺主。已处理的提问降级为中性态「已选择：xxx」（`permission_resolved` 广播带回的 questionAnswers 落到视图）/「已跳过」，与闸门 resolved 风格一致。未决提问天然计入 pendingGates（按 `kind==="gate" && !decision` 计），「N 个闸门等待处理 ↑」贴条与滚动定位照常覆盖。
+
+**打桩测试** `frontend/scripts/effective-ask-flow.test.mjs`（10 例，新增 `test:effective-ask` 并挂进根 `npm test` 聚合）：effectiveFor 取值/来源/null 纪律、applyConfigUpdated 吸收四字段且不改写 config.model、codex 广播不带 effective* 不被写入、normalizeQuestions 字段齐全与无效过滤、gateFromEvent 识别 interactionType（普通闸门不受影响）、单选替换/多选 toggle/allAnswered、key 逐字 = question 不用 header、多选逗号合并按选项顺序、resolved 广播 questionAnswers 落视图、resolvePermission 帧形状（questionAnswers 与 updatedInput 互斥、deny 不带答案）、SessionView/QuestionBlock 源码接线（提问路由、pendingGates 覆盖、跳过出口非 btn-danger、已选择/已跳过降级态）。
+
+- [x] **1. claude 未覆盖时看到实际模型；首轮前后精度变化。** **接口侧实测**（隔离实例 `WORKBENCH_PORT=8797`，`tsx frontend/scripts/ask-e2e.mjs 8797`）：不传 config 的会话 B 建会话时 `config.model:null + effectiveModel:"opus" + source:"settings"`、`effectiveEffort:"high"/"settings"`（别名精度，显示「跟随 Claude 配置（opus）·设置」）；`config:{model:"haiku"}` 的会话 A 建会话时 `effectiveModel:"haiku"/source:"session"`，首轮 init 后 GET 实测升级为 `effectiveModel:"claude-haiku-4-5-20251001"/source:"init"`，且 `config.model` 仍为 `"haiku"` 不被改写。UI 渲染为代码复核（无头环境未启浏览器）。
+- [x] **2. codex/kimi 显示未受影响。** **打桩实测 + 代码复核**：codex 的 config_updated 不带 effective*，session 字段保持缺省、`effectiveFor` 返回 null，控件仍只显示具体值或 followLabel，不追加、不显示成异常。
+- [x] **3. 提问卡片打桩测试。** **实测**：`npm run test:effective-ask` 10 例全过——header/question/options/description 齐全、单选/多选分别处理、key 逐字 = question、多选逗号合并（`咸菜,煎蛋`）。
+- [x] **4. 真实闭环实测。** **实测**（8797 隔离实例）：claude 会话（`config:{model:"haiku"}`）→ 发消息让它用 AskUserQuestion 提问早餐 → 收到 `interactionType:"ask_user_question"` 事件（问题「早餐吃什么？」、header「早餐选择」、选项 ZORP7/QUUX3）→ 前端真实代码路径（gateFromEvent → normalizeQuestions → toggleOption → buildQuestionAnswers）产出 `questionAnswers:{"早餐吃什么？":"ZORP7"}` 回传 → 模型回复「明白了！你选择了 **ZORP7**。」（包含所选 label），turn_completed 正常。完事 DELETE 自建的两个会话，`ss -tlnp` 找 pid kill，端口确认关闭。
+- [x] **5. 拒绝出口存在但不喧宾夺主。** **代码复核**：跳过出口是 `.question-skip` 小字次按钮（中性 `--text-muted`，hover 才出下划线），与「提交回答」主按钮体量悬殊；提问卡片整树无 `btn-danger`（打桩源码断言覆盖）。
+- [x] **6. 未决提问滚出视口有回到它的提示。** **代码复核**：pendingGates 按 `kind==="gate" && !item.decision` 计，提问卡片就是 gate 条目，「N 个闸门等待处理 ↑」贴条与点击滚动定位天然覆盖（gateRefs 两种卡片都注册）。
+- [x] **7. `npm test`、`npm run build`、双 typecheck 全绿；新测试挂进聚合。** **实测**：`npm test`（check:theme「✅ 深色令牌两份一致（26 项）」+ mentions 29 例 + store 13 例 + pages 6 例 + resume 9 例 + effective-ask 10 例）退出码 0；`npm run build`（vite 8.2.2，退出码 0）；`npm run typecheck` 与 `npm run typecheck:frontend` 退出码均 0。
+
+**这版提问交互仍会卡用户的点**（如实记录）：① 跳过即 deny，模型收到的是「用户拒绝了此操作」的拒绝语义，没有「稍后回答/换个问法」的中间态；② 选项只有模型给的那些，没有「自定义回答」输入框（Claude 协议层另有 Other 约定，当前未接）；③ 提交后卡片靠 `permission_resolved` 广播降级，WS 断开期间提交会静默失败（按钮停在「提交中…」，重连重取快照后恢复可操作）；④ 多问题卡片没有逐题进度指示，长问题列表要用户自己确认每题都选了。
 
 ## 已知取舍
 
