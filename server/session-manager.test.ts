@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type {
@@ -76,6 +76,19 @@ class FakeClaudeDriver implements Driver {
     this.options.callbacks.status("idle");
   }
 
+  reportInit(model: string, effort?: string): void {
+    this.options.callbacks.metadata({
+      effectiveConfig: {
+        model: { value: model, source: "init" },
+        ...(effort ? { effort: { value: effort, source: "init" } } : {}),
+      },
+    });
+    this.options.callbacks.emit("config_updated", {
+      effectiveFrom: "current_turn",
+      reportedBy: "system/init",
+    });
+  }
+
   requestApproval(): void {
     this.options.callbacks.emit("permission_request", {
       requestId: "permission-after-restart",
@@ -85,14 +98,55 @@ class FakeClaudeDriver implements Driver {
   }
 }
 
+class FakeDefaultDriver implements Driver {
+  private config: SessionConfig;
+
+  constructor(readonly kind: "codex" | "kimi", readonly options: DriverOptions) {
+    this.config = kind === "codex"
+      ? { model: "gpt-5.6-sol", effort: "xhigh", permissionMode: "untrusted" }
+      : { model: "kimi-code/k3", effort: "high", permissionMode: "default" };
+  }
+
+  async start(): Promise<void> {
+    this.options.callbacks.metadata({ config: { ...this.config } });
+    this.options.callbacks.status("idle");
+  }
+
+  getConfigSchema(): DriverConfigSchema {
+    return {
+      source: "test",
+      options: [
+        { id: "model", name: "模型", values: [{ value: this.config.model!, label: "default" }], default: this.config.model!, mutable: true },
+        { id: "effort", name: "推理强度", values: [{ value: "low", label: "low" }, { value: this.config.effort!, label: "default" }], default: this.config.effort!, mutable: true },
+        { id: "permissionMode", name: "审批模式", values: [{ value: this.config.permissionMode!, label: "default" }], default: this.config.permissionMode!, mutable: true },
+      ],
+    };
+  }
+
+  async setConfig(config: SessionConfig): Promise<SessionConfig> {
+    this.config = { ...this.config, ...config };
+    this.options.callbacks.metadata({ config: { ...this.config } });
+    return { ...this.config };
+  }
+
+  async sendUserMessage(_message: UserMessageInput): Promise<void> {}
+  async resolvePermission(
+    _requestId: string,
+    _decision: PermissionDecision,
+    _updatedInput?: unknown,
+  ): Promise<void> {}
+  async interrupt(): Promise<void> {}
+  async stop(): Promise<void> {}
+}
+
 const instances: FakeClaudeDriver[] = [];
 const factory = (agent: AgentKind, options: DriverOptions): Driver => {
-  assert.equal(agent, "claude");
+  if (agent !== "claude") return new FakeDefaultDriver(agent, options);
   const driver = new FakeClaudeDriver(options, CLAUDE_CONFIG_SCHEMA);
   instances.push(driver);
   return driver;
 };
-const manager = new SessionManager(factory);
+const manager = new SessionManager(factory, () => ({ model: "opus", effort: "high" }));
 const events: UnifiedEvent[] = [];
 manager.onEvent((event) => events.push(event));
 
@@ -113,6 +167,25 @@ assert.deepEqual(flagValue(launchArgs, "--permission-prompt-tool"), "stdio");
 
 const created = await manager.create({ agent: "claude", cwd: process.cwd() });
 assert.equal(created.nativeSessionId, undefined);
+assert.deepEqual({
+  configModel: created.config.model,
+  configEffort: created.config.effort,
+  model: created.model,
+  effort: created.effort,
+  effectiveModel: created.effectiveModel,
+  effectiveEffort: created.effectiveEffort,
+  effectiveModelSource: created.effectiveModelSource,
+  effectiveEffortSource: created.effectiveEffortSource,
+}, {
+  configModel: null,
+  configEffort: null,
+  model: null,
+  effort: null,
+  effectiveModel: "opus",
+  effectiveEffort: "high",
+  effectiveModelSource: "settings",
+  effectiveEffortSource: "settings",
+});
 await assert.rejects(
   () => manager.setConfig(created.id, { model: "sonnet" }),
   /首轮完成前尚无 nativeSessionId/,
@@ -125,6 +198,24 @@ await assert.rejects(
   /当前回合尚未结束，请等待或中断后再切换/,
 );
 assert.equal(instances[0].stopped, false);
+instances[0].reportInit("claude-opus-5");
+const afterInit = manager.get(created.id)!;
+assert.equal(afterInit.config.model, null);
+assert.equal(afterInit.config.effort, null);
+assert.equal(afterInit.model, "claude-opus-5");
+assert.equal(afterInit.effort, null);
+assert.equal(afterInit.effectiveModel, "claude-opus-5");
+assert.equal(afterInit.effectiveModelSource, "init");
+assert.equal(afterInit.effectiveEffort, "high");
+assert.equal(afterInit.effectiveEffortSource, "settings");
+const initEvent = events.at(-1)!;
+assert.equal(initEvent.type, "config_updated");
+assert.equal(initEvent.payload.effectiveModel, "claude-opus-5");
+assert.equal(initEvent.payload.effectiveEffort, "high");
+assert.equal(initEvent.payload.effectiveModelSource, "init");
+assert.equal(initEvent.payload.effectiveEffortSource, "settings");
+assert.equal(manager.list().find((session) => session.id === created.id)!.effectiveModel, "claude-opus-5");
+assert.equal(manager.getSnapshot(created.id)!.session.effectiveEffort, "high");
 instances[0].finish("native-test-session");
 
 const beforeRestartSeq = manager.get(created.id)!.seq;
@@ -140,11 +231,19 @@ assert.deepEqual(instances[1].options.config, {
 assert.equal(switched.id, created.id);
 assert.equal(switched.nativeSessionId, "native-test-session");
 assert.equal(switched.status, "idle");
+assert.equal(switched.config.model, "sonnet");
+assert.equal(switched.effectiveModel, "sonnet");
+assert.equal(switched.effectiveModelSource, "session");
+assert.equal(switched.effectiveEffort, "high");
+assert.equal(switched.effectiveEffortSource, "session");
 assert.ok(switched.seq > beforeRestartSeq);
 assert.deepEqual(
   events.filter((event) => event.seq > beforeRestartSeq).map((event) => event.type),
   ["config_update_started", "config_updated"],
 );
+const restartConfigEvent = events.at(-1)!;
+assert.equal(restartConfigEvent.payload.effectiveModel, "sonnet");
+assert.equal(restartConfigEvent.payload.effectiveModelSource, "session");
 assert.equal(events.some((event) => event.type === "process_exited"), false);
 
 instances[1].requestApproval();
@@ -163,9 +262,60 @@ assert.deepEqual(resumed.resumedFrom, {
 });
 assert.equal(resumed.nativeSessionId, "existing-native-session");
 
+const overridden = await manager.create({
+  agent: "claude",
+  cwd: process.cwd(),
+  config: { model: "haiku" },
+});
+assert.equal(overridden.config.model, "haiku");
+assert.equal(overridden.model, "haiku");
+assert.equal(overridden.effectiveModel, "haiku");
+assert.equal(overridden.effectiveModelSource, "session");
+instances.at(-1)!.reportInit("claude-haiku-4-5-20251001");
+const overriddenAfterInit = manager.get(overridden.id)!;
+assert.equal(overriddenAfterInit.config.model, "haiku");
+assert.equal(overriddenAfterInit.model, "claude-haiku-4-5-20251001");
+assert.equal(overriddenAfterInit.effectiveModelSource, "init");
+
+const codex = await manager.create({ agent: "codex", cwd: process.cwd() });
+assert.deepEqual({ model: codex.model, effort: codex.effort, permissionMode: codex.permissionMode }, {
+  model: "gpt-5.6-sol",
+  effort: "xhigh",
+  permissionMode: "untrusted",
+});
+assert.equal(Object.hasOwn(codex, "effectiveModel"), false);
+const updatedCodex = await manager.setConfig(codex.id, { effort: "low" });
+assert.equal(updatedCodex.effort, "low");
+const codexConfigEvent = events.at(-1)!;
+assert.equal(codexConfigEvent.payload.effectiveFrom, "next_turn");
+assert.equal(Object.hasOwn(codexConfigEvent.payload, "effectiveModel"), false);
+
+const kimi = await manager.create({ agent: "kimi", cwd: process.cwd() });
+assert.deepEqual({ model: kimi.model, effort: kimi.effort, permissionMode: kimi.permissionMode }, {
+  model: "kimi-code/k3",
+  effort: "high",
+  permissionMode: "default",
+});
+assert.equal(Object.hasOwn(kimi, "effectiveModel"), false);
+
 await manager.shutdown();
+
+const emptySettingsManager = new SessionManager(factory, () => ({ model: null, effort: null }));
+const reloadedOverride = emptySettingsManager.get(overridden.id)!;
+assert.equal(reloadedOverride.config.model, "haiku");
+assert.equal(reloadedOverride.model, "claude-haiku-4-5-20251001");
+assert.equal(reloadedOverride.effectiveModel, "claude-haiku-4-5-20251001");
+assert.equal(reloadedOverride.effectiveModelSource, "init");
+const noSettings = await emptySettingsManager.create({ agent: "claude", cwd: process.cwd() });
+assert.equal(noSettings.effectiveModel, null);
+assert.equal(noSettings.effectiveEffort, null);
+assert.equal(noSettings.effectiveModelSource, null);
+assert.equal(noSettings.effectiveEffortSource, null);
+await emptySettingsManager.shutdown();
+
+await rm(fixture, { recursive: true, force: true });
 console.log(JSON.stringify({
-  fixture,
+  fixtureCleaned: true,
   restartEvents: ["config_update_started", "config_updated"],
   resumeSessionId: instances[1].options.resumeSessionId,
   permissionGate: permissionEvent.payload.gate,

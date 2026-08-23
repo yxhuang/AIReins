@@ -215,15 +215,28 @@ export class ClaudeDriver extends BaseDriver {
     }
 
     if (message.type === "system" && message.subtype === "init") {
-      if (typeof message.model === "string") this.config.model = message.model;
-      if (typeof message.effort === "string") this.config.effort = message.effort;
+      const effectiveConfig = {
+        ...(typeof message.model === "string"
+          ? { model: { value: message.model, source: "init" as const } }
+          : {}),
+        ...(typeof message.effort === "string"
+          ? { effort: { value: message.effort, source: "init" as const } }
+          : {}),
+      };
       if (typeof message.permissionMode === "string") {
         this.config.permissionMode = message.permissionMode === "default" ? "manual" : message.permissionMode;
       }
       this.callbacks.metadata({
         nativeSessionId: typeof message.session_id === "string" ? message.session_id : undefined,
-        config: { ...this.config },
+        config: { permissionMode: this.config.permissionMode },
+        effectiveConfig,
       });
+      if (Object.keys(effectiveConfig).length > 0) {
+        this.callbacks.emit("config_updated", {
+          effectiveFrom: "current_turn",
+          reportedBy: "system/init",
+        });
+      }
       if (this.commands.length === 0 && Array.isArray(message.slash_commands)) {
         this.updateCommands(message.slash_commands.map((name: unknown) => ({ name })));
       }
@@ -246,7 +259,7 @@ export class ClaudeDriver extends BaseDriver {
         if (message.response?.subtype === "success") {
           const responseMode = String(message.response?.response?.mode ?? pending.mode);
           this.config.permissionMode = responseMode === "default" ? "manual" : responseMode;
-          const current = { ...this.config };
+          const current = { permissionMode: this.config.permissionMode };
           this.callbacks.metadata({ config: current });
           pending.resolve(current);
         } else {

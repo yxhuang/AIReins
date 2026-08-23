@@ -58,7 +58,7 @@ npm run server
 }
 ```
 
-三项都可省略，也可在建会话时传 `null` 表示“不覆盖、跟随 CLI 有效配置”。不传 `config` 时沿用各 driver 原有默认行为。旧字段 `model` 与 `kimiMode` 暂时兼容，分别等价于 `config.model` 与 Kimi 的 `config.permissionMode`；新调用不要再使用旧字段。WS `set_config` 对 schema 中同时满足 `mutable:true` 且 `values` 含 `null` 的选项接受 `null`，用于清除已经生效的会话级覆盖；事件与 session 随即报告从 driver 事实源得到的真正有效值，而不是继续显示 `null` 或旧覆盖值。
+三项都可省略，也可在建会话时传 `null` 表示“不覆盖、跟随 CLI 有效配置”。不传 `config` 时沿用各 driver 原有默认行为。旧字段 `model` 与 `kimiMode` 暂时兼容，分别等价于 `config.model` 与 Kimi 的 `config.permissionMode`；新调用不要再使用旧字段。WS `set_config` 对 schema 中同时满足 `mutable:true` 且 `values` 含 `null` 的选项接受 `null`，用于清除已经生效的会话级覆盖。`config` 始终是判断会话级覆盖是否存在的事实源；Claude 的继承值另见下述 `effective*` 字段。
 
 `GET /api/sessions`、会话详情和 snapshot 中的 `session` 都包含当前配置：
 
@@ -76,6 +76,26 @@ npm run server
 }
 ```
 
+Claude 额外固定返回四个字段；未显式覆盖时的初始形状如下：
+
+```json
+{
+  "model": null,
+  "effort": null,
+  "effectiveModel": "opus",
+  "effectiveEffort": "high",
+  "effectiveModelSource": "settings",
+  "effectiveEffortSource": "settings",
+  "config": {
+    "model": null,
+    "effort": null,
+    "permissionMode": "manual"
+  }
+}
+```
+
+`config.model / config.effort` 只表示会话级覆盖，`null` 不改写；前端据此区分“覆盖”与“继承”。`effectiveModel / effectiveEffort` 是当前能确认的实际值，拿不到就是 `null`。对应 source 为：`session`（会话显式覆盖）、`settings`（分层 settings 合并）或 `init`（Claude `system/init` 的运行时回报）；值为 `null` 时 source 也为 `null`。兼容字段 `model / effort` 保留既有语义：首轮前是覆盖值或 `null`，init 报出某项后更新为该项的运行时精确值。显式覆盖始终保留在 `config` 中，不会被 settings 或 init 改写。
+
 `riskyMode` 在 Claude 的 `bypassPermissions / dontAsk`、Codex 的 `never`、Kimi 的 `yolo` 下为 `true`。这是每会话标记，不存在全局 yolo 开关。
 
 `GET /api/meta` 的 `data.drivers.<agent>.options` 是前端配置控件的唯一事实源。每项结构为 `{id,name,values,default,mutable,mutableVia?}`；`default` 可以是 `null`，对应 values 中“跟随 … 配置”的标签；`mutable:false` 表示只能建会话时设置。`mutableVia:"restart"` 表示界面上允许修改，但代价是停止并重启底层 worker。来源如下：
@@ -88,7 +108,9 @@ npm run server
 
 每个 driver 还在 `/api/meta` 暴露 `commands / mentions` 两个布尔能力位。本机协议实测后的能力矩阵是：Claude `true / true`、Codex `false / true`、Kimi `true / true`。前端必须以能力位决定是否展示功能；尤其不能把 Codex 的普通文本 `/compact` 冒充为原生斜杠命令。
 
-Claude 的模型或推理强度不显式覆盖时，schema 默认值和初始 session 值均为 `null`，标签为“跟随 Claude 配置”。Claude 在首轮 `system/init` 报出实际模型后，session 的 `model` 会更新为完整模型名；若未来 init 回报 effort，也会同步更新。当前 Claude Code 2.1.238 的 init 不回报有效 effort，因此 session 的 effort 保持 `null`，不会猜值。审批模式由 driver 明确传 `manual`，init 回报的协议值 `default` 会归一为 `manual`。
+Claude 的模型或推理强度不显式覆盖时，schema 默认值、`config` 和兼容字段 `model / effort` 的初始值均为 `null`，标签为“跟随 Claude 配置”。创建每个 worker 时，服务端只读并依次合并 `~/.claude/settings.json`、`<cwd>/.claude/settings.json`、`<cwd>/.claude/settings.local.json`，后层同名字符串覆盖前层；模型读取 `model`，推理强度读取 `effortLevel`。每个文件独立容错：缺失、无权限、坏 JSON、非对象或该项不是非空字符串时忽略该层的该项并保留上一层；三层都没有可用值才报告 `null`。这里不启动 Claude 查询配置，不要求预热，也不在 `~/.claude`、`~/.codex` 或 `~/.kimi-code` 写缓存文件。
+
+Claude 在首轮 `system/init` 报出实际模型后，兼容字段 `model` 和 `effectiveModel` 都更新为完整模型名，`effectiveModelSource` 变为 `init`，并广播一条 `config_updated`。若未来 init 回报 effort，同样提升 effort；当前 Claude Code 2.1.238 的 init 不回报有效 effort，因此兼容字段 `effort` 保持 `null`，`effectiveEffort` 则继续使用 settings 合并值及 `settings` 来源，不会猜测精确模型侧 effort。审批模式由 driver 明确传 `manual`，init 回报的协议值 `default` 会归一为 `manual`。
 
 Codex 0.148.0 的 `approvalPolicy` 实测只接受 `untrusted / on-request / never`（另支持结构化 `granular`，不属于当前三档 UI）。`on-failure` 请求会被 app-server 以 `unknown variant` 拒绝，因此 schema 不暴露该值。
 
@@ -267,9 +289,28 @@ interface PageHealth {
 
 每条可解析的 WS 上行都可带字符串 `clientRequestId`。随后返回的 `ack` 或 `error` 会同时原样回显 `clientRequestId`、`action` 与 `sessionId`，因此同一会话内的并发请求不需要靠 pending 顺序猜测归因。不可改字段、未知值或没有活动 worker 时返回 WS `error`，不会假装成功。
 
+Claude 的 `config_updated`（包括首轮 init 精度提升）还会带完整有效值与来源，例如：
+
+```json
+{
+  "type": "config_updated",
+  "payload": {
+    "config": {"model":null,"effort":null,"permissionMode":"manual"},
+    "model": "claude-opus-5",
+    "effort": null,
+    "effectiveModel": "claude-opus-5",
+    "effectiveEffort": "high",
+    "effectiveModelSource": "init",
+    "effectiveEffortSource": "settings",
+    "effectiveFrom": "current_turn",
+    "reportedBy": "system/init"
+  }
+}
+```
+
 Codex 的首次 `config_updated.effectiveFrom` 为 `next_turn`，Claude 与 Kimi 为 `immediate`。Codex 下一次 `turn/start` 接受该配置后还会广播第二个 `config_updated`：`effectiveFrom:"current_turn"` 表示已经在该轮生效，`effectiveConfig` 是该轮确认生效的完整配置，`appliedFields` 是本次由“待生效”转为“已生效”的字段，另带原生 `turnId`。清除 Codex model/effort 覆盖时，下一次 `turn/start` 显式发送对应的 `null` 来清除 app-server 的 sticky override；报告值则回到 `config/read(cwd)` 得到的有效默认值。
 
-Claude 的 model/effort 切换先广播 `config_update_started`，其 payload 含 `message:"正在切换模型…"`、`mutableVia:"restart"`、旧/新配置与 native ID；新 worker 的初始化 control request 成功后再广播 `config_updated`，并带 `mutableVia:"restart"`、`workerRestarted:true`。同一个 Workbench session 不变，事件 `seq` 继续递增，原生会话仍是同一 ID。若续接 worker 初始化失败，会进入 `session_error`，不会假装切换完成。若当前状态为 `running`，明确拒绝并返回“当前回合尚未结束，请等待或中断后再切换”，不会停止 worker；若首轮前尚无 `nativeSessionId`，也会明确拒绝。重启参数始终重新带上 `--permission-mode` 与 `--permission-prompt-tool stdio`，因此审批 control_request 边界不会因换模型丢失。Codex/Kimi 继续使用既有原生活改路径，不经过重启。
+Claude 的 model/effort 切换先广播 `config_update_started`，其 payload 含 `message:"正在切换模型…"`、`mutableVia:"restart"`、旧/新配置与 native ID；新 worker 的初始化 control request 成功后再广播 `config_updated`，并带 `mutableVia:"restart"`、`workerRestarted:true` 以及四个 `effective*` 字段。显式字符串覆盖的初始 source 是 `session`；清除为 `null` 时立即重新按该 session 的 cwd 合并 settings。下一轮 init 若给出更精确运行时值，随后再以 `source:"init"` 广播 `current_turn` 更新。同一个 Workbench session 不变，事件 `seq` 继续递增，原生会话仍是同一 ID。若续接 worker 初始化失败，会进入 `session_error`，并恢复切换前的覆盖值、有效值和来源，不会假装切换完成。若当前状态为 `running`，明确拒绝并返回“当前回合尚未结束，请等待或中断后再切换”，不会停止 worker；若首轮前尚无 `nativeSessionId`，也会明确拒绝。重启参数始终重新带上 `--permission-mode` 与 `--permission-prompt-tool stdio`，因此审批 control_request 边界不会因换模型丢失。Codex/Kimi 继续使用既有原生活改路径，不经过重启。
 
 ## 文件检索
 

@@ -36,6 +36,18 @@ export interface SessionConfig {
   permissionMode?: string | null;
 }
 
+export type EffectiveConfigSource = "session" | "settings" | "init";
+
+export interface EffectiveConfigValue {
+  value: string | null;
+  source: EffectiveConfigSource | null;
+}
+
+export interface EffectiveConfigUpdate {
+  model?: EffectiveConfigValue;
+  effort?: EffectiveConfigValue;
+}
+
 export interface ConfigOptionValue {
   value: string | null;
   label: string;
@@ -109,6 +121,10 @@ export interface SessionRecord {
   processId?: number;
   model?: string | null;
   effort?: string | null;
+  effectiveModel?: string | null;
+  effectiveEffort?: string | null;
+  effectiveModelSource?: EffectiveConfigSource | null;
+  effectiveEffortSource?: EffectiveConfigSource | null;
   permissionMode?: string | null;
   config: SessionConfig;
   riskyMode: boolean;
@@ -137,6 +153,7 @@ export interface DriverCallbacks {
     nativeSessionId?: string;
     nativeTranscriptPath?: string;
     config?: SessionConfig;
+    effectiveConfig?: EffectiveConfigUpdate;
   }): void;
   commands(commands: UnifiedCommand[]): void;
   status(status: SessionStatus): void;

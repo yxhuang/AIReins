@@ -1,5 +1,6 @@
 import { statSync } from "node:fs";
 import { isAbsolute, resolve } from "node:path";
+import { readClaudeEffectiveSettings, type ClaudeEffectiveSettings } from "./claude-settings.js";
 import { createDriver, DRIVER_CAPABILITIES } from "./drivers/index.js";
 import {
   cleanSessionConfig,
@@ -18,6 +19,7 @@ import type {
   CreateSessionInput,
   Driver,
   DriverCallbacks,
+  EffectiveConfigUpdate,
   EventType,
   PermissionDecision,
   SessionConfig,
@@ -31,6 +33,7 @@ import { ulid } from "./ulid.js";
 
 const RING_SIZE = 1_000;
 export type DriverFactory = typeof createDriver;
+export type ClaudeSettingsResolver = (cwd: string) => ClaudeEffectiveSettings;
 
 export class SessionManager {
   private readonly sessions = new Map<string, SessionRecord>();
@@ -40,7 +43,10 @@ export class SessionManager {
   private readonly listeners = new Set<(event: UnifiedEvent) => void>();
   private readonly restartingSessions = new Set<string>();
 
-  constructor(private readonly driverFactory: DriverFactory = createDriver) {
+  constructor(
+    private readonly driverFactory: DriverFactory = createDriver,
+    private readonly claudeSettingsResolver: ClaudeSettingsResolver = readClaudeEffectiveSettings,
+  ) {
     const loaded = loadRegistry();
     for (const stored of loaded) {
       const events = readTranscript(stored.transcriptPath);
@@ -56,8 +62,8 @@ export class SessionManager {
         seq,
         processId: undefined,
         config,
-        model: config.model,
-        effort: config.effort,
+        model: stored.agent === "claude" && stored.model !== undefined ? stored.model : config.model,
+        effort: stored.agent === "claude" && stored.effort !== undefined ? stored.effort : config.effort,
         permissionMode: config.permissionMode,
         riskyMode: isRiskyConfig(stored.agent, config),
       });
@@ -113,11 +119,15 @@ export class SessionManager {
     const id = ulid();
     const now = new Date().toISOString();
     const config = configFromCreateInput(input);
+    const cwd = resolve(input.cwd);
+    const claudeSettings = input.agent === "claude"
+      ? this.claudeSettingsResolver(cwd)
+      : undefined;
     const record: SessionRecord = {
       id,
       agent: input.agent,
       agentId: input.agentId || "main",
-      cwd: resolve(input.cwd),
+      cwd,
       status: "starting",
       createdAt: now,
       lastActivityAt: now,
@@ -132,6 +142,7 @@ export class SessionManager {
       } : {}),
       model: config.model,
       effort: config.effort,
+      ...(claudeSettings ? claudeEffectiveFields(config, claudeSettings) : {}),
       permissionMode: config.permissionMode,
       config,
       riskyMode: isRiskyConfig(input.agent, config),
@@ -146,6 +157,7 @@ export class SessionManager {
       resumedNativeSessionId: input.resumeSessionId,
       resumedFrom: record.resumedFrom,
       config: record.config,
+      ...this.claudeEffectivePayload(record),
       riskyMode: record.riskyMode,
     });
 
@@ -224,14 +236,9 @@ export class SessionManager {
     const record = this.sessions.get(id)!;
     this.applyConfig(record, updated);
     this.persistRegistry();
-    this.emit(id, "config_updated", {
-      config: { ...record.config },
-      model: record.model,
-      effort: record.effort,
-      permissionMode: record.permissionMode,
-      riskyMode: record.riskyMode,
+    this.emit(id, "config_updated", this.configUpdatedPayload(record, {
       effectiveFrom: record.agent === "codex" ? "next_turn" : "immediate",
-    });
+    }));
     return cloneSession(record);
   }
 
@@ -301,10 +308,39 @@ export class SessionManager {
 
   private applyConfig(session: SessionRecord, update: SessionConfig): void {
     session.config = mergeSessionConfig(session.config, update);
-    session.model = session.config.model;
-    session.effort = session.config.effort;
+    if (session.agent !== "claude") {
+      session.model = session.config.model;
+      session.effort = session.config.effort;
+    } else {
+      const updatesModel = Object.hasOwn(update, "model");
+      const updatesEffort = Object.hasOwn(update, "effort");
+      const settings = updatesModel || updatesEffort
+        ? this.claudeSettingsResolver(session.cwd)
+        : undefined;
+      if (updatesModel) {
+        session.model = session.config.model;
+        applyClaudeConfigValue(session, "model", session.config.model, settings!.model);
+      }
+      if (updatesEffort) {
+        session.effort = session.config.effort;
+        applyClaudeConfigValue(session, "effort", session.config.effort, settings!.effort);
+      }
+    }
     session.permissionMode = session.config.permissionMode;
     session.riskyMode = isRiskyConfig(session.agent, session.config);
+  }
+
+  private applyEffectiveConfig(session: SessionRecord, update: EffectiveConfigUpdate): void {
+    if (update.model) {
+      session.effectiveModel = update.model.value;
+      session.effectiveModelSource = update.model.source;
+      session.model = update.model.value;
+    }
+    if (update.effort) {
+      session.effectiveEffort = update.effort.value;
+      session.effectiveEffortSource = update.effort.source;
+      session.effort = update.effort.value;
+    }
   }
 
   private async restartClaudeWorker(id: string, update: SessionConfig): Promise<SessionRecord> {
@@ -319,6 +355,7 @@ export class SessionManager {
       throw new Error(`Claude 会话当前状态为 ${record.status}，只能在回合结束后切换`);
     }
 
+    const previousState = cloneSession(record);
     const previousConfig = { ...record.config };
     const targetConfig = mergeSessionConfig(previousConfig, update);
     const nativeSessionId = record.nativeSessionId;
@@ -351,22 +388,25 @@ export class SessionManager {
       await nextWorker.start();
       record.processId = nextWorker.child?.pid;
       this.persistRegistry();
-      this.emit(id, "config_updated", {
-        config: { ...record.config },
-        model: record.model,
-        effort: record.effort,
-        permissionMode: record.permissionMode,
-        riskyMode: record.riskyMode,
+      this.emit(id, "config_updated", this.configUpdatedPayload(record, {
         effectiveFrom: "immediate",
         mutableVia: "restart",
         workerRestarted: true,
         nativeSessionId,
-      });
+      }));
       return cloneSession(record);
     } catch (error) {
       if (replacement && this.workers.get(id) === replacement) this.workers.delete(id);
       if (replacement) await replacement.stop().catch(() => undefined);
-      this.applyConfig(record, previousConfig);
+      record.config = { ...previousState.config };
+      record.model = previousState.model;
+      record.effort = previousState.effort;
+      record.effectiveModel = previousState.effectiveModel;
+      record.effectiveEffort = previousState.effectiveEffort;
+      record.effectiveModelSource = previousState.effectiveModelSource;
+      record.effectiveEffortSource = previousState.effectiveEffortSource;
+      record.permissionMode = previousState.permissionMode;
+      record.riskyMode = previousState.riskyMode;
       record.processId = undefined;
       this.emit(id, "session_error", {
         message: error instanceof Error ? error.message : String(error),
@@ -382,13 +422,24 @@ export class SessionManager {
   private driverCallbacks(id: string, worker: () => Driver): DriverCallbacks {
     const current = () => this.workers.get(id) === worker();
     return {
-      emit: (type, payload = {}) => current() ? this.emit(id, type, payload) : undefined,
+      emit: (type, payload = {}) => {
+        if (!current()) return undefined;
+        const session = this.sessions.get(id);
+        return this.emit(
+          id,
+          type,
+          type === "config_updated" && session
+            ? this.configUpdatedPayload(session, payload)
+            : payload,
+        );
+      },
       metadata: (metadata) => {
         const session = this.sessions.get(id);
         if (!session || !current()) return;
         if (metadata.nativeSessionId) session.nativeSessionId = metadata.nativeSessionId;
         if (metadata.nativeTranscriptPath) session.nativeTranscriptPath = metadata.nativeTranscriptPath;
         if (metadata.config) this.applyConfig(session, metadata.config);
+        if (metadata.effectiveConfig) this.applyEffectiveConfig(session, metadata.effectiveConfig);
         const pid = worker().child?.pid;
         if (pid) session.processId = pid;
         this.persistRegistry();
@@ -467,6 +518,66 @@ export class SessionManager {
 
   private persistRegistry(): void {
     saveRegistry([...this.sessions.values()]);
+  }
+
+  private claudeEffectivePayload(session: SessionRecord): Record<string, unknown> {
+    if (session.agent !== "claude") return {};
+    return {
+      effectiveModel: session.effectiveModel ?? null,
+      effectiveEffort: session.effectiveEffort ?? null,
+      effectiveModelSource: session.effectiveModelSource ?? null,
+      effectiveEffortSource: session.effectiveEffortSource ?? null,
+    };
+  }
+
+  private configUpdatedPayload(
+    session: SessionRecord,
+    payload: Record<string, unknown>,
+  ): Record<string, unknown> {
+    return {
+      config: { ...session.config },
+      model: session.model,
+      effort: session.effort,
+      permissionMode: session.permissionMode,
+      riskyMode: session.riskyMode,
+      ...this.claudeEffectivePayload(session),
+      ...payload,
+    };
+  }
+}
+
+function claudeEffectiveFields(
+  config: SessionConfig,
+  settings: ClaudeEffectiveSettings,
+): Pick<
+  SessionRecord,
+  "effectiveModel" | "effectiveEffort" | "effectiveModelSource" | "effectiveEffortSource"
+> {
+  const modelIsOverridden = typeof config.model === "string" && config.model.length > 0;
+  const effortIsOverridden = typeof config.effort === "string" && config.effort.length > 0;
+  return {
+    effectiveModel: modelIsOverridden ? config.model! : settings.model,
+    effectiveEffort: effortIsOverridden ? config.effort! : settings.effort,
+    effectiveModelSource: modelIsOverridden ? "session" : settings.model === null ? null : "settings",
+    effectiveEffortSource: effortIsOverridden ? "session" : settings.effort === null ? null : "settings",
+  };
+}
+
+function applyClaudeConfigValue(
+  session: SessionRecord,
+  key: "model" | "effort",
+  override: string | null | undefined,
+  setting: string | null,
+): void {
+  const overridden = typeof override === "string" && override.length > 0;
+  const value = overridden ? override : setting;
+  const source = overridden ? "session" : setting === null ? null : "settings";
+  if (key === "model") {
+    session.effectiveModel = value;
+    session.effectiveModelSource = source;
+  } else {
+    session.effectiveEffort = value;
+    session.effectiveEffortSource = source;
   }
 }
 
