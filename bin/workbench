@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # workbench —— 个人 Agent 工作台的启动器。
 # 用法：workbench [start|stop|status|restart|logs]   （不带参数 = start）
+# 启动后自动在 Windows 侧默认浏览器打开；置 WORKBENCH_NO_OPEN=1 可跳过。
 set -uo pipefail
 
 REPO="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
@@ -16,11 +17,24 @@ is_ours() {                       # 占用 $PORT 的进程是不是本工作台
   [[ "$cmd" == *"server/index.ts"* ]]
 }
 
+open_browser() {                   # 在 Windows 侧默认浏览器打开工作台
+  [[ -n "${WORKBENCH_NO_OPEN:-}" ]] && return 0
+  # wslview（wslu 提供）最规范；没有就退到 explorer.exe，它是 WSL 自带的。
+  # 两者打开 URL 成功时也可能返回非 0（explorer.exe 几乎总是返回 1），
+  # 退出码不可信，一律吞掉，绝不让它影响 start 的返回值。
+  if command -v wslview >/dev/null 2>&1; then
+    wslview "$URL" >/dev/null 2>&1 || true
+  elif command -v explorer.exe >/dev/null 2>&1; then
+    explorer.exe "$URL" >/dev/null 2>&1 || true
+  fi
+  return 0
+}
+
 start() {
   local pid; pid="$(port_pid)"
   if [[ -n "$pid" ]]; then
     if is_ours "$pid"; then
-      echo "工作台已在运行（PID $pid） → $URL"; return 0
+      echo "工作台已在运行（PID $pid） → $URL"; open_browser; return 0
     fi
     echo "❌ 端口 $PORT 被别的程序占用（PID $pid）：" >&2
     tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null | cut -c1-120 >&2
@@ -32,7 +46,7 @@ start() {
   # 整个进程组，nohup 只挡 SIGHUP 挡不住。必须新建会话彻底脱离。
   ( cd "$REPO" && setsid env WORKBENCH_PORT="$PORT" npm run server >>"$LOG" 2>&1 < /dev/null & )
   for _ in $(seq 1 40); do
-    pid="$(port_pid)"; [[ -n "$pid" ]] && { echo "已启动（PID $pid） → $URL"; return 0; }
+    pid="$(port_pid)"; [[ -n "$pid" ]] && { echo "已启动（PID $pid） → $URL"; open_browser; return 0; }
     sleep 0.25
   done
   echo "❌ 15 秒内没起来，看日志：$LOG" >&2; tail -5 "$LOG" >&2; return 1
