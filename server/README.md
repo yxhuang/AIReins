@@ -15,6 +15,7 @@ npm run server
 
 - 注册表：`~/.workbench/sessions.json`
 - 统一事件 transcript：`~/.workbench/transcripts/<sessionId>.ndjson`
+- 非 Git 工作目录的委派前快照：`~/.workbench/snapshots/<basename>-<pathHash>/`
 - 各家 CLI 自有 transcript：完全由原生 CLI 管理；Workbench 从不删除
 
 服务启动会把注册表中的旧会话统一标记为 `dead`，不会接管或自动续接旧进程。需要续接时，新建会话可传原生 `resumeSessionId`；Claude 使用 `--resume`，Codex 使用 `thread/resume`，Kimi 使用 `session/resume`。
@@ -30,6 +31,7 @@ npm run server
 接口：
 
 - `POST /api/sessions`：创建会话，统一配置见下文
+- `POST /api/snapshot/preflight`：建会话前检查 cwd 是否需要及能够自动快照
 - `GET /api/sessions`
 - `GET /api/sessions/:id`
 - `GET /api/sessions/:id/snapshot`
@@ -49,6 +51,7 @@ npm run server
 {
   "agent": "claude",
   "cwd": "/home/user/dev/workbench",
+  "snapshot": "auto",
   "config": {
     "model": "haiku",
     "effort": "low",
@@ -57,6 +60,13 @@ npm run server
   "initialMessage": "只回复 OK"
 }
 ```
+
+`CreateSessionInput.snapshot` 可省略，取值为 `"auto" | "skip"`，默认 `"auto"`。`auto` 会在
+driver 启动前检查 cwd：位于 Git 仓库（包括仓库子目录）时跳过；非 Git 目录在阈值和空间
+检查通过后先刷新全量快照。快照成功时，创建响应、会话列表、会话详情和会话 snapshot 中的
+`session` 都可包含 `snapshotPath: string`。快照失败不会阻断会话创建；server 记录 warn 日志，
+并发送 `session_error` 事件，其中 `source:"snapshot"`、`severity:"warning"`、
+`nonBlocking:true`。
 
 三项都可省略，也可在建会话时传 `null` 表示“不覆盖、跟随 CLI 有效配置”。不传 `config` 时沿用各 driver 原有默认行为。旧字段 `model` 与 `kimiMode` 暂时兼容，分别等价于 `config.model` 与 Kimi 的 `config.permissionMode`；新调用不要再使用旧字段。WS `set_config` 对 schema 中同时满足 `mutable:true` 且 `values` 含 `null` 的选项接受 `null`，用于清除已经生效的会话级覆盖。`config` 始终是判断会话级覆盖是否存在的事实源；Claude 的继承值另见下述 `effective*` 字段。
 
@@ -97,6 +107,47 @@ Claude 额外固定返回四个字段；未显式覆盖时的初始形状如下�
 `config.model / config.effort` 只表示会话级覆盖，`null` 不改写；前端据此区分“覆盖”与“继承”。`effectiveModel / effectiveEffort` 是当前能确认的实际值，拿不到就是 `null`。对应 source 为：`session`（会话显式覆盖）、`settings`（分层 settings 合并）或 `init`（Claude `system/init` 的运行时回报）；值为 `null` 时 source 也为 `null`。兼容字段 `model / effort` 保留既有语义：首轮前是覆盖值或 `null`，init 报出某项后更新为该项的运行时精确值。显式覆盖始终保留在 `config` 中，不会被 settings 或 init 改写。
 
 `riskyMode` 在 Claude 的 `bypassPermissions / dontAsk`、Codex 的 `never`、Kimi 的 `yolo` 下为 `true`。这是每会话标记，不存在全局 yolo 开关。
+
+## 委派前自动快照
+
+`POST /api/snapshot/preflight` 的请求体严格使用 cwd：
+
+```json
+{"cwd":"/absolute/non-git/workdir"}
+```
+
+成功响应的 `data` 固定为：
+
+```ts
+interface SnapshotPreflightResult {
+  isGit: boolean;              // cwd 是否位于 Git 仓库内
+  needed: boolean;             // 等价于 !isGit
+  exceeds: boolean;            // 是否超过 500 MiB 或 20,000 个文件
+  existing: boolean;           // 是否已有该 cwd 的旧快照
+  freeSpaceOk: boolean;        // 目标盘可用空间是否至少为待复制量的 1.1 倍
+  snapshotPath: string | null; // Git cwd 为 null，否则为稳定的绝对快照路径
+}
+```
+
+cwd 必须是存在的绝对目录；相对路径、不存在路径和普通文件均返回 HTTP 400。Git cwd 直接返回
+`needed:false`，同时 `exceeds / existing / freeSpaceOk` 都为 `false`、`snapshotPath:null`，不会扫描
+目录或查询目标盘空间。
+
+`snapshot.ts` 是自动快照的唯一实现位置。它按文件累加大小和数量，超过
+`500 * 1024 * 1024` 字节或 20,000 个文件后立即停止扫描；因为此时完整待复制量未知，
+`exceeds:true` 时 `freeSpaceOk:false`，自动快照也会在复制前以超阈值错误退出。slug 使用可读的
+cwd basename 加绝对路径 SHA-256 短前缀，同一路径稳定、同名但不同路径不会共用目标。
+
+刷新采用全量复制，明确不使用硬链接：先写 `<slug>.tmp/`，再把现有快照暂存为
+`<slug>.old/`、将 tmp rename 到正式路径，成功后清理 old；第二次 rename 失败会先把 old
+恢复到正式路径，因此中途失败不破坏旧快照。同一 cwd 的进程内并发调用复用同一个进行中
+Promise。复制前先检查目标文件系统可用空间至少为扫描量的 1.1 倍。
+
+文件删除权限只为这一功能收窄：`server/` 中仅 `snapshot.ts` 可以调用文件删除，且实际调用
+只用于清理 `~/.workbench/snapshots/` 根目录下由模块创建的直属 tmp/old 目录。每次删除前都要
+同时做词法直属关系和 `realpath` 包含关系校验，并拒绝快照根本身、`../` 穿越、符号链接逃逸
+及非真实目录。当前不提供自动恢复，也没有任何覆盖用户 cwd 的代码；`snapshotPath` 只供界面
+展示，恢复由用户自行复制。
 
 `GET /api/meta` 的 `data.drivers.<agent>.options` 是前端配置控件的唯一事实源。每项结构为 `{id,name,values,default,mutable,mutableVia?}`；`default` 可以是 `null`，对应 values 中“跟随 … 配置”的标签；`mutable:false` 表示只能建会话时设置。`mutableVia:"restart"` 表示界面上允许修改，但代价是停止并重启底层 worker。来源如下：
 

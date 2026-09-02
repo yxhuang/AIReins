@@ -298,6 +298,64 @@ assert.deepEqual({ model: kimi.model, effort: kimi.effort, permissionMode: kimi.
 });
 assert.equal(Object.hasOwn(kimi, "effectiveModel"), false);
 
+let snapshotFinished = false;
+let driverStartedAfterSnapshot = false;
+let snapshotCalls = 0;
+const snapshotFactory = (agent: AgentKind, options: DriverOptions): Driver => {
+  assert.equal(agent, "codex");
+  const driver = new FakeDefaultDriver("codex", options);
+  const start = driver.start.bind(driver);
+  driver.start = async () => {
+    driverStartedAfterSnapshot = snapshotFinished;
+    await start();
+  };
+  return driver;
+};
+const snapshotManager = new SessionManager(
+  snapshotFactory,
+  () => ({ model: null, effort: null }),
+  async () => {
+    snapshotCalls += 1;
+    snapshotFinished = true;
+    return "/tmp/workbench-test-snapshot";
+  },
+);
+const snapshotted = await snapshotManager.create({ agent: "codex", cwd: process.cwd() });
+assert.equal(driverStartedAfterSnapshot, true);
+assert.equal(snapshotted.snapshotPath, "/tmp/workbench-test-snapshot");
+assert.equal(snapshotCalls, 1);
+await snapshotManager.create({ agent: "codex", cwd: process.cwd(), snapshot: "skip" });
+assert.equal(snapshotCalls, 1);
+await snapshotManager.shutdown();
+
+const snapshotWarningEvents: UnifiedEvent[] = [];
+let warningDriverStarted = false;
+const snapshotFailureManager = new SessionManager(
+  (_agent, options) => {
+    const driver = new FakeDefaultDriver("codex", options);
+    const start = driver.start.bind(driver);
+    driver.start = async () => {
+      warningDriverStarted = true;
+      await start();
+    };
+    return driver;
+  },
+  () => ({ model: null, effort: null }),
+  async () => {
+    throw new Error("snapshot test failure");
+  },
+);
+snapshotFailureManager.onEvent((event) => snapshotWarningEvents.push(event));
+const createdDespiteSnapshotFailure = await snapshotFailureManager.create({ agent: "codex", cwd: process.cwd() });
+assert.equal(warningDriverStarted, true);
+assert.equal(createdDespiteSnapshotFailure.status, "idle");
+const snapshotWarning = snapshotWarningEvents.find((event) => (
+  event.type === "session_error" && event.payload.source === "snapshot"
+));
+assert.equal(snapshotWarning?.payload.severity, "warning");
+assert.equal(snapshotWarning?.payload.nonBlocking, true);
+await snapshotFailureManager.shutdown();
+
 await manager.shutdown();
 
 const emptySettingsManager = new SessionManager(factory, () => ({ model: null, effort: null }));

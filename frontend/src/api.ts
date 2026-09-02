@@ -1,4 +1,4 @@
-import type { ApiEnvelope, CommandInfo, HistoryListData, HistoryMessagesPage, HistoryPreview, MetaInfo, PageHealth, PageManifest, SessionConfig, SessionRecord, Snapshot } from "./types";
+import type { ApiEnvelope, CommandInfo, HistoryListData, HistoryMessagesPage, HistoryPreview, MetaInfo, PageHealth, PageManifest, SessionConfig, SessionRecord, Snapshot, SnapshotPreflight } from "./types";
 import type { AgentKind } from "./types";
 import { buildHistoryQuery, type HistoryQueryInput } from "./history";
 
@@ -63,6 +63,20 @@ export interface CreateSessionInput {
   /** 原生会话 id 续接：claude --resume / codex thread/resume / kimi session/resume */
   resumeSessionId?: string;
   initialMessage?: string;
+  /**
+   * 非 git 目录的建会话前快照：缺省 = "auto"（后端静默快照）。
+   * 只在用户于确认框里做出选择后才显式传值；省略即让后端按默认处理。
+   */
+  snapshot?: "auto" | "skip";
+}
+
+/** 建会话前快照预检：cwd 无效时后端返回 400（按失败处理，不阻断建会话）。 */
+export function fetchSnapshotPreflight(cwd: string): Promise<SnapshotPreflight> {
+  return call<SnapshotPreflight>("/api/snapshot/preflight", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ cwd }),
+  });
 }
 
 /** 移除注册表条目并停 worker；各家 CLI 的原生 transcript 不受影响。 */

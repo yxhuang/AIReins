@@ -46,12 +46,14 @@ frontend/
     history.ts          历史会话纯逻辑：/api/history 查询串构造 / 来源筛选 / 已导入对照（无 DOM 依赖，可单测）
     config-view.ts      配置控件纯逻辑：mutableVia:"restart" 代价旁注判定与文案（无 DOM 依赖，可单测）
     resumed-history.ts  续接会话历史区纯逻辑：最新一页打底 / nextCursor 翻页 prepend / DOM 上限（无 DOM 依赖，可单测）
+    snapshot.ts         建会话前快照编排纯逻辑：preflight 分支决策（git 直连 / 小而够静默快照 / 超阈值或空间不足弹确认框）/ 确认框原因文案 / 三出口 → snapshot 入参（无 DOM 依赖，可单测）
     components/
-      Sidebar.tsx       会话列表（身份色脊 / 状态点 / 闸门徽标 / 危险模式「!」标记 / 行右删除入口 ×：hover/focus 显现、Tab 可达，点击后就地变行内二次确认）+ 新建会话表单（含三个配置下拉；cwd 三级预填回退 + 空 cwd 可见禁用原因）+ 底部「历史会话」入口、「页面」分区与设置入口
+      Sidebar.tsx       会话列表（身份色脊 / 状态点 / 闸门徽标 / 危险模式「!」标记 / 行右删除入口 ×：hover/focus 显现、Tab 可达，点击后就地变行内二次确认）+ 新建会话表单（含三个配置下拉；cwd 三级预填回退 + 空 cwd 可见禁用原因；提交前快照预检 preflight，需要时弹 SnapshotConfirm）+ 底部「历史会话」入口、「页面」分区与设置入口
       SettingsMenu.tsx  设置齿轮 + 锚定浮层（分组/条目结构，60vh 限高滚动 + focus trap）；主题三选一写 <html data-theme>、localStorage 持久化（读写均 try/catch）
+      SnapshotConfirm.tsx 建会话前快照确认弹窗（暖色闸门样式 + 2px 硬边直角，模态遮罩居中；Esc/点遮罩取消、focus trap、aria-modal；写明弹框原因/快照路径/旧快照覆盖刷新；空间不足时「仍然快照」禁用并给出可见原因）
       PageView.tsx      扩展页面视图：进入先查健康，按 embeddable 三态渲染——不可达降级面板（reason + 重试）；embeddable:false 完全不渲染 iframe 改降级面板（服务正常但目标拒绝嵌入 + 主按钮新标签页打开）；embeddable:true 正常 iframe；null/缺省 iframe + 空白提示与常驻新标签页出口
       HistoryView.tsx   历史会话浏览（#/history）：筛选（agent / 来源 / 关键词 250ms 防抖）+ nextCursor「加载更多」分页 + 预览面板（≤8 条消息）+「导入并续接」（就地续接代价写在按钮上方）+「已在工作台中」标记与跳转
-      SessionView.tsx   会话头（usage 分家渲染 / 配置只读摘要（跟随配置时并入有效值）/ 中断）+ 危险模式警示条 + 历史消息区（resumedFrom 时）+ 事件流（AskUserQuestion 走提问选择卡片）+ 输入框（配置控件行在输入框正上方，跟随配置时显示实际生效值与来源小字；行首 / 命令面板、@ 文件引用面板与待附加预览条、结构化 command 上行、codex 降级说明；草稿按会话内存缓存，切走切回不丢；dead 会话「新建会话并续接」出口）+ 未决闸门贴条
+      SessionView.tsx   会话头（usage 分家渲染 / 配置只读摘要（跟随配置时并入有效值）/ 快照路径（会话记录带 snapshotPath 时）/ 中断）+ 危险模式警示条 + 历史消息区（resumedFrom 时）+ 事件流（AskUserQuestion 走提问选择卡片）+ 输入框（配置控件行在输入框正上方，跟随配置时显示实际生效值与来源小字；行首 / 命令面板、@ 文件引用面板与待附加预览条、结构化 command 上行、codex 降级说明；草稿按会话内存缓存，切走切回不丢；dead 会话「新建会话并续接」出口）+ 未决闸门贴条
       ResumedHistory.tsx 续接会话的历史消息区：实时流上方、默认加载最近一页、「加载更早的消息」nextCursor 翻页 prepend、弱化底色 + 分隔线与实时区区分、用户/助手两态（不伪造工具/思考块）
       StreamItems.tsx   用户消息 / 文本块 / 思考折叠块 / 工具卡片 / 闸门块 / 提问选择卡片（AskUserQuestion）/ 系统行
     styles.css          设计令牌（深浅两套）与全部样式
@@ -356,6 +358,29 @@ frontend/
 - [x] **7. `npm test`、`npm run build`、双 typecheck 全绿；新测试挂进聚合。** **实测**：`npm test`（check:theme「✅ 深色令牌两份一致（26 项）」+ mentions 29 例 + store 13 例 + pages 6 例 + resume 9 例 + effective-ask 10 例）退出码 0；`npm run build`（vite 8.2.2，退出码 0）；`npm run typecheck` 与 `npm run typecheck:frontend` 退出码均 0。
 
 **这版提问交互仍会卡用户的点**（如实记录）：① 跳过即 deny，模型收到的是「用户拒绝了此操作」的拒绝语义，没有「稍后回答/换个问法」的中间态；② 选项只有模型给的那些，没有「自定义回答」输入框（Claude 协议层另有 Other 约定，当前未接）；③ 提交后卡片靠 `permission_resolved` 广播降级，WS 断开期间提交会静默失败（按钮停在「提交中…」，重连重取快照后恢复可操作）；④ 多问题卡片没有逐题进度指示，长问题列表要用户自己确认每题都选了。
+
+### M17 建会话前自动快照接入（2026-09-02）
+
+后端新增 `POST /api/snapshot/preflight` 与 `POST /api/sessions` 的可选 `snapshot` 入参；本轮是前端落地（后端由另一执行层并行开发，联调前按其接口契约写死形状）。
+
+- **编排**（`snapshot.ts` 纯逻辑 `createWithSnapshotPreflight`，DOM-free）：提交建会话先 preflight，再按分支——`needed:false`（git 仓库）直连不传 snapshot；`needed && !exceeds && freeSpaceOk` 直连（后端静默快照）；`needed && (exceeds || !freeSpaceOk)` 弹确认框。**preflight 本身失败（网络/500/400）一律吞掉、console.warn 记录、不传 snapshot 照常建**——快照是保护措施，不能反过来卡住用户。确认框取消返回 false，表单回到原状态不建会话。
+- **确认框**（`SnapshotConfirm.tsx`）：暖色闸门样式（`--gate-bg` 底 + 2px `var(--gate-border)` 硬边 + 直角，与闸门块同一语言，`--shadow-pop` 阴影），模态遮罩居中。内容：为什么弹框（超 500MB/20000 文件阈值、目标盘空间不足，逐条列出）、快照写入路径（mono）、`existing:true` 时明确「已有的旧快照会被覆盖刷新」。三出口：「仍然快照」（`btn-gate`）→ `snapshot:"auto"`；「跳过快照」→ `snapshot:"skip"`；「取消」（Esc/点遮罩）→ 不建会话，焦点回「创建并进入」。`freeSpaceOk:false` 时「仍然快照」禁用 + 弹窗内写明可见原因「目标盘空间不足，『仍然快照』会失败」（不只靠 title）。
+- **键盘可达**：Esc 取消、Tab/Shift+Tab 在弹窗内循环（focus trap，与 SettingsMenu 同一实现纪律）、`role="dialog" aria-modal="true" aria-labelledby/aria-describedby`、打开时焦点落「仍然快照」（被禁用时落「跳过快照」）。
+- **快照路径展示**：`SessionRecord` 新增可选 `snapshotPath`（字段缺失兼容：不渲染）；会话头 `session-sub` 摘要行尾部追加「· 快照 <路径>」，title 说明用途。
+- **配色纪律**：未新增任何颜色令牌（遮罩为半透明中性黑，与 `--shadow-pop` 同族，不进令牌）；radius/shadow 只引用现有令牌；`check:theme` 不受影响。
+- **打桩测试** `frontend/scripts/snapshot-flow.test.mjs`（11 例，新增 `test:snapshot` 并挂进根 `npm test` 聚合）：分支决策全覆盖；git 不弹框直连；小而够静默建；超阈值/空间不足弹框；三出口各自传对参数（auto/skip/取消不建）；preflight 三种失败形态均不阻断且留日志；preflight 请求形状（POST + `{cwd}`）与错误信封抛中文 msg；`createSession` 透传 snapshot（选了才带键）；组件接线源码断言（弹窗 ARIA/Esc/focus trap/禁用逻辑/existing 告知、会话头 `snapshotPath` 守卫渲染、表单只在用户选择后携带 snapshot）。
+
+- [x] **91. git 目录不弹框直连建会话、不传 snapshot。** **打桩实测**（用例 3）：`needed:false` → create 收到 `undefined`、confirm 零调用；配合用例 10 断言请求体无 `snapshot` 键。
+- [x] **92. 未超阈值且空间够 → 静默建会话。** **打桩实测**（用例 4）：不弹框、不带 snapshot（后端默认 auto 静默快照）。
+- [x] **93. 超阈值或空间不足 → 弹确认框。** **打桩实测**（用例 1/5/7 决策 + 编排），弹窗内容与交互为**代码复核**（无头环境未启浏览器）。
+- [x] **94. 三出口各自传对参数。** **打桩实测**（用例 5/6/7）：仍然快照 → `snapshot:"auto"`；跳过快照 → `snapshot:"skip"`；取消 → create 零调用、返回 false（表单回到原状态）。
+- [x] **95. preflight 失败不阻断建会话。** **打桩实测**（用例 8）：网络错误/500/400 三种形态均照常建会话、不传 snapshot、confirm 零调用、`console.warn` 留记录。
+- [x] **96. 空间不足时「仍然快照」禁用并写明原因。** **代码复核**（SnapshotConfirm：`disabled={!canSnapshot}` + `.snapshot-warn` 可见文案，打桩源码断言覆盖）；交互未在浏览器人工确认。
+- [x] **97. 会话头展示快照路径，字段缺失不显示。** **代码复核**（SessionView：`session.snapshotPath && …` 守卫渲染，打桩源码断言覆盖）；后端联调（字段名以实际返回为准）未实测。
+- [x] **98. 键盘可达与配色纪律。** **代码复核**：Esc/点遮罩取消、focus trap 与 SettingsMenu 同一实现、`aria-modal`；未新增颜色令牌、radius/shadow 引用现有令牌。视觉效果与键盘流未在浏览器人工确认。
+- [x] **99. 构建与检查全绿。** **实测**：`npm test`（check:theme「✅ 深色令牌两份一致（26 项）」+ mentions 40 例 + store 17 例 + pages 6 例 + resume 11 例 + effective-ask 12 例 + history 6 例 + render-items 26 例 + snapshot 11 例）退出码 0；`npm run build`（vite 8.2.2，37 modules，退出码 0）；`npx tsc --noEmit`（根）与 `npm run typecheck:frontend` 退出码均 0。
+
+**这版快照接入的边界**（如实记录）：① 只有新建会话表单走 preflight；「新建会话并续接」（dead/error 出口）与历史会话「导入并续接」两条 `store.create` 路径未接预检（续接语义下同 cwd 通常已有快照，且本轮需求只点新建流程）；② preflight 返回 400（cwd 无效）按失败处理照常建——建会话请求会带后端自己的错误消息，用户不会静默丢信息；③ 弹窗出现期间表单保持 busy（防重复提交），用户取消后需重新点「创建并进入」（会重新 preflight，结果可能已变）；④ 后端联调未做（并行业层开发中），`snapshotPath` 字段名按约定实现，缺失即不显示。
 
 ## 已知取舍
 

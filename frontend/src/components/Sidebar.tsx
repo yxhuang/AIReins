@@ -1,10 +1,13 @@
 import { useEffect, useRef, useState } from "react";
-import type { AgentKind, ConfigOptionId, SessionRecord } from "../types";
+import type { AgentKind, ConfigOptionId, SessionRecord, SnapshotPreflight } from "../types";
 import { relativeTime, sessionTitle } from "../format";
 import { isInlineSvg } from "../pages";
+import { fetchSnapshotPreflight, type CreateSessionInput } from "../api";
+import { createWithSnapshotPreflight, type SnapshotChoice } from "../snapshot";
 import { store, type Store } from "../store";
 import { useStore } from "../useStore";
 import { SettingsMenu } from "./SettingsMenu";
+import { SnapshotConfirm } from "./SnapshotConfirm";
 
 const AGENT_LABELS: Record<AgentKind, string> = {
   claude: "claude",
@@ -400,6 +403,10 @@ function NewSessionForm({ onDone }: { onDone: () => void }) {
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // 快照确认框：非 null 时弹出，等用户拍板（auto/skip/cancel）后 resolve
+  const [confirmPreflight, setConfirmPreflight] = useState<SnapshotPreflight | null>(null);
+  const confirmResolver = useRef<((choice: SnapshotChoice) => void) | null>(null);
+  const submitBtnRef = useRef<HTMLButtonElement>(null);
   // 三个配置下拉的已选值；"" = 跟随配置（不传该字段）。切 agent 时整体重置。
   const [configSel, setConfigSel] = useState<Partial<Record<ConfigOptionId, string>>>({});
   const options = meta?.drivers[agent]?.options ?? [];
@@ -411,6 +418,25 @@ function NewSessionForm({ onDone }: { onDone: () => void }) {
     if (next) setCwdState(next);
   });
 
+  // 表单被收起/卸载时若确认框还挂着，按取消了结，别让 submit 的承诺永远挂起
+  useEffect(
+    () => () => {
+      confirmResolver.current?.("cancel");
+      confirmResolver.current = null;
+    },
+    [],
+  );
+
+  const resolveConfirm = (choice: SnapshotChoice) => {
+    setConfirmPreflight(null);
+    confirmResolver.current?.(choice);
+    confirmResolver.current = null;
+    if (choice === "cancel") {
+      // 取消 = 不建会话、回到表单原状态；焦点还给「创建并进入」（等弹窗卸载后）
+      requestAnimationFrame(() => submitBtnRef.current?.focus());
+    }
+  };
+
   const submit = async () => {
     if (!cwd.trim() || busy) return;
     setBusy(true);
@@ -419,13 +445,15 @@ function NewSessionForm({ onDone }: { onDone: () => void }) {
     const config = Object.fromEntries(
       Object.entries(configSel).filter(([, value]) => value),
     );
-    try {
-      const session = await store.create({
-        agent,
-        cwd: cwd.trim(),
-        ...(Object.keys(config).length > 0 ? { config } : {}),
-        ...(message.trim() ? { initialMessage: message.trim() } : {}),
-      });
+    const base: Omit<CreateSessionInput, "snapshot"> = {
+      agent,
+      cwd: cwd.trim(),
+      ...(Object.keys(config).length > 0 ? { config } : {}),
+      ...(message.trim() ? { initialMessage: message.trim() } : {}),
+    };
+    // 实际建会话：snapshot 只在用户在确认框做出选择后显式携带，其余情况省略（后端默认 auto）
+    const doCreate = async (snapshot?: "auto" | "skip") => {
+      const session = await store.create(snapshot ? { ...base, snapshot } : base);
       // 记忆本次 cwd，下次新建直接预填（localStorage 不可用就跳过）
       try {
         localStorage.setItem(CWD_STORAGE_KEY, session.cwd);
@@ -434,6 +462,21 @@ function NewSessionForm({ onDone }: { onDone: () => void }) {
       }
       store.navigate(session.id);
       onDone();
+    };
+    try {
+      // 建会话前快照预检：分支规则在 snapshot.ts（git 直连 / 静默快照 / 弹确认框）；
+      // preflight 自身失败不阻断建会话（保护措施不能反过来卡住用户）。
+      const created = await createWithSnapshotPreflight(base.cwd, {
+        preflight: fetchSnapshotPreflight,
+        create: doCreate,
+        confirm: (preflight) =>
+          new Promise<SnapshotChoice>((resolve) => {
+            confirmResolver.current = resolve;
+            setConfirmPreflight(preflight);
+          }),
+        log: (msg) => console.warn(`[snapshot] ${msg}`),
+      });
+      if (!created) return; // 用户在确认框取消：回到表单
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -513,6 +556,7 @@ function NewSessionForm({ onDone }: { onDone: () => void }) {
       <button
         type="submit"
         className="btn btn-primary"
+        ref={submitBtnRef}
         disabled={busy || !cwd.trim()}
         title={!cwd.trim() ? "请先填写工作目录" : undefined}
       >
@@ -520,6 +564,10 @@ function NewSessionForm({ onDone }: { onDone: () => void }) {
       </button>
       {/* 禁用原因不只靠 title tooltip：直接写在按钮下方 */}
       {!cwd.trim() && <p className="new-hint">请先填写工作目录</p>}
+      {/* 快照预检判定需要用户拍板时弹暖色确认框（Esc 取消，焦点回「创建并进入」） */}
+      {confirmPreflight && (
+        <SnapshotConfirm preflight={confirmPreflight} onResolve={resolveConfirm} />
+      )}
     </form>
   );
 }

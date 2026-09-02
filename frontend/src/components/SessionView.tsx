@@ -106,6 +106,16 @@ export function SessionView({ session }: { session: SessionRecord }) {
               {" · "}{STATUS_LABELS[session.status] ?? session.status}
             </span>
             <ConfigSummary session={session} />
+            {/* 建会话时的自动快照位置；git 目录/跳过快照/旧会话该字段缺省，不显示 */}
+            {session.snapshotPath && (
+              <span
+                className="session-snapshot"
+                title="本次会话开始前对工作目录做的完整备份，改坏文件后可从这里找回"
+              >
+                {" · 快照 "}
+                {session.snapshotPath}
+              </span>
+            )}
           </div>
         </div>
         <div className="session-head-actions">

@@ -2,6 +2,7 @@ import { statSync } from "node:fs";
 import { isAbsolute, resolve } from "node:path";
 import { readClaudeEffectiveSettings, type ClaudeEffectiveSettings } from "./claude-settings.js";
 import { createDriver, DRIVER_CAPABILITIES } from "./drivers/index.js";
+import { log } from "./logger.js";
 import {
   cleanSessionConfig,
   configFromCreateInput,
@@ -15,6 +16,7 @@ import {
   saveRegistry,
   transcriptPathFor,
 } from "./persistence.js";
+import { createSnapshotIfNeeded } from "./snapshot.js";
 import type {
   CreateSessionInput,
   Driver,
@@ -35,6 +37,7 @@ import { ulid } from "./ulid.js";
 const RING_SIZE = 1_000;
 export type DriverFactory = typeof createDriver;
 export type ClaudeSettingsResolver = (cwd: string) => ClaudeEffectiveSettings;
+export type SnapshotCreator = (cwd: string) => Promise<string | null>;
 
 export class SessionManager {
   private readonly sessions = new Map<string, SessionRecord>();
@@ -47,6 +50,7 @@ export class SessionManager {
   constructor(
     private readonly driverFactory: DriverFactory = createDriver,
     private readonly claudeSettingsResolver: ClaudeSettingsResolver = readClaudeEffectiveSettings,
+    private readonly snapshotCreator: SnapshotCreator = createSnapshotIfNeeded,
   ) {
     const loaded = loadRegistry();
     for (const stored of loaded) {
@@ -161,6 +165,29 @@ export class SessionManager {
       ...this.claudeEffectivePayload(record),
       riskyMode: record.riskyMode,
     });
+
+    if ((input.snapshot ?? "auto") === "auto") {
+      try {
+        const snapshotPath = await this.snapshotCreator(record.cwd);
+        if (snapshotPath) {
+          record.snapshotPath = snapshotPath;
+          this.persistRegistry();
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        log("warn", "session snapshot failed; continuing startup", {
+          sessionId: id,
+          cwd: record.cwd,
+          errorMessage: message,
+        });
+        this.emit(id, "session_error", {
+          message: `自动快照失败，会话仍将继续创建：${message}`,
+          source: "snapshot",
+          severity: "warning",
+          nonBlocking: true,
+        });
+      }
+    }
 
     let worker!: Driver;
     const callbacks = this.driverCallbacks(id, () => worker);

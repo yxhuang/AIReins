@@ -9,6 +9,7 @@ import { HistoryIndex, HistoryQueryError } from "./history.js";
 import { getMeta, SERVER_VERSION } from "./meta.js";
 import { checkPageHealth, scanPages } from "./pages.js";
 import { SessionManager } from "./session-manager.js";
+import { preflightSnapshot, SnapshotCwdError } from "./snapshot.js";
 import {
   AGENTS,
   CONFIG_OPTION_IDS,
@@ -138,6 +139,14 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse)
         respond(response, 200, 0, "success", await history.list(input), requestId);
       } catch (error) {
         if (error instanceof HistoryQueryError) throw new ApiError(400, 40032, error.message);
+        throw error;
+      }
+    } else if (method === "POST" && url.pathname === "/api/snapshot/preflight") {
+      const cwd = validateSnapshotPreflight(await readJson(request));
+      try {
+        respond(response, 200, 0, "success", await preflightSnapshot(cwd), requestId);
+      } catch (error) {
+        if (error instanceof SnapshotCwdError) throw new ApiError(400, 40022, error.message);
         throw error;
       }
     } else if (method === "POST" && url.pathname === "/api/sessions") {
@@ -442,6 +451,9 @@ function validateCreateSession(value: unknown): CreateSessionInput {
     throw new ApiError(400, 40001, "agent 必须是 claude、codex 或 kimi");
   }
   if (typeof input.cwd !== "string") throw new ApiError(400, 40002, "cwd 必须是绝对路径字符串");
+  if (input.snapshot !== undefined && !["auto", "skip"].includes(String(input.snapshot))) {
+    throw new ApiError(400, 40023, "snapshot 必须是 auto 或 skip");
+  }
   if (input.agentId !== undefined && typeof input.agentId !== "string") throw new ApiError(400, 40003, "agentId 必须是字符串");
   if (input.initialMessage !== undefined && typeof input.initialMessage !== "string") throw new ApiError(400, 40004, "initialMessage 必须是字符串");
   if (input.model !== undefined && typeof input.model !== "string") throw new ApiError(400, 40005, "model 必须是字符串");
@@ -456,6 +468,15 @@ function validateCreateSession(value: unknown): CreateSessionInput {
   }
   if (input.config !== undefined) validateSessionConfig(input.config, "config");
   return input as unknown as CreateSessionInput;
+}
+
+function validateSnapshotPreflight(value: unknown): string {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new ApiError(400, 40020, "请求体必须是 JSON 对象");
+  }
+  const cwd = (value as Record<string, unknown>).cwd;
+  if (typeof cwd !== "string") throw new ApiError(400, 40022, "cwd 必须是绝对路径字符串");
+  return cwd;
 }
 
 function validateSessionConfig(value: unknown, label: string): SessionConfig {

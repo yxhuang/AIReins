@@ -114,6 +114,7 @@ export interface SessionRecord {
   transcriptPath: string;
   nativeSessionId?: string;
   nativeTranscriptPath?: string;
+  snapshotPath?: string;
   resumedFrom?: {
     agent: AgentKind;
     nativeSessionId: string;
@@ -189,6 +190,7 @@ export interface Driver {
 export interface CreateSessionInput {
   agent: AgentKind;
   cwd: string;
+  snapshot?: "auto" | "skip";
   agentId?: string;
   config?: SessionConfig;
   /** @deprecated Use config.model. */

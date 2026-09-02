@@ -93,6 +93,8 @@ export interface SessionRecord {
   effectiveModelSource?: EffectiveSource;
   effectiveEffortSource?: EffectiveSource;
   config: SessionConfig;
+  /** 建会话时后端自动快照的写入路径；git 目录/跳过快照/旧会话为缺省或 null，缺失就不显示 */
+  snapshotPath?: string | null;
   /** true = 该会话已关闭 agent 主动询问（claude bypass/dontAsk、codex never、kimi yolo） */
   riskyMode: boolean;
 }
@@ -183,6 +185,25 @@ export interface PageHealth {
   embeddable?: boolean | null;
   /** embeddable:false 时的原因，如 "目标站点设置了 X-Frame-Options: DENY" */
   embedReason?: string | null;
+}
+
+/**
+ * POST /api/snapshot/preflight 的 data：建会话前的快照预检。
+ * needed 等价于 !isGit；snapshotPath 在 needed 为 false 时为 null。
+ */
+export interface SnapshotPreflight {
+  /** cwd 是否在 git 仓库内（git 有自身回滚能力，不需要快照） */
+  isGit: boolean;
+  /** 是否需要快照 */
+  needed: boolean;
+  /** 是否超过阈值（500MB 或 20000 文件） */
+  exceeds: boolean;
+  /** 是否已存在该 cwd 的旧快照（再快照会覆盖刷新） */
+  existing: boolean;
+  /** 目标盘空间是否足够（false 时后端会拒绝复制，「仍然快照」必失败） */
+  freeSpaceOk: boolean;
+  /** 快照写入路径；needed 为 false 时为 null */
+  snapshotPath: string | null;
 }
 
 /** 三家 CLI 原生历史会话的可识别创建来源；unknown 如实显示「未知」，不猜。 */
