@@ -33,6 +33,7 @@ npm run server
 | 入口 | 给谁用 | 规则 |
 |---|---|---|
 | `127.0.0.1:8790`（可用 `WORKBENCH_PORT` 改） | 电脑浏览器、Vite 开发服务器（5173）、本机的 curl 和脚本 | 见下 |
+| `127.0.0.1:<remote.json 的 port>`（默认不开） | `tailscale serve` 转发的手机请求 | 见下 |
 
 本机入口的规则：
 
@@ -41,6 +42,30 @@ npm run server
 - **不带 Origin 的请求放行**：这类请求来自本机进程。
 
 另外，静态资源响应带 `X-Frame-Options: DENY` 和 `Content-Security-Policy: frame-ancestors 'none'`，不允许别的网站嵌入 workbench。
+
+远程入口的规则：
+
+- **Host**：必须是配置的 `origin` 主机名，或 `127.0.0.1:<port>`（Serve 转发可能改写 Host）。
+- **身份**：必须带 Serve 注入的 `Tailscale-User-Login` 头，且登录名在 `allowedLogins` 中。
+- **Origin**：写操作和 WS 握手必须带 Origin，且与配置的 `origin` 完全一致。
+
+### 远程入口配置 `~/.workbench/remote.json`
+
+没有文件时不开远程入口。文件无效时只记一条 `remote.json 无效，远程入口未开启` 日志，本机入口照常使用。更改配置后须重启 workbench 才生效。
+
+```json
+{
+  "port": 8792,
+  "origin": "https://my-desktop.tailxxxx.ts.net",
+  "allowedLogins": ["你的登录名@github"]
+}
+```
+
+- `port`：1–65535，不能与本机端口相同，且须与 Serve 转发目标一致。
+- `origin`：手机地址栏里的源；全小写，无路径、无结尾斜杠。
+- `allowedLogins`：允许访问的 Tailscale 登录名。未知时可先填占位值，手机打开页面后，403 提示会显示实际登录名。
+
+Serve 会剥掉客户端自带的同名身份头，再注入真实身份。远程端口只绑定 `127.0.0.1`；DNS 重绑定网页的 Host 过不了检查。本机进程可伪造此头，但本来就能访问本机入口。
 
 ## REST
 

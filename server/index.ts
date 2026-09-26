@@ -1,15 +1,16 @@
 import { createReadStream, existsSync, statSync } from "node:fs";
-import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { extname, resolve } from "node:path";
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import { extname, join, resolve } from "node:path";
 import type { Duplex } from "node:stream";
 import { fileURLToPath } from "node:url";
 import { WebSocket, WebSocketServer } from "ws";
-import { checkAccess, localPolicy, type AccessPolicy } from "./access.js";
+import { checkAccess, loadRemoteConfig, localPolicy, remotePolicy, type AccessPolicy, type RemoteConfig } from "./access.js";
 import { log } from "./logger.js";
 import { normalizeFileQuery, searchFiles } from "./file-search.js";
 import { HistoryIndex, HistoryQueryError } from "./history.js";
 import { getMeta, SERVER_VERSION } from "./meta.js";
 import { checkPageHealth, scanPages } from "./pages.js";
+import { workbenchHome } from "./persistence.js";
 import { SessionManager } from "./session-manager.js";
 import { preflightSnapshot, SnapshotCwdError } from "./snapshot.js";
 import {
@@ -30,6 +31,17 @@ const STATIC_ROOT = process.env.WORKBENCH_STATIC_DIR
   ? resolve(process.env.WORKBENCH_STATIC_DIR)
   : resolve(fileURLToPath(new URL("../frontend/dist", import.meta.url)));
 const LOCAL_POLICY = localPolicy(PORT);
+const REMOTE_CONFIG = readRemoteConfig();
+
+/** 配置错误不影响本机入口。 */
+function readRemoteConfig(): RemoteConfig | null {
+  try {
+    return loadRemoteConfig(join(workbenchHome, "remote.json"), PORT);
+  } catch (error) {
+    log("error", "remote.json 无效，远程入口未开启", { message: error instanceof Error ? error.message : String(error) });
+    return null;
+  }
+}
 
 function listenPort(value: string | undefined): number {
   if (value === undefined) return 8790;
@@ -119,6 +131,21 @@ server.on("error", (error) => {
   process.exitCode = 1;
 });
 
+const remoteServer = REMOTE_CONFIG ? startRemoteListener(REMOTE_CONFIG) : null;
+
+function startRemoteListener(config: RemoteConfig): Server {
+  const policy = remotePolicy(config);
+  const remote = createServer((request, response) => {
+    void handleRequest(request, response, policy);
+  });
+  remote.on("upgrade", (request, socket, head) => handleUpgrade(request, socket, head, policy));
+  remote.on("error", (error) => log("error", "remote listener error", { message: error.message, port: config.port }));
+  remote.listen(config.port, HOST, () => {
+    log("info", "remote listener started", { host: HOST, port: config.port, origin: config.origin });
+  });
+  return remote;
+}
+
 let shuttingDown = false;
 async function shutdown(signal: string): Promise<void> {
   if (shuttingDown) return;
@@ -127,6 +154,7 @@ async function shutdown(signal: string): Promise<void> {
   for (const client of clients) client.socket.close(1001, "server shutdown");
   await manager.shutdown();
   await new Promise<void>((resolveClose) => server.close(() => resolveClose()));
+  if (remoteServer) await new Promise<void>((resolveClose) => remoteServer.close(() => resolveClose()));
 }
 
 process.on("SIGINT", () => void shutdown("SIGINT"));

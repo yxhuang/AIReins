@@ -25,11 +25,14 @@ export function log(
   message: string,
   context: Record<string, unknown> = {},
 ): void {
+  // context 里的 message（多为 error.message）改名 detail，不许覆盖日志标题
+  const { message: detail, ...rest } = redact(context) as Record<string, unknown>;
   const line = JSON.stringify({
     timestamp: new Date().toISOString(),
     level,
     message,
-    ...redact(context) as Record<string, unknown>,
+    ...rest,
+    detail,
   });
   (level === "error" ? console.error : console.log)(line);
 }
