@@ -67,6 +67,19 @@ npm run server
 
 Serve 会剥掉客户端自带的同名身份头，再注入真实身份。远程端口只绑定 `127.0.0.1`；DNS 重绑定网页的 Host 过不了检查。本机进程可伪造此头，但本来就能访问本机入口。
 
+### 手机远程排错
+
+| 现象 | 常见原因 | 处理 |
+|---|---|---|
+| 手机打不开，一直超时 | 手机 Tailscale 没连上；代理客户端 TUN 抢了路由；电脑睡眠或关机了 | 看手机 Tailscale 的连接状态；TUN 模式要把 `100.64.0.0/10` 与 `*.ts.net` 设为直连；电脑那边远程开机 |
+| 502 Bad Gateway | workbench 没在跑；或 `remote.json` 没配、配错了，8792 没有监听 | 用 `workbench status` 看「远程」那一行；`workbench logs` 里搜 `remote` |
+| 403「没有 Tailscale 身份」 | 没走 Serve，比如直连了 8792；或请求来自 Funnel、打了 tag 的设备 | 改用 `https://<机器域名>/` 访问 |
+| 403「Tailscale 账号 X 未授权」 | X 不在 `allowedLogins` 里 | 把 X 加进 `remote.json`，然后 `workbench restart` |
+| 403「Origin 不匹配」或「Host 不在远程白名单」 | `remote.json` 里的 `origin` 和地址栏不一致（大小写、结尾斜杠、机器改了名） | 改成地址栏里的 `https://<机器域名>`，不带结尾斜杠，然后 restart |
+| 页面能打开，但一直「连接中」，圆点不变绿 | WS 握手被拒（日志里有 `websocket rejected`），或 Serve 没转发 WS | 按日志里的原因处理；如果是 Serve 的问题，记下现象报告给用户 |
+| 电脑浏览器突然 403 | 用了白名单以外的地址访问，比如局域网 IP、自定义的 hosts 名 | 改用 `http://127.0.0.1:8790` 或 `http://localhost:8790` |
+| 手机上改了后端却没变化 | 后端改动要 `workbench restart` 才生效（前端 `dist` 刷新即可） | 重启前先查 `/api/sessions` 有无活会话 |
+
 ## 闸门提醒
 
 配了 `~/.workbench/notify.json` 才开启：闸门挂起超过 `delaySeconds` 秒（默认 60）还没人处理，就发一条飞书提醒。两种发送方式二选一：`feishuWebhook` 走群里的自定义机器人；`larkUserId` 调本机 `lark-cli im +messages-send --as bot` 让应用机器人私聊该 open_id（租户关了自定义机器人时用，凭据由 lark-cli 管，要先 `lark-cli auth status` 看 bot 身份是 ready）。
