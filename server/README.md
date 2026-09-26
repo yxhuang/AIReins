@@ -1,6 +1,6 @@
 # Workbench server（M1）
 
-后端使用 Node 22、TypeScript 和 `tsx` 直跑，没有后端构建步骤。服务固定绑定回环地址 `127.0.0.1`，默认端口为 `8790`，不做鉴权；三家 CLI 版本在启动时实测并缓存。
+后端使用 Node 22、TypeScript 和 `tsx` 直跑，没有后端构建步骤。服务固定绑定回环地址 `127.0.0.1`，默认端口为 `8790`，带访问控制（见「## 访问控制」）；三家 CLI 版本在启动时实测并缓存。
 
 ## 启动
 
@@ -19,6 +19,28 @@ npm run server
 - 各家 CLI 自有 transcript：完全由原生 CLI 管理；Workbench 从不删除
 
 服务启动会把注册表中的旧会话统一标记为 `dead`，不会接管或自动续接旧进程。需要续接时，新建会话可传原生 `resumeSessionId`；Claude 使用 `--resume`，Codex 使用 `thread/resume`，Kimi 使用 `session/resume`。
+
+## 访问控制
+
+`server/access.ts` 按请求从哪个监听进来，套用不同的策略。
+
+被拒绝时：
+
+- HTTP 请求返回 `403`：`code` 为 `40300`，`msg` 是拒绝原因。
+- WS 握手直接返回 `403` 并断开。
+- 两种情况都会记一条日志：`request failed` 或 `websocket rejected`。
+
+| 入口 | 给谁用 | 规则 |
+|---|---|---|
+| `127.0.0.1:8790`（可用 `WORKBENCH_PORT` 改） | 电脑浏览器、Vite 开发服务器（5173）、本机的 curl 和脚本 | 见下 |
+
+本机入口的规则：
+
+- **Host**：必须是 `127.0.0.1` 或 `localhost`，端口为本端口或 5173。用来挡 DNS 重绑定。
+- **Origin**：写操作（GET、HEAD 以外）和 WS 握手如果带了 Origin，必须是上面四个地址对应的 `http://` 源。用来挡跨站伪造和 WS 劫持。
+- **不带 Origin 的请求放行**：这类请求来自本机进程。
+
+另外，静态资源响应带 `X-Frame-Options: DENY` 和 `Content-Security-Policy: frame-ancestors 'none'`，不允许别的网站嵌入 workbench。
 
 ## REST
 

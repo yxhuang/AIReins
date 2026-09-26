@@ -1,8 +1,10 @@
 import { createReadStream, existsSync, statSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { extname, resolve } from "node:path";
+import type { Duplex } from "node:stream";
 import { fileURLToPath } from "node:url";
 import { WebSocket, WebSocketServer } from "ws";
+import { checkAccess, localPolicy, type AccessPolicy } from "./access.js";
 import { log } from "./logger.js";
 import { normalizeFileQuery, searchFiles } from "./file-search.js";
 import { HistoryIndex, HistoryQueryError } from "./history.js";
@@ -27,6 +29,7 @@ const PORT = listenPort(process.env.WORKBENCH_PORT);
 const STATIC_ROOT = process.env.WORKBENCH_STATIC_DIR
   ? resolve(process.env.WORKBENCH_STATIC_DIR)
   : resolve(fileURLToPath(new URL("../frontend/dist", import.meta.url)));
+const LOCAL_POLICY = localPolicy(PORT);
 
 function listenPort(value: string | undefined): number {
   if (value === undefined) return 8790;
@@ -62,17 +65,25 @@ manager.onEvent((event) => {
 });
 
 const server = createServer((request, response) => {
-  void handleRequest(request, response);
+  void handleRequest(request, response, LOCAL_POLICY);
 });
 
-server.on("upgrade", (request, socket, head) => {
+server.on("upgrade", (request, socket, head) => handleUpgrade(request, socket, head, LOCAL_POLICY));
+
+function handleUpgrade(request: IncomingMessage, socket: Duplex, head: Buffer, policy: AccessPolicy): void {
+  const denied = checkAccess(policy, request.method ?? "GET", request.headers, true);
+  if (denied) {
+    log("warn", "websocket rejected", { reason: denied, path: request.url });
+    socket.end("HTTP/1.1 403 Forbidden\r\nConnection: close\r\nContent-Length: 0\r\n\r\n");
+    return;
+  }
   const url = new URL(request.url ?? "/", `http://${request.headers.host ?? `${HOST}:${PORT}`}`);
   if (url.pathname !== "/ws") {
     socket.destroy();
     return;
   }
   wss.handleUpgrade(request, socket, head, (websocket) => wss.emit("connection", websocket, request));
-});
+}
 
 wss.on("connection", (socket, request) => {
   const url = new URL(request.url ?? "/ws", `http://${request.headers.host ?? `${HOST}:${PORT}`}`);
@@ -121,10 +132,12 @@ async function shutdown(signal: string): Promise<void> {
 process.on("SIGINT", () => void shutdown("SIGINT"));
 process.on("SIGTERM", () => void shutdown("SIGTERM"));
 
-async function handleRequest(request: IncomingMessage, response: ServerResponse): Promise<void> {
+async function handleRequest(request: IncomingMessage, response: ServerResponse, policy: AccessPolicy): Promise<void> {
   const requestId = ulid();
   const started = Date.now();
   try {
+    const denied = checkAccess(policy, request.method ?? "GET", request.headers, false);
+    if (denied) throw new ApiError(403, 40300, denied);
     const url = new URL(request.url ?? "/", `http://${request.headers.host ?? `${HOST}:${PORT}`}`);
     const method = request.method ?? "GET";
     if (method === "GET" && url.pathname === "/api/meta") {
@@ -568,6 +581,8 @@ function serveStatic(pathname: string, response: ServerResponse): boolean {
   response.writeHead(200, {
     "content-type": contentTypes[extname(path)] ?? "application/octet-stream",
     "cache-control": path.endsWith("index.html") ? "no-cache" : "public, max-age=31536000, immutable",
+    "x-frame-options": "DENY",
+    "content-security-policy": "frame-ancestors 'none'",
   });
   createReadStream(path).pipe(response);
   return true;

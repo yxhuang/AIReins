@@ -21,7 +21,8 @@
     "test:history": "tsx frontend/scripts/history-flow.test.mjs",
     "test:render-items": "tsx frontend/scripts/render-items.test.mjs",
     "test:snapshot": "tsx frontend/scripts/snapshot-flow.test.mjs",
-    "test": "npm run check:theme && npm run test:mentions && npm run test:store && npm run test:pages && npm run test:resume && npm run test:effective-ask && npm run test:history && npm run test:render-items && npm run test:snapshot"
+    "test:server": "n=0; for f in server/*.test.ts; do tsx \"$f\" > /dev/null || { echo \"❌ $f\"; exit 1; }; n=$((n+1)); done; echo \"✅ server 测试全过（$n 个文件）\"",
+    "test": "npm run check:theme && npm run test:mentions && npm run test:store && npm run test:pages && npm run test:resume && npm run test:effective-ask && npm run test:history && npm run test:render-items && npm run test:snapshot && npm run test:server"
   },
   "devDependencies": {
     "@types/node": "^26.2.0",
