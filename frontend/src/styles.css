@@ -654,12 +654,6 @@ body {
   color: var(--busy);
 }
 
-/* mutableVia:"restart" 选项旁的代价说明：中性小字，不是警告 */
-.config-note {
-  font-size: 11px;
-  color: var(--text-faint);
-}
-
 /* 跟随配置时有效值的来源标注（设置/运行时）：极小字，精度差异如实可见 */
 .config-effective-src {
   font-size: 10.5px;
@@ -1062,26 +1056,246 @@ body {
   border-top: 1px solid var(--border);
 }
 
-.composer-row {
+/* 输入框 + 底栏（胶囊 + 发送）合成一个框，参照 Claude Code VSCode 扩展的输入框 */
+.composer-box {
   display: flex;
-  gap: 8px;
-}
-
-.composer-row textarea {
-  flex: 1;
+  flex-direction: column;
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--bg);
+}
+
+.composer-box:focus-within {
+  border-color: var(--border-strong);
+  box-shadow: 0 0 0 1px var(--border-strong);
+}
+
+.composer-box textarea {
+  border: 0;
+  outline: none;
+  background: transparent;
   color: var(--text);
-  padding: 8px 10px;
+  padding: 8px 10px 4px;
   font-size: 14px;
   font-family: inherit;
   resize: none;
 }
 
-.composer-row textarea:disabled {
+.composer-box textarea:disabled {
   color: var(--text-faint);
 }
+
+/* 底栏：浮层相对它定位（贴左/右边缘展开），不相对胶囊，免得在窄侧栏里被裁 */
+.cfg-bar {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 6px 6px;
+}
+
+.cfg-pills {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+/* 审批模式胶囊靠右，挨着发送键 */
+.cfg-pills > .cfg-pill-wrap + .cfg-pill-wrap { margin-left: auto; }
+
+.cfg-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 100%;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: var(--surface-sunk);
+  color: var(--text);
+  padding: 3px 8px;
+  font-size: 12.5px;
+  font-family: inherit;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.cfg-pill-wrap { display: flex; min-width: 0; }
+.cfg-pill { min-width: 0; }
+.cfg-pill > span { overflow: hidden; text-overflow: ellipsis; }
+.cfg-pill > svg { color: var(--text-muted); flex: 0 0 auto; }
+.cfg-pill:hover:not(:disabled), .cfg-pill.open { border-color: var(--border-strong); }
+.cfg-pill:disabled { opacity: 0.55; cursor: not-allowed; }
+.cfg-pill-sub { color: var(--text-faint); text-transform: capitalize; }
+
+.cfg-menu {
+  position: absolute;
+  z-index: 20;
+  min-width: 200px;
+  max-width: min(320px, 100%);
+  max-height: 50vh;
+  overflow-y: auto;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 4px;
+  box-shadow: var(--shadow-pop);
+  animation: settings-pop 0.12s ease-out;
+}
+
+.cfg-menu-up { bottom: calc(100% + 4px); }
+.cfg-menu-down { top: calc(100% + 4px); }
+.cfg-menu-left { left: 6px; }
+.cfg-menu-right { right: 6px; }
+
+.cfg-group + .cfg-group {
+  border-top: 1px solid var(--border);
+  margin-top: 4px;
+  padding-top: 4px;
+}
+
+.cfg-group-title {
+  padding: 4px 8px 2px;
+  font-size: 11.5px;
+  letter-spacing: 0.04em;
+  color: var(--text-faint);
+}
+
+.cfg-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  padding: 6px 8px;
+  font-size: 13px;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+/* 焦点/悬停同命令面板选中项的纪律：冷色 --busy 竖条 */
+.cfg-item:hover:not(:disabled), .cfg-item:focus-visible {
+  outline: none;
+  background: var(--surface-sunk);
+  box-shadow: inset 2px 0 0 var(--busy);
+}
+
+.cfg-item:disabled { color: var(--text-faint); cursor: not-allowed; }
+.cfg-check { width: 14px; flex: 0 0 auto; display: inline-flex; color: var(--busy); }
+.cfg-item-label { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+
+.cfg-note {
+  padding: 2px 8px 4px;
+  font-size: 11px;
+  color: var(--text-faint);
+}
+.cfg-note:empty { display: none; }
+
+/* 推理强度滑块：圆角槽 + 每档一个点，已选段用冷色 --busy 填到滑钮中心 */
+/* 含滑块的菜单定宽、滑块行不换行：宽度若随「（High）/（xhigh）」文字伸缩，滑块会在拖动中左右挪，
+   同一指针位置换算出不同档位，来回跳档闪烁（2026-09-26 实测复现） */
+.cfg-menu:has(.cfg-slider-row) { width: min(300px, 100%); }
+
+.cfg-slider-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  font-size: 13px;
+}
+
+.cfg-slider-label { flex: 1 1 auto; min-width: 0; color: var(--text); }
+.cfg-slider-value { color: var(--text-faint); }
+
+.cfg-slider-reset {
+  border: 0;
+  background: none;
+  color: var(--busy);
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+  padding: 0 2px;
+}
+
+.cfg-slider {
+  --fill: 0%;
+  flex: 0 0 auto;
+  display: flex;
+  width: 132px;
+  height: 20px;
+  border-radius: 999px;
+  background: linear-gradient(to right, var(--busy) var(--fill), var(--surface-sunk) var(--fill));
+  cursor: pointer;
+  touch-action: none; /* 触屏横拖不滚页面 */
+}
+
+.cfg-slider.follow {
+  background: linear-gradient(to right, color-mix(in srgb, var(--busy) 35%, var(--surface-sunk)) var(--fill), var(--surface-sunk) var(--fill));
+}
+
+.cfg-slider:focus-visible { outline: 2px solid var(--busy); outline-offset: 2px; }
+.cfg-slider[aria-disabled="true"] { opacity: 0.5; cursor: not-allowed; }
+
+.cfg-step {
+  flex: 1;
+  display: grid;
+  place-items: center;
+}
+
+.cfg-step::after {
+  content: "";
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--text-faint);
+}
+
+.cfg-step.on::after { background: rgb(255 255 255 / 0.7); }
+
+.cfg-step.thumb::after {
+  width: 16px;
+  height: 16px;
+  background: var(--surface);
+  box-shadow: 0 0 0 1px var(--border-strong), 0 1px 3px rgb(0 0 0 / 0.25);
+}
+
+.cfg-slider.follow .cfg-step.thumb::after { background: var(--surface-sunk); }
+
+/* prompt 缓存剩余时间：中性小字，过期变淡（不用暖色——那是闸门专用） */
+.cache-timer {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12.5px;
+  color: var(--text-muted);
+  cursor: help;
+}
+
+.cache-timer.expired { color: var(--text-faint); }
+
+.send-btn {
+  flex: 0 0 auto;
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 6px;
+  background: var(--busy);
+  color: #fff;
+  cursor: pointer;
+}
+
+.send-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* 新建表单里框底色跟卡片走 */
+.new-form .composer-box { background: var(--surface); }
 
 /* 斜杠命令面板：与设置浮层同一套面板语言（冷色，不用暖色） */
 .cmd-panel {
@@ -1351,7 +1565,7 @@ body {
 
 /* 减少动态：关光标闪烁、徽标脉冲与浮层动画 */
 @media (prefers-reduced-motion: reduce) {
-  .cursor, .gate-badge, .settings-panel, .cmd-panel { animation: none; }
+  .cursor, .gate-badge, .settings-panel, .cmd-panel, .cfg-menu { animation: none; }
 }
 
 /* ── 扩展页面：左栏分区与页面视图（全部冷色/中性，暖色仍是闸门专用） ── */
@@ -2059,7 +2273,9 @@ body {
 
 @media (pointer: coarse) {
   /* 触屏点按目标至少 44px */
-  .btn, .icon-btn, .row-delete { min-height: 44px; }
+  .btn, .icon-btn, .row-delete, .cfg-pill, .cfg-item { min-height: 44px; }
+  .send-btn { width: 44px; height: 44px; }
+  .cfg-slider { width: 176px; height: 32px; }
   /* 没有 hover：删除按钮常显（点了还有确认步骤，不会误删） */
   .row-delete { opacity: 1; min-width: 44px; }
   /* iOS 聚焦字号小于 16px 的输入框会自动放大页面；!important 用来压过各处更具体的字号规则 */

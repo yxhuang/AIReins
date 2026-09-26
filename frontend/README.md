@@ -48,7 +48,7 @@ frontend/
     resumed-history.ts  续接会话历史区纯逻辑：最新一页打底 / nextCursor 翻页 prepend / DOM 上限（无 DOM 依赖，可单测）
     snapshot.ts         建会话前快照编排纯逻辑：preflight 分支决策（git 直连 / 小而够静默快照 / 超阈值或空间不足弹确认框）/ 确认框原因文案 / 三出口 → snapshot 入参（无 DOM 依赖，可单测）
     components/
-      Sidebar.tsx       会话列表（身份色脊 / 状态点 / 闸门徽标 / 危险模式「!」标记 / 行右删除入口 ×：hover/focus 显现、Tab 可达，点击后就地变行内二次确认）+ 新建会话表单（含三个配置下拉；cwd 三级预填回退 + 空 cwd 可见禁用原因；提交前快照预检 preflight，需要时弹 SnapshotConfirm）+ 底部「历史会话」入口、「页面」分区与设置入口
+      Sidebar.tsx       会话列表（身份色脊 / 状态点 / 闸门徽标 / 危险模式「!」标记 / 行右删除入口 ×：hover/focus 显现、Tab 可达，点击后就地变行内二次确认）+ 新建会话表单（首条消息框底栏带配置胶囊；cwd 三级预填回退 + 空 cwd 可见禁用原因；提交前快照预检 preflight，需要时弹 SnapshotConfirm）+ 底部「历史会话」入口、「页面」分区与设置入口
       SettingsMenu.tsx  设置齿轮 + 锚定浮层（分组/条目结构，60vh 限高滚动 + focus trap）；主题三选一写 <html data-theme>、localStorage 持久化（读写均 try/catch）
       SnapshotConfirm.tsx 建会话前快照确认弹窗（暖色闸门样式 + 2px 硬边直角，模态遮罩居中；Esc/点遮罩取消、focus trap、aria-modal；写明弹框原因/快照路径/旧快照覆盖刷新；空间不足时「仍然快照」禁用并给出可见原因）
       PageView.tsx      扩展页面视图：进入先查健康，按 embeddable 三态渲染——不可达降级面板（reason + 重试）；embeddable:false 完全不渲染 iframe 改降级面板（服务正常但目标拒绝嵌入 + 主按钮新标签页打开）；embeddable:true 正常 iframe；null/缺省 iframe + 空白提示与常驻新标签页出口
@@ -381,6 +381,21 @@ frontend/
 - [x] **99. 构建与检查全绿。** **实测**：`npm test`（check:theme「✅ 深色令牌两份一致（26 项）」+ mentions 40 例 + store 17 例 + pages 6 例 + resume 11 例 + effective-ask 12 例 + history 6 例 + render-items 26 例 + snapshot 11 例）退出码 0；`npm run build`（vite 8.2.2，37 modules，退出码 0）；`npx tsc --noEmit`（根）与 `npm run typecheck:frontend` 退出码均 0。
 
 **这版快照接入的边界**（如实记录）：① 只有新建会话表单走 preflight；「新建会话并续接」（dead/error 出口）与历史会话「导入并续接」两条 `store.create` 路径未接预检（续接语义下同 cwd 通常已有快照，且本轮需求只点新建流程）；② preflight 返回 400（cwd 无效）按失败处理照常建——建会话请求会带后端自己的错误消息，用户不会静默丢信息；③ 弹窗出现期间表单保持 busy（防重复提交），用户取消后需重新点「创建并进入」（会重新 preflight，结果可能已变）；④ 后端联调未做（并行业层开发中），`snapshotPath` 字段名按约定实现，缺失即不显示。
+
+### M18 配置控件改为输入框底栏胶囊（2026-09-26）
+
+用户反馈原先「标签 + 原生下拉 + 旁注小字」太占地方，要求参照 Claude Code VSCode 扩展的输入框：直接把当前值作为按钮，点开再选。
+- 新组件 `components/ConfigMenu.tsx`：`ConfigPill`（胶囊 + 分组单选浮层，role=menu / menuitemradio，↑↓ 移动、Esc 关闭并还焦点、点外关闭）与 `ConfigPills`（模型 + 推理强度合成一个胶囊，如「✦ Opus 5.5 High」；审批模式单独一个靠右，图标按放权程度：盾 / 笔 / 清单 / 闪电）。
+- 会话输入框：textarea 与底栏合成一个 `.composer-box`，底栏是胶囊 + 图标发送键；过渡文案 / 提示 / 错误挪到框上方的 `ConfigStatus`。原先常驻的重启旁注、来源小字、别名说明、禁用原因都收进浮层（组底 `.cfg-note`），文案与判定不变，源码断言照旧通过。
+- 新建会话表单：去掉三个标签下拉，首条消息框底栏放同一套胶囊（浮层向下展开）；「跟随配置」在这里可选回。
+- 胶囊显示值是 `config-view.ts` 的 `pillText`：会话覆盖 > 实际生效值（精确 id 按别名子串认回标签）> 后端 `default` > 「默认」，有单测。
+- 用户刷新后确认外观「挺好的」，同日追加两项：
+  - **推理强度滑块**：菜单里推理强度不再逐行列出，改成底部一行「推理强度（High）+ 横向滑块」（`ConfigMenu.tsx` 的 `StepSlider`，role=slider，点 / 拖 / ←→ / Home / End）。live 会话每次改都要重启 worker，所以拖动只动草稿、松手才提交，键盘连按停 600ms 再提交，浮层关闭时补交。跟随配置时滑钮画成虚的、落在实际生效值上；新建表单里有「默认」可选回跟随。
+  - **prompt 缓存剩余时间**：claude 会话输入框底栏显示「🕐 56m」，过期显示「已过期」。逻辑在 `render-items.ts` 的 `promptCacheExpiry`：起点取最近一次 `usage_updated`（result，≈ 最后一次请求），TTL 取最近一次真写过缓存的 `cache_creation.ephemeral_1h / 5m` 分项，有单测；拿真实 transcript 核过是 1 小时。回合进行中不显示；codex / kimi 的报文里没有 TTL，不显示也不猜。
+- 用户反馈两处问题，已修：
+  - **缓存提示看不到**：两个活会话都还没完成过回合、没有 `usage_updated`，原先「判定不了就不显示」让整块消失。改为 claude 会话常显，没数据时显示「🕐 —」并在 title 说明。
+  - **滑块拖动高频闪烁**：headless chromium 复现为单向拖动时档位 3→2→3 来回跳。根因是布局反馈环：标签「（high）/（xhigh）」宽度变 → 自适应宽度的菜单变宽变窄 → 靠右的滑块左右挪 → 同一指针位置换算出不同档位。修法：含滑块的菜单定宽且滑块行不换行（`.cfg-menu:has(.cfg-slider-row)`），并在按下时锁定滑块坐标框（`dragRect`），`pointercancel` 也收尾提交。复测 1280 与 390 宽下拖动序列均为 0→4→0 单调，整次拖动只提交一次。
+- 验证：typecheck、build、`npm test` 全过；拖动行为用 playwright headless chromium 在活会话里实测（拦截 `set_config` 帧，不触发真实重启）。
 
 ## 已知取舍
 

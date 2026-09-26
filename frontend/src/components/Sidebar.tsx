@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from "react";
-import type { AgentKind, ConfigOptionId, SessionRecord, SnapshotPreflight } from "../types";
+import { useEffect, useRef, useState, type Dispatch, type SetStateAction } from "react";
+import type { AgentKind, ConfigOptionId, DriverConfigOption, SessionRecord, SnapshotPreflight } from "../types";
 import { relativeTime, sessionTitle } from "../format";
 import { isInlineSvg } from "../pages";
 import { fetchSnapshotPreflight, type CreateSessionInput } from "../api";
@@ -7,6 +7,8 @@ import { createWithSnapshotPreflight, type SnapshotChoice } from "../snapshot";
 import { store, type Store } from "../store";
 import { useStore } from "../useStore";
 import { SettingsMenu } from "./SettingsMenu";
+import { ConfigPills, type MenuGroup } from "./ConfigMenu";
+import { pillText } from "../config-view";
 import { SnapshotConfirm } from "./SnapshotConfirm";
 import { DirectoryBrowser } from "./DirectoryBrowser";
 
@@ -513,30 +515,6 @@ function NewSessionForm({ onDone }: { onDone: () => void }) {
           </button>
         ))}
       </div>
-      {options.map((option) => {
-        // default 为 null 的那条 values 项带后端给的「跟随 … 配置」标签，优先用它
-        const followLabel = option.values.find((v) => v.value === null)?.label ?? "跟随配置";
-        return (
-          <label className="new-field" key={option.id}>
-            <span>{option.name}</span>
-            <select
-              value={configSel[option.id] ?? ""}
-              onChange={(e) =>
-                setConfigSel((prev) => ({ ...prev, [option.id]: e.target.value }))
-              }
-            >
-              <option value="">{followLabel}</option>
-              {option.values
-                .filter((v): v is { value: string; label: string } => v.value !== null)
-                .map((v) => (
-                  <option key={v.value} value={v.value}>
-                    {v.label}
-                  </option>
-                ))}
-            </select>
-          </label>
-        );
-      })}
       <div className="new-field">
         <label htmlFor="new-session-cwd">工作目录（绝对路径）</label>
         <div className="cwd-input-row">
@@ -552,15 +530,19 @@ function NewSessionForm({ onDone }: { onDone: () => void }) {
           <button ref={browseButtonRef} type="button" className="btn" onClick={() => setBrowseOpen(true)}>浏览…</button>
         </div>
       </div>
-      <label className="new-field">
-        <span>首条消息（可选）</span>
+      {/* 首条消息 + 配置胶囊：与会话输入框同一形态（胶囊直接显示当前值，点开选） */}
+      <div className="composer-box">
         <textarea
           value={message}
           onChange={(e) => setMessage(e.target.value)}
           rows={2}
-          placeholder="创建后立即发给 agent"
+          aria-label="首条消息（可选）"
+          placeholder="首条消息（可选，创建后立即发给 agent）"
         />
-      </label>
+        <div className="cfg-bar">
+          <NewConfigPills options={options} selected={configSel} onChange={setConfigSel} />
+        </div>
+      </div>
       {error && <p className="new-error">{error}</p>}
       <button
         type="submit"
@@ -585,5 +567,46 @@ function NewSessionForm({ onDone }: { onDone: () => void }) {
         />
       )}
     </form>
+  );
+}
+
+// 新建表单的配置胶囊：""=跟随配置（可选回，建会话时不传该字段）；其余同会话输入框底栏。
+function NewConfigPills({
+  options,
+  selected,
+  onChange,
+}: {
+  options: DriverConfigOption[];
+  selected: Partial<Record<ConfigOptionId, string>>;
+  onChange: Dispatch<SetStateAction<Partial<Record<ConfigOptionId, string>>>>;
+}) {
+  const build = (option: DriverConfigOption) => {
+    // default 为 null 的那条 values 项带后端给的「跟随 … 配置」标签，优先用它
+    const followLabel = option.values.find((v) => v.value === null)?.label ?? "跟随配置";
+    const group: MenuGroup = {
+      id: option.id,
+      title: option.name,
+      selected: selected[option.id] ?? "",
+      slider: option.id === "effort",
+      items: [
+        { value: "", label: followLabel },
+        ...option.values
+          .filter((v): v is { value: string; label: string } => v.value !== null)
+          .map((v) => ({ value: v.value, label: v.label })),
+      ],
+      onSelect: (value) => onChange((prev) => ({ ...prev, [option.id]: value })),
+    };
+    return { group, text: pillText(option, selected[option.id]) };
+  };
+  const byId = (id: ConfigOptionId) => options.find((o) => o.id === id);
+  const main = [byId("model"), byId("effort")].filter((o): o is DriverConfigOption => Boolean(o)).map(build);
+  const perm = byId("permissionMode");
+  return (
+    <ConfigPills
+      main={main}
+      perm={perm ? build(perm) : null}
+      permMode={selected.permissionMode || perm?.default || ""}
+      placement="down"
+    />
   );
 }

@@ -15,7 +15,7 @@ import { readFileSync } from "node:fs";
 globalThis.WebSocket = { CONNECTING: 0, OPEN: 1, CLOSING: 2, CLOSED: 3 };
 
 const { Store } = await import("../src/store.ts");
-const { needsRestartNote, RESTART_NOTE } = await import("../src/config-view.ts");
+const { needsRestartNote, RESTART_NOTE, pillText } = await import("../src/config-view.ts");
 const {
   HISTORY_MAX_MESSAGES,
   HISTORY_PAGE_SIZE,
@@ -86,6 +86,15 @@ await t("needsRestartNote：仅 mutableVia:\"restart\" 需要旁注；文案逐�
     source.includes("!option.mutable || !live || Boolean(switching)"),
     "禁用条件被改动，restart 项可能被重新禁用",
   );
+});
+
+await t("pillText：胶囊显示值按 覆盖 > 实际生效值 > default 取，精确 id 按别名认回标签，都没有写「默认」", async () => {
+  const model = { default: null, values: [{ value: null, label: "跟随 Claude 配置" }, { value: "opus", label: "Opus 5.5" }] };
+  assert.equal(pillText(model, "opus", "sonnet"), "Opus 5.5", "覆盖优先");
+  assert.equal(pillText(model, undefined, "claude-opus-5-5"), "Opus 5.5", "init 精确 id 应认回别名标签");
+  assert.equal(pillText(model, undefined, "claude-foo-9"), "claude-foo-9", "认不回就原样显示，不编造");
+  assert.equal(pillText(model, undefined, null), "默认");
+  assert.equal(pillText({ default: "high", values: [{ value: "high", label: "Thinking High" }] }, undefined), "Thinking High", "codex/kimi 用 default");
 });
 
 // --- 验收 2：config_update_started → 过渡态；config_updated → 恢复 ---

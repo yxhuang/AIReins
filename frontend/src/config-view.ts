@@ -49,3 +49,18 @@ export function effectiveFor(
   if (typeof value !== "string" || !value || !source) return null;
   return { value, source };
 }
+
+/** 胶囊上显示的值：有覆盖用覆盖，否则用实际生效值 / 后端给的 default，都没有才写「默认」。 */
+export function pillText(
+  option: { values: { value: string | null; label: string }[]; default: string | null },
+  current: string | undefined,
+  effective?: string | null,
+): string {
+  const labelOf = (value: string) =>
+    option.values.find((v) => v.value === value)?.label ??
+    // claude init 回报的是精确 id（claude-opus-5-5），按别名子串认回菜单里的标签
+    option.values.find((v) => v.value !== null && value.includes(v.value))?.label ??
+    value;
+  const value = current || effective || option.default;
+  return value ? labelOf(value) : "默认";
+}

@@ -357,3 +357,24 @@ function toolResultText(result: unknown): string {
   }
   return stringifyBlock(result);
 }
+
+/**
+ * claude prompt 缓存的过期时刻（ms 时间戳）；判定不了返回 null。
+ * 起点 = 最近一次 usage_updated（claude 在回合结束的 result 里发，≈ 最后一次 API 请求）；
+ * TTL = 往回找最近一次真写过缓存的 cache_creation 分项：ephemeral_1h > 0 → 1 小时，ephemeral_5m > 0 → 5 分钟。
+ * 只读缓存的回合也会续期，所以起点取最近一次 usage，TTL 可以来自更早的回合。
+ * codex/kimi 报文里没有 TTL 信息，调用方只对 claude 用。
+ */
+export function promptCacheExpiry(events: UnifiedEvent[]): number | null {
+  let at: number | null = null;
+  for (let i = events.length - 1; i >= 0; i--) {
+    const event = events[i]!;
+    if (event.type !== "usage_updated") continue;
+    at ??= Date.parse(event.timestamp);
+    if (Number.isNaN(at)) return null;
+    const created = asRecord(asRecord(event.payload.usage).cache_creation);
+    if (Number(created.ephemeral_1h_input_tokens) > 0) return at + 60 * 60_000;
+    if (Number(created.ephemeral_5m_input_tokens) > 0) return at + 5 * 60_000;
+  }
+  return null;
+}

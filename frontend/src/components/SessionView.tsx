@@ -1,19 +1,21 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
-import type { CommandInfo, MetaInfo, SessionRecord } from "../types";
+import type { CommandInfo, DriverConfigOption, MetaInfo, SessionRecord } from "../types";
 import { compactTokens, duration, asRecord, truncateDisplayWidth } from "../format";
-import { buildRenderItems } from "../render-items";
+import { buildRenderItems, promptCacheExpiry } from "../render-items";
 import { filterCommands, noteCommandUsed, readRecentCommands, recentInTable } from "../commands";
 import { extractMentionTokens, mentionQueryAt, mentionTokenEnd } from "../mentions";
-import { needsRestartNote, effectiveFor, EFFECTIVE_SOURCE_LABELS, ALIAS_NOTE, RESTART_NOTE } from "../config-view";
+import { needsRestartNote, effectiveFor, pillText, EFFECTIVE_SOURCE_LABELS, ALIAS_NOTE, RESTART_NOTE } from "../config-view";
 import { fetchFiles } from "../api";
 import { MAX_MENTIONS, store, type Store } from "../store";
 import { shallowEqual, useStore } from "../useStore";
 import { GateBlock, QuestionBlock, RawLine, SystemLine, TextBlockView, ThoughtBlockView, ToolCard, UserBlockView } from "./StreamItems";
 import { ResumedHistory } from "./ResumedHistory";
+import { ClockIcon, ConfigPills, SendIcon, type MenuGroup, type MenuItem } from "./ConfigMenu";
 import { STATUS_HINTS, STATUS_LABELS } from "./Sidebar";
 
 const selectMeta = (value: Store) => value.meta;
 const selectWsState = (value: Store) => value.wsState;
+const selectNow = (value: Store) => value.now;
 
 /** 触屏设备（手机、平板）：软键盘的回车只换行，发送靠按钮或 Ctrl/⌘+Enter。 */
 const TOUCH = typeof window !== "undefined" && window.matchMedia?.("(pointer: coarse)").matches === true;
@@ -233,83 +235,63 @@ function ConfigSummary({ session }: { session: SessionRecord }) {
 
 // 模型/推理强度/审批模式控件：选项全部来自 /api/meta 的 options，
 // 前端不硬编码任何值；活改走 WS set_config，等 config_updated 广播回来才更新显示。
-// 渲染位置在 Composer 内（输入框正上方一行）。
-function ConfigControls({ session }: { session: SessionRecord }) {
-  const meta = useStore(selectMeta);
+// 渲染位置在输入框底栏：模型+推理强度合成一个胶囊（「Opus 5.5 High」），审批模式单独一个靠右；
+// 过渡文案 / 提示 / 错误由 ConfigStatus 在输入框上方单独一行显示。
+function useConfigState(sessionId: string) {
   const selectConfigState = useCallback(
     (value: Store) => [
-      [...(value.configPending.get(session.id) ?? [])].sort().join(","),
-      value.configErrors.get(session.id),
-      value.configHints.get(session.id),
-      value.configSwitching.get(session.id),
+      [...(value.configPending.get(sessionId) ?? [])].sort().join(","),
+      value.configErrors.get(sessionId),
+      value.configHints.get(sessionId),
+      value.configSwitching.get(sessionId),
     ] as const,
-    [session.id],
+    [sessionId],
   );
   const [, error, hint, switching] = useStore(selectConfigState, shallowEqual);
+  return { error, hint, switching };
+}
+
+function ConfigControls({ session }: { session: SessionRecord }) {
+  const meta = useStore(selectMeta);
+  const { switching } = useConfigState(session.id);
   const options = meta?.drivers[session.agent]?.options ?? [];
   const pending = store.configPending.get(session.id);
   // 重启切换进行中（claude model/effort）：全部控件禁用，就地显示后端给的过渡文案
   const live = Boolean(session.processId) && session.status !== "dead";
-  if (options.length === 0 && !error) return null;
+  if (options.length === 0) return null;
 
-  return (
-    <div className="session-config">
-      {options.map((option) => {
-        const current = session.config?.[option.id];
-        const currentKey = current ?? "";
-        // default 为 null 的那条 values 项带后端给的「跟随 … 配置」标签，优先用它。
-        const followLabel =
-          option.values.find((v) => v.value === null)?.label ?? "跟随配置";
-        const known = new Set(option.values.map((v) => v.value));
-        const disabled =
-          !option.mutable || !live || Boolean(switching) || Boolean(pending?.has(option.id));
-        // claude 跟随配置时，把控件上的实际生效值与来源一并显示（codex/kimi 恒 null，不追加）。
-        // 首轮前只能是设置里的别名（source=settings），首轮 init 后升级为精确 id（source=init），
-        // 精度差异是真实的，用极小字标来源，不伪装成一致。
-        const effective = currentKey === "" ? effectiveFor(session, option.id) : null;
-        const aliasNote =
-          session.agent === "claude" && option.id === "model" ? ALIAS_NOTE : undefined;
-        const title = switching
-          ? undefined
-          : !option.mutable
-            ? "此项需新建会话才能更改"
-            : !live
-              ? "会话已结束，无法更改"
-              : aliasNote;
-        return (
-          <label className="config-select" key={option.id} title={title}>
-            <span className="config-select-name">
-              {option.name}
-              {/* 禁用原因直接写在标签里，不 hover 也能看到；title 作补充 */}
-              {!option.mutable && "（建会话时定）"}
-            </span>
-            <select
-              value={currentKey}
-              disabled={disabled}
-              onChange={(e) => {
-                const value = e.target.value;
-                // 空值是「跟随配置」展示项，不能用于撤销会话级覆盖（后端也只接受字符串值）。
-                if (value) store.setConfig(session.id, { [option.id]: value });
-              }}
-            >
-              {currentKey === "" && (
-                <option value="" disabled>
-                  {/* 跟随配置时把实际生效值并进同一处显示（别名/精确 id 的精度差异由旁边的来源小字标注） */}
-                  {effective ? `${followLabel}（${effective.value}）` : followLabel}
-                </option>
-              )}
-              {currentKey !== "" && !known.has(currentKey) && (
-                <option value={currentKey}>{currentKey}</option>
-              )}
-              {option.values
-                .filter((v): v is { value: string; label: string } => v.value !== null)
-                .map((v) => (
-                  <option key={v.value} value={v.value}>
-                    {v.label}
-                  </option>
-                ))}
-            </select>
-            {/* 有效值的来源标注（极小字）：设置=首轮前的别名/合并值，运行时=init 回报的精确值 */}
+  const build = (option: DriverConfigOption) => {
+    const current = session.config?.[option.id];
+    const currentKey = current ?? "";
+    // default 为 null 的那条 values 项带后端给的「跟随 … 配置」标签，优先用它。
+    const followLabel =
+      option.values.find((v) => v.value === null)?.label ?? "跟随配置";
+    const known = new Set(option.values.map((v) => v.value));
+    const disabled =
+      !option.mutable || !live || Boolean(switching) || Boolean(pending?.has(option.id));
+    // claude 跟随配置时，把实际生效值与来源一并显示（codex/kimi 恒 null，不追加）。
+    // 首轮前只能是设置里的别名（source=settings），首轮 init 后升级为精确 id（source=init），
+    // 精度差异是真实的，用极小字标来源，不伪装成一致。
+    const effective = currentKey === "" ? effectiveFor(session, option.id) : null;
+    const aliasNote =
+      session.agent === "claude" && option.id === "model" ? ALIAS_NOTE : undefined;
+    const reason = switching
+      ? undefined
+      : !option.mutable
+        ? "此项需新建会话才能更改"
+        : !live
+          ? "会话已结束，无法更改"
+          : undefined;
+    const items: MenuItem[] = [];
+    if (currentKey === "") {
+      // 「跟随配置」只作展示（不能用来撤销会话级覆盖，后端也只接受字符串值）
+      items.push({
+        value: "",
+        inert: true,
+        label: (
+          <>
+            {/* 跟随配置时把实际生效值并进同一处显示（别名/精确 id 的精度差异由旁边的来源小字标注） */}
+            {effective ? `${followLabel}（${effective.value}）` : followLabel}
             {effective && (
               <span
                 className="config-effective-src"
@@ -324,13 +306,85 @@ function ConfigControls({ session }: { session: SessionRecord }) {
                 {EFFECTIVE_SOURCE_LABELS[effective.source]}
               </span>
             )}
-            {/* mutableVia:"restart" 的代价如实标注在控件旁：事实说明，不是警告 */}
-            {needsRestartNote(option) && (
-              <span className="config-note">{RESTART_NOTE}</span>
-            )}
-          </label>
-        );
-      })}
+          </>
+        ),
+      });
+    }
+    if (currentKey !== "" && !known.has(currentKey)) items.push({ value: currentKey, label: currentKey });
+    for (const v of option.values) {
+      if (v.value !== null) items.push({ value: v.value, label: v.label });
+    }
+    const group: MenuGroup = {
+      id: option.id,
+      title: option.name,
+      items,
+      selected: currentKey,
+      disabled,
+      slider: option.id === "effort",
+      effective: effective?.value,
+      onSelect: (value) => {
+        if (value) store.setConfig(session.id, { [option.id]: value });
+      },
+      note: (
+        <>
+          {/* 禁用原因直接写进菜单，不 hover 也能看到 */}
+          {reason && <div>{reason}</div>}
+          {/* mutableVia:"restart" 的代价如实标注：事实说明，不是警告 */}
+          {needsRestartNote(option) && <div>{RESTART_NOTE}</div>}
+          {effective && aliasNote && effective.source === "settings" && <div>{aliasNote}</div>}
+        </>
+      ),
+    };
+    return { group, text: pillText(option, current ?? undefined, effective?.value), reason };
+  };
+
+  const byId = (id: string) => options.find((o) => o.id === id);
+  const main = [byId("model"), byId("effort")].filter((o): o is DriverConfigOption => Boolean(o)).map(build);
+  const perm = byId("permissionMode");
+  return (
+    <ConfigPills
+      main={main}
+      perm={perm ? build(perm) : null}
+      permMode={session.config?.permissionMode ?? perm?.default ?? ""}
+    />
+  );
+}
+
+// claude prompt 缓存剩余时间（同 VSCode 扩展输入框的「🕐 56m」）：过期后下一条消息要按全价重建缓存。
+// 回合进行中缓存随每次请求续期，不显示；判定不了 TTL（还没跑过回合）显示「—」，不猜。
+function CacheTimer({ session }: { session: SessionRecord }) {
+  const selectExpiry = useCallback(
+    (value: Store) => promptCacheExpiry(value.data.get(session.id)?.events ?? []),
+    [session.id],
+  );
+  const expiry = useStore(selectExpiry);
+  const now = useStore(selectNow);
+  if (session.status === "running" || session.status === "starting") return null;
+  if (expiry === null) {
+    return (
+      <span className="cache-timer expired" title="Prompt 缓存剩余时间：这个会话还没有完成过回合，第一轮结束后开始倒计时">
+        <ClockIcon />—
+      </span>
+    );
+  }
+  const left = expiry - now;
+  const minutes = Math.ceil(left / 60_000);
+  return (
+    <span
+      className={`cache-timer${left <= 0 ? " expired" : ""}`}
+      title={`Prompt 缓存${left > 0 ? `约剩 ${minutes} 分钟` : "已过期"}（自上个回合结束起算）；过期后下一条消息要重建缓存，更慢也更贵`}
+    >
+      <ClockIcon />
+      {left > 0 ? `${minutes}m` : "已过期"}
+    </span>
+  );
+}
+
+function ConfigStatus({ session }: { session: SessionRecord }) {
+  const { error, hint, switching } = useConfigState(session.id);
+  if (!error && !hint && !switching) return null;
+  return (
+    <div className="session-config">
       {switching && (
         <span className="config-hint" role="status">
           {switching}
@@ -670,8 +724,8 @@ function Composer({ session, dead, errored }: { session: SessionRecord; dead: bo
 
   return (
     <div className="composer">
-      {/* 配置控件行：从会话头挪到输入框正上方；可交互控件只此一处，会话头留只读摘要 */}
-      <ConfigControls session={session} />
+      {/* 配置的过渡文案 / 提示 / 错误；可交互的胶囊在输入框底栏，会话头留只读摘要 */}
+      <ConfigStatus session={session} />
       {(dead || errored) && (
         <div className="composer-dead">
           {/* error 与 dead 共用续接出口（同 agent/cwd/nativeSessionId），文案区分 */}
@@ -785,7 +839,7 @@ function Composer({ session, dead, errored }: { session: SessionRecord; dead: bo
           Codex 不支持斜杠命令
         </div>
       )}
-      <div className="composer-row">
+      <div className="composer-box">
         <textarea
           ref={textareaRef}
           value={text}
@@ -813,9 +867,20 @@ function Composer({ session, dead, errored }: { session: SessionRecord; dead: bo
           }}
           onKeyDown={onKeyDown}
         />
-        <button type="button" className="btn btn-primary" disabled={dead || !text.trim()} onClick={send}>
-          发送
-        </button>
+        <div className="cfg-bar">
+          {session.agent === "claude" && <CacheTimer session={session} />}
+          <ConfigControls session={session} />
+          <button
+            type="button"
+            className="send-btn"
+            aria-label="发送"
+            title="发送"
+            disabled={dead || !text.trim()}
+            onClick={send}
+          >
+            <SendIcon />
+          </button>
+        </div>
       </div>
     </div>
   );

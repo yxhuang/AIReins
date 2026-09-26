@@ -5,7 +5,7 @@
 import { strict as assert } from "node:assert";
 
 // 用 tsx 把 TS 模块加载进来
-const { buildRenderItems, gateFromEvent } = await import("../src/render-items.ts");
+const { buildRenderItems, gateFromEvent, promptCacheExpiry } = await import("../src/render-items.ts");
 const {
   filterCommands,
   isSubsequence,
@@ -304,6 +304,19 @@ t("noteCommandUsed：去重置顶 + 截断到上限；坏 JSON 读为空", () =>
     if (had) globalThis.localStorage = original;
     else delete globalThis.localStorage;
   }
+});
+
+t("promptCacheExpiry：起点取最近一次 usage，TTL 取最近一次写缓存的分项（1h/5m），没有 usage 或判定不了为 null", () => {
+  const usage = (timestamp, cache_creation) => ({ type: "usage_updated", timestamp, payload: { usage: cache_creation ? { cache_creation } : {} } });
+  const t0 = Date.parse("2026-09-26T10:00:00Z");
+  assert.equal(promptCacheExpiry([]), null);
+  assert.equal(
+    promptCacheExpiry([usage("2026-09-26T09:00:00Z", { ephemeral_1h_input_tokens: 500, ephemeral_5m_input_tokens: 0 }), usage("2026-09-26T10:00:00Z", { ephemeral_1h_input_tokens: 0, ephemeral_5m_input_tokens: 0 })]),
+    t0 + 3600_000,
+    "只读缓存的回合也续期：起点是最近一次，TTL 来自更早写过的那次",
+  );
+  assert.equal(promptCacheExpiry([usage("2026-09-26T10:00:00Z", { ephemeral_5m_input_tokens: 9 })]), t0 + 300_000);
+  assert.equal(promptCacheExpiry([usage("2026-09-26T10:00:00Z", null)]), null, "没有 cache_creation 分项就不猜");
 });
 
 if (!process.exitCode) console.log(`✅ render-items / commands 单测全过（${pass} 例）`);
