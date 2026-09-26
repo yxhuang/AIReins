@@ -186,12 +186,6 @@ assert.deepEqual({
   effectiveModelSource: "settings",
   effectiveEffortSource: "settings",
 });
-await assert.rejects(
-  () => manager.setConfig(created.id, { model: "sonnet" }),
-  /首轮完成前尚无 nativeSessionId/,
-);
-assert.equal(instances[0].stopped, false);
-
 await manager.sendUserMessage(created.id, { text: "第一轮" });
 await assert.rejects(
   () => manager.setConfig(created.id, { model: "sonnet" }),
@@ -276,6 +270,19 @@ const overriddenAfterInit = manager.get(overridden.id)!;
 assert.equal(overriddenAfterInit.config.model, "haiku");
 assert.equal(overriddenAfterInit.model, "claude-haiku-4-5-20251001");
 assert.equal(overriddenAfterInit.effectiveModelSource, "init");
+
+// 首条消息前 claude 已报 session_id，但原生存档还没落盘：切换应按新配置开新 worker，不续接
+const fresh = await manager.create({ agent: "claude", cwd: process.cwd() });
+instances.at(-1)!.options.callbacks.metadata({ nativeSessionId: "unsaved-native-session" });
+const freshSwitched = await manager.setConfig(fresh.id, { model: "sonnet" });
+assert.equal(instances.at(-2)!.stopped, true);
+assert.equal(instances.at(-1)!.options.resumeSessionId, undefined);
+assert.equal(freshSwitched.config.model, "sonnet");
+assert.equal(freshSwitched.status, "idle");
+assert.equal(freshSwitched.nativeSessionId, undefined);
+// 导入的历史会话即使本次没发过消息，存档也已存在，必须续接
+await manager.setConfig(resumed.id, { model: "sonnet" });
+assert.equal(instances.at(-1)!.options.resumeSessionId, "existing-native-session");
 
 const codex = await manager.create({ agent: "codex", cwd: process.cwd() });
 assert.deepEqual({ model: codex.model, effort: codex.effort, permissionMode: codex.permissionMode }, {

@@ -46,6 +46,8 @@ export class SessionManager {
   private readonly commands = new Map<string, UnifiedCommand[]>();
   private readonly listeners = new Set<(event: UnifiedEvent) => void>();
   private readonly restartingSessions = new Set<string>();
+  /** 发过消息的会话：Claude 原生存档要到首条消息后才落盘，没发过的切换配置时不能续接 */
+  private readonly promptedSessions = new Set<string>();
 
   constructor(
     private readonly driverFactory: DriverFactory = createDriver,
@@ -220,6 +222,7 @@ export class SessionManager {
     const worker = this.requireWorker(id);
     const message = this.normalizeUserMessage(id, input);
     await worker.sendUserMessage(message);
+    this.promptedSessions.add(id);
     this.emit(id, "user_message", {
       ...(message.text !== undefined ? { text: message.text } : {}),
       ...(message.command ? { command: message.command } : {}),
@@ -385,7 +388,10 @@ export class SessionManager {
     if (record.status === "running") {
       throw new Error("当前回合尚未结束，请等待或中断后再切换");
     }
-    if (!record.nativeSessionId) {
+    // claude 2.1.281 起首条消息前就会报 session_id，但原生存档此时还没落盘，续接必然报
+    // No conversation found；所以没发过消息（也不是导入历史）的会话直接按新配置开新 worker。
+    const resume = Boolean(record.resumedFrom) || this.promptedSessions.has(id);
+    if (resume && !record.nativeSessionId) {
       throw new Error("Claude 首轮完成前尚无 nativeSessionId，无法通过续接切换模型或推理强度");
     }
     if (record.status !== "idle") {
@@ -395,7 +401,7 @@ export class SessionManager {
     const previousState = cloneSession(record);
     const previousConfig = { ...record.config };
     const targetConfig = mergeSessionConfig(previousConfig, update);
-    const nativeSessionId = record.nativeSessionId;
+    const nativeSessionId = resume ? record.nativeSessionId : undefined;
     const oldWorker = this.requireWorker(id);
     this.restartingSessions.add(id);
     this.emit(id, "config_update_started", {
@@ -411,6 +417,7 @@ export class SessionManager {
     let replacement: Driver | undefined;
     try {
       await oldWorker.stop();
+      if (!resume) record.nativeSessionId = undefined;
       let nextWorker!: Driver;
       const callbacks = this.driverCallbacks(id, () => nextWorker);
       nextWorker = this.driverFactory("claude", {
@@ -429,7 +436,7 @@ export class SessionManager {
         effectiveFrom: "immediate",
         mutableVia: "restart",
         workerRestarted: true,
-        nativeSessionId,
+        nativeSessionId: record.nativeSessionId,
       }));
       return cloneSession(record);
     } catch (error) {
