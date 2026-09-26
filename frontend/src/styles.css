@@ -2029,6 +2029,10 @@ body {
   .app {
     padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
   }
+  /* 主屏幕 PWA 里紧贴状态栏显得挤，顶部再多让 8px（浏览器里不加） */
+  @media (display-mode: standalone) {
+    .app { padding-top: calc(env(safe-area-inset-top) + 8px); }
+  }
   /* 顶部让出安全区后，把「workbench」并进「+ 新建会话」那一行，列表起点基本不下移 */
   .app:not(.sidebar-collapsed) .sidebar { flex-flow: row wrap; align-content: flex-start; }
   .app:not(.sidebar-collapsed) .sidebar > * { flex: 0 0 100%; min-width: 0; }
