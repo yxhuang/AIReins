@@ -88,6 +88,7 @@ function readTermFontFamily(): string {
 interface TermRuntime {
   fit: () => void;
   sendInput: (data: string) => void;
+  paste: (text: string) => void;
   createNew: () => Promise<void>;
   reconnectNow: () => void;
 }
@@ -112,6 +113,17 @@ export function TerminalPanel({ open, onClose }: { open: boolean; onClose: () =>
   const [confirmKill, setConfirmKill] = useState(false);
   const [killBusy, setKillBusy] = useState(false);
   const runtimeRef = useRef<TermRuntime | null>(null);
+
+  // 手机上 xterm 的隐藏 textarea 拿不到长按粘贴菜单；读不了剪贴板（拒绝授权 / 不支持）时退回 prompt 手动粘贴
+  const pasteClipboard = async () => {
+    let text: string | null = null;
+    try {
+      text = await navigator.clipboard.readText();
+    } catch {
+      text = window.prompt("粘贴到终端");
+    }
+    if (text) runtimeRef.current?.paste(text);
+  };
   const openRef = useRef(open);
   openRef.current = open;
 
@@ -286,6 +298,8 @@ export function TerminalPanel({ open, onClose }: { open: boolean; onClose: () =>
           sendFrame({ type: "input", terminalId: attachedId, data });
         }
       },
+      // 走 term.paste：bracketed paste 与换行归一由 xterm 处理，再经 onData 上行
+      paste: (text) => term.paste(text),
       createNew: async () => {
         setError(null);
         try {
@@ -493,6 +507,9 @@ export function TerminalPanel({ open, onClose }: { open: boolean; onClose: () =>
               {key.label}
             </button>
           ))}
+          <button type="button" className="term-key" aria-label="粘贴剪贴板" onClick={() => void pasteClipboard()}>
+            粘贴
+          </button>
         </div>
       </div>
     </>
