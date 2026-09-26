@@ -135,9 +135,11 @@ export function Sidebar({ collapsed, onToggle, newOpen, onNewOpenChange }: Sideb
           <button
             type="button"
             className="btn btn-new"
+            aria-expanded={newOpen}
             onClick={() => onNewOpenChange(!newOpen)}
           >
-            + 新建会话
+            {/* 收起即卸载表单、丢掉未提交的输入，所以叫「取消」而不是「收起」 */}
+            {newOpen ? "× 取消新建" : "+ 新建会话"}
           </button>
           {newOpen && <NewSessionForm onDone={() => onNewOpenChange(false)} />}
           <ul className="session-list">
