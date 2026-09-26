@@ -69,7 +69,7 @@ Serve 会剥掉客户端自带的同名身份头，再注入真实身份。远�
 
 ## 闸门提醒
 
-配了 `~/.workbench/notify.json` 才开启：闸门挂起超过 `delaySeconds` 秒（默认 60）还没人处理，就往飞书群机器人发一条提醒。
+配了 `~/.workbench/notify.json` 才开启：闸门挂起超过 `delaySeconds` 秒（默认 60）还没人处理，就发一条飞书提醒。两种发送方式二选一：`feishuWebhook` 走群里的自定义机器人；`larkUserId` 调本机 `lark-cli im +messages-send --as bot` 让应用机器人私聊该 open_id（租户关了自定义机器人时用，凭据由 lark-cli 管，要先 `lark-cli auth status` 看 bot 身份是 ready）。
 
 - **限频**：同一会话 60 秒内最多发一条；冷却中到期的闸门顺延，冷却结束时仍未处理再发。
 - **取消提醒**：收到 `permission_resolved`（已处理），或 `process_exited`（进程退出，闸门没法再操作）。
@@ -78,6 +78,7 @@ Serve 会剥掉客户端自带的同名身份头，再注入真实身份。远�
 
 ```json
 { "feishuWebhook": "https://open.feishu.cn/open-apis/bot/v2/hook/…", "delaySeconds": 60 }
+{ "larkUserId": "ou_…", "delaySeconds": 60 }
 ```
 
 webhook 地址就是密钥：文件权限设为 600，也不要写进日志或仓库。更改配置后须重启 workbench 才生效。

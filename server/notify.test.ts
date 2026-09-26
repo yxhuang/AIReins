@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
-import { mkdtemp, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { feishuSender, GateNotifier, gateLabel, gateText, loadNotifyConfig } from "./notify.js";
+import { feishuSender, GateNotifier, gateLabel, gateText, larkCliSender, loadNotifyConfig } from "./notify.js";
 import type { SessionRecord, UnifiedEvent } from "./types.js";
 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -93,7 +93,15 @@ const file = join(dir, "notify.json");
 assert.equal(loadNotifyConfig(file), null);
 await writeFile(file, JSON.stringify({ feishuWebhook: "https://open.feishu.cn/open-apis/bot/v2/hook/x" }));
 assert.equal(loadNotifyConfig(file)?.delaySeconds, 60);
-for (const bad of [{ feishuWebhook: "http://x" }, { feishuWebhook: "https://x", delaySeconds: -1 }, {}]) {
+await writeFile(file, JSON.stringify({ larkUserId: "ou_abc123", delaySeconds: 5 }));
+assert.deepEqual(loadNotifyConfig(file), { larkUserId: "ou_abc123", delaySeconds: 5 });
+for (const bad of [
+  { feishuWebhook: "http://x" },
+  { feishuWebhook: "https://x", delaySeconds: -1 },
+  {},
+  { larkUserId: "abc" },
+  { larkUserId: "ou_a", feishuWebhook: "https://x" },
+]) {
   await writeFile(file, JSON.stringify(bad));
   assert.throws(() => loadNotifyConfig(file), /notify\.json/);
 }
@@ -122,4 +130,14 @@ try {
   fake.close();
 }
 
-console.log(JSON.stringify({ notifier: 5, text: 3, config: 5, feishu: 4 }));
+// lark-cli：用假脚本代替，不连飞书。假脚本回显参数；第一个参数不是 im 时输出 ok:false。
+const fakeCli = join(dir, "fake-lark-cli");
+await writeFile(fakeCli, `#!/bin/sh\nif [ "$1" = im ]; then printf '{"ok":true}'; echo "$@" > "${dir}/args"; else printf '{"ok":false}'; fi\n`);
+await chmod(fakeCli, 0o755);
+await larkCliSender("ou_me", fakeCli)("[workbench] hi");
+assert.equal((await readFile(join(dir, "args"), "utf8")).trim(), "im +messages-send --as bot --user-id ou_me --text [workbench] hi");
+await assert.rejects(larkCliSender("ou_me", join(dir, "missing"))("x"), /lark-cli 发送失败/);
+await writeFile(fakeCli, `#!/bin/sh\nprintf '{"ok":false}'\n`);
+await assert.rejects(larkCliSender("ou_me", fakeCli)("x"), /lark-cli 发送失败/);
+
+console.log(JSON.stringify({ notifier: 5, text: 3, config: 8, feishu: 4, larkCli: 3 }));

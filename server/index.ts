@@ -10,7 +10,7 @@ import { DirListError, listDirectories } from "./dir-list.js";
 import { normalizeFileQuery, searchFiles } from "./file-search.js";
 import { HistoryIndex, HistoryQueryError } from "./history.js";
 import { getMeta, SERVER_VERSION } from "./meta.js";
-import { feishuSender, GateNotifier, loadNotifyConfig, type NotifyConfig } from "./notify.js";
+import { feishuSender, GateNotifier, larkCliSender, loadNotifyConfig, type NotifyConfig } from "./notify.js";
 import { checkPageHealth, proxyPage, scanPages } from "./pages.js";
 import { workbenchHome } from "./persistence.js";
 import { SessionManager } from "./session-manager.js";
@@ -106,13 +106,13 @@ function startNotifier(): void {
   }
   if (!config) return;
   const notifier = new GateNotifier(
-    feishuSender(config.feishuWebhook),
+    config.feishuWebhook ? feishuSender(config.feishuWebhook) : larkCliSender(config.larkUserId!),
     (id) => manager.get(id),
     config.delaySeconds * 1000,
     REMOTE_CONFIG?.origin,
   );
   manager.onEvent((event) => notifier.handle(event));
-  log("info", "gate notifier started", { delaySeconds: config.delaySeconds });
+  log("info", "gate notifier started", { delaySeconds: config.delaySeconds, via: config.feishuWebhook ? "webhook" : "lark-cli" });
 }
 
 const server = createServer((request, response) => {

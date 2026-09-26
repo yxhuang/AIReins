@@ -1,11 +1,13 @@
+import { execFile } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { basename } from "node:path";
 import { log } from "./logger.js";
 import type { SessionRecord, UnifiedEvent } from "./types.js";
 
-/** notify.json 中的 webhook 是密钥，不得写入日志。 */
+/** notify.json：feishuWebhook（群机器人，是密钥，不得写入日志）与 larkUserId（经 lark-cli 应用机器人私聊）二选一。 */
 export interface NotifyConfig {
-  feishuWebhook: string;
+  feishuWebhook?: string;
+  larkUserId?: string;
   delaySeconds: number;
 }
 
@@ -24,14 +26,22 @@ export function loadNotifyConfig(path: string): NotifyConfig | null {
   } catch {
     throw new Error(`${path} 不是有效 JSON`);
   }
-  const { feishuWebhook, delaySeconds = 60 } = (value ?? {}) as Record<string, unknown>;
-  if (typeof feishuWebhook !== "string" || !feishuWebhook.startsWith("https://")) {
+  const { feishuWebhook, larkUserId, delaySeconds = 60 } = (value ?? {}) as Record<string, unknown>;
+  if ((feishuWebhook === undefined) === (larkUserId === undefined)) {
+    throw new Error(`${path}：feishuWebhook 与 larkUserId 必须且只能配一个`);
+  }
+  if (feishuWebhook !== undefined && (typeof feishuWebhook !== "string" || !feishuWebhook.startsWith("https://"))) {
     throw new Error(`${path}：feishuWebhook 必须是 https:// 开头的飞书机器人 webhook 地址`);
+  }
+  if (larkUserId !== undefined && (typeof larkUserId !== "string" || !/^ou_\w+$/.test(larkUserId))) {
+    throw new Error(`${path}：larkUserId 必须是 ou_ 开头的飞书 open_id`);
   }
   if (typeof delaySeconds !== "number" || !Number.isFinite(delaySeconds) || delaySeconds < 0) {
     throw new Error(`${path}：delaySeconds 必须是不小于 0 的数字`);
   }
-  return { feishuWebhook, delaySeconds };
+  return feishuWebhook !== undefined
+    ? { feishuWebhook: feishuWebhook as string, delaySeconds }
+    : { larkUserId: larkUserId as string, delaySeconds };
 }
 
 export function gateLabel(payload: Record<string, unknown>): string {
@@ -119,4 +129,29 @@ export function feishuSender(webhook: string): (text: string) => Promise<void> {
       throw new Error(`飞书返回 HTTP ${response.status}，code ${code}${body.msg ? `：${body.msg}` : ""}`);
     }
   };
+}
+
+/**
+ * 经 lark-cli 的应用机器人私聊（租户关了自定义机器人时用）。凭据由 lark-cli 自己管，
+ * 成功时 stdout 是 {"ok":true,…}。
+ */
+export function larkCliSender(userId: string, bin = "lark-cli"): (text: string) => Promise<void> {
+  return (text) =>
+    new Promise((resolve, reject) => {
+      execFile(
+        bin,
+        ["im", "+messages-send", "--as", "bot", "--user-id", userId, "--text", text],
+        { timeout: 20_000 },
+        (error, stdout) => {
+          let ok = false;
+          try {
+            ok = JSON.parse(stdout).ok === true;
+          } catch {
+            // 非 JSON 输出按失败处理
+          }
+          if (error || !ok) reject(new Error(`lark-cli 发送失败${error ? `：${error.message}` : ""}`));
+          else resolve();
+        },
+      );
+    });
 }
