@@ -624,10 +624,13 @@ function serveStatic(pathname: string, response: ServerResponse): boolean {
     ".json": "application/json; charset=utf-8",
     ".svg": "image/svg+xml",
     ".png": "image/png",
+    ".webmanifest": "application/manifest+json",
   };
+  // 只有 assets/ 下的文件名带内容哈希，可以永久缓存；其余（index.html、图标、manifest）文件名固定，每次回源确认。
+  const immutable = path.startsWith(`${STATIC_ROOT}/assets/`);
   response.writeHead(200, {
     "content-type": contentTypes[extname(path)] ?? "application/octet-stream",
-    "cache-control": path.endsWith("index.html") ? "no-cache" : "public, max-age=31536000, immutable",
+    "cache-control": immutable ? "public, max-age=31536000, immutable" : "no-cache",
     "x-frame-options": "DENY",
     "content-security-policy": "frame-ancestors 'none'",
   });
