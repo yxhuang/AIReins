@@ -68,3 +68,8 @@ export function isLoopbackUrl(url: string): boolean {
     return false;
   }
 }
+
+/** iframe 与「新标签页打开」用的地址：开了代理就走 workbench 自己的 /pages/<id>/（相对当前源，手机上也可用）。 */
+export function pageSrc(page: PageManifest): string {
+  return page.proxy ? `/pages/${encodeURIComponent(page.id)}/` : page.url;
+}

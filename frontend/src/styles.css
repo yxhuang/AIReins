@@ -278,6 +278,67 @@ body {
 
 .new-field input.mono { font-family: var(--font-mono); }
 
+.cwd-input-row { display: flex; gap: 6px; min-width: 0; }
+.cwd-input-row input { flex: 1; min-width: 0; }
+.cwd-input-row .btn { flex: 0 0 auto; }
+
+/* 工作目录浏览器：中性与冷色令牌，独立于审批闸门。 */
+.dir-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  background: color-mix(in srgb, var(--surface-sunk) 80%, transparent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+
+.dir-dialog {
+  width: min(100%, 560px);
+  max-height: calc(100dvh - 32px);
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow-pop);
+}
+
+.dir-heading, .dir-nav, .dir-actions { display: flex; align-items: center; gap: 8px; }
+.dir-heading { justify-content: space-between; }
+.dir-heading h2 { margin: 0; font-size: 16px; }
+.dir-actions { justify-content: flex-end; }
+.dir-path { margin: 0; padding: 8px; background: var(--surface-sunk); overflow-wrap: anywhere; }
+.dir-list { min-height: 80px; overflow-y: auto; border: 1px solid var(--border); border-radius: var(--radius); }
+.dir-list .new-hint { padding: 10px; }
+.dir-entry {
+  display: block;
+  width: 100%;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  padding: 10px 12px;
+  text-align: left;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+.dir-entry:last-child { border-bottom: 0; }
+.dir-entry:hover, .dir-entry:focus-visible { background: var(--surface-sunk); }
+
+@media (max-width: 720px) {
+  .dir-overlay { padding: 6px; }
+  .dir-dialog { width: 100%; max-height: calc(100dvh - 12px); }
+}
+
+@media (pointer: coarse) {
+  .dir-entry { min-height: 44px; }
+}
+
 .new-error {
   margin: 0;
   font-size: 12.5px;
@@ -1877,15 +1938,15 @@ body {
 
 .history-actions .history-note { margin: 0; }
 
-/* 窄窗口：预览面板压到列表下方纵向排布 */
+/* 「返回列表」只在窄窗口出现 */
+.history-back { display: none; }
+
+/* 窄窗口：列表与预览二选一铺满。原先把预览压到列表下方，手机上点了行看起来像没反应 */
 @media (max-width: 900px) {
-  .history-view { flex-direction: column; overflow-y: auto; }
-  .history-preview-pane {
-    flex: 0 0 auto;
-    border-left: none;
-    border-top: 1px solid var(--border);
-    min-height: 320px;
-  }
+  .history-preview-pane { flex: 1 1 auto; border-left: none; }
+  .history-view:not(.has-selection) .history-preview-pane,
+  .history-view.has-selection .history-list-pane { display: none; }
+  .history-back { display: inline-flex; align-self: flex-start; margin: 10px 14px 0; }
 }
 
 /* ── 建会话前快照确认弹窗 ─────────────────────
@@ -1967,6 +2028,8 @@ body {
   .app.sidebar-collapsed .sidebar { width: 100%; border-right: none; }
   .app.has-main .sidebar { display: none; }
   .app:not(.has-main) .main { display: none; }
+  /* manifest 的 maxWidth（如 ai-usage 的 33%）是给宽屏的，单栏下铺满；!important 压过内联样式 */
+  .page-view { max-width: none !important; }
   /* 单栏下「收起」没有意义；只在已收起时保留按钮，作为展开的唯一出口 */
   .app:not(.sidebar-collapsed) .sidebar-toggle { display: none; }
   .mobile-topbar {

@@ -8,6 +8,7 @@ import { store, type Store } from "../store";
 import { useStore } from "../useStore";
 import { SettingsMenu } from "./SettingsMenu";
 import { SnapshotConfirm } from "./SnapshotConfirm";
+import { DirectoryBrowser } from "./DirectoryBrowser";
 
 const AGENT_LABELS: Record<AgentKind, string> = {
   claude: "claude",
@@ -403,6 +404,8 @@ function NewSessionForm({ onDone }: { onDone: () => void }) {
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [browseOpen, setBrowseOpen] = useState(false);
+  const browseButtonRef = useRef<HTMLButtonElement>(null);
   // 快照确认框：非 null 时弹出，等用户拍板（auto/skip/cancel）后 resolve
   const [confirmPreflight, setConfirmPreflight] = useState<SnapshotPreflight | null>(null);
   const confirmResolver = useRef<((choice: SnapshotChoice) => void) | null>(null);
@@ -532,17 +535,21 @@ function NewSessionForm({ onDone }: { onDone: () => void }) {
           </label>
         );
       })}
-      <label className="new-field">
-        <span>工作目录（绝对路径）</span>
-        <input
-          type="text"
-          value={cwd}
-          onChange={(e) => setCwd(e.target.value)}
-          placeholder="/home/you/project"
-          className="mono"
-          required
-        />
-      </label>
+      <div className="new-field">
+        <label htmlFor="new-session-cwd">工作目录（绝对路径）</label>
+        <div className="cwd-input-row">
+          <input
+            id="new-session-cwd"
+            type="text"
+            value={cwd}
+            onChange={(e) => setCwd(e.target.value)}
+            placeholder="/home/you/project"
+            className="mono"
+            required
+          />
+          <button ref={browseButtonRef} type="button" className="btn" onClick={() => setBrowseOpen(true)}>浏览…</button>
+        </div>
+      </div>
       <label className="new-field">
         <span>首条消息（可选）</span>
         <textarea
@@ -567,6 +574,13 @@ function NewSessionForm({ onDone }: { onDone: () => void }) {
       {/* 快照预检判定需要用户拍板时弹暖色确认框（Esc 取消，焦点回「创建并进入」） */}
       {confirmPreflight && (
         <SnapshotConfirm preflight={confirmPreflight} onResolve={resolveConfirm} />
+      )}
+      {browseOpen && (
+        <DirectoryBrowser
+          initialPath={cwd}
+          onSelect={(path) => { setCwd(path); setBrowseOpen(false); requestAnimationFrame(() => browseButtonRef.current?.focus()); }}
+          onClose={() => { setBrowseOpen(false); requestAnimationFrame(() => browseButtonRef.current?.focus()); }}
+        />
       )}
     </form>
   );

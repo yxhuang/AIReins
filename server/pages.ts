@@ -1,4 +1,6 @@
 import { readdirSync, readFileSync } from "node:fs";
+import { pipeline } from "node:stream";
+import { request as httpRequest, type IncomingMessage, type OutgoingHttpHeaders, type ServerResponse } from "node:http";
 import { join, resolve } from "node:path";
 import { performance } from "node:perf_hooks";
 import { fileURLToPath } from "node:url";
@@ -20,6 +22,9 @@ export interface IframePageManifest {
   /** 内容区最大宽度（任意合法 CSS 长度/百分比）。省略即撑满主窗口。
       动机：ai-usage 是窄面板，拉满整个宽屏主窗口反而难看。 */
   maxWidth?: string;
+  /** true：经 workbench 自己的 /pages/<id>/ 反向代理访问 url（手机经 Tailscale 也能用）。
+      目标前端必须全用相对路径。 */
+  proxy?: boolean;
 }
 
 export type PageManifest = IframePageManifest;
@@ -73,9 +78,11 @@ export function scanPages(root = DEFAULT_PAGES_ROOT): PageManifest[] {
  * 但 iframe 里是 Chrome 的「拒绝了我们的连接请求」。渲染一个必然报错的 iframe
  * 比直接给降级面板更糟，所以这里把可嵌性也一并告诉前端。
  */
-function detectEmbeddable(headers: Headers, selfOrigin: string): { embeddable: boolean | null; embedReason: string } {
+function detectEmbeddable(headers: Headers, selfOrigin: string, proxied: boolean): { embeddable: boolean | null; embedReason: string } {
   const xfo = headers.get("x-frame-options")?.trim().toLowerCase();
   if (xfo === "deny") return { embeddable: false, embedReason: "目标站点设置了 X-Frame-Options: DENY" };
+  // 经反向代理时目标与 workbench 同源：SAMEORIGIN 和 'self' 都放行
+  if (proxied && xfo === "sameorigin") return { embeddable: true, embedReason: "经 workbench 反向代理，与工作台同源" };
   // workbench 与目标端口不同即为跨源，SAMEORIGIN 同样会被浏览器拦下
   if (xfo === "sameorigin") return { embeddable: false, embedReason: "目标站点设置了 X-Frame-Options: SAMEORIGIN（端口不同即跨源）" };
 
@@ -87,6 +94,9 @@ function detectEmbeddable(headers: Headers, selfOrigin: string): { embeddable: b
     // 白名单里如果明确列了 workbench 自己的源，就能判准，不必含糊成 null。
     // 注意 'self' 指的是目标站自己的源（8788），不是我们，所以不算数。
     const tokens = value.split(/\s+/u).filter(Boolean);
+    if (proxied && tokens.includes("'self'")) {
+      return { embeddable: true, embedReason: "经 workbench 反向代理，与工作台同源（目标站点 CSP 放行 'self'）" };
+    }
     if (tokens.includes(selfOrigin.toLowerCase())) {
       return { embeddable: true, embedReason: `目标站点 CSP 已显式放行 ${selfOrigin}` };
     }
@@ -109,7 +119,7 @@ export async function checkPageHealth(
       signal: AbortSignal.timeout(timeoutMs),
     });
     await response.body?.cancel().catch(() => undefined);
-    const embed = detectEmbeddable(response.headers, selfOrigin);
+    const embed = detectEmbeddable(response.headers, selfOrigin, page.proxy === true);
     return {
       id: page.id,
       reachable: true,
@@ -127,6 +137,49 @@ export async function checkPageHealth(
       durationMs: Math.round(performance.now() - started),
     };
   }
+}
+
+const HOP_BY_HOP = new Set(["connection", "keep-alive", "proxy-connection", "transfer-encoding", "upgrade", "te", "trailer"]);
+
+/**
+ * /pages/<id>/<rest> → page.url 下的 <rest>。调用方必须先过 checkAccess。
+ * 带 Origin 的请求此时已确认来自工作台自己的页面，改写成目标自己的源，目标的来源校验（如 ai-usage 的
+ * require_local_ui）才认；Host 同理。Tailscale 身份头、Cookie、Referer 不往下传。
+ * 2026-09-26 用户明确授权这一改写（手机上要能用 ai-usage 的刷新与开关）。
+ */
+export function proxyPage(page: PageManifest, path: string, request: IncomingMessage, response: ServerResponse): Promise<void> {
+  const target = new URL(page.url);
+  const headers: OutgoingHttpHeaders = {};
+  for (const [name, value] of Object.entries(request.headers)) {
+    if (HOP_BY_HOP.has(name) || name.startsWith("tailscale-") || name.startsWith("x-forwarded-")) continue;
+    if (name === "host" || name === "origin" || name === "cookie" || name === "referer") continue;
+    headers[name] = value;
+  }
+  headers.host = target.host;
+  if (request.headers.origin !== undefined) headers.origin = target.origin;
+  return new Promise((resolvePromise, reject) => {
+    const upstream = httpRequest({
+      hostname: target.hostname,
+      port: target.port || 80,
+      method: request.method,
+      path: target.pathname.replace(/\/$/u, "") + path,
+      headers,
+      signal: AbortSignal.timeout(30_000),
+    }, (upstreamResponse) => {
+      const outHeaders = { ...upstreamResponse.headers };
+      for (const name of HOP_BY_HOP) delete outHeaders[name];
+      response.writeHead(upstreamResponse.statusCode ?? 502, outHeaders);
+      // pipeline：任一端出错或客户端断开都销毁两端，不会挂住响应
+      pipeline(upstreamResponse, response, (error) => (error ? reject(error) : resolvePromise()));
+    });
+    upstream.on("error", reject);
+    // 客户端上传途中断开：立即销毁上游并结束，不然这个请求要挂到 30 秒超时才释放
+    request.on("error", (error) => {
+      upstream.destroy();
+      reject(error);
+    });
+    request.pipe(upstream);
+  });
 }
 
 function parseManifest(value: unknown): PageManifest {
@@ -150,6 +203,13 @@ function parseManifest(value: unknown): PageManifest {
   const maxWidth = input.maxWidth === undefined
     ? undefined
     : cssLength(input.maxWidth, "maxWidth");
+  if (input.proxy !== undefined && typeof input.proxy !== "boolean") throw new Error("proxy 必须是布尔值");
+  if (input.proxy === true) {
+    const target = new URL(url);
+    if (target.protocol !== "http:" || !["127.0.0.1", "localhost", "[::1]"].includes(target.hostname)) {
+      throw new Error("proxy 只支持本机回环的 http 目标");
+    }
+  }
 
   return {
     id,
@@ -160,6 +220,7 @@ function parseManifest(value: unknown): PageManifest {
     ...(healthCheck ? { healthCheck } : {}),
     ...(description ? { description } : {}),
     ...(maxWidth ? { maxWidth } : {}),
+    ...(input.proxy === true ? { proxy: true } : {}),
   };
 }
 

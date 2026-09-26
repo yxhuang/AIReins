@@ -1,4 +1,4 @@
-import type { ApiEnvelope, CommandInfo, HistoryListData, HistoryMessagesPage, HistoryPreview, MetaInfo, PageHealth, PageManifest, SessionConfig, SessionRecord, Snapshot, SnapshotPreflight } from "./types";
+import type { ApiEnvelope, CommandInfo, DirectoryListing, HistoryListData, HistoryMessagesPage, HistoryPreview, MetaInfo, PageHealth, PageManifest, SessionConfig, SessionRecord, Snapshot, SnapshotPreflight } from "./types";
 import type { AgentKind } from "./types";
 import { buildHistoryQuery, type HistoryQueryInput } from "./history";
 
@@ -31,6 +31,12 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
 
 export function fetchMeta(): Promise<MetaInfo> {
   return call<MetaInfo>("/api/meta");
+}
+
+/** 不传 path 时从服务端 $HOME 浏览。 */
+export function fetchDirectories(path?: string): Promise<DirectoryListing> {
+  const query = path === undefined ? "" : `?${new URLSearchParams({ path })}`;
+  return call<DirectoryListing>(`/api/fs/dirs${query}`);
 }
 
 export function fetchSessions(): Promise<SessionRecord[]> {

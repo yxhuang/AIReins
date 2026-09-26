@@ -162,12 +162,14 @@ export interface PageManifest {
   /** emoji 或以 <svg...>...</svg> 表示的内联 SVG 字符串 */
   icon: string;
   type: string;
-  /** iframe 直接加载的地址；server 不代理 */
+  /** 目标地址；proxy 为 true 时 iframe 改走 /pages/<id>/ 反向代理 */
   url: string;
   healthCheck?: string;
   description?: string;
   /** 内容区最大宽度（CSS 长度），省略即撑满 */
   maxWidth?: string;
+  /** 经 workbench 反向代理访问（手机经 Tailscale 也能用） */
+  proxy?: boolean;
 }
 
 /** GET /api/pages/:id/health：只回答「服务在不在」，收到任何 HTTP 响应即 reachable。 */
@@ -204,6 +206,14 @@ export interface SnapshotPreflight {
   freeSpaceOk: boolean;
   /** 快照写入路径；needed 为 false 时为 null */
   snapshotPath: string | null;
+}
+
+/** GET /api/fs/dirs 的 data：一级子目录及可返回的逻辑父路径。 */
+export interface DirectoryListing {
+  path: string;
+  parent: string | null;
+  dirs: { name: string; path: string }[];
+  truncated: boolean;
 }
 
 /** 三家 CLI 原生历史会话的可识别创建来源；unknown 如实显示「未知」，不猜。 */

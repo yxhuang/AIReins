@@ -6,10 +6,11 @@ import { fileURLToPath } from "node:url";
 import { WebSocket, WebSocketServer } from "ws";
 import { checkAccess, loadRemoteConfig, localPolicy, remotePolicy, type AccessPolicy, type RemoteConfig } from "./access.js";
 import { log } from "./logger.js";
+import { DirListError, listDirectories } from "./dir-list.js";
 import { normalizeFileQuery, searchFiles } from "./file-search.js";
 import { HistoryIndex, HistoryQueryError } from "./history.js";
 import { getMeta, SERVER_VERSION } from "./meta.js";
-import { checkPageHealth, scanPages } from "./pages.js";
+import { checkPageHealth, proxyPage, scanPages } from "./pages.js";
 import { workbenchHome } from "./persistence.js";
 import { SessionManager } from "./session-manager.js";
 import { preflightSnapshot, SnapshotCwdError } from "./snapshot.js";
@@ -189,6 +190,13 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
     const method = request.method ?? "GET";
     if (method === "GET" && url.pathname === "/api/meta") {
       respond(response, 200, 0, "success", await getMeta(), requestId);
+    } else if (method === "GET" && url.pathname === "/api/fs/dirs") {
+      try {
+        respond(response, 200, 0, "success", await listDirectories(url.searchParams.get("path") ?? undefined), requestId);
+      } catch (error) {
+        if (error instanceof DirListError) throw new ApiError(400, 40035, error.message);
+        throw error;
+      }
     } else if (method === "GET" && url.pathname === "/api/pages") {
       respond(response, 200, 0, "success", { pages }, requestId);
     } else if (method === "GET" && url.pathname === "/api/sessions") {
@@ -221,6 +229,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       const historyMessagesMatch = url.pathname.match(/^\/api\/history\/([^/]+)\/([^/]+)\/messages$/);
       const historyPreviewMatch = url.pathname.match(/^\/api\/history\/([^/]+)\/([^/]+)$/);
       const pageHealthMatch = url.pathname.match(/^\/api\/pages\/([^/]+)\/health$/);
+      const pageProxyMatch = url.pathname.match(/^\/pages\/([^/]+)(\/.*)?$/);
       if (method === "GET" && pageHealthMatch) {
         const id = decodeURIComponent(pageHealthMatch[1]);
         const page = pagesById.get(id);
@@ -276,6 +285,20 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
           nativeTranscriptPath: removed.nativeTranscriptPath,
           workbenchTranscriptPreserved: true,
         }, requestId);
+      } else if (pageProxyMatch) {
+        const page = pagesById.get(decodeURIComponent(pageProxyMatch[1]));
+        if (!page?.proxy) throw new ApiError(404, 40410, `页面不存在或未开启代理：${pageProxyMatch[1]}`);
+        if (!pageProxyMatch[2]) {
+          // 目标前端用相对路径，入口必须带结尾斜杠才能解析对
+          response.writeHead(302, { location: `/pages/${pageProxyMatch[1]}/${url.search}` });
+          response.end();
+        } else {
+          try {
+            await proxyPage(page, pageProxyMatch[2] + url.search, request, response);
+          } catch (error) {
+            throw new ApiError(502, 50200, `${page.name} 不可达：${error instanceof Error ? error.message : String(error)}`);
+          }
+        }
       } else if (!url.pathname.startsWith("/api/")) {
         if (!serveStatic(url.pathname, response)) throw new ApiError(404, 40400, "静态前端尚未构建");
       } else {

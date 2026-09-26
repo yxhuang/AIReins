@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { PageHealth, PageManifest } from "../types";
 import { fetchPageHealth } from "../api";
-import { isLoopbackUrl, pageRenderMode } from "../pages";
+import { isLoopbackUrl, pageRenderMode, pageSrc } from "../pages";
 import { PageIcon } from "./Sidebar";
 
 type CheckState =
@@ -46,9 +46,10 @@ export function PageView({ page }: { page: PageManifest }) {
 
   // 检查进行中禁用「重新检查」/「重试」（检查中视图切到下方降级面板，这里是兜底表达）
   const checking = state.phase === "checking";
+  const src = pageSrc(page);
 
   // 手机经 Tailscale 打开时，127.0.0.1 指的是手机自己：这类页面只能在电脑上用。
-  if (!isLoopbackUrl(window.location.href) && isLoopbackUrl(page.url)) {
+  if (!page.proxy && !isLoopbackUrl(window.location.href) && isLoopbackUrl(page.url)) {
     return (
       <div className="page-view">
         <div className="page-fallback">
@@ -86,7 +87,7 @@ export function PageView({ page }: { page: PageManifest }) {
               这是目标站点自己的安全策略——workbench 与目标服务都没有故障，请在新标签页中使用它。
             </p>
             <div className="page-fallback-actions">
-              <a className="btn btn-primary" href={page.url} target="_blank" rel="noopener noreferrer">
+              <a className="btn btn-primary" href={src} target="_blank" rel="noopener noreferrer">
                 在新标签页打开
               </a>
               <button
@@ -118,12 +119,12 @@ export function PageView({ page }: { page: PageManifest }) {
                 若下方空白，说明目标站点拒绝被嵌入，请用新标签页打开
               </span>
             )}
-            <a className="page-open-blank" href={page.url} target="_blank" rel="noreferrer">
+            <a className="page-open-blank" href={src} target="_blank" rel="noreferrer">
               在新标签页打开
             </a>
           </div>
           {/* 有意不加 sandbox：pages/ 里的页面（如 ai-usage）可能需要脚本/同源等完整能力，记录此决策 */}
-          <iframe className="page-frame" src={page.url} title={page.name} loading="lazy" />
+          <iframe className="page-frame" src={src} title={page.name} loading="lazy" />
         </div>
       );
     }
@@ -161,7 +162,7 @@ export function PageView({ page }: { page: PageManifest }) {
           >
             {state.phase === "checking" ? "检查中…" : "重试"}
           </button>
-          <a className="page-open-blank" href={page.url} target="_blank" rel="noreferrer">
+          <a className="page-open-blank" href={src} target="_blank" rel="noreferrer">
             在新标签页打开
           </a>
         </div>

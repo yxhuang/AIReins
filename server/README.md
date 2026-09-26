@@ -79,6 +79,7 @@ Serve 会剥掉客户端自带的同名身份头，再注入真实身份。远�
 
 - `POST /api/sessions`：创建会话，统一配置见下文
 - `POST /api/snapshot/preflight`：建会话前检查 cwd 是否需要及能够自动快照
+- `GET /api/fs/dirs?path=<绝对路径>`：只读列出一级子目录；省略 `path` 时使用 `$HOME`
 - `GET /api/sessions`
 - `GET /api/sessions/:id`
 - `GET /api/sessions/:id/snapshot`
@@ -91,6 +92,8 @@ Serve 会剥掉客户端自带的同名身份头，再注入真实身份。远�
 - `GET /api/meta`：server/CLI 实测版本、全局能力、三 driver 能力位与配置 schema
 - `GET /api/pages`：启动时已注册的扩展页面列表
 - `GET /api/pages/:id/health`：限时探测一个扩展页面的目标服务
+
+`GET /api/fs/dirs` 的 `data` 为 `{path,parent,dirs:[{name,path}],truncated}`。路径先规范化；根目录 `/` 的 `parent` 为 `null`。不限制浏览根目录，包括 `/mnt/c/...`；隐藏目录不列出，指向目录的有效符号链接会列出，断链和无权限条目跳过。子目录按名称排序，最多返回 1000 项，更多时 `truncated:true`。路径无效、不存在、不是目录或无权限读取时返回 HTTP 400、错误码 `40035`。
 
 建会话时，三家统一使用 `config.model / config.effort / config.permissionMode`：
 
@@ -318,9 +321,11 @@ interface IframePageManifest {
   name: string;         // 中文显示名
   icon: string;         // emoji 或以 <svg...>...</svg> 表示的内联 SVG 字符串
   type: "iframe";       // 本轮只支持 iframe
-  url: string;          // iframe 直接加载的 http/https 地址；server 不代理
+  url: string;          // 目标 http/https 地址；proxy 为 true 时只允许本机回环的 http
   healthCheck?: string; // 可选 http/https 探测地址；省略时探测 url
   description?: string; // 可选的页面说明或降级提示背景
+  maxWidth?: string;    // 可选内容区最大宽度（简单 CSS 长度）；手机单栏下前端忽略它
+  proxy?: boolean;      // true：iframe 改走 /pages/<id>/ 反向代理（见下文）
 }
 ```
 
@@ -338,7 +343,18 @@ interface PageHealth {
 }
 ```
 
-只要收到 HTTP 响应（包括非 2xx），`reachable` 就为 `true`，因为该检查只回答“服务在不在”；HTTP 状态仍通过 `status` 和 `reason` 原样提供。iframe 始终由前端直接加载 manifest 的 `url`，server 不提供反向代理。
+只要收到 HTTP 响应（包括非 2xx），`reachable` 就为 `true`，因为该检查只回答“服务在不在”；HTTP 状态仍通过 `status` 和 `reason` 原样提供。`proxy` 未开启时，iframe 由前端直接加载 manifest 的 `url`。
+
+### 反向代理 `/pages/<id>/*`（2026-09-26）
+
+`proxy: true` 的页面经 workbench 自己的源访问，手机经 Tailscale 也能用（直连 `127.0.0.1` 在手机上指的是手机自己）。
+
+- `GET /pages/<id>` → 302 到 `/pages/<id>/`；`/pages/<id>/<rest>?<query>` 转发到 `url` 下的 `<rest>?<query>`，方法、请求体、响应状态与响应头原样透传（去掉 hop-by-hop 头），上游 30 秒超时。
+- 未开启代理或不存在的 id → 404 / `40410`；上游不可达 → 502 / `50200`。
+- **访问控制照常**：请求先过 `checkAccess`（本机或远程策略），不另开入口。
+- **头改写**：Host 改成目标 host；请求带 Origin 时改成目标自己的 origin（此时 Origin 已由 `checkAccess` 确认来自工作台页面），让 ai-usage 的写操作来源校验通过——这一改写经用户 2026-09-26 明确授权。请求不带 Origin 时不补，目标按自身规则 fail-closed。`tailscale-*`、`x-forwarded-*`、Cookie、Referer 不下传。
+- 被代理的页面与工作台同源，其脚本能调工作台 API；只给自己信任的本机服务开 `proxy`。
+- 目标前端必须全用相对路径（ai-usage 已改）。健康检查对代理页面把 CSP 的 `'self'` / `X-Frame-Options: SAMEORIGIN` 判为可嵌入。
 
 ## WebSocket
 
