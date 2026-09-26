@@ -44,7 +44,8 @@ start() {
   mkdir -p "$(dirname "$LOG")"
   # setsid 而非仅 nohup：快捷方式经 `wsl.exe -e` 启动时，wsl.exe 退出会连坐清理
   # 整个进程组，nohup 只挡 SIGHUP 挡不住。必须新建会话彻底脱离。
-  ( cd "$REPO" && setsid env WORKBENCH_PORT="$PORT" npm run server >>"$LOG" 2>&1 < /dev/null & )
+  # exec：让后台那份 bash 直接换成 setsid，别留一个占着调用方 stdout 的壳（否则 `workbench start | cat` 永不返回）
+  ( cd "$REPO" && exec setsid env WORKBENCH_PORT="$PORT" npm run server >>"$LOG" 2>&1 < /dev/null & )
   for _ in $(seq 1 40); do
     pid="$(port_pid)"; [[ -n "$pid" ]] && { echo "已启动（PID $pid） → $URL"; open_browser; return 0; }
     sleep 0.25
