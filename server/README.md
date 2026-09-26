@@ -67,6 +67,21 @@ npm run server
 
 Serve 会剥掉客户端自带的同名身份头，再注入真实身份。远程端口只绑定 `127.0.0.1`；DNS 重绑定网页的 Host 过不了检查。本机进程可伪造此头，但本来就能访问本机入口。
 
+## 闸门提醒
+
+配了 `~/.workbench/notify.json` 才开启：闸门挂起超过 `delaySeconds` 秒（默认 60）还没人处理，就往飞书群机器人发一条提醒。
+
+- **限频**：同一会话 60 秒内最多发一条；冷却中到期的闸门顺延，冷却结束时仍未处理再发。
+- **取消提醒**：收到 `permission_resolved`（已处理），或 `process_exited`（进程退出，闸门没法再操作）。
+- **直达链接**：配了 `remote.json` 时，提醒带 `<origin>/#/session/<id>` 链接。
+- **容错**：发送失败只记一条 `warn` 日志；`notify.json` 写错只记一条 `error` 日志；两种情况都不影响服务。
+
+```json
+{ "feishuWebhook": "https://open.feishu.cn/open-apis/bot/v2/hook/…", "delaySeconds": 60 }
+```
+
+webhook 地址就是密钥：文件权限设为 600，也不要写进日志或仓库。更改配置后须重启 workbench 才生效。
+
 ## REST
 
 所有 REST 成功和错误都使用同一个信封；`request_id` 是 ULID，也会出现在同次请求的服务端 JSON 日志中。
