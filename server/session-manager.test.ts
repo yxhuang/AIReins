@@ -284,6 +284,11 @@ assert.equal(freshSwitched.nativeSessionId, undefined);
 await manager.setConfig(resumed.id, { model: "sonnet" });
 assert.equal(instances.at(-1)!.options.resumeSessionId, "existing-native-session");
 
+const promptedSessions = (manager as unknown as { promptedSessions: Set<string> }).promptedSessions;
+assert.equal(promptedSessions.has(created.id), true);
+await manager.remove(created.id);
+assert.equal(promptedSessions.has(created.id), false);
+
 const codex = await manager.create({ agent: "codex", cwd: process.cwd() });
 assert.deepEqual({ model: codex.model, effort: codex.effort, permissionMode: codex.permissionMode }, {
   model: "gpt-5.6-sol",

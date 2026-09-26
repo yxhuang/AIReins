@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto";
+import { spawn } from "node:child_process";
 import { basename } from "node:path";
+import { createInterface } from "node:readline";
 import type {
   DriverConfigSchema,
   DriverOptions,
@@ -24,8 +26,83 @@ interface PendingConfigRequest {
 }
 
 interface PendingCommandRequest {
-  resolve(commands: UnifiedCommand[]): void;
+  resolve(response: unknown): void;
   reject(error: Error): void;
+}
+
+const CLAUDE_MODEL_FALLBACKS: Record<string, string> = {
+  fable: "Fable（最新）",
+  opus: "Opus（最新）",
+  sonnet: "Sonnet（最新）",
+  haiku: "Haiku（最新）",
+};
+
+/** Only the four selectable aliases are relabeled; protocol IDs remain unchanged. */
+export function deriveClaudeModelLabels(models: unknown): Record<string, string> {
+  if (!Array.isArray(models)) return {};
+  const labels: Record<string, string> = {};
+  for (const model of models) {
+    if (!model || typeof model !== "object") continue;
+    const item = model as Record<string, unknown>;
+    const value = item.value;
+    const alias = value === "opus" || value === "sonnet" || value === "haiku"
+      ? value
+      : item.displayName === "Fable" || (typeof item.resolvedModel === "string" && item.resolvedModel.startsWith("claude-fable-"))
+        ? "fable"
+        : undefined;
+    if (!alias || typeof item.description !== "string") continue;
+    const name = alias[0].toUpperCase() + alias.slice(1);
+    const match = item.description.match(new RegExp(`^${name} (\\d+(?:\\.\\d+)*)\\s*(?:·|$)`));
+    if (match) labels[alias] = `${name} ${match[1]}`;
+  }
+  return labels;
+}
+
+export function updateClaudeModelLabels(models: unknown): void {
+  const labels = deriveClaudeModelLabels(models);
+  const option = CLAUDE_CONFIG_SCHEMA.options.find((item) => item.id === "model");
+  for (const entry of option?.values ?? []) {
+    if (entry.value && Object.hasOwn(CLAUDE_MODEL_FALLBACKS, entry.value)) {
+      entry.label = labels[entry.value] ?? CLAUDE_MODEL_FALLBACKS[entry.value];
+    }
+  }
+}
+
+/** Startup probe sends only initialize, with no user turn. Failure leaves static labels intact. */
+export async function probeClaudeModelLabels(cwd: string): Promise<void> {
+  await new Promise<void>((resolve) => {
+    const env = { ...process.env };
+    delete env.CLAUDE_CODE_ENTRYPOINT;
+    const child = spawn("claude", [
+      "-p", "--input-format", "stream-json", "--output-format", "stream-json",
+      "--verbose", "--permission-prompt-tool", "stdio",
+    ], { cwd, env, stdio: ["pipe", "pipe", "pipe"] });
+    child.stderr.resume();
+    const requestId = randomUUID();
+    let finished = false;
+    const finish = () => {
+      if (finished) return;
+      finished = true;
+      clearTimeout(timer);
+      child.kill("SIGTERM");
+      resolve();
+    };
+    const timer = setTimeout(finish, 8_000);
+    child.on("error", finish);
+    child.on("close", finish);
+    createInterface({ input: child.stdout }).on("line", (line) => {
+      const message = parseJsonLine(line);
+      if (message?.type !== "control_response" || message.response?.request_id !== requestId) return;
+      if (message.response?.subtype === "success") {
+        updateClaudeModelLabels(message.response.response?.models);
+      }
+      finish();
+    });
+    child.stdin.on("error", finish);
+    child.stdin.write(`${JSON.stringify({
+      type: "control_request", request_id: requestId, request: { subtype: "initialize" },
+    })}\n`);
+  });
 }
 
 export const CLAUDE_CONFIG_SCHEMA: DriverConfigSchema = {
@@ -301,8 +378,7 @@ export class ClaudeDriver extends BaseDriver {
       if (pendingCommands) {
         this.pendingCommandRequests.delete(requestId);
         if (message.response?.subtype === "success") {
-          const commands = this.normalizeCommands(message.response?.response?.commands);
-          pendingCommands.resolve(commands);
+          pendingCommands.resolve(message.response?.response);
         } else {
           pendingCommands.reject(new Error(message.response?.error ?? "Claude initialize control_request 失败"));
         }
@@ -438,7 +514,7 @@ export class ClaudeDriver extends BaseDriver {
     if (this.refreshingCommands) return await this.refreshingCommands;
     this.refreshingCommands = (async () => {
       const requestId = randomUUID();
-      const result = new Promise<UnifiedCommand[]>((resolve, reject) => {
+      const result = new Promise<unknown>((resolve, reject) => {
         this.pendingCommandRequests.set(requestId, { resolve, reject });
         this.send({
           type: "control_request",
@@ -447,7 +523,9 @@ export class ClaudeDriver extends BaseDriver {
         });
       });
       try {
-        this.updateCommands(await withTimeout(result, 15_000, "Claude command initialize"));
+        const response = await withTimeout(result, 15_000, "Claude command initialize") as Record<string, unknown> | undefined;
+        updateClaudeModelLabels(response?.models);
+        this.updateCommands(response?.commands);
       } finally {
         this.pendingCommandRequests.delete(requestId);
       }

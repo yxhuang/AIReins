@@ -293,6 +293,7 @@ export class SessionManager {
     if (worker) await worker.stop();
     this.workers.delete(id);
     this.sessions.delete(id);
+    this.promptedSessions.delete(id);
     this.rings.delete(id);
     this.commands.delete(id);
     this.persistRegistry();

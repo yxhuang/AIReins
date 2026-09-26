@@ -1,5 +1,5 @@
 import type { AgentKind, Driver, DriverCapabilities, DriverOptions } from "../types.js";
-import { CLAUDE_CONFIG_SCHEMA, ClaudeDriver } from "./claude.js";
+import { CLAUDE_CONFIG_SCHEMA, ClaudeDriver, probeClaudeModelLabels } from "./claude.js";
 import { CodexDriver, probeCodexConfigSchema } from "./codex.js";
 import { KimiDriver, probeKimiConfigSchema } from "./kimi.js";
 
@@ -55,7 +55,8 @@ export function createDriver(agent: AgentKind, options: DriverOptions): Driver {
 }
 
 export async function getDriverMetadata(cwd: string): Promise<Record<AgentKind, Record<string, unknown>>> {
-  const [codexSchema, kimiSchema] = await Promise.all([
+  const [, codexSchema, kimiSchema] = await Promise.all([
+    probeClaudeModelLabels(cwd).catch(() => undefined),
     probeSchema(() => probeCodexConfigSchema(cwd), "Codex app-server model/list and v2 protocol schema"),
     probeSchema(() => probeKimiConfigSchema(cwd), "Kimi ACP session/new.configOptions"),
   ]);
