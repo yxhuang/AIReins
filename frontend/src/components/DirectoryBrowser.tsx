@@ -1,6 +1,17 @@
 import { useEffect, useRef, useState } from "react";
 import { fetchDirectories } from "../api";
+import { store } from "../store";
 import type { DirectoryListing } from "../types";
+
+const WINDOWS_FALLBACK = "/mnt/c/Users";
+
+/** 「Windows」按钮的落点：最近活跃的、工作目录在 /mnt/ 下的会话（服务端记录，电脑和手机一致）。 */
+function lastWindowsCwd(): string {
+  const latest = store.sessions
+    .filter((session) => session.cwd.startsWith("/mnt/"))
+    .sort((a, b) => Date.parse(b.lastActivityAt) - Date.parse(a.lastActivityAt))[0];
+  return latest?.cwd ?? WINDOWS_FALLBACK;
+}
 
 interface DirectoryBrowserProps {
   initialPath: string;
@@ -15,7 +26,8 @@ export function DirectoryBrowser({ initialPath, onSelect, onClose }: DirectoryBr
   const requestId = useRef(0);
   const closeButton = useRef<HTMLButtonElement>(null);
 
-  async function load(path?: string, fallbackToHome = false) {
+  /** fallback：path 读不了时改去哪（undefined = 不回退；"" = 主目录） */
+  async function load(path?: string, fallback?: string) {
     const id = ++requestId.current;
     setLoading(true);
     setError(null);
@@ -26,12 +38,12 @@ export function DirectoryBrowser({ initialPath, onSelect, onClose }: DirectoryBr
     } catch (cause) {
       if (id !== requestId.current) return;
       const message = cause instanceof Error ? cause.message : String(cause);
-      if (fallbackToHome) {
+      if (fallback !== undefined) {
         try {
-          const home = await fetchDirectories();
+          const home = await fetchDirectories(fallback || undefined);
           if (id !== requestId.current) return;
           setListing(home);
-          setError(`当前路径无法浏览（${message}），已回到主目录。`);
+          setError(`${path} 无法浏览（${message}），已改为打开 ${home.path}。`);
         } catch (homeCause) {
           if (id !== requestId.current) return;
           setError(homeCause instanceof Error ? homeCause.message : String(homeCause));
@@ -46,7 +58,7 @@ export function DirectoryBrowser({ initialPath, onSelect, onClose }: DirectoryBr
 
   useEffect(() => {
     closeButton.current?.focus();
-    void load(initialPath.trim() || undefined, Boolean(initialPath.trim()));
+    void load(initialPath.trim() || undefined, initialPath.trim() ? "" : undefined);
     return () => { requestId.current += 1; };
     // 打开时只读取一次表单路径；后续目录导航由按钮触发。
   }, []);
@@ -63,7 +75,11 @@ export function DirectoryBrowser({ initialPath, onSelect, onClose }: DirectoryBr
         <p className="dir-path mono" aria-label="当前路径">{listing?.path ?? "正在读取目录…"}</p>
         <div className="dir-nav">
           <button className="btn" type="button" disabled={!listing?.parent || loading} onClick={() => { if (listing?.parent) void load(listing.parent); }}>上一级</button>
-          <button className="btn" type="button" disabled={loading} onClick={() => void load()}>回到主目录</button>
+          <button className="btn" type="button" disabled={loading} onClick={() => void load()}>主目录</button>
+          <button className="btn" type="button" disabled={loading} onClick={() => {
+            const target = lastWindowsCwd();
+            void load(target, target === WINDOWS_FALLBACK ? undefined : WINDOWS_FALLBACK);
+          }}>Windows</button>
         </div>
         {error && <p className="new-error" role="alert">{error}</p>}
         {listing?.truncated && <p className="new-hint">此目录下子目录超过 1000 个，仅显示前 1000 个。</p>}

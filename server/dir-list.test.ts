@@ -30,7 +30,9 @@ for (const path of ["relative", "", join(fixture, "missing"), join(fixture, "fil
 const previousHome = process.env.HOME;
 try {
   process.env.HOME = fixture;
-  assert.equal((await listDirectories()).path, fixture);
+  assert.equal((await listDirectories()).path, fixture, "没有 dev 时缺省 $HOME");
+  await mkdir(join(fixture, "dev"));
+  assert.equal((await listDirectories()).path, join(fixture, "dev"), "有 dev 时缺省 ~/dev");
 } finally {
   if (previousHome === undefined) delete process.env.HOME;
   else process.env.HOME = previousHome;

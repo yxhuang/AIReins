@@ -14,9 +14,21 @@ export interface DirectoryListing {
   truncated: boolean;
 }
 
+/** 目录浏览器「主目录」按钮的落点：~/dev（用户的项目根），不存在时退回 $HOME。 */
+async function defaultRoot(): Promise<string> {
+  const home = process.env.HOME || homedir();
+  const dev = join(home, "dev");
+  try {
+    if ((await stat(dev)).isDirectory()) return dev;
+  } catch {
+    // 没有 dev 就用 $HOME
+  }
+  return home;
+}
+
 /** 只读枚举一级子目录；保留逻辑路径，使符号链接中的「上一级」可返回原位置。 */
 export async function listDirectories(rawPath?: string): Promise<DirectoryListing> {
-  const input = rawPath === undefined ? (process.env.HOME || homedir()) : rawPath;
+  const input = rawPath === undefined ? await defaultRoot() : rawPath;
   if (!isAbsolute(input) || input.includes("\0")) {
     throw new DirListError("path 必须是绝对路径");
   }

@@ -79,7 +79,7 @@ Serve 会剥掉客户端自带的同名身份头，再注入真实身份。远�
 
 - `POST /api/sessions`：创建会话，统一配置见下文
 - `POST /api/snapshot/preflight`：建会话前检查 cwd 是否需要及能够自动快照
-- `GET /api/fs/dirs?path=<绝对路径>`：只读列出一级子目录；省略 `path` 时使用 `$HOME`
+- `GET /api/fs/dirs?path=<绝对路径>`：只读列出一级子目录；省略 `path` 时使用 `~/dev`（不存在则 `$HOME`）
 - `GET /api/sessions`
 - `GET /api/sessions/:id`
 - `GET /api/sessions/:id/snapshot`
