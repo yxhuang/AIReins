@@ -8,7 +8,7 @@ import { needsRestartNote, effectiveFor, pillText, EFFECTIVE_SOURCE_LABELS, ALIA
 import { fetchFiles } from "../api";
 import { MAX_MENTIONS, store, type Store } from "../store";
 import { shallowEqual, useStore } from "../useStore";
-import { GateBlock, QuestionBlock, RawLine, SystemLine, TextBlockView, ThoughtBlockView, ToolCard, UserBlockView } from "./StreamItems";
+import { ExternalHistoryView, GateBlock, QuestionBlock, RawLine, SystemLine, TextBlockView, ThoughtBlockView, ToolCard, UserBlockView } from "./StreamItems";
 import { ResumedHistory } from "./ResumedHistory";
 import { ClockIcon, ConfigPills, SendIcon, type MenuGroup, type MenuItem } from "./ConfigMenu";
 import { STATUS_HINTS, STATUS_LABELS } from "./Sidebar";
@@ -155,6 +155,8 @@ export function SessionView({ session }: { session: SessionRecord }) {
           switch (item.kind) {
             case "user":
               return <UserBlockView key={item.key} item={item} />;
+            case "external-history":
+              return <ExternalHistoryView key={item.key} item={item} />;
             case "text":
               return <TextBlockView key={item.key} item={item} streaming={isLast && running} />;
             case "thought":

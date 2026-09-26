@@ -1,4 +1,4 @@
-import type { AgentKind, AskQuestion, PermissionDecision, UnifiedEvent } from "./types";
+import type { AgentKind, AskQuestion, HistoryMessage, PermissionDecision, UnifiedEvent } from "./types";
 import { asRecord, stringifyBlock } from "./format";
 import { normalizeQuestions } from "./ask";
 
@@ -87,6 +87,14 @@ export interface RawBlock {
   text: string;
 }
 
+export interface ExternalHistoryBlock {
+  kind: "external-history";
+  key: string;
+  seq: number;
+  messages: HistoryMessage[];
+  truncated: boolean;
+}
+
 export type RenderItem =
   | TextBlock
   | ThoughtBlock
@@ -94,6 +102,7 @@ export type RenderItem =
   | ToolView
   | GateView
   | SystemBlock
+  | ExternalHistoryBlock
   | RawBlock;
 
 // 从 permission_request payload 提取闸门视图；三家 payload 形状不同，宽容处理。
@@ -224,6 +233,19 @@ export function buildRenderItems(events: UnifiedEvent[], agent: AgentKind): Rend
           text: String(p.text ?? ""),
         });
         break;
+      case "external_messages_added": {
+        breakRun();
+        const messages: HistoryMessage[] = Array.isArray(p.messages)
+          ? p.messages.flatMap((raw) => {
+              if (!raw || typeof raw !== "object") return [];
+              const item = raw as Record<string, unknown>;
+              if ((item.role !== "user" && item.role !== "assistant") || typeof item.text !== "string") return [];
+              return [{ role: item.role, text: item.text, timestamp: typeof item.timestamp === "string" ? item.timestamp : null }];
+            })
+          : [];
+        items.push({ kind: "external-history", key: `external:${event.seq}`, seq: event.seq, messages, truncated: p.truncated === true });
+        break;
+      }
       case "tool_call_started": {
         breakRun();
         const id = String(p.toolCallId ?? event.seq);

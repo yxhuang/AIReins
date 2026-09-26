@@ -185,7 +185,7 @@ export class ClaudeDriver extends BaseDriver {
     this.validateConfig(this.config);
     const args = claudeLaunchArgs(this.config, this.resumeSessionId);
     const env = { ...process.env };
-    delete env.CLAUDE_CODE_ENTRYPOINT;
+    env.CLAUDE_CODE_ENTRYPOINT = "claude-vscode";
     this.spawnProcess("claude", args, { env });
     try {
       await this.refreshCommands();

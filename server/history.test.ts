@@ -166,6 +166,36 @@ assert.equal(findSession(all, "claude", workbenchClaudeId).source, "workbench");
 assert.equal(findSession(all, "codex", codexId).source, "interactive");
 assert.equal(findSession(all, "kimi", kimiId).source, "workbench");
 
+// claude-vscode 身份须靠注册表区分工作台新建与导入；Kimi 导入同样不能误标。
+const vscodeCreatedId = "66666666-6666-4666-8666-666666666666";
+const vscodeImportedId = "77777777-7777-4777-8777-777777777777";
+for (const id of [vscodeCreatedId, vscodeImportedId]) {
+  await writeJsonl(join(roots.claude, "project", `${id}.jsonl`), [{
+    type: "user", cwd: "/repo/vscode", entrypoint: "claude-vscode",
+    message: { role: "user", content: `会话 ${id}` },
+  }]);
+}
+const importedKimiId = "session_kimi_imported";
+await mkdir(join(roots.kimi, "workspace", importedKimiId, "agents", "main"), { recursive: true });
+await writeFile(join(roots.kimi, "workspace", importedKimiId, "state.json"), JSON.stringify({
+  id: importedKimiId, cwd: "/repo/kimi-imported", title: "导入的 Kimi 会话", custom: {},
+}), "utf8");
+await writeJsonl(join(roots.kimi, "workspace", importedKimiId, "agents", "main", "wire.jsonl"), [
+  { type: "turn.prompt", input: [{ type: "text", text: "导入前" }] },
+]);
+await writeFile(roots.workbenchRegistry, JSON.stringify([
+  { agent: "kimi", nativeSessionId: kimiId },
+  { agent: "kimi", nativeSessionId: importedKimiId, resumedFrom: { agent: "kimi", nativeSessionId: importedKimiId } },
+  { agent: "claude", nativeSessionId: vscodeCreatedId },
+  { agent: "claude", nativeSessionId: vscodeImportedId, resumedFrom: { agent: "claude", nativeSessionId: vscodeImportedId } },
+]), "utf8");
+const classified = await history.list({ limit: 20 });
+assert.equal(findSession(classified, "claude", vscodeCreatedId).source, "workbench");
+assert.equal(findSession(classified, "claude", vscodeImportedId).source, "interactive");
+assert.equal(findSession(classified, "claude", workbenchClaudeId).source, "workbench");
+assert.equal(findSession(classified, "kimi", importedKimiId).source, "unknown");
+assert.equal(findSession(classified, "kimi", kimiId).source, "workbench");
+
 const filtered = await history.list({ q: "REPO/CODEX", limit: 20 });
 assert.deepEqual(filtered.sessions.map((session) => session.nativeSessionId), [codexId]);
 
@@ -173,8 +203,8 @@ const firstPage = await history.list({ limit: 2 });
 assert.equal(firstPage.sessions.length, 2);
 assert.ok(firstPage.nextCursor);
 const secondPage = await history.list({ limit: 20, cursor: firstPage.nextCursor });
-assert.equal(secondPage.sessions.length, 3);
-assert.equal(new Set([...firstPage.sessions, ...secondPage.sessions].map((session) => session.nativeSessionId)).size, 5);
+assert.equal(secondPage.sessions.length, 6);
+assert.equal(new Set([...firstPage.sessions, ...secondPage.sessions].map((session) => session.nativeSessionId)).size, 8);
 
 const preview = await history.preview("claude", interactiveClaudeId);
 assert.ok(preview);

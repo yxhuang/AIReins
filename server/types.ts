@@ -7,6 +7,7 @@ export const EVENT_TYPES = [
   "session_created",
   "config_update_started",
   "user_message",
+  "external_messages_added",
   "agent_text_delta",
   "thought_delta",
   "tool_call_started",

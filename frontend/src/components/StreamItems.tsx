@@ -1,6 +1,7 @@
 import { forwardRef, useState } from "react";
 import type {
   GateView,
+  ExternalHistoryBlock,
   RawBlock,
   SystemBlock,
   TextBlock,
@@ -26,6 +27,25 @@ export function UserBlockView({ item }: { item: UserBlock }) {
     <div className="user-block">
       <span className="user-text">{item.text}</span>
     </div>
+  );
+}
+
+export function ExternalHistoryView({ item }: { item: ExternalHistoryBlock }) {
+  return (
+    <section className="session-history" aria-label="在别处继续的对话">
+      <p className="session-history-note">以下为在别处（VSCode/CLI 等）继续的对话，仅消息文本，不含工具调用。</p>
+      {item.truncated && <p className="session-history-note">原生记录超出单次读取窗口，这里只显示可读取的最新消息。</p>}
+      <ul className="session-history-list">
+        {item.messages.map((message, index) => (
+          <li key={`${item.key}:${index}`} className={`history-msg history-msg-${message.role}`}>
+            <span className="history-msg-role">{message.role === "user" ? "用户" : "助手"}</span>
+            <span className="history-msg-text">{message.text}</span>
+            <span className="history-msg-time mono">{message.timestamp ? new Date(message.timestamp).toLocaleString() : "时间未知"}</span>
+          </li>
+        ))}
+      </ul>
+      <div className="session-history-divider" role="separator"><span>以上为在别处继续的对话 · 仅消息文本</span></div>
+    </section>
   );
 }
 

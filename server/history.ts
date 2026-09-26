@@ -497,7 +497,8 @@ export class HistoryIndex {
         for (const record of records) {
           if (!record || typeof record !== "object") continue;
           const item = record as Record<string, unknown>;
-          if (AGENTS.includes(item.agent as AgentKind) && typeof item.nativeSessionId === "string") {
+          // 导入的会话仍属于原来的客户端；注册表只证明工作台新建的会话来源。
+          if (AGENTS.includes(item.agent as AgentKind) && typeof item.nativeSessionId === "string" && !item.resumedFrom) {
             ids.add(`${item.agent}:${item.nativeSessionId}`);
           }
         }
@@ -538,7 +539,8 @@ function sessionFromCandidate(
 }
 
 function decorateSource(session: HistorySession, workbenchIds: Set<string>): HistorySession {
-  if (session.source !== "unknown" || !workbenchIds.has(`${session.agent}:${session.nativeSessionId}`)) {
+  if ((session.source !== "unknown" && !(session.agent === "claude" && session.source === "interactive"))
+    || !workbenchIds.has(`${session.agent}:${session.nativeSessionId}`)) {
     return { ...session };
   }
   return { ...session, source: "workbench" };
@@ -677,7 +679,7 @@ async function readBackward(path: string, endOffset: number, maxBytes: number): 
   }
 }
 
-function parseHistoryMessages(agent: AgentKind, lines: OffsetLine[]): OffsetHistoryMessage[] {
+export function parseHistoryMessages(agent: AgentKind, lines: OffsetLine[]): OffsetHistoryMessage[] {
   const messages: OffsetHistoryMessage[] = [];
   const codexHasEventMessages = agent === "codex" && lines.some((line) => {
     const record = parseLine(line.text);
@@ -723,7 +725,7 @@ function stringValue(value: unknown): string | undefined {
   return typeof value === "string" && value ? value : undefined;
 }
 
-function mergeHistoryMessages(messages: OffsetHistoryMessage[]): OffsetHistoryMessage[] {
+export function mergeHistoryMessages(messages: OffsetHistoryMessage[]): OffsetHistoryMessage[] {
   const merged: OffsetHistoryMessage[] = [];
   for (const message of messages) {
     const previous = merged.at(-1);

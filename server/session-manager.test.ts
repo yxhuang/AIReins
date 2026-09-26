@@ -15,6 +15,9 @@ import type {
 
 const fixture = await mkdtemp(join(tmpdir(), "workbench-session-manager-test-"));
 process.env.WORKBENCH_HOME = fixture;
+process.env.WORKBENCH_CLAUDE_HISTORY_DIR = join(fixture, "claude-native");
+process.env.WORKBENCH_CODEX_HISTORY_DIR = join(fixture, "codex-native");
+process.env.WORKBENCH_KIMI_HISTORY_DIR = join(fixture, "kimi-native");
 
 const [{ SessionManager }, { CLAUDE_CONFIG_SCHEMA, claudeLaunchArgs }] = await Promise.all([
   import("./session-manager.js"),

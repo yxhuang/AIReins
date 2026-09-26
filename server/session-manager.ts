@@ -3,6 +3,7 @@ import { isAbsolute, resolve } from "node:path";
 import { readClaudeEffectiveSettings, type ClaudeEffectiveSettings } from "./claude-settings.js";
 import { createDriver, DRIVER_CAPABILITIES } from "./drivers/index.js";
 import { log } from "./logger.js";
+import { NativeConversationReader, type NativeConversationMark } from "./native-conversation.js";
 import {
   cleanSessionConfig,
   configFromCreateInput,
@@ -46,13 +47,17 @@ export class SessionManager {
   private readonly commands = new Map<string, UnifiedCommand[]>();
   private readonly listeners = new Set<(event: UnifiedEvent) => void>();
   private readonly restartingSessions = new Set<string>();
+  private readonly checkingSessions = new Set<string>();
   /** 发过消息的会话：Claude 原生存档要到首条消息后才落盘，没发过的切换配置时不能续接 */
   private readonly promptedSessions = new Set<string>();
+  private readonly nativeMarks = new Map<string, NativeConversationMark>();
+  private readonly pendingMarkReads = new Map<string, Promise<void>>();
 
   constructor(
     private readonly driverFactory: DriverFactory = createDriver,
     private readonly claudeSettingsResolver: ClaudeSettingsResolver = readClaudeEffectiveSettings,
     private readonly snapshotCreator: SnapshotCreator = createSnapshotIfNeeded,
+    private readonly nativeReader: NativeConversationReader = new NativeConversationReader(),
   ) {
     const loaded = loadRegistry();
     for (const stored of loaded) {
@@ -205,6 +210,7 @@ export class SessionManager {
       await worker.start();
       record.processId = worker.child?.pid;
       this.persistRegistry();
+      await this.captureNativeMark(id);
       if (input.initialMessage) await this.sendUserMessage(id, { text: input.initialMessage });
       return cloneSession(record);
     } catch (error) {
@@ -219,15 +225,24 @@ export class SessionManager {
 
   async sendUserMessage(id: string, input: UserMessageInput): Promise<void> {
     if (this.restartingSessions.has(id)) throw new Error("正在切换模型，请稍候再发送消息");
-    const worker = this.requireWorker(id);
-    const message = this.normalizeUserMessage(id, input);
-    await worker.sendUserMessage(message);
-    this.promptedSessions.add(id);
-    this.emit(id, "user_message", {
-      ...(message.text !== undefined ? { text: message.text } : {}),
-      ...(message.command ? { command: message.command } : {}),
-      ...(message.mentions?.length ? { mentions: message.mentions } : {}),
-    });
+    this.requireWorker(id);
+    if (this.checkingSessions.has(id)) throw new Error("正在检查原生会话，请稍候再发送消息");
+    this.checkingSessions.add(id);
+    try {
+      const record = this.sessions.get(id)!;
+      if (record.status === "idle") await this.refreshBeforeSend(id);
+      const worker = this.requireWorker(id);
+      const message = this.normalizeUserMessage(id, input);
+      await worker.sendUserMessage(message);
+      this.promptedSessions.add(id);
+      this.emit(id, "user_message", {
+        ...(message.text !== undefined ? { text: message.text } : {}),
+        ...(message.command ? { command: message.command } : {}),
+        ...(message.mentions?.length ? { mentions: message.mentions } : {}),
+      });
+    } finally {
+      this.checkingSessions.delete(id);
+    }
   }
 
   async resolvePermission(
@@ -253,6 +268,7 @@ export class SessionManager {
     ));
     if (entries.length === 0) throw new Error("set_config.config 至少包含一个配置项");
     if (this.restartingSessions.has(id)) throw new Error("正在切换模型，请稍候");
+    if (this.checkingSessions.has(id)) throw new Error("正在检查原生会话，请稍候再切换配置");
     const worker = this.requireWorker(id);
     const schema = worker.getConfigSchema();
     for (const [key, value] of entries) {
@@ -284,6 +300,9 @@ export class SessionManager {
   }
 
   async remove(id: string): Promise<SessionRecord | undefined> {
+    if (this.checkingSessions.has(id) || this.restartingSessions.has(id)) {
+      throw new Error("会话正在续接，请稍候再移除");
+    }
     const record = this.sessions.get(id);
     if (!record) return undefined;
     const worker = this.workers.get(id);
@@ -291,6 +310,8 @@ export class SessionManager {
     this.workers.delete(id);
     this.sessions.delete(id);
     this.promptedSessions.delete(id);
+    this.nativeMarks.delete(id);
+    this.pendingMarkReads.delete(id);
     this.rings.delete(id);
     this.commands.delete(id);
     this.persistRegistry();
@@ -331,6 +352,13 @@ export class SessionManager {
     this.rings.set(id, ring);
     this.persistRegistry();
     for (const listener of this.listeners) listener(event);
+    if (type === "turn_completed") {
+      const pending = this.captureNativeMark(id);
+      this.pendingMarkReads.set(id, pending);
+      void pending.finally(() => {
+        if (this.pendingMarkReads.get(id) === pending) this.pendingMarkReads.delete(id);
+      });
+    }
     return event;
   }
 
@@ -381,6 +409,104 @@ export class SessionManager {
     }
   }
 
+  private async captureNativeMark(id: string): Promise<void> {
+    const record = this.sessions.get(id);
+    if (!record) return;
+    try {
+      const mark = await this.nativeReader.capture(record);
+      if (mark) this.nativeMarks.set(id, mark);
+      else this.warnMissingNativeMark(record, "没有可用的对话指纹");
+    } catch (error) {
+      this.warnMissingNativeMark(record, error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  private warnMissingNativeMark(record: SessionRecord, reason: string): void {
+    log("warn", "native conversation fingerprint unavailable", {
+      sessionId: record.id,
+      agent: record.agent,
+      nativeSessionId: record.nativeSessionId,
+      reason,
+    });
+  }
+
+  private async refreshBeforeSend(id: string): Promise<void> {
+    await this.pendingMarkReads.get(id);
+    const record = this.sessions.get(id)!;
+    const previous = this.nativeMarks.get(id);
+    if (!previous) {
+      this.warnMissingNativeMark(record, "尚未记录上次同步的对话指纹");
+      return;
+    }
+    let change;
+    try {
+      change = await this.nativeReader.changed(record, previous);
+    } catch (error) {
+      this.warnMissingNativeMark(record, error instanceof Error ? error.message : String(error));
+      return;
+    }
+    if (!change) return;
+    if (change.messages.length === 0) {
+      // Only our previous assistant reply was flushed late. Keep the live worker.
+      this.nativeMarks.set(id, change.mark);
+      return;
+    }
+    const nativeSessionId = record.nativeSessionId;
+    if (!nativeSessionId) {
+      this.warnMissingNativeMark(record, "原生会话 ID 缺失");
+      return;
+    }
+    const oldWorker = this.requireWorker(id);
+    this.restartingSessions.add(id);
+    this.setStatus(id, "starting");
+    this.workers.delete(id);
+    try {
+      const replacement = await this.replaceWorker(id, oldWorker, record.config, nativeSessionId);
+      record.processId = replacement.child?.pid;
+      this.nativeMarks.set(id, change.mark);
+      this.emit(id, "external_messages_added", {
+        nativeSessionId,
+        messages: change.messages,
+        truncated: change.truncated,
+      });
+    } catch (error) {
+      const message = `检测到别处续聊，但重新续接失败；本轮未发送：${error instanceof Error ? error.message : String(error)}`;
+      this.emit(id, "session_error", { message, source: "external_resume" });
+      this.setStatus(id, "error");
+      throw new Error(message);
+    } finally {
+      this.restartingSessions.delete(id);
+    }
+  }
+
+  private async replaceWorker(
+    id: string,
+    oldWorker: Driver,
+    config: SessionConfig,
+    nativeSessionId?: string,
+  ): Promise<Driver> {
+    await oldWorker.stop();
+    const record = this.sessions.get(id)!;
+    let replacement!: Driver;
+    const callbacks = this.driverCallbacks(id, () => replacement);
+    replacement = this.driverFactory(record.agent, {
+      sessionId: id,
+      cwd: record.cwd,
+      config,
+      resumeSessionId: nativeSessionId,
+      callbacks,
+    });
+    this.workers.set(id, replacement);
+    try {
+      await replacement.start();
+      return replacement;
+    } catch (error) {
+      if (this.workers.get(id) === replacement) this.workers.delete(id);
+      await replacement.stop().catch(() => undefined);
+      throw error;
+    }
+  }
+
   private async restartClaudeWorker(id: string, update: SessionConfig): Promise<SessionRecord> {
     const record = this.sessions.get(id)!;
     if (record.status === "running") {
@@ -412,22 +538,9 @@ export class SessionManager {
     this.setStatus(id, "starting");
     this.workers.delete(id);
 
-    let replacement: Driver | undefined;
     try {
-      await oldWorker.stop();
       if (!resume) record.nativeSessionId = undefined;
-      let nextWorker!: Driver;
-      const callbacks = this.driverCallbacks(id, () => nextWorker);
-      nextWorker = this.driverFactory("claude", {
-        sessionId: id,
-        cwd: record.cwd,
-        config: targetConfig,
-        resumeSessionId: nativeSessionId,
-        callbacks,
-      });
-      replacement = nextWorker;
-      this.workers.set(id, nextWorker);
-      await nextWorker.start();
+      const nextWorker = await this.replaceWorker(id, oldWorker, targetConfig, nativeSessionId);
       record.processId = nextWorker.child?.pid;
       this.persistRegistry();
       this.emit(id, "config_updated", this.configUpdatedPayload(record, {
@@ -438,8 +551,6 @@ export class SessionManager {
       }));
       return cloneSession(record);
     } catch (error) {
-      if (replacement && this.workers.get(id) === replacement) this.workers.delete(id);
-      if (replacement) await replacement.stop().catch(() => undefined);
       record.config = { ...previousState.config };
       record.model = previousState.model;
       record.effort = previousState.effort;

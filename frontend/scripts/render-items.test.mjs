@@ -53,6 +53,28 @@ t("user_message 打断文本合并（前后各成一块）", () => {
   assert.equal(items[2].text, "后");
 });
 
+t("外部续聊事件归一成历史区，排在新一轮用户消息之前", () => {
+  const items = buildRenderItems([
+    ev(1, "agent_text_delta", { text: "旧回复" }),
+    ev(2, "external_messages_added", {
+      nativeSessionId: "native-1",
+      messages: [
+        { role: "user", text: "外部提问", timestamp: null },
+        { role: "assistant", text: "外部回答", timestamp: "2026-09-27T00:00:00.000Z" },
+      ],
+      truncated: false,
+    }),
+    ev(3, "user_message", { text: "工作台续聊" }),
+    ev(4, "agent_text_delta", { text: "新回复" }),
+  ], "claude");
+  assert.deepEqual(items.map((item) => item.kind), ["text", "external-history", "user", "text"]);
+  assert.deepEqual(items[1].messages.map((message) => `${message.role}:${message.text}`), [
+    "user:外部提问", "assistant:外部回答",
+  ]);
+  assert.equal(items[1].truncated, false);
+  assert.equal(items[2].text, "工作台续聊");
+});
+
 t("thought_delta 独立合并，与文本互不混入", () => {
   const items = buildRenderItems(
     [

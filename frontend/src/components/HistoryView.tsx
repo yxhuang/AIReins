@@ -429,7 +429,7 @@ function HistoryPreviewPane({ item, onBack }: { item: HistorySession | undefined
             {/* 代价说明不能省：就地续接，不是分叉；措辞中性如实 */}
             <p className="history-note">
               这是就地续接，不是分叉：导入后，工作台里跑的新回合会追写进这个原生会话文件；
-              其中 Claude 会话里这些回合以 sdk-cli 身份落盘，与你交互式跑出的回合在文件里身份不同。
+              工作台里跑的 Claude 回合以 VSCode 扩展身份落盘；工作台新建的 Claude 会话可在 VSCode/CLI 的 resume 列表里找到。
             </p>
             {importError && (
               <p className="history-error" role="alert">

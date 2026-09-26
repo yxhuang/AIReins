@@ -135,6 +135,8 @@ client → CLI：`user`、`control_response`。
 
 两组均落盘为 `entrypoint:"sdk-cli"`、`userType:"external"`。因此结论是：**`--print` 模式硬编码为 sdk-cli 身份，与 `CLAUDE_CODE_ENTRYPOINT` 环境变量无关**；连裸 `--print` 都如此，不是 `stream-json` 参数造成。脚本仍按硬要求显式删除该变量，但 M1 不能依赖它改变会话身份。
 
+**2026-09-27 补充（修正上述结论）**：Claude Code 2.1.281 的 `isHiddenFromSessionPicker` 会把首条 `entrypoint` 为 `sdk-cli / sdk-ts / sdk-py` 的会话从 `claude --resume` 与 VSCode 扩展历史列表隐藏。实测在 `-p` 下设置 `CLAUDE_CODE_ENTRYPOINT=claude-vscode` 后落盘身份原样保留，会话出现在 `claude --resume`；不设置时仍为 `sdk-cli`、不出现；设置 `cli` 则被 CLI 改回 `sdk-cli`。官方 VSCode 扩展也以 `claude-vscode` 身份和 stream-json 控制协议驱动 CLI。`claude -p --resume <id>` 沿用同一 ID 并追加同一 jsonl。旧结论对当时测试的未设置变量和 `cli` 两组成立，但“与环境变量无关”的推断不成立；Workbench worker 现在明确设置 `claude-vscode`。
+
 ### usage/token 样本
 
 ```json
@@ -469,7 +471,7 @@ Kimi 这里不是 input/output 分项，而是上下文已用量 `used` 与总�
 
 1. **审批路由按真实协议分层。** Claude 关联 `control_request.request_id`；Codex 关联 JSON-RPC server request 的 `id`；Kimi 既处理 `session/request_permission`，又必须把 `terminal/create`/`fs.write_text_file` 当成不可绕过的最终执行闸门。
 2. **事件流必须幂等、宽容并按会话/回合关联。** Claude 会回放 user/control_response 且 partial 与最终消息并存；Codex 实际省略 `jsonrpc` 并混入无 turn 的状态事件；Kimi 的 prompt result 只表示 turn 收尾，细节全在多型 `session/update` 中。
-3. **会话身份与续接不能套用任务书旧假设。** Claude `--print` 固定 `sdk-cli`；Codex 当前 source 固定 `vscode`、应用标识应读写 `originator`；续接分别使用 Claude session id、Codex `thread/resume`、Kimi `session/load` 或 `session/resume`，两种 Kimi 续接语义不同。
+3. **会话身份与续接不能套用任务书旧假设。** Claude `--print` 默认落盘 `sdk-cli`，但 2026-09-27 实测 `CLAUDE_CODE_ENTRYPOINT=claude-vscode` 可原样保留并进入 resume 列表（见上文补充）；Codex 当前 source 固定 `vscode`、应用标识应读写 `originator`；续接分别使用 Claude session id、Codex `thread/resume`、Kimi `session/load` 或 `session/resume`，两种 Kimi 续接语义不同。
 
 ## 5. 踩坑记录
 

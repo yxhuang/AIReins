@@ -303,7 +303,7 @@ interface HistoryListData {
 
 标题提取不会把注入包装当成人类输入：Claude 跳过 `isMeta`、sidechain、`local-command-caveat / local-command-stdout / system-reminder / task-notification / ide_selection / ide_opened_file`；斜杠命令包装只提取真正的 `command-args`，无参数时退化为 `command-name`。Codex 跳过 role 非 user 的记录，以及 `recommended_plugins / AGENTS.md instructions / environment_context / skills / permissions / apps / plugins / multi_agent_mode` 等注入块。Kimi 优先使用有效的原生 `state.title`，否则从第一条非 `system-reminder` 的 `turn.prompt` 取标题。
 
-`source` 表示原生会话的可识别创建来源，而不是当前读取者。Claude 首个 `entrypoint:"sdk-cli"` 为 `workbench`，普通 CLI/VS Code 入口为 `interactive`；Codex 的 `originator` 以 `workbench` 开头为 `workbench`，其他已知 originator 为 `interactive`；Kimi 的多代落盘格式没有稳定的客户端来源字段，只能用仍在 `~/.workbench/sessions.json` 的原生 ID 作 `workbench` 回退，其余诚实返回 `unknown`。
+`source` 表示原生会话的可识别创建来源，而不是当前读取者。Claude 老会话首个 `entrypoint:"sdk-cli"` 仍为 `workbench`；新 worker 明确设置 `CLAUDE_CODE_ENTRYPOINT=claude-vscode`，其新建会话靠 `~/.workbench/sessions.json` 中未带 `resumedFrom` 的注册表记录判为 `workbench`，其他 `claude-vscode` 会话为 `interactive`。Codex 的 `originator` 以 `workbench` 开头为 `workbench`，其他已知 originator 为 `interactive`；Kimi 的多代落盘格式没有稳定的客户端来源字段，也用未带 `resumedFrom` 的注册表记录回退为 `workbench`，其余为 `unknown`。导入的 VSCode/Kimi 原生会话保留原来源。
 
 `GET /api/history/:agent/:nativeSessionId` 值得保留：前端可在把原生 ID 交给创建接口前展示“导入前看一眼”。它返回 `{session, messages, truncated}`，`messages` 最多 8 条，只读文件头部最多 2 MiB；Kimi wire 缺失时仍返回 session 元数据、空 messages 和 `truncated:true`。ID 只接受 1–128 位字母、数字、下划线和连字符，后端先在对应事实源中解析匹配候选，不会把 URL 片段直接拼成任意文件路径。
 
@@ -338,7 +338,11 @@ Claude 从非 meta/sidechain 的 `user` 和含文本块的 `assistant` 记录归
 }
 ```
 
-这里没有 fork 语义：Claude 用 `--resume`，Codex 用 `thread/resume`，Kimi 用 `session/resume`。代价也必须由前端明确提示：续接后，Workbench 中的新回合会由原生 CLI 追写进用户选择的真实会话；其中 Claude 的 Workbench 回合以 `sdk-cli` 身份落盘。若用户不希望改变原会话，应取消续接，而不是调用本接口后期待自动分叉。
+这里没有 fork 语义：Claude 用 `--resume`，Codex 用 `thread/resume`，Kimi 用 `session/resume`。续接后，Workbench 中的新回合会由原生 CLI 追写进用户选择的真实会话；Claude worker 以 `claude-vscode` 身份落盘，工作台新建会话因此可进入 VSCode/CLI 的 resume 列表。仅做 initialize 的 Claude 模型标签探针不发送用户消息、不产生会话，仍清除该环境变量。
+
+空闲会话发消息前，服务端只读原生记录的末尾最多 4 MiB，比较最后一条归一化用户/助手消息的身份：Claude 用 `uuid`，Codex/Kimi 用追加文件的字节偏移与该行 SHA-256；标题、摘要、token 等元数据变化不触发。指纹之后若只有助手消息，视为本端上一轮在 `turn_completed` 之后才刷盘：静默推进指纹，不重启、不发事件。只有出现新的用户消息才判为外部续聊；第一条新用户消息之前的助手消息不进入事件。此时先停旧 worker、起新进程并以同一原生 ID 续接，再发送消息。Codex app-server 的 `thread/resume` 和 Kimi ACP 的 `session/resume` 都在新进程里执行，避免复用旧进程内存中的线程/会话。取不到原生 ID、文件或对话指纹时记录 warn 并照常发送；正在运行的回合不检测。重新续接失败会广播 `session_error`（`source:"external_resume"`），拒绝本轮发送，不回退到旧 worker。尾部窗口装不下全部外部消息时，事件只带读到的最新文本，并标 `truncated:true`。
+
+新增 `external_messages_added` 事件：`payload` 为 `{nativeSessionId:string, messages:Array<{role:"user"|"assistant",text:string,timestamp:string|null}>, truncated:boolean}`。消息使用历史接口的三家归一化规则，只包含用户和助手文本。它写入 Workbench transcript 并通过同一事件流广播，顺序在新一轮 `user_message` 之前；断线后的快照回放也包含它。原生目录仍只由各家 CLI 自己写入，server 的检查代码只读。
 
 使用 `resumeSessionId` 成功建出的 session 会同时包含：
 
@@ -418,7 +422,7 @@ interface PageHealth {
 }
 ```
 
-事件最小集为 `session_created / config_update_started / user_message / agent_text_delta / thought_delta / tool_call_started / tool_call_updated / tool_call_completed / permission_request / permission_resolved / commands_updated / config_updated / usage_updated / turn_completed / session_error / process_exited`；另有容错用 `raw_event`。每个 session 独立计数，`seq` 单调递增。
+事件最小集为 `session_created / config_update_started / external_messages_added / user_message / agent_text_delta / thought_delta / tool_call_started / tool_call_updated / tool_call_completed / permission_request / permission_resolved / commands_updated / config_updated / usage_updated / turn_completed / session_error / process_exited`；另有容错用 `raw_event`。每个 session 独立计数，`seq` 单调递增。
 
 上行至少支持：
 

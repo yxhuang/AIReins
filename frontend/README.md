@@ -300,7 +300,7 @@ frontend/
 - **筛选**：agent 三个身份色 chip + 全部；来源筛选（全部来源/对话/工作台）默认「全部」**不过滤任何东西**，且是前端侧过滤（接口没有 source 参数），开启时元信息行明示「来源筛选只作用于已加载的条目」；关键词搜索 250ms 防抖后打到 `q`，请求带代次戳，过期响应丢弃。
 - **分页**：`nextCursor` +「加载更多」（每页 150 条，本机 467 候选约 4 页），不做无限滚动、不引虚拟滚动库；`truncated`（扫描预算触发）与 `skipped`（坏/空/不可读候选数，正常也可能非零）都渲染成 `--text-faint` 中性小字，不当错误；真正的失败（列表/预览/导入）才用冷调 `--danger`。
 - **预览**：点行 → 右侧面板 `GET /api/history/:agent/:id`（≤8 条消息，用户/助手分块）；`truncated:true` 是常态，中性说明「仅显示开头若干条消息（预览只读取会话文件头部），完整内容在原生会话文件中」；消息为空（kimi wire 缺失）同样中性说明。
-- **导入并续接**：`POST /api/sessions` 带 `{agent, cwd, resumeSessionId: nativeSessionId}`（复用 `store.create`，成功后 navigate 进新会话）。按钮上方小字如实写明代价（逐字）：「这是就地续接，不是分叉：导入后，工作台里跑的新回合会追写进这个原生会话文件；其中 Claude 会话里这些回合以 sdk-cli 身份落盘，与你交互式跑出的回合在文件里身份不同。」失败错误就地显示。
+- **导入并续接**：`POST /api/sessions` 带 `{agent, cwd, resumeSessionId: nativeSessionId}`（复用 `store.create`，成功后 navigate 进新会话）。按钮上方说明就地续接会追写原生文件，并说明 Claude 工作台回合以 VSCode 扩展身份落盘、工作台新建会话可在 VSCode/CLI 的 resume 列表找到。失败错误就地显示。
 - **已导入标记**：`history.ts` 的 `findImportedSession` 对照 `store.sessions` 的 `agent + nativeSessionId`，命中则行内标「已在工作台中」（`--ok` 冷色小徽标），预览面板给「跳转过去」，不再显示导入按钮。
 - **配色**：全部复用既有令牌（`--busy`/`--ok`/`--danger`/`--text-faint` 等），未新增令牌，暖色仍是闸门专用；筛选 chip 选中态复用 new-agent 的身份色纪律。行是真实 `<button>`，全部走全局 `:focus-visible` 描边。
 - **打桩测试** `frontend/scripts/history-flow.test.mjs`（根 package.json 本轮不动，直接 `npx tsx` 跑；`npm test` 聚合脚本不含它）：6 例覆盖查询串构造（空值省略/cursor 原样带回/中文编码）、来源筛选、已导入对照（agent 不匹配不算）、fetch URL 组装与 truncated/skipped 透传、错误信封抛中文 msg、`#/history` 与既有两类路由互斥。
@@ -419,6 +419,14 @@ frontend/
 **只能等后端就绪后真机验证的**（本轮均为代码复核，无头环境未起真实 PTY）：① 建终端/attach/回放/实时输出的完整链路（含 omitted 提示出现时机）；② resize 上行后全屏程序（vim/htop）重排；③ 断线重连后回放与重复 attach 的 reset 表现；④ kill 后 exit 帧到达与「已退出（码 N）」切换；⑤ 分隔条拖动/键盘/双击与宽度持久化的实际手感；⑥ 手机窄屏铺满、快捷键栏点按与安全区；⑦ 深浅色切换下 xterm 主题的即时跟随与 ANSI 黄实际观感；⑧ kill 成功但 WS 恰好断开时退出码依赖下次 attach/刷新才可见（契约内已知边界）。
 
 
+
+### M20 工作台 × VSCode/CLI 会话互通（2026-09-27）
+
+- Claude worker 以 `claude-vscode` 身份落盘。历史导入说明已更新：工作台新建的 Claude 会话可在 VSCode/CLI 的 resume 列表中出现；导入仍是对原生记录的就地续接。
+- `external_messages_added` 被归一成 `external-history` 渲染条目，放在本轮 `user_message` 前；使用与「导入前的历史对话」相同的弱化底色、用户/助手文本样式，并明确说明没有工具调用。事件进入 transcript，快照和断线回放按 `seq` 还原。
+- **打桩测试**：`frontend/scripts/render-items.test.mjs` 覆盖新事件载荷归一、与前后文本分块及新用户消息的顺序。**代码复核**：`SessionView` 的事件分支和 `ExternalHistoryView` 的文案、样式复用。**待真机**：Claude 新建会话在 VSCode 与 CLI resume 列表可见；三家在别处续聊后回工作台发送、断线回放及异常提示；视觉与手机布局。
+
+### 通用边界
 
 - `@token` 严格按空白切段：句末紧跟的标点（如 `@a.ts，`）自 M12 起会在解析时逐级剥尾部标点、剥后命中真实文件才采纳；但标点后无空格直接接文字（如 `@a.ts，然后`）标点不在 token 尾部，仍判「未找到」，需要在引用后敲空格。
 
