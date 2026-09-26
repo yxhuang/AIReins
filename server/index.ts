@@ -62,6 +62,8 @@ interface WsClientState {
   socket: WebSocket;
   sessionId?: string;
   lastSeq: Map<string, number>;
+  /** 心跳：上次 ping 之后收到过 pong（刚连上时为 true） */
+  alive: boolean;
 }
 
 const manager = new SessionManager();
@@ -71,6 +73,19 @@ const pagesById = new Map(pages.map((page) => [page.id, page]));
 void getMeta(); // 启动时探测一次并缓存，不让首个 /api/meta 承担延迟。
 const wss = new WebSocketServer({ noServer: true });
 const clients = new Set<WsClientState>();
+
+// 没回 pong 的连接在 25–50 秒内被断开（terminate 会触发 close，从 clients 里移除）。
+const heartbeat = setInterval(() => {
+  for (const client of clients) {
+    if (!client.alive) {
+      client.socket.terminate();
+      continue;
+    }
+    client.alive = false;
+    client.socket.ping();
+  }
+}, 25_000);
+heartbeat.unref();
 
 manager.onEvent((event) => {
   for (const client of clients) sendEvent(client, event);
@@ -101,7 +116,7 @@ wss.on("connection", (socket, request) => {
   const url = new URL(request.url ?? "/ws", `http://${request.headers.host ?? `${HOST}:${PORT}`}`);
   const sessionId = url.searchParams.get("sessionId") ?? undefined;
   const afterSeq = Math.max(0, Number(url.searchParams.get("afterSeq")) || 0);
-  const client: WsClientState = { socket, sessionId, lastSeq: new Map() };
+  const client: WsClientState = { socket, sessionId, lastSeq: new Map(), alive: true };
   if (sessionId) client.lastSeq.set(sessionId, afterSeq);
   clients.add(client);
 
@@ -118,6 +133,9 @@ wss.on("connection", (socket, request) => {
   sendWs(client, { type: "ready", serverVersion: SERVER_VERSION, sessionId, afterSeq });
 
   socket.on("message", (data) => void handleWsMessage(client, data.toString("utf8")));
+  socket.on("pong", () => {
+    client.alive = true;
+  });
   socket.on("close", () => clients.delete(client));
   socket.on("error", (error) => log("warn", "websocket error", { message: error.message, sessionId }));
 });
@@ -151,6 +169,7 @@ async function shutdown(signal: string): Promise<void> {
   if (shuttingDown) return;
   shuttingDown = true;
   log("info", "workbench server stopping", { signal });
+  clearInterval(heartbeat);
   for (const client of clients) client.socket.close(1001, "server shutdown");
   await manager.shutdown();
   await new Promise<void>((resolveClose) => server.close(() => resolveClose()));

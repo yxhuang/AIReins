@@ -100,6 +100,8 @@ export class Store {
   private socket: WebSocket | null = null;
   private reconnectDelay = 1000;
   private reconnectTimer: ReturnType<typeof setTimeout> | undefined;
+  /** 页面切到后台的时刻（0 = 在前台）；切回时据此判断连接是否可能已成僵尸 */
+  private hiddenAt = 0;
   private listRefreshTimer: ReturnType<typeof setTimeout> | undefined;
   private clockStarted = false;
   private tickTimer: ReturnType<typeof setTimeout> | undefined;
@@ -156,6 +158,9 @@ export class Store {
 
   async init(): Promise<void> {
     window.addEventListener("hashchange", this.onHashChange);
+    // 手机锁屏 / 切后台回来、网络恢复：立即重连，不等退避计时器（最长 15 秒）。
+    document.addEventListener("visibilitychange", this.onVisibilityChange);
+    window.addEventListener("online", this.onOnline);
     this.onHashChange();
     try {
       this.meta = await fetchMeta();
@@ -366,6 +371,32 @@ export class Store {
     }
   }
 
+  /** 网络恢复：旧连接多半已经死了（可能还显示 OPEN，或卡在 CONNECTING），直接换新的。 */
+  private onOnline = (): void => this.reconnectNow(true);
+
+  private onVisibilityChange = (): void => {
+    if (document.visibilityState === "hidden") {
+      this.hiddenAt = Date.now();
+      return;
+    }
+    // 离开超过 30 秒：iOS 常留下 readyState 仍是 OPEN 的死连接，直接换新的。
+    const longAway = this.hiddenAt > 0 && Date.now() - this.hiddenAt > 30_000;
+    this.hiddenAt = 0;
+    this.reconnectNow(longAway);
+  };
+
+  /** 立即重连：跳过退避等待；force=true 时，连看似健康的连接也换掉。 */
+  reconnectNow(force = false): void {
+    if (!force && this.socket && this.socket.readyState <= WebSocket.OPEN) return;
+    clearTimeout(this.reconnectTimer);
+    this.reconnectTimer = undefined;
+    this.reconnectDelay = 1000;
+    const stale = this.socket;
+    this.socket = null;
+    stale?.close();
+    this.connect();
+  }
+
   private connect(): void {
     if (this.socket && this.socket.readyState <= WebSocket.OPEN) return;
     this.wsState = "connecting";
@@ -375,6 +406,7 @@ export class Store {
     this.socket = socket;
 
     socket.addEventListener("open", () => {
+      if (this.socket !== socket) return; // 已被 reconnectNow 换掉的旧连接
       this.wsState = "open";
       this.reconnectDelay = 1000;
       const reconnected = this.hasOpenedSocket;
@@ -383,6 +415,7 @@ export class Store {
       this.notify();
     });
     socket.addEventListener("message", (messageEvent) => {
+      if (this.socket !== socket) return; // 已被 reconnectNow 换掉的旧连接
       try {
         this.handleFrame(JSON.parse(String(messageEvent.data)) as Record<string, unknown>);
       } catch {
@@ -390,6 +423,7 @@ export class Store {
       }
     });
     socket.addEventListener("close", () => {
+      if (this.socket !== socket) return; // 已被 reconnectNow 换掉的旧连接
       this.wsState = "closed";
       this.socket = null;
       this.notify();
