@@ -12,7 +12,7 @@ import { strict as assert } from "node:assert";
 globalThis.WebSocket = { CONNECTING: 0, OPEN: 1, CLOSING: 2, CLOSED: 3 };
 globalThis.window = { location: { hash: "#/" }, addEventListener() {} };
 
-const { isInlineSvg, partitionPages, pageRenderMode } = await import("../src/pages.ts");
+const { isInlineSvg, isLoopbackUrl, partitionPages, pageRenderMode } = await import("../src/pages.ts");
 const { fetchPageHealth } = await import("../src/api.ts");
 const { Store } = await import("../src/store.ts");
 
@@ -54,6 +54,15 @@ await t("isInlineSvg：emoji 为 false，内联 SVG 字符串为 true", async ()
   assert.equal(isInlineSvg("📊"), false);
   assert.equal(isInlineSvg('<svg viewBox="0 0 16 16"><path d="M1 1h14v14H1z"/></svg>'), true);
   assert.equal(isInlineSvg('  <svg viewBox="0 0 16 16"></svg>'), true, "前导空白也应识别");
+});
+
+// --- 用例 2b：手机经 Tailscale 访问时，指向 127.0.0.1 的页面打不开，要能识别出来 ---
+await t("isLoopbackUrl：127.0.0.1 / localhost / [::1] 是本机地址，ts.net 与非法 URL 不是", async () => {
+  assert.equal(isLoopbackUrl("http://127.0.0.1:8788"), true);
+  assert.equal(isLoopbackUrl("http://localhost:8788/x"), true);
+  assert.equal(isLoopbackUrl("http://[::1]:8788"), true);
+  assert.equal(isLoopbackUrl("https://desk.tail1234.ts.net/#/page/ai-usage"), false);
+  assert.equal(isLoopbackUrl("不是网址"), false);
 });
 
 // --- 用例 3（验收 3 渲染分支）：reachable:false → fallback，不渲染空白 iframe ---

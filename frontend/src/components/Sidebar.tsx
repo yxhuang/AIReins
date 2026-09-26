@@ -122,7 +122,7 @@ export function Sidebar({ collapsed, onToggle, newOpen, onNewOpenChange }: Sideb
         )}
         <button
           type="button"
-          className="icon-btn"
+          className="icon-btn sidebar-toggle"
           title={collapsed ? "展开会话列表" : "收起会话列表"}
           onClick={onToggle}
         >

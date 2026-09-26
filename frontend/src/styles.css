@@ -1954,3 +1954,37 @@ body {
   justify-content: flex-end;
   margin-top: 4px;
 }
+
+/* ── 手机与触屏（ROADMAP §4 Task 3）─────────────────────
+   ≤720px 单栏：没打开会话 / 页面 / 历史时只显示列表（铺满），打开后只显示主区，
+   主区顶栏「‹ 会话列表」返回。顶栏徽标沿用 .gate-badge——暖色仍只用于闸门计数。 */
+.mobile-topbar { display: none; }
+
+@media (max-width: 720px) {
+  /* dvh = 扣掉浏览器工具栏后的可见高度，避免底部输入框被 Safari 工具栏挡住 */
+  .app { height: 100dvh; }
+  .sidebar,
+  .app.sidebar-collapsed .sidebar { width: 100%; border-right: none; }
+  .app.has-main .sidebar { display: none; }
+  .app:not(.has-main) .main { display: none; }
+  /* 单栏下「收起」没有意义；只在已收起时保留按钮，作为展开的唯一出口 */
+  .app:not(.sidebar-collapsed) .sidebar-toggle { display: none; }
+  .mobile-topbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 6px 10px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+  }
+}
+
+@media (pointer: coarse) {
+  /* 触屏点按目标至少 44px */
+  .btn, .icon-btn, .row-delete { min-height: 44px; }
+  /* 没有 hover：删除按钮常显（点了还有确认步骤，不会误删） */
+  .row-delete { opacity: 1; min-width: 44px; }
+  /* iOS 聚焦字号小于 16px 的输入框会自动放大页面；!important 用来压过各处更具体的字号规则 */
+  textarea, input, select { font-size: 16px !important; }
+}

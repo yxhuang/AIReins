@@ -59,3 +59,12 @@ export function pageRenderMode(health: PageHealth): PageRenderMode {
   if (health.embeddable === false) return "blocked";
   return "uncertain";
 }
+
+/** 指向本机回环地址的 URL：手机经 Tailscale 打开 workbench 时，这类地址指的是手机自己。 */
+export function isLoopbackUrl(url: string): boolean {
+  try {
+    return ["127.0.0.1", "localhost", "[::1]"].includes(new URL(url).hostname);
+  } catch {
+    return false;
+  }
+}

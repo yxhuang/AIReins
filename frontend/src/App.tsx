@@ -43,6 +43,8 @@ export function App() {
     shallowEqual,
   );
   const pendingTotal = useStore(selectPendingTotal);
+  // 手机窄屏下，列表和主区二选一：有内容要看（会话 / 页面 / 历史）时只显示主区。
+  const hasMain = Boolean(historyOpen || currentPageId || current);
 
   // 标签页标题带上全局未决闸门总数：切走也能看到「有闸门在等你」。
   // 必须写在组件里而不是 store.notify()——store.ts 会被纯 node 测试 import，没有 document。
@@ -51,7 +53,7 @@ export function App() {
   }, [pendingTotal]);
 
   return (
-    <div className={`app${collapsed ? " sidebar-collapsed" : ""}`}>
+    <div className={`app${collapsed ? " sidebar-collapsed" : ""}${hasMain ? " has-main" : ""}`}>
       <Sidebar
         collapsed={collapsed}
         onToggle={() => setCollapsed((v) => !v)}
@@ -59,6 +61,18 @@ export function App() {
         onNewOpenChange={setNewOpen}
       />
       <main className="main">
+        {hasMain && (
+          <div className="mobile-topbar">
+            <button type="button" className="btn" onClick={() => store.navigate(null)}>
+              ‹ 会话列表
+            </button>
+            {pendingTotal > 0 && (
+              <span className="gate-badge" title={`${pendingTotal} 个闸门等待处理`}>
+                {pendingTotal}
+              </span>
+            )}
+          </div>
+        )}
         {historyOpen ? (
           <HistoryView />
         ) : currentPage ? (

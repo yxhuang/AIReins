@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { PageHealth, PageManifest } from "../types";
 import { fetchPageHealth } from "../api";
-import { pageRenderMode } from "../pages";
+import { isLoopbackUrl, pageRenderMode } from "../pages";
 import { PageIcon } from "./Sidebar";
 
 type CheckState =
@@ -46,6 +46,21 @@ export function PageView({ page }: { page: PageManifest }) {
 
   // 检查进行中禁用「重新检查」/「重试」（检查中视图切到下方降级面板，这里是兜底表达）
   const checking = state.phase === "checking";
+
+  // 手机经 Tailscale 打开时，127.0.0.1 指的是手机自己：这类页面只能在电脑上用。
+  if (!isLoopbackUrl(window.location.href) && isLoopbackUrl(page.url)) {
+    return (
+      <div className="page-view">
+        <div className="page-fallback">
+          <h2 className="page-fallback-title">
+            <PageIcon icon={page.icon} />
+            {page.name}
+          </h2>
+          <p className="page-fallback-info">这个页面指向电脑本机地址（{page.url}），只能在电脑上打开。</p>
+        </div>
+      </div>
+    );
+  }
 
   if (state.phase === "done") {
     const { health } = state;

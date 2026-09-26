@@ -15,6 +15,9 @@ import { STATUS_HINTS, STATUS_LABELS } from "./Sidebar";
 const selectMeta = (value: Store) => value.meta;
 const selectWsState = (value: Store) => value.wsState;
 
+/** 触屏设备（手机、平板）：软键盘的回车只换行，发送靠按钮或 Ctrl/⌘+Enter。 */
+const TOUCH = typeof window !== "undefined" && window.matchMedia?.("(pointer: coarse)").matches === true;
+
 export function SessionView({ session }: { session: SessionRecord }) {
   const running = session.status === "running" || session.status === "starting";
   const dead = session.status === "dead";
@@ -659,7 +662,7 @@ function Composer({ session, dead, errored }: { session: SessionRecord; dead: bo
       }
       // 无匹配时 Enter 落回普通发送（未知路径本就不会附加）
     }
-    if (e.key === "Enter" && !e.shiftKey) {
+    if (e.key === "Enter" && !e.shiftKey && (!TOUCH || e.metaKey || e.ctrlKey)) {
       e.preventDefault();
       send();
     }
@@ -788,7 +791,13 @@ function Composer({ session, dead, errored }: { session: SessionRecord; dead: bo
           value={text}
           rows={2}
           disabled={dead}
-          placeholder={dead ? "会话已结束，新建会话可续接" : "发消息给这个 agent…（Enter 发送，Shift+Enter 换行）"}
+          placeholder={
+            dead
+              ? "会话已结束，新建会话可续接"
+              : TOUCH
+                ? "发消息给这个 agent…"
+                : "发消息给这个 agent…（Enter 发送，Shift+Enter 换行）"
+          }
           onChange={(e) => {
             setText(e.target.value);
             setCursor(e.target.selectionStart);
