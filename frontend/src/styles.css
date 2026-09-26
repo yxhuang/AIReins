@@ -1938,7 +1938,7 @@ body {
 
 .history-actions .history-note { margin: 0; }
 
-/* 「返回列表」只在窄窗口出现 */
+/* 「‹ 历史会话列表」只在窄窗口出现 */
 .history-back { display: none; }
 
 /* 窄窗口：列表与预览二选一铺满。原先把预览压到列表下方，手机上点了行看起来像没反应 */
@@ -2024,6 +2024,16 @@ body {
 @media (max-width: 720px) {
   /* dvh = 扣掉浏览器工具栏后的可见高度，避免底部输入框被 Safari 工具栏挡住 */
   .app { height: 100dvh; }
+  /* 主屏幕 PWA 里内容会铺到 iPhone 状态栏与底部横条下面（viewport-fit=cover 让 env() 报出真实值），
+     四周让出安全区；非全面屏或浏览器里 env() 为 0，不受影响 */
+  .app {
+    padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+  }
+  /* 顶部让出安全区后，把「workbench」并进「+ 新建会话」那一行，列表起点基本不下移 */
+  .app:not(.sidebar-collapsed) .sidebar { flex-flow: row wrap; align-content: flex-start; }
+  .app:not(.sidebar-collapsed) .sidebar > * { flex: 0 0 100%; min-width: 0; }
+  .app:not(.sidebar-collapsed) .sidebar > .sidebar-head { flex: 0 0 auto; }
+  .app:not(.sidebar-collapsed) .sidebar > .btn-new { flex: 1 1 0; width: auto; }
   .sidebar,
   .app.sidebar-collapsed .sidebar { width: 100%; border-right: none; }
   .app.has-main .sidebar { display: none; }

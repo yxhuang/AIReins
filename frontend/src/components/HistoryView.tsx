@@ -141,7 +141,7 @@ export function HistoryView() {
   const selectRow = useCallback((key: string) => setSelectedKey(key), []);
 
   return (
-    // has-selection：窄屏下选中后只显示预览栏（见 styles.css），靠「返回列表」回来
+    // has-selection：窄屏下选中后只显示预览栏（见 styles.css），靠「‹ 历史会话列表」回来
     <div className={`history-view${selected ? " has-selection" : ""}`}>
       <section className="history-list-pane" aria-label="历史会话列表">
         <header className="history-head">
@@ -364,7 +364,7 @@ function HistoryPreviewPane({ item, onBack }: { item: HistorySession | undefined
   return (
     <aside className="history-preview-pane" aria-label="会话预览" aria-live="polite">
       <button type="button" className="btn history-back" onClick={onBack}>
-        ‹ 返回列表
+        ‹ 历史会话列表
       </button>
       <div className="history-preview-head">
         <h2 className="history-preview-title">{item.title}</h2>
