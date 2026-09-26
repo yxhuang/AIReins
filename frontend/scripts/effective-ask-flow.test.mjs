@@ -423,5 +423,15 @@ await t("源码接线：每题选项末尾追加「其他…」按钮，选中�
   assert.ok(qBody.includes("buildQuestionAnswers(questions, selection, other)"), "答案合成未带 other");
 });
 
+await t("normalizeQuestions：otherSupported 每题优先、事件级兜底，只有明确 false 才标记（claude 缺省仍显示「其他」）", async () => {
+  const q = (extra) => ({ question: "选哪个？", options: [{ label: "A" }], ...extra });
+  assert.equal(normalizeQuestions([q({})])[0].otherSupported, undefined, "claude 缺省不标记");
+  assert.equal(normalizeQuestions([q({})], false)[0].otherSupported, false, "kimi 事件级 false");
+  assert.equal(normalizeQuestions([q({ otherSupported: true })], false)[0].otherSupported, undefined, "codex 每题 true 优先于事件级");
+  assert.equal(normalizeQuestions([q({ otherSupported: false })])[0].otherSupported, false, "codex 每题 false");
+  const block = readFileSync(new URL("../src/components/StreamItems.tsx", import.meta.url), "utf8");
+  assert.ok(block.includes("q.otherSupported !== false &&"), "QuestionBlock 未按 otherSupported 隐藏「其他…」");
+});
+
 console.log(`✅ effective/ask 前端逻辑回归全过（${pass} 例）`);
 process.exit(process.exitCode ?? 0);

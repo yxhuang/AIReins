@@ -238,9 +238,6 @@ export class SessionManager {
     questionAnswers?: QuestionAnswers,
   ): Promise<void> {
     const worker = this.requireWorker(id);
-    if (questionAnswers !== undefined && worker.kind !== "claude") {
-      throw new Error(`${worker.kind} driver 尚不支持 questionAnswers`);
-    }
     await worker.resolvePermission(requestId, decision, updatedInput, questionAnswers);
     this.emit(id, "permission_resolved", {
       requestId,

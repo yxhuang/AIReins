@@ -269,7 +269,9 @@ export const QuestionBlock = forwardRef<HTMLDivElement, { item: GateView; sessio
                     </button>
                   );
                 })}
-                {/* 「其他…」自由文本出口：选项都不合适时用自己的话回答，与选项互斥 */}
+                {/* 「其他…」自由文本出口：选项都不合适时用自己的话回答，与选项互斥；
+                    协议不收自由文本的题（kimi、codex isOther:false）不给这个出口，免得填了被后端拒 */}
+                {q.otherSupported !== false && (
                 <button
                   type="button"
                   className={`question-option question-other${otherActive ? " selected" : ""}`}
@@ -284,6 +286,7 @@ export const QuestionBlock = forwardRef<HTMLDivElement, { item: GateView; sessio
                   <span className="question-option-label">其他…</span>
                   <span className="question-option-desc">自己输入回答</span>
                 </button>
+                )}
               </div>
               {otherActive && (
                 // 复用 .config-select 控件的紧凑视觉语言；input 没有对应 CSS 规则，

@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import type { IncomingHttpHeaders } from "node:http";
+import { log } from "./logger.js";
 
 /** ~/.workbench/remote.json：手机经 Tailscale Serve 访问的入口配置（用户手写，server 只读）。 */
 export interface RemoteConfig {
@@ -9,6 +10,8 @@ export interface RemoteConfig {
   origin: string;
   /** 允许的 Tailscale 登录名（Serve 注入的 Tailscale-User-Login 头） */
   allowedLogins: string[];
+  /** 是否向这个入口开放用户自由终端；缺省关闭。 */
+  terminal?: boolean;
 }
 
 export type AccessPolicy =
@@ -80,7 +83,7 @@ export function loadRemoteConfig(path: string, localPort: number): RemoteConfig 
   } catch {
     throw new Error(`${path} 不是有效 JSON`);
   }
-  const { port, origin, allowedLogins } = (value ?? {}) as Record<string, unknown>;
+  const { port, origin, allowedLogins, terminal } = (value ?? {}) as Record<string, unknown>;
   if (typeof port !== "number" || !Number.isInteger(port) || port < 1 || port > 65_535 || port === localPort) {
     throw new Error(`${path}：port 必须是 1–65535 的整数，且不能等于本机端口 ${localPort}`);
   }
@@ -94,7 +97,13 @@ export function loadRemoteConfig(path: string, localPort: number): RemoteConfig 
   ) {
     throw new Error(`${path}：allowedLogins 必须是非空的字符串数组`);
   }
-  return { port, origin, allowedLogins };
+  if (terminal !== undefined && typeof terminal !== "boolean") {
+    log("warn", "remote.json terminal 类型无效，终端保持关闭", { path });
+  }
+  return {
+    port, origin, allowedLogins,
+    ...(terminal !== undefined ? { terminal: terminal === true } : {}),
+  };
 }
 
 /** https://<机器名>.<tailnet>.ts.net 这种规范写法（tailscale serve 只给 ts.net 域名签证书）。 */

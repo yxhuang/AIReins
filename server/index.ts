@@ -15,6 +15,7 @@ import { checkPageHealth, proxyPage, scanPages } from "./pages.js";
 import { workbenchHome } from "./persistence.js";
 import { SessionManager } from "./session-manager.js";
 import { preflightSnapshot, SnapshotCwdError } from "./snapshot.js";
+import { TerminalError, TerminalRegistry, terminalEnabled, type TerminalEvent } from "./terminals.js";
 import {
   AGENTS,
   CONFIG_OPTION_IDS,
@@ -69,12 +70,15 @@ interface WsClientState {
 }
 
 const manager = new SessionManager();
+const terminals = new TerminalRegistry(process.cwd());
 const history = new HistoryIndex();
 const pages = scanPages();
 const pagesById = new Map(pages.map((page) => [page.id, page]));
 void getMeta(); // 启动时探测一次并缓存，不让首个 /api/meta 承担延迟。
 const wss = new WebSocketServer({ noServer: true });
+const terminalWss = new WebSocketServer({ noServer: true, maxPayload: 1024 * 1024 });
 const clients = new Set<WsClientState>();
+const terminalClients = new Map<WebSocket, boolean>();
 
 // 没回 pong 的连接在 25–50 秒内被断开（terminate 会触发 close，从 clients 里移除）。
 const heartbeat = setInterval(() => {
@@ -85,6 +89,14 @@ const heartbeat = setInterval(() => {
     }
     client.alive = false;
     client.socket.ping();
+  }
+  for (const [socket, alive] of terminalClients) {
+    if (!alive) {
+      socket.terminate();
+      continue;
+    }
+    terminalClients.set(socket, false);
+    if (socket.readyState === WebSocket.OPEN) socket.ping();
   }
 }, 25_000);
 heartbeat.unref();
@@ -129,6 +141,15 @@ function handleUpgrade(request: IncomingMessage, socket: Duplex, head: Buffer, p
     return;
   }
   const url = new URL(request.url ?? "/", `http://${request.headers.host ?? `${HOST}:${PORT}`}`);
+  if (url.pathname === "/ws/terminal") {
+    if (!terminalEnabled(policy, REMOTE_CONFIG)) {
+      log("warn", "websocket rejected", { reason: "终端未对该入口开放", path: request.url });
+      socket.end("HTTP/1.1 403 Forbidden\r\nConnection: close\r\nContent-Length: 0\r\n\r\n");
+      return;
+    }
+    terminalWss.handleUpgrade(request, socket, head, (websocket) => terminalWss.emit("connection", websocket, request));
+    return;
+  }
   if (url.pathname !== "/ws") {
     socket.destroy();
     return;
@@ -164,6 +185,64 @@ wss.on("connection", (socket, request) => {
   socket.on("error", (error) => log("warn", "websocket error", { message: error.message, sessionId }));
 });
 
+terminalWss.on("connection", (socket) => {
+  terminalClients.set(socket, true);
+  const attachments = new Map<string, () => void>();
+  socket.on("message", (raw, isBinary) => {
+    if (isBinary) {
+      sendTerminalWs(socket, { type: "error", message: "终端 WS 消息必须是 JSON 文本帧" });
+      return;
+    }
+    let message: Record<string, unknown>;
+    try {
+      const value: unknown = JSON.parse(raw.toString("utf8"));
+      if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("消息必须是对象");
+      message = value as Record<string, unknown>;
+    } catch {
+      sendTerminalWs(socket, { type: "error", message: "终端 WS 消息必须是 JSON 对象" });
+      return;
+    }
+    const terminalId = message.terminalId;
+    if (typeof terminalId !== "string" || !terminalId) {
+      sendTerminalWs(socket, { type: "error", message: "terminalId 必须是非空字符串" });
+      return;
+    }
+    try {
+      if (message.type === "attach") {
+        attachments.get(terminalId)?.();
+        const replay = terminals.attach(terminalId, (event: TerminalEvent) => sendTerminalWs(socket, event));
+        attachments.set(terminalId, replay.detach);
+        sendTerminalWs(socket, { type: "attached", terminalId, omitted: replay.omitted });
+        sendTerminalWs(socket, { type: "data", terminalId, data: replay.data });
+        if (replay.exited) sendTerminalWs(socket, { type: "exit", terminalId, exitCode: replay.exitCode });
+      } else if (message.type === "input") {
+        terminals.input(terminalId, message.data);
+      } else if (message.type === "resize") {
+        terminals.resize(terminalId, message.cols, message.rows);
+      } else {
+        throw new TerminalError("invalid", `不支持的终端 WS 类型：${String(message.type)}`);
+      }
+    } catch (error) {
+      sendTerminalWs(socket, { type: "error", terminalId, message: error instanceof Error ? error.message : String(error) });
+    }
+  });
+  socket.on("close", () => {
+    for (const detach of attachments.values()) detach();
+    terminalClients.delete(socket);
+  });
+  socket.on("pong", () => terminalClients.set(socket, true));
+  socket.on("error", (error) => log("warn", "terminal websocket error", { message: error.message }));
+});
+
+function sendTerminalWs(socket: WebSocket, value: unknown): void {
+  if (socket.readyState !== WebSocket.OPEN) return;
+  if (socket.bufferedAmount > 1024 * 1024) {
+    socket.terminate();
+    return;
+  }
+  socket.send(JSON.stringify(value));
+}
+
 server.listen(PORT, HOST, () => {
   log("info", "workbench server started", { host: HOST, port: PORT, staticRoot: STATIC_ROOT });
 });
@@ -195,6 +274,8 @@ async function shutdown(signal: string): Promise<void> {
   log("info", "workbench server stopping", { signal });
   clearInterval(heartbeat);
   for (const client of clients) client.socket.close(1001, "server shutdown");
+  for (const socket of terminalClients.keys()) socket.close(1001, "server shutdown");
+  terminals.shutdown();
   await manager.shutdown();
   await new Promise<void>((resolveClose) => server.close(() => resolveClose()));
   if (remoteServer) await new Promise<void>((resolveClose) => remoteServer.close(() => resolveClose()));
@@ -202,6 +283,7 @@ async function shutdown(signal: string): Promise<void> {
 
 process.on("SIGINT", () => void shutdown("SIGINT"));
 process.on("SIGTERM", () => void shutdown("SIGTERM"));
+process.once("exit", () => terminals.shutdown());
 
 async function handleRequest(request: IncomingMessage, response: ServerResponse, policy: AccessPolicy): Promise<void> {
   const requestId = ulid();
@@ -212,7 +294,33 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
     const url = new URL(request.url ?? "/", `http://${request.headers.host ?? `${HOST}:${PORT}`}`);
     const method = request.method ?? "GET";
     if (method === "GET" && url.pathname === "/api/meta") {
-      respond(response, 200, 0, "success", await getMeta(), requestId);
+      const meta = await getMeta();
+      respond(response, 200, 0, "success", {
+        ...meta,
+        capabilities: { ...(meta.capabilities as Record<string, unknown>), terminal: terminalEnabled(policy, REMOTE_CONFIG) },
+      }, requestId);
+    } else if (url.pathname === "/api/terminals" && method === "GET") {
+      requireTerminalEnabled(policy);
+      respond(response, 200, 0, "success", { terminals: terminals.list() }, requestId);
+    } else if (url.pathname === "/api/terminals" && method === "POST") {
+      requireTerminalEnabled(policy);
+      const input = await readJson(request);
+      if (!input || typeof input !== "object" || Array.isArray(input)) throw new ApiError(400, 40040, "请求体必须是 JSON 对象");
+      try {
+        const { cwd, cols, rows } = input as Record<string, unknown>;
+        respond(response, 201, 0, "success", terminals.create({ cwd: cwd as string | undefined, cols: cols as number, rows: rows as number }), requestId);
+      } catch (error) {
+        throw asTerminalApiError(error);
+      }
+    } else if (method === "POST" && /^\/api\/terminals\/[^/]+\/kill$/.test(url.pathname)) {
+      requireTerminalEnabled(policy);
+      const id = decodeURIComponent(url.pathname.split("/")[3]);
+      try {
+        terminals.kill(id);
+        respond(response, 200, 0, "success", { ok: true }, requestId);
+      } catch (error) {
+        throw asTerminalApiError(error);
+      }
     } else if (method === "GET" && url.pathname === "/api/fs/dirs") {
       try {
         respond(response, 200, 0, "success", await listDirectories(url.searchParams.get("path") ?? undefined), requestId);
@@ -350,6 +458,17 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       durationMs: Date.now() - started,
     });
   }
+}
+
+function requireTerminalEnabled(policy: AccessPolicy): void {
+  if (!terminalEnabled(policy, REMOTE_CONFIG)) throw new ApiError(403, 40300, "终端未对该入口开放");
+}
+
+function asTerminalApiError(error: unknown): Error {
+  if (error instanceof TerminalError) {
+    return new ApiError(error.kind === "missing" ? 404 : 400, error.kind === "missing" ? 40440 : 40040, error.message);
+  }
+  return error instanceof Error ? error : new Error(String(error));
 }
 
 async function handleWsMessage(client: WsClientState, text: string): Promise<void> {

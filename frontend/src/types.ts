@@ -63,6 +63,8 @@ export interface AskQuestion {
   header?: string;
   options: AskQuestionOption[];
   multiSelect: boolean;
+  /** false = 协议不接收「其他」自由文本（kimi 全部、codex isOther:false 的题）；缺省 = 支持（claude） */
+  otherSupported?: boolean;
 }
 
 export interface SessionRecord {
@@ -275,6 +277,18 @@ export interface HistoryMessagesPage {
   /** 当前页受条数或 4 MiB 读取窗口限制（中性说明，不是错误） */
   truncated: boolean;
   durationMs: number;
+}
+
+/** 终端面板的终端信息（docs/terminal-panel-design.md §9 契约）。 */
+export interface TerminalInfo {
+  id: string;
+  cwd: string;
+  shell: string;
+  cols: number;
+  rows: number;
+  createdAt: string;
+  exited: boolean;
+  exitCode: number | null;
 }
 
 export interface ApiEnvelope<T> {

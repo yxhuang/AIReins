@@ -22,14 +22,17 @@
     "test:render-items": "tsx frontend/scripts/render-items.test.mjs",
     "test:snapshot": "tsx frontend/scripts/snapshot-flow.test.mjs",
     "test:reconnect": "tsx frontend/scripts/reconnect-flow.test.mjs",
+    "test:terminal": "tsx frontend/scripts/terminal.test.mjs",
     "test:server": "n=0; for f in server/*.test.ts; do tsx \"$f\" > /dev/null || { echo \"❌ $f\"; exit 1; }; n=$((n+1)); done; echo \"✅ server 测试全过（$n 个文件）\"",
-    "test": "npm run check:theme && npm run test:mentions && npm run test:store && npm run test:pages && npm run test:resume && npm run test:effective-ask && npm run test:history && npm run test:render-items && npm run test:snapshot && npm run test:reconnect && npm run test:server"
+    "test": "npm run check:theme && npm run test:mentions && npm run test:store && npm run test:pages && npm run test:resume && npm run test:effective-ask && npm run test:history && npm run test:render-items && npm run test:snapshot && npm run test:reconnect && npm run test:terminal && npm run test:server"
   },
   "devDependencies": {
     "@types/node": "^26.2.0",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.4",
     "@types/ws": "^8.18.1",
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/xterm": "^6.0.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "tsx": "^4.23.12",
@@ -37,6 +40,7 @@
     "vite": "^8.2.2"
   },
   "dependencies": {
+    "@lydell/node-pty": "1.2.0-beta.15",
     "ws": "^8.21.3"
   }
 }

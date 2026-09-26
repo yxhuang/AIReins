@@ -70,9 +70,13 @@ interface SidebarProps {
   onToggle: () => void;
   newOpen: boolean;
   onNewOpenChange: (open: boolean) => void;
+  /** meta.capabilities.terminal === true 才显示终端入口（按请求入口由后端计算） */
+  terminalCapable: boolean;
+  termOpen: boolean;
+  onToggleTerm: () => void;
 }
 
-export function Sidebar({ collapsed, onToggle, newOpen, onNewOpenChange }: SidebarProps) {
+export function Sidebar({ collapsed, onToggle, newOpen, onNewOpenChange, terminalCapable, termOpen, onToggleTerm }: SidebarProps) {
   const sessionRecords = useStore(selectSessions);
   const now = useStore(selectNow);
   const currentId = useStore(selectCurrentId);
@@ -174,9 +178,54 @@ export function Sidebar({ collapsed, onToggle, newOpen, onNewOpenChange }: Sideb
       <div className="sidebar-foot">
         <HistoryNav collapsed={collapsed} />
         <PageNav collapsed={collapsed} />
+        {terminalCapable && (
+          <TerminalNav collapsed={collapsed} open={termOpen} onToggle={onToggleTerm} />
+        )}
         <SettingsMenu />
       </div>
     </aside>
+  );
+}
+
+/** 左栏底部「终端」入口（页面分区下方、齿轮上方，同一套分区语言；收起态只显图标）。 */
+function TerminalNav({
+  collapsed,
+  open,
+  onToggle,
+}: {
+  collapsed: boolean;
+  open: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <nav className="page-nav" aria-label="终端">
+      <button
+        type="button"
+        className={`page-nav-item${open ? " active" : ""}`}
+        title="终端：工作区级内置终端，切会话不影响"
+        aria-label="终端"
+        aria-pressed={open}
+        onClick={onToggle}
+      >
+        <span className="page-icon" aria-hidden="true">
+          <svg
+            viewBox="0 0 24 24"
+            width="16"
+            height="16"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <rect x="2" y="4" width="20" height="16" rx="2" />
+            <polyline points="6 9 9 12 6 15" />
+            <line x1="12" y1="15" x2="18" y2="15" />
+          </svg>
+        </span>
+        {!collapsed && <span className="page-nav-name">终端</span>}
+      </button>
+    </nav>
   );
 }
 

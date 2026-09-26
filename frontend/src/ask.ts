@@ -10,7 +10,7 @@ import { asRecord } from "./format";
  * 归一 permission_request 下行的 questions：只保留「question 为非空字符串且至少一个
  * label 非空的选项」的条目；全部无效时返回空数组（调用方回退到普通审批卡片）。
  */
-export function normalizeQuestions(raw: unknown): AskQuestion[] {
+export function normalizeQuestions(raw: unknown, payloadOtherSupported?: unknown): AskQuestion[] {
   if (!Array.isArray(raw)) return [];
   const questions: AskQuestion[] = [];
   for (const item of raw) {
@@ -35,6 +35,10 @@ export function normalizeQuestions(raw: unknown): AskQuestion[] {
       ...(typeof q.header === "string" && q.header ? { header: q.header } : {}),
       options,
       multiSelect: q.multiSelect === true,
+      // 每题的 otherSupported 优先，其次事件级；只有明确 false 才隐藏「其他…」
+      ...(q.otherSupported === false || (q.otherSupported === undefined && payloadOtherSupported === false)
+        ? { otherSupported: false }
+        : {}),
     });
   }
   return questions;

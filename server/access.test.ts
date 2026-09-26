@@ -48,6 +48,12 @@ try {
   const good = { port: 8792, origin, allowedLogins: ["me@github"] };
   await writeFile(file, JSON.stringify(good));
   assert.deepEqual(loadRemoteConfig(file, 8790), good);
+  await writeFile(file, JSON.stringify({ ...good, terminal: true }));
+  assert.deepEqual(loadRemoteConfig(file, 8790), { ...good, terminal: true }, "显式开启远程终端");
+  await writeFile(file, JSON.stringify({ ...good, terminal: false }));
+  assert.deepEqual(loadRemoteConfig(file, 8790), { ...good, terminal: false }, "显式关闭远程终端");
+  await writeFile(file, JSON.stringify({ ...good, terminal: "true" }));
+  assert.deepEqual(loadRemoteConfig(file, 8790), { ...good, terminal: false }, "错误类型按关闭处理");
   const bad: unknown[] = [
     { ...good, port: 8790 }, // 与本机端口相同
     { ...good, port: "8792" },

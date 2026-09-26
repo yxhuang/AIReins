@@ -1,5 +1,23 @@
 # M0：三家 CLI 协议 spike 与报文抓取
 
+## P1-1：结构化提问协议复核（2026-09-26）
+
+本次复核使用 `codex-cli 0.157.1` 的 `codex app-server generate-json-schema --out /tmp/codex-schema-0157` 产物，以及本机 `~/.kimi-code/bin/kimi` 2.1.1 ELF 内嵌的 ACP SDK 与 `interaction-bridge` 实现。以下为 schema/本机实现事实；尚未做真实模型触发提问的冒烟验证。
+
+### Codex 0.157.1
+
+`ServerRequest.json` 仍含 `item/tool/requestUserInput`。`ToolRequestUserInputParams.json` 要求 `threadId`、`turnId`、`itemId`、`isBlocking`、`questions`；每题要求 `id`、`header`、`question`，可有 `options: [{label,description}] | null`、`isOther`（默认 false）、`isSecret`（默认 false）。`autoResolutionMs` 已标废弃。`ToolRequestUserInputResponse.json` 要求 `{answers:{[questionId]:{answers:string[]}}}`。无原生 `multiSelect`，无 accept/decline/cancel 枚举；空 `answers` 对象是 Workbench 的跳过约定，需真机确认 agent 对跳过的呈现。
+
+与 0.148.0 旧记录相比：请求/应答方法和按 id 回写仍成立；新增或明确了 blocking、secret、other、废弃的自动解决字段，Workbench driver 已接入。因现有前端只能渲染有选项的题，`options:null` 和 `isSecret:true` 会安全跳过。
+
+### Kimi Code CLI 2.1.1
+
+ACP initialize 的客户端能力字段为 `clientCapabilities: { elicitation: { form: {} } }`。本机实现只检查 `clientCapabilities.elicitation.form` 是否存在，再对 AskUserQuestion 调用 `elicitation/create`。form 请求含 `sessionId`、`toolCallId`、`mode:"form"`、`message`（问题文本逐行连接）及 `requestedSchema:{type:"object",properties,required}`。原生桥接把第 i 题映为 `q{i}`：单选 `{type:"string",oneOf:[{const,title,description}]}`，多选 `{type:"array",minItems:1,items:{anyOf:[{const,title,description}]}}`。ACP SDK 还允许普通 string、boolean、number、enum 等扁平属性类型；本工单只把有可选项的 string/array 映入现有 QuestionBlock。
+
+回应为 `{action:"accept",content:{q0:"选项",q1:["选项A","选项B"]}}`，明确拒绝为 `{action:"decline"}`，关闭/取消为 `{action:"cancel"}`。Kimi 桥接对非 accept、无 content、无匹配选项均按「用户未回答」处理；对多选按原选项顺序拼成逗号加空格的工具答案。桥接源码明确说「其他」自由文本没有等价 form 字段；提交不在枚举里的内容会被过滤，所以 driver 必须拒绝并提示。
+
+与 0.38.0 旧记录相比：老版结论中 form 客户端可拿到多题/多选依然成立；本次确认了 2.1.1 的精确 capability 字段、schema 映射和三种 action，Workbench 已声明 form 能力并接入。普通审批与最终执行闸门不变。
+
 实测日期：2026-08-21；工作目录：`/home/user/dev/workbench`。
 
 版本：Node `v22.23.1`、Claude Code `2.1.238`、Codex CLI `0.148.0`、Kimi Code CLI `0.38.0`。三份 capture 都采用同一 NDJSON 信封：

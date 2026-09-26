@@ -149,7 +149,7 @@ export function gateFromEvent(event: UnifiedEvent, agent: AgentKind): GateView {
 
   // Claude AskUserQuestion：interactionType 标记 + 结构化 questions[]；归一后为空则回退普通审批卡片。
   const questions =
-    p.interactionType === "ask_user_question" ? normalizeQuestions(p.questions) : [];
+    p.interactionType === "ask_user_question" ? normalizeQuestions(p.questions, p.otherSupported) : [];
 
   // 兜底详情：优先展示 input，其次 toolCall，再次整个 payload。
   const detailSource =

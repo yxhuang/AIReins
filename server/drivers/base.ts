@@ -65,11 +65,14 @@ export abstract class BaseDriver implements Driver {
       this.callbacks.status("error");
     });
     child.on("close", (code, signal) => {
+      this.handleProcessExit();
       this.callbacks.exited({ code, signal, expected: this.stopping });
     });
   }
 
   protected abstract handleStdoutLine(line: string): void;
+
+  protected handleProcessExit(): void {}
 
   protected send(message: unknown): void {
     if (!this.child?.stdin.writable) throw new Error(`${this.kind} worker stdin 已关闭`);

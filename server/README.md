@@ -57,13 +57,15 @@ npm run server
 {
   "port": 8792,
   "origin": "https://my-desktop.tailxxxx.ts.net",
-  "allowedLogins": ["你的登录名@github"]
+  "allowedLogins": ["你的登录名@github"],
+  "terminal": false
 }
 ```
 
 - `port`：1–65535，不能与本机端口相同，且须与 Serve 转发目标一致。
 - `origin`：手机地址栏里的源；全小写，无路径、无结尾斜杠。
 - `allowedLogins`：允许访问的 Tailscale 登录名。未知时可先填占位值，手机打开页面后，403 提示会显示实际登录名。
+- `terminal`：可选布尔值。只有显式设为 `true` 才允许远程入口使用自由终端；缺省或类型不对均按 `false` 处理，类型错误会记日志。
 
 Serve 会剥掉客户端自带的同名身份头，再注入真实身份。远程端口只绑定 `127.0.0.1`；DNS 重绑定网页的 Host 过不了检查。本机进程可伪造此头，但本来就能访问本机入口。
 
@@ -186,6 +188,20 @@ Claude 额外固定返回四个字段；未显式覆盖时的初始形状如下�
 `config.model / config.effort` 只表示会话级覆盖，`null` 不改写；前端据此区分“覆盖”与“继承”。`effectiveModel / effectiveEffort` 是当前能确认的实际值，拿不到就是 `null`。对应 source 为：`session`（会话显式覆盖）、`settings`（分层 settings 合并）或 `init`（Claude `system/init` 的运行时回报）；值为 `null` 时 source 也为 `null`。兼容字段 `model / effort` 保留既有语义：首轮前是覆盖值或 `null`，init 报出某项后更新为该项的运行时精确值。显式覆盖始终保留在 `config` 中，不会被 settings 或 init 改写。
 
 `riskyMode` 在 Claude 的 `bypassPermissions / dontAsk`、Codex 的 `never`、Kimi 的 `yolo` 下为 `true`。这是每会话标记，不存在全局 yolo 开关。
+
+## 终端
+
+用户自由终端属于工作区，与会话和 Kimi ACP 的 `terminal/create` 完全隔离。它在 server 进程内存中保存，断开 WebSocket 或隐藏面板不会结束 PTY；server 重启会结束全部 PTY。`GET /api/meta` 的 `data.capabilities.terminal` 按请求入口返回：本机入口为 `true`，远程入口仅在 `remote.json` 显式配置 `"terminal": true` 时为 `true`。关闭时以下 REST 均返回 HTTP 403，`/ws/terminal` 拒绝升级。两个监听都只绑定 `127.0.0.1`；远程访问须经 Tailscale Serve，并通过既有 Host、Origin 和 Tailscale 身份检查。自由终端直接运行用户 shell，不经过 agent 审批闸门。
+
+REST 沿用 `{code,msg,data,request_id}` 信封：
+
+- `GET /api/terminals` → `data: {terminals: TerminalInfo[]}`。
+- `POST /api/terminals`，body `{cwd?: string, cols: number, rows: number}` → `data: TerminalInfo`。`cwd` 缺省或不存在时回退到 server 的 `defaultCwd`；shell 取 `$SHELL`，缺省 `bash`，以登录交互模式启动，继承 server 环境。`cols` 限 1–500，`rows` 限 1–300，均须为整数。
+- `POST /api/terminals/:id/kill` → `data: {ok: true}`。只结束进程，不删除文件；退出记录保留到 server 重启。
+
+`TerminalInfo = {id:string, cwd:string, shell:string, cols:number, rows:number, createdAt:string, exited:boolean, exitCode:number|null}`。
+
+`/ws/terminal` 是独立的 JSON 文本帧通道，一个连接可订阅多个终端。上行 `{type:"attach",terminalId}` 后，服务端依次发送 `{type:"attached",terminalId,omitted}`、`{type:"data",terminalId,data}`（当前全部回放），随后推送实时 `{type:"data",terminalId,data}`。重复 attach 同一 id 会重新回放。每终端只保留最近 256KB 输出，`omitted` 为此前丢弃的字节数。上行还支持 `{type:"input",terminalId,data}` 和 `{type:"resize",terminalId,cols,rows}`。进程退出发送 `{type:"exit",terminalId,exitCode}`；未知 id、已退出或参数无效发送 `{type:"error",terminalId?,message}`。连接断开仅解除订阅，不结束 PTY。
 
 ## 委派前自动快照
 
@@ -376,6 +392,8 @@ interface PageHealth {
 
 ### 反向代理 `/pages/<id>/*`（2026-09-26）
 
+> 安全提示（2026-09-26 终端上线后）：被代理页面与工作台同源，能调用 `/api/terminals` 与 `/ws/terminal`，等于拿到本机 shell。只给完全信任的本机服务开 `proxy: true`。
+
 `proxy: true` 的页面经 workbench 自己的源访问，手机经 Tailscale 也能用（直连 `127.0.0.1` 在手机上指的是手机自己）。
 
 - `GET /pages/<id>` → 302 到 `/pages/<id>/`；`/pages/<id>/<rest>?<query>` 转发到 `url` 下的 `<rest>?<query>`，方法、请求体、响应状态与响应头原样透传（去掉 hop-by-hop 头），上游 30 秒超时。
@@ -519,7 +537,9 @@ Claude 的 `AskUserQuestion` 仍通过原 `permission_request` 审批闸门下�
 }
 ```
 
-前端选择后发送上面的 `questionAnswers` 形式；key 必须逐字使用 `question`，不能使用 `header`。多选答案按 Claude 协议合并为逗号分隔的一个字符串。Server 校验答案后把它合成为原控制应答的 `updatedInput.answers`，不会绕开审批闸门，也不会把 `updatedInput` 错当成独立工具结果；`questionAnswers` 与原始 `updatedInput` 不能同时发送。当前该便捷字段只由 Claude driver 支持。
+前端选择后发送 `questionAnswers: {"完整问题文本":"答案"}`；key 必须逐字使用 `question`，不能使用 `header`。多选答案由现有前端按选项顺序合并为逗号分隔的一个字符串；`questionAnswers` 与原始 `updatedInput` 不能同时发送。三家都通过原 `permission_request` / `permission_resolved` 通道，driver 逐题校验并转换：Claude 合成 `updatedInput.answers`，Codex 转为以原生 question `id` 为键的 `{answers:[字符串]}`，Kimi 转为以 form 属性键为键的 `content`（多选为字符串数组）。`deny` 是跳过：Codex 回 `{answers:{}}`，Kimi 回 `{action:"decline"}`；会话主动取消/停止时 Kimi 回 `{action:"cancel"}`。进程已经退出时无法再向它发送响应，driver 清理本地挂起项，前端以 `process_exited` 将卡片标为失效。
+
+Codex 0.157.1 没有多选字段，统一事件的 `multiSelect` 固定为 `false`；`isOther:false` 时后端拒绝自由文本。Kimi 2.1.1 的内置 AskUserQuestion → ACP form 桥接支持多题及多选，却明确不支持「其他」自由文本，后端会拒绝该输入，避免 agent 将它当作空答案。两家事件均带 `otherSupported` 和 `protocolLimitations` 提示；Codex 的每题对象也带 `otherSupported`，用于混合题组。**前端仍总是显示「其他」按钮**，尚需前端读取每题的 `otherSupported:false` 并隐藏按钮，才能避免用户选到协议不支持的路径；本工单不改 `frontend/**`。Codex 无选项/秘密提问及 Kimi 非选项或非 form 字段无法用现有 QuestionBlock 表达，后端会自动跳过/取消并发诊断事件；若要显示文本输入或秘密输入，需要前端另加对应控件。
 
 协议诊断来自真实进程（2026-08-21、2026-08-23）：
 
@@ -530,8 +550,8 @@ Claude 的 `AskUserQuestion` 仍通过原 `permission_request` 审批闸门下�
 针对结构化提问的补充诊断（2026-08-23）：
 
 - Claude Code 2.1.238：`control_response` 的 `allow` 只接受并使用 `updatedInput`；在其中加入 `answers: {"完整问题文本":"答案"}` 后，`AskUserQuestion` 返回正常工具结果并让模型继续。额外塞入 `result / toolResult / content / message` 不会成为工具结果。`deny.message` 会原样成为 `is_error:true` 的工具结果，可作降级，但会同时留下拒绝语义。无答案放行后再发一条明确关联的 user message 也能继续，但会多出一个用户回合。
-- Codex CLI 0.148.0：实验性 app-server schema 已有专用 `item/tool/requestUserInput` server request，客户端按 question `id` 返回 `answers[]`；当前 Workbench Codex driver 尚未接入该方法。
-- Kimi Code CLI 0.38.0：引擎对支持 ACP form elicitation 的客户端可用 `elicitation/create`；当前 Workbench 未声明该能力，因此会降级到 `session/request_permission`，只能表达第一问且多选退化为单选。当前通用审批应答也不能让前端指定同为 `allow_once` 的具体答案选项，尚不构成完整等价能力。
+- Codex CLI 0.157.1：已接入 app-server `item/tool/requestUserInput`，按原生 question `id` 回写 `{answers:{id:{answers:[text]}}}`。schema 新增 `isBlocking`、`isSecret` 等字段；无原生多选和显式取消 action，跳过以空 `answers` 对象表示。
+- Kimi Code CLI 2.1.1：ACP initialize 已声明 `clientCapabilities.elicitation.form`，`elicitation/create` 可原样覆盖多题与多选；回包为 `{action:"accept",content:{q0:"选项",q1:["选项A","选项B"]}}`，跳过/取消分别为 `decline`/`cancel`。`session/request_permission` 仍用于普通审批；`terminal/create`、`fs/write_text_file` 最终闸门继续拦截。
 
 `decision` 可为 `allow / deny / always`，也可附 `updatedInput`。Claude 的 `request_id` 原样保留并回填，`permissionSuggestions` 透传；Codex 按 server request 的 JSON-RPC `id` 应答；Kimi 每次 `terminal/create` 和 `fs/write_text_file` 都会额外产生不可绕过的最终审批事件。
 

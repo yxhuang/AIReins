@@ -47,6 +47,7 @@ frontend/
     config-view.ts      配置控件纯逻辑：mutableVia:"restart" 代价旁注判定与文案（无 DOM 依赖，可单测）
     resumed-history.ts  续接会话历史区纯逻辑：最新一页打底 / nextCursor 翻页 prepend / DOM 上限（无 DOM 依赖，可单测）
     snapshot.ts         建会话前快照编排纯逻辑：preflight 分支决策（git 直连 / 小而够静默快照 / 超阈值或空间不足弹确认框）/ 确认框原因文案 / 三出口 → snapshot 入参（无 DOM 依赖，可单测）
+    terminal.ts         终端面板纯逻辑：宽度 clamp / 快捷键栏按键→控制序列 / /ws/terminal 下行帧归约 / WS URL 构造（无 DOM 依赖，可单测）
     components/
       Sidebar.tsx       会话列表（身份色脊 / 状态点 / 闸门徽标 / 危险模式「!」标记 / 行右删除入口 ×：hover/focus 显现、Tab 可达，点击后就地变行内二次确认）+ 新建会话表单（首条消息框底栏带配置胶囊；cwd 三级预填回退 + 空 cwd 可见禁用原因；提交前快照预检 preflight，需要时弹 SnapshotConfirm）+ 底部「历史会话」入口、「页面」分区与设置入口
       SettingsMenu.tsx  设置齿轮 + 锚定浮层（分组/条目结构，60vh 限高滚动 + focus trap）；主题三选一写 <html data-theme>、localStorage 持久化（读写均 try/catch）
@@ -56,6 +57,7 @@ frontend/
       SessionView.tsx   会话头（usage 分家渲染 / 配置只读摘要（跟随配置时并入有效值）/ 快照路径（会话记录带 snapshotPath 时）/ 中断）+ 危险模式警示条 + 历史消息区（resumedFrom 时）+ 事件流（AskUserQuestion 走提问选择卡片）+ 输入框（配置控件行在输入框正上方，跟随配置时显示实际生效值与来源小字；行首 / 命令面板、@ 文件引用面板与待附加预览条、结构化 command 上行、codex 降级说明；草稿按会话内存缓存，切走切回不丢；dead 会话「新建会话并续接」出口）+ 未决闸门贴条
       ResumedHistory.tsx 续接会话的历史消息区：实时流上方、默认加载最近一页、「加载更早的消息」nextCursor 翻页 prepend、弱化底色 + 分隔线与实时区区分、用户/助手两态（不伪造工具/思考块）
       StreamItems.tsx   用户消息 / 文本块 / 思考折叠块 / 工具卡片 / 闸门块 / 提问选择卡片（AskUserQuestion）/ 系统行
+      TerminalPanel.tsx 终端面板：xterm + 专用 WS /ws/terminal（重连后重新 attach 回放）、可拖分隔条、标题条（cwd + 结束/隐藏/新建）、手机快捷键栏；隐藏只是 CSS 隐藏，实例与连接保留
     styles.css          设计令牌（深浅两套）与全部样式
 ```
 
@@ -397,7 +399,26 @@ frontend/
   - **滑块拖动高频闪烁**：headless chromium 复现为单向拖动时档位 3→2→3 来回跳。根因是布局反馈环：标签「（high）/（xhigh）」宽度变 → 自适应宽度的菜单变宽变窄 → 靠右的滑块左右挪 → 同一指针位置换算出不同档位。修法：含滑块的菜单定宽且滑块行不换行（`.cfg-menu:has(.cfg-slider-row)`），并在按下时锁定滑块坐标框（`dragRect`），`pointercancel` 也收尾提交。复测 1280 与 390 宽下拖动序列均为 0→4→0 单调，整次拖动只提交一次。
 - 验证：typecheck、build、`npm test` 全过；拖动行为用 playwright headless chromium 在活会话里实测（拦截 `set_config` 帧，不触发真实重启）。
 
-## 已知取舍
+### M19 终端面板（2026-09-26）
+
+工作区级内置终端（PTY 在 server 进程里，接口以 `docs/terminal-panel-design.md` §9 为契约；后端由另一执行者并行实现，本轮前端按契约写死形状）。
+
+- **入口**：左栏底部「终端」按钮（页面分区下方、齿轮上方，同一套 page-nav 分区语言，收起态只显图标），仅当 `meta.capabilities.terminal === true`（按请求入口由后端计算）时渲染；点击切换面板显示/隐藏。
+- **布局**：`.main` 外套 `.workspace`（flex row），`.main` 内部规则一行未动；终端开启时右侧渲染 `.term-split`（6px 分隔条）+ `.term-panel`。分隔条 `role="separator"` + `aria-orientation="vertical"` + `aria-valuenow/min/max`，方向键每次 16px（← 变宽 / → 变窄），指针用 `setPointerCapture` + `touch-action:none`，拖动期间 `<body>` 加 `.resizing`（`user-select:none` + `cursor:col-resize`），双击复位默认宽度 480。宽度 px 存 localStorage（`workbench-term-width`，typeof 判定 + try/catch），挂载与 `window.resize` 时 clamp 到 `[320, 视口宽−480]`；clamp 是纯函数 `terminal.ts` 的 `clampPanelWidth`（视口过窄、上限<下限时按下限 320 收口，面板不消失）。
+- **窄屏（≤720px）**：不做分栏，终端打开时 `.app.term-open` 隐藏左栏与 `.main`，面板铺满（内联宽度用 `!important` 压过，同 `.page-view` 纪律），标题条出现「‹ 返回」；终端下方一条快捷键栏（Esc/Tab/Ctrl-C/Ctrl-D/↑/↓/←/→，点按经 WS `input` 帧发对应控制序列），触屏键高 ≥44px（`pointer: coarse`），iOS 安全区沿用 `.app` 的 `env(safe-area-inset-*)` 让位。
+- **终端本体**：`@xterm/xterm` + `@xterm/addon-fit`；可见时 fit，ResizeObserver 跟随尺寸变化 fit → 上行 `{type:"resize"}`（尺寸没变不发）。**隐藏只是 CSS display:none**：xterm 实例、WS 连接、服务端 PTY 全部保留，组件首次打开后常驻不卸载。
+- **生命周期**：首次打开 `GET /api/terminals`，有未退出的 attach 第一个，没有就 `POST /api/terminals`（cwd 取当前所看会话的 cwd，没有会话取 `meta.defaultCwd`；cols/rows 取 `fitAddon.proposeDimensions()`）。标题条显示 cwd（等宽、过长省略 + title 全量）+「结束」（`POST /api/terminals/:id/kill`，标题条内就地二次确认，Esc 取消，与会话行删除同一纪律）+「隐藏」。收到 `exit` 帧后标题条显示「已退出（码 N）」并换成「新建终端」按钮。
+- **连接**：单独一条 WS `/ws/terminal`（`buildTerminalWsUrl`：https 入口用 wss，与 store.ts 的 /ws 同一取法）；断线指数退避重连（1s 起封顶 15s，同全局 WS 纪律）；每次 open 后对当前终端重新 `attach`，服务端回 `attached` → 前端先 `term.reset()` 再写回放数据；`omitted > 0` 时面板顶部一行中性提示「已省略较早输出」；页面回前台（visibilitychange）时若连接已断立即重连。下行帧归约是纯函数 `reduceTermFrame`（attached/data/exit/error，其他 terminalId 的帧一律忽略）。
+- **主题**：xterm 主题不硬编码颜色，运行时从 `--term-*` 令牌读计算样式（`getComputedStyle`），`MutationObserver` 监听 `<html data-theme>` + `matchMedia("(prefers-color-scheme: dark)")` 监听系统切换，三态主题即时跟随。`--term-*`（前景/背景/光标/选区 + ANSI 16 色）在 `:root` 与两处深色块定义，两处深色逐字一致由 `check:theme` 校验。配色三条裁决（终端内容区豁免不变量 / chrome 禁暖色 / ANSI 黄往橄榄偏）已写进 `styles.css` 顶部不变量注释。
+- **a11y**：面板 `role="region" aria-label="终端"`；快捷键栏 `role="toolbar"`；图标/文字按钮均有 aria-label；分隔条可聚焦走全局 `:focus-visible` 描边；终端无动画，`prefers-reduced-motion` 纪律不受影响。
+
+**打桩/纯逻辑测试** `frontend/scripts/terminal.test.mjs`（`npm run test:terminal`，16 例，已挂进根 `npm test` 聚合 `test:reconnect` 之后）：clamp 区间/上下限/视口过窄/坏输入/取整；快捷键八键控制序列逐字断言；WS URL http→ws、https→wss；帧归约（attached→reset+omitted、data 追加、attached 前的 data 忽略、重复 attach 重新 reset、exit 带码/缺码、未知 terminalId 全部忽略、error 归属、垃圾帧）。
+
+- [x] **100. 构建与检查全绿。** 实测：`npm run typecheck:frontend` 退出码 0；`npm run build` 退出码 0（44 modules；xterm 进场后 bundle 超 500kB 触发 vite chunk 体积提示，仅警告未处理）；`npm run check:theme` 输出「✅ 深色令牌两份一致（46 项）」；`npm run test:terminal` 16 例全过；既有 9 套前端测试（mentions/store/pages/resume/effective-ask/history/render-items/snapshot/reconnect）全过。
+
+**只能等后端就绪后真机验证的**（本轮均为代码复核，无头环境未起真实 PTY）：① 建终端/attach/回放/实时输出的完整链路（含 omitted 提示出现时机）；② resize 上行后全屏程序（vim/htop）重排；③ 断线重连后回放与重复 attach 的 reset 表现；④ kill 后 exit 帧到达与「已退出（码 N）」切换；⑤ 分隔条拖动/键盘/双击与宽度持久化的实际手感；⑥ 手机窄屏铺满、快捷键栏点按与安全区；⑦ 深浅色切换下 xterm 主题的即时跟随与 ANSI 黄实际观感；⑧ kill 成功但 WS 恰好断开时退出码依赖下次 attach/刷新才可见（契约内已知边界）。
+
+
 
 - `@token` 严格按空白切段：句末紧跟的标点（如 `@a.ts，`）自 M12 起会在解析时逐级剥尾部标点、剥后命中真实文件才采纳；但标点后无空格直接接文字（如 `@a.ts，然后`）标点不在 token 尾部，仍判「未找到」，需要在引用后敲空格。
 

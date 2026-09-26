@@ -3,6 +3,7 @@ import type {
   DriverConfigSchema,
   DriverOptions,
   PermissionDecision,
+  QuestionAnswers,
   SessionConfig,
   UserMessageInput,
 } from "../types.js";
@@ -20,6 +21,18 @@ interface CodexPermission {
   rpcId: string | number;
   method: string;
   params: Record<string, any>;
+}
+
+interface CodexQuestion {
+  id: string;
+  question: string;
+  options: Array<{ label: string; description?: string }>;
+  isOther: boolean;
+}
+
+interface CodexUserInput {
+  rpcId: string | number;
+  questions: CodexQuestion[];
 }
 
 const APPROVAL_METHODS = new Set([
@@ -130,6 +143,7 @@ export class CodexDriver extends BaseDriver {
   private rpcId = 1_000;
   private readonly rpc = new Map<number, PendingRpc>();
   private readonly permissions = new Map<string, CodexPermission>();
+  private readonly userInputs = new Map<string, CodexUserInput>();
   private threadId = "";
   private turnId = "";
   private configSchema = codexConfigSchemaFromModels([], undefined);
@@ -308,7 +322,37 @@ export class CodexDriver extends BaseDriver {
     });
   }
 
-  async resolvePermission(requestId: string, decision: PermissionDecision): Promise<void> {
+  async resolvePermission(
+    requestId: string,
+    decision: PermissionDecision,
+    updatedInput?: unknown,
+    questionAnswers?: QuestionAnswers,
+  ): Promise<void> {
+    const userInput = this.userInputs.get(requestId);
+    if (userInput) {
+      if (updatedInput !== undefined) throw new Error("Codex 提问不接受 updatedInput");
+      const answers: Record<string, { answers: string[] }> = Object.create(null);
+      if (decision !== "deny") {
+        if (!questionAnswers) throw new Error("Codex 提问缺少 questionAnswers");
+        if (Object.keys(questionAnswers).length !== userInput.questions.length) {
+          throw new Error("Codex 提问必须回答全部问题");
+        }
+        for (const question of userInput.questions) {
+          if (!Object.hasOwn(questionAnswers, question.question)) {
+            throw new Error(`Codex 提问缺少答案：${question.question}`);
+          }
+          const answer = questionAnswers[question.question]!.trim();
+          if (!question.isOther && !question.options.some((option) => option.label === answer)) {
+            throw new Error(`Codex 提问不接受自由文本：${question.question}`);
+          }
+          answers[question.id] = { answers: [answer] };
+        }
+      }
+      this.send({ jsonrpc: "2.0", id: userInput.rpcId, result: { answers } });
+      this.userInputs.delete(requestId);
+      return;
+    }
+    if (questionAnswers !== undefined) throw new Error("Codex 普通审批不接受 questionAnswers");
     const pending = this.permissions.get(requestId);
     if (!pending) throw new Error(`Codex permission_request 不存在：${requestId}`);
     let protocolDecision: unknown = decision === "deny" ? "cancel" : "accept";
@@ -323,11 +367,13 @@ export class CodexDriver extends BaseDriver {
   }
 
   async interrupt(): Promise<void> {
+    this.cancelUserInputs();
     if (!this.threadId || !this.turnId) return;
     await this.request("turn/interrupt", { threadId: this.threadId, turnId: this.turnId });
   }
 
   async stop(): Promise<void> {
+    this.cancelUserInputs();
     if (this.threadId && this.child?.stdin.writable) {
       try {
         await withTimeout(this.request("thread/unsubscribe", { threadId: this.threadId }), 1_000, "Codex unsubscribe");
@@ -368,7 +414,58 @@ export class CodexDriver extends BaseDriver {
       });
       return;
     }
+    if (message.method === "item/tool/requestUserInput" && Object.hasOwn(message, "id")) {
+      const rawQuestions = message.params?.questions;
+      const questions: CodexQuestion[] = Array.isArray(rawQuestions)
+        ? rawQuestions.map((raw: any) => ({
+          id: raw?.id,
+          question: raw?.question,
+          options: Array.isArray(raw?.options) ? raw.options : [],
+          isOther: raw?.isOther === true,
+        })) : [];
+      const valid = questions.length > 0 && questions.length <= 4
+        && questions.every((q, i) => typeof q.id === "string" && q.id
+          && typeof q.question === "string" && q.question
+          && q.options.length > 0 && q.options.every((o) => typeof o?.label === "string" && o.label)
+          && new Set(q.options.map((o) => o.label)).size === q.options.length
+          && rawQuestions[i]?.isSecret !== true)
+        && new Set(questions.map((q) => q.question)).size === questions.length
+        && new Set(questions.map((q) => q.id)).size === questions.length;
+      const requestId = `codex:question:${String(message.id)}`;
+      if (!valid) {
+        // 无选项、秘密字段或超出前端限制时，安全结束本次请求，避免展示不可回答的卡片。
+        this.send({ jsonrpc: "2.0", id: message.id, result: { answers: {} } });
+        this.callbacks.emit("raw_event", { source: "codex", method: message.method,
+          warning: "提问包含前端无法表达的字段，已按跳过处理" });
+        return;
+      }
+      this.userInputs.set(requestId, { rpcId: message.id, questions });
+      this.callbacks.emit("permission_request", {
+        requestId, gate: message.method, toolName: "requestUserInput",
+        interactionType: "ask_user_question", questionProtocol: "codex_request_user_input_v1",
+        questions: questions.map((q, i) => ({
+          question: q.question, header: rawQuestions[i].header,
+          options: q.options, multiSelect: false, otherSupported: q.isOther,
+        })),
+        otherSupported: questions.every((q) => q.isOther),
+        protocolLimitations: ["Codex schema 无多选字段；每题只回传一个答案", "isOther=false 时不接受自由文本"],
+      });
+      return;
+    }
     this.handleNotification(message.method, message.params ?? {});
+  }
+
+  protected handleProcessExit(): void {
+    this.userInputs.clear();
+  }
+
+  private cancelUserInputs(): void {
+    for (const [requestId, pending] of this.userInputs) {
+      if (this.child?.stdin.writable) {
+        this.send({ jsonrpc: "2.0", id: pending.rpcId, result: { answers: {} } });
+      }
+      this.userInputs.delete(requestId);
+    }
   }
 
   private handleNotification(method: string, params: Record<string, any>): void {

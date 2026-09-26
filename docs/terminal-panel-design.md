@@ -179,3 +179,37 @@ M1 就能满足「随时可以使用 terminal」。M2 之前刷新页面会断�
 2. **终端归属**：工作区级（推荐）还是每会话一个？
 3. **ANSI 黄**：按上面三条裁决走，还是你有别的想法？
 4. **鉴权**：这轮一起做，还是先不做、同时明确暂缓网络暴露？
+
+---
+
+## 9. 定案（2026-09-26 用户拍板）与接口契约
+
+§8 四件事的结论：
+
+1. **PTY 用预编译版 `@lydell/node-pty`**（固定 `1.2.0-beta.15`，同 node-pty API，自带 linux-x64 二进制）。本机没有 C++ 工具链，官方 node-pty 装不上；主会话已实测 spawn、`resize` 后 `stty size` 从 24×80 变 40×120。依赖已由主会话装好，前后端执行端都不改 `package.json` 的依赖。
+2. **工作区级**：终端不绑会话，切会话不杀；新建时 cwd 取当前所看会话的 cwd，没有会话取 `meta.defaultCwd`。
+3. **ANSI 黄按 §4 三条**：终端内容区豁免配色不变量；终端 chrome 禁暖色；调色板的 yellow / bright-yellow 往橄榄 / 赭石偏，拉开与琥珀金的距离。结论写进 `styles.css` 顶部不变量注释。
+4. **鉴权已由 `server/access.ts` 解决**（本机 Host/Origin 白名单、远程 Tailscale 身份白名单）。**手机远程入口也开放终端**，但须 `~/.workbench/remote.json` 显式 `"terminal": true` 才开（缺省关）；该文件由用户自己改。
+
+范围：本轮做 §7 的 **M1 + 刷新 / 断线后按 id 重连并回放 scrollback**（手机锁屏重连是常态，没它不可用）。多终端标签页、搜索等留到以后。
+
+### 接口契约（前后端都以此为准）
+
+能力位：`GET /api/meta` 的 `capabilities.terminal: boolean`，**按请求入口计算**：本机入口恒 true；远程入口 = `remote.json` 的 `terminal === true`。为 false 时前端不显示终端入口，后端对下面所有终端接口返回 403。
+
+REST（沿用现有 `{code, msg, data}` 包装）：
+
+- `GET /api/terminals` → `data: { terminals: TerminalInfo[] }`
+- `POST /api/terminals`，body `{ cwd?: string, cols: number, rows: number }` → `data: TerminalInfo`。cwd 缺省或不存在时用 server 的 defaultCwd；shell 取 `$SHELL`，缺省 `bash`，以登录交互 shell 启动。
+- `POST /api/terminals/:id/kill` → `data: { ok: true }`。结束进程，不是删文件；不用 DELETE 动词。
+
+`TerminalInfo = { id: string, cwd: string, shell: string, cols: number, rows: number, createdAt: string, exited: boolean, exitCode: number | null }`
+
+WS `/ws/terminal`（与 `/ws` 同一套 Host / Origin / Tailscale 身份检查；能力位为 false 时拒绝升级），全部 JSON 文本帧（PTY 输出本就是 UTF-8 字符串，不再做二进制分帧，偏离 §3 原建议，换实现简单）：
+
+- 上行 `{type:"attach", terminalId}`：服务端先回 `{type:"attached", terminalId, omitted}`（`omitted` = scrollback 因 256KB 上限丢掉的字节数，>0 时前端顶部提示「已省略较早输出」），再发一条 `{type:"data", terminalId, data}` 装当前全部 scrollback，之后实时推送。同一连接可 attach 多个；重复 attach 同一 id 视为重新回放（前端先 `reset()` 再写）。
+- 上行 `{type:"input", terminalId, data}`、`{type:"resize", terminalId, cols, rows}`。
+- 下行 `{type:"data", terminalId, data}`、`{type:"exit", terminalId, exitCode}`、`{type:"error", terminalId?, message}`（未知 id、已退出等）。
+- 服务端每终端保留最近 256KB 输出；进程退出后记录保留（`exited: true`），直到 server 重启。server 重启 = 全部终端结束，这是已知行为。
+
+安全硬约束（§5）：用户终端注册表与 kimi ACP `terminal/create` **物理隔离**，独立模块、独立 id 空间，agent 侧代码不得 import 它；终端输出永远不进会话事件流。

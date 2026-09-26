@@ -6,6 +6,7 @@ import type {
   ConfigOptionId,
   DriverConfigSchema,
   PermissionDecision,
+  QuestionAnswers,
   SessionConfig,
   UnifiedCommand,
   UserMessageInput,
@@ -20,9 +21,24 @@ interface PendingRpc {
 
 interface KimiPermission {
   rpcId: string | number;
-  method: "session/request_permission" | "terminal/create" | "fs/write_text_file";
+  method: "session/request_permission" | "terminal/create" | "fs/write_text_file" | "elicitation/create";
   params: Record<string, any>;
+  questions?: KimiFormQuestion[];
 }
+
+interface KimiFormQuestion {
+  key: string;
+  question: string;
+  options: Array<{ label: string; value: string; description?: string }>;
+  multiSelect: boolean;
+  header?: string;
+}
+
+const KIMI_CLIENT_CAPABILITIES = {
+  fs: { readTextFile: true, writeTextFile: true },
+  terminal: true,
+  elicitation: { form: {} },
+};
 
 interface TerminalState {
   process: ChildProcessWithoutNullStreams;
@@ -97,7 +113,7 @@ export async function probeKimiConfigSchema(cwd: string): Promise<DriverConfigSc
   try {
     await probe.request("initialize", {
       protocolVersion: 1,
-      clientCapabilities: { fs: { readTextFile: true, writeTextFile: true }, terminal: true },
+      clientCapabilities: KIMI_CLIENT_CAPABILITIES,
       clientInfo: { name: "workbench-meta", title: "Workbench metadata probe", version: "0.1.0" },
     });
     const result = await probe.request("session/new", { cwd, mcpServers: [] });
@@ -125,7 +141,7 @@ export class KimiDriver extends BaseDriver {
     this.spawnProcess("kimi", ["acp"]);
     await withTimeout(this.request("initialize", {
       protocolVersion: 1,
-      clientCapabilities: { fs: { readTextFile: true, writeTextFile: true }, terminal: true },
+      clientCapabilities: KIMI_CLIENT_CAPABILITIES,
       clientInfo: { name: "workbench", title: "Workbench", version: "0.1.0" },
     }), 15_000, "Kimi initialize");
 
@@ -198,25 +214,61 @@ export class KimiDriver extends BaseDriver {
     });
   }
 
-  async resolvePermission(requestId: string, decision: PermissionDecision, updatedInput?: unknown): Promise<void> {
+  async resolvePermission(
+    requestId: string,
+    decision: PermissionDecision,
+    updatedInput?: unknown,
+    questionAnswers?: QuestionAnswers,
+  ): Promise<void> {
     const pending = this.permissions.get(requestId);
     if (!pending) throw new Error(`Kimi permission_request 不存在：${requestId}`);
-    if (pending.method === "session/request_permission") {
+    if (pending.method === "elicitation/create") {
+      if (updatedInput !== undefined) throw new Error("Kimi 提问不接受 updatedInput");
+      if (decision === "deny") {
+        this.replyResult(pending.rpcId, { action: "decline" });
+      } else {
+        const questions = pending.questions ?? [];
+        if (!questionAnswers || Object.keys(questionAnswers).length !== questions.length) {
+          throw new Error("Kimi 提问必须回答全部问题");
+        }
+        const content: Record<string, string | string[]> = Object.create(null);
+        for (const question of questions) {
+          if (!Object.hasOwn(questionAnswers, question.question)) {
+            throw new Error(`Kimi 提问缺少答案：${question.question}`);
+          }
+          const answer = questionAnswers[question.question]!.trim();
+          const exact = question.options.find((option) => option.label === answer);
+          const labels = exact ? [answer] : answer.split(",").map((label) => label.trim());
+          if (!question.multiSelect && labels.length !== 1) throw new Error(`Kimi 提问只允许单选：${question.question}`);
+          if (new Set(labels).size !== labels.length || labels.some((label) => !question.options.some((o) => o.label === label))) {
+            throw new Error(`Kimi 提问只接受列出的选项，不支持「其他」：${question.question}`);
+          }
+          const values = question.options.filter((option) => labels.includes(option.label)).map((option) => option.value);
+          content[question.key] = question.multiSelect ? values : values[0]!;
+        }
+        this.replyResult(pending.rpcId, { action: "accept", content });
+      }
+    } else if (pending.method === "session/request_permission") {
+      if (questionAnswers !== undefined) throw new Error("Kimi 普通审批不接受 questionAnswers");
       this.resolveStandardPermission(pending, decision);
     } else if (pending.method === "terminal/create") {
+      if (questionAnswers !== undefined) throw new Error("Kimi 最终闸门不接受 questionAnswers");
       this.resolveTerminalGate(pending, decision, updatedInput);
     } else {
+      if (questionAnswers !== undefined) throw new Error("Kimi 最终闸门不接受 questionAnswers");
       this.resolveWriteGate(pending, decision, updatedInput);
     }
     this.permissions.delete(requestId);
   }
 
   async interrupt(): Promise<void> {
+    this.cancelElicitations();
     if (!this.nativeSessionId) return;
     this.send({ jsonrpc: "2.0", method: "session/cancel", params: { sessionId: this.nativeSessionId } });
   }
 
   async stop(): Promise<void> {
+    this.cancelElicitations();
     for (const terminal of this.terminals.values()) {
       if (terminal.process.exitCode === null && terminal.process.signalCode === null) terminal.process.kill("SIGTERM");
     }
@@ -261,6 +313,10 @@ export class KimiDriver extends BaseDriver {
 
   private handleServerRequest(message: Record<string, any>): void {
     const method = message.method as string;
+    if (method === "elicitation/create") {
+      this.queueElicitation(message);
+      return;
+    }
     if (method === "session/request_permission") {
       this.queuePermission(message, "session/request_permission", "session/request_permission", {
         toolName: message.params?.toolCall?.title ?? "tool",
@@ -304,6 +360,77 @@ export class KimiDriver extends BaseDriver {
       return;
     }
     this.replyError(message.id, -32601, `Workbench 未实现 Kimi 方法：${method}`);
+  }
+
+  private queueElicitation(message: Record<string, any>): void {
+    const params = message.params ?? {};
+    if (params.mode !== undefined && params.mode !== "form") {
+      this.replyResult(message.id, { action: "cancel" });
+      return;
+    }
+    const properties = params.requestedSchema?.properties;
+    const entries = properties && typeof properties === "object" && !Array.isArray(properties)
+      ? Object.entries(properties) : [];
+    const texts = typeof params.message === "string" ? params.message.split("\n") : [];
+    const questions: KimiFormQuestion[] = entries.map(([key, raw], index) => {
+      const schema = raw && typeof raw === "object" ? raw as Record<string, any> : {};
+      const choices = schema.type === "array" ? schema.items?.anyOf : schema.oneOf;
+      const legacy = schema.type === "string" && Array.isArray(schema.enum)
+        ? schema.enum.map((value: string, i: number) => ({ const: value, title: schema.enumNames?.[i] ?? value }))
+        : [];
+      const rawOptions = Array.isArray(choices) ? choices : legacy;
+      return {
+        key,
+        question: texts[index] ?? "",
+        ...(typeof schema.title === "string" ? { header: schema.title } : {}),
+        multiSelect: schema.type === "array",
+        options: rawOptions.map((option: any) => ({
+          label: option?.title, value: option?.const,
+          ...(typeof option?.description === "string" ? { description: option.description } : {}),
+        })),
+      };
+    });
+    const valid = entries.length > 0 && entries.length <= 4 && texts.length === entries.length
+      && questions.every((q) => q.question && q.options.length > 0
+        && q.options.every((o) => typeof o.label === "string" && o.label && typeof o.value === "string")
+        && (!q.multiSelect || q.options.every((o) => !o.label.includes(",")))
+        && new Set(q.options.map((o) => o.label)).size === q.options.length)
+      && new Set(questions.map((q) => q.question)).size === questions.length
+      && entries.every(([, raw], i) => {
+        const schema = raw && typeof raw === "object" ? raw as Record<string, any> : {};
+        return schema.type === "string" || (schema.type === "array" && schema.items?.anyOf
+          && (schema.minItems === undefined || schema.minItems <= 1)
+          && (schema.maxItems === undefined || schema.maxItems >= questions[i].options.length));
+      });
+    if (!valid) {
+      this.replyResult(message.id, { action: "cancel" });
+      this.callbacks.emit("raw_event", { source: "kimi", method: message.method,
+        warning: "elicitation 表单包含前端无法表达的字段，已按取消处理" });
+      return;
+    }
+    const requestId = `kimi:elicitation:${String(message.id)}`;
+    this.permissions.set(requestId, { rpcId: message.id, method: "elicitation/create", params, questions });
+    this.callbacks.emit("permission_request", {
+      requestId, gate: message.method, toolName: "AskUserQuestion",
+      interactionType: "ask_user_question", questionProtocol: "kimi_acp_elicitation_form_v1",
+      questions: questions.map((q) => ({ question: q.question, header: q.header,
+        options: q.options.map(({ label, description }) => ({ label, description })), multiSelect: q.multiSelect })),
+      otherSupported: false,
+      protocolLimitations: ["Kimi AskUserQuestion 的 form 桥接不接收「其他」自由文本"],
+    });
+  }
+
+  protected handleProcessExit(): void {
+    this.permissions.clear();
+    this.rpc.clear();
+  }
+
+  private cancelElicitations(): void {
+    for (const [requestId, pending] of this.permissions) {
+      if (pending.method !== "elicitation/create") continue;
+      if (this.child?.stdin.writable) this.replyResult(pending.rpcId, { action: "cancel" });
+      this.permissions.delete(requestId);
+    }
   }
 
   private queuePermission(

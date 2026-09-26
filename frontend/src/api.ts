@@ -1,4 +1,4 @@
-import type { ApiEnvelope, CommandInfo, DirectoryListing, HistoryListData, HistoryMessagesPage, HistoryPreview, MetaInfo, PageHealth, PageManifest, SessionConfig, SessionRecord, Snapshot, SnapshotPreflight } from "./types";
+import type { ApiEnvelope, CommandInfo, DirectoryListing, HistoryListData, HistoryMessagesPage, HistoryPreview, MetaInfo, PageHealth, PageManifest, SessionConfig, SessionRecord, Snapshot, SnapshotPreflight, TerminalInfo } from "./types";
 import type { AgentKind } from "./types";
 import { buildHistoryQuery, type HistoryQueryInput } from "./history";
 
@@ -98,6 +98,31 @@ export function createSession(input: CreateSessionInput): Promise<SessionRecord>
     headers: { "content-type": "application/json" },
     body: JSON.stringify(input),
   }).then((data) => data.session);
+}
+
+/** 工作区级终端列表（含已退出记录，server 重启前保留）。 */
+export function fetchTerminals(): Promise<TerminalInfo[]> {
+  return call<{ terminals: TerminalInfo[] }>("/api/terminals").then((data) => data.terminals);
+}
+
+/** 新建终端：cwd 缺省或不存在时后端用 defaultCwd。 */
+export function createTerminal(input: {
+  cwd?: string;
+  cols: number;
+  rows: number;
+}): Promise<TerminalInfo> {
+  return call<TerminalInfo>("/api/terminals", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input),
+  });
+}
+
+/** 结束终端进程（不是删文件，故不用 DELETE 动词）。 */
+export function killTerminal(id: string): Promise<{ ok: true }> {
+  return call<{ ok: true }>(`/api/terminals/${encodeURIComponent(id)}/kill`, {
+    method: "POST",
+  });
 }
 
 /** 启动时已注册的扩展页面列表（原始返回，类型过滤在 pages.ts 的 partitionPages）。 */

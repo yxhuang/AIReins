@@ -7,7 +7,11 @@
    闸门专用色 = 琥珀金（浅 #8F5806 / 底 #F6E3AE，深 #F2B32C / 底 #3A2E10），全站仅审批相关元素可用。
    claude 的珊瑚橙与琥珀金色相相邻但明度饱和度差异大，不要把两者互相靠近。
    --danger 冷调洋红仅用于「拒绝」与错误；--diff-del* 仅用于 diff 删除行。
-   新增任何颜色前先问：它会不会被误读成「有闸门在等我」。 */
+   新增任何颜色前先问：它会不会被误读成「有闸门在等我」。
+   终端配色裁决（2026-09-26 用户拍板，docs/terminal-panel-design.md §4/§9）：
+     1) 终端内容区豁免配色不变量，视同外来内容（先例：PageView iframe 渲染用户自己的页面）；
+     2) 终端 chrome（标题条、按钮、分隔条、左栏入口）一律中性或冷色，禁暖色；
+     3) ANSI yellow / bright-yellow 往橄榄/赭石偏（--term-yellow 系），与琥珀金 --gate 系明显拉开。 */
 :root {
   --bg:               #FAF9F5;
   --surface:          #FFFFFF;
@@ -36,6 +40,29 @@
   --diff-add-bg: #E2F1EC;
   --diff-del:    #A63D57;
   --diff-del-bg: #F6E9ED;
+
+  /* 终端调色板（M19）：仅 xterm 内容区使用（该区豁免配色不变量，见顶部裁决）。
+     yellow 系往橄榄偏（浅 #757100 / 亮 #9A8F00，色相近 60°），与琥珀金 --gate（色相近 35°）拉开。 */
+  --term-bg:               #FBFAF7;
+  --term-fg:               #1F1E1D;
+  --term-cursor:           #276C8D;
+  --term-selection:        #D8E3EC;
+  --term-black:            #3D3B37;
+  --term-red:              #B3234A;
+  --term-green:            #17806B;
+  --term-yellow:           #757100;
+  --term-blue:             #1A73E8;
+  --term-magenta:          #7D3CB5;
+  --term-cyan:             #0E7C8C;
+  --term-white:            #8C8981;
+  --term-bright-black:     #6E6B63;
+  --term-bright-red:       #D43D5E;
+  --term-bright-green:     #1F9B7F;
+  --term-bright-yellow:    #9A8F00;
+  --term-bright-blue:      #3B8BF2;
+  --term-bright-magenta:   #9A5CD0;
+  --term-bright-cyan:      #1B97A8;
+  --term-bright-white:     #262624;
 
   --font-ui:   system-ui, -apple-system, "Segoe UI", "Microsoft YaHei UI",
                "PingFang SC", "Noto Sans CJK SC", sans-serif;
@@ -79,6 +106,29 @@
     --diff-add-bg: #14251F;
     --diff-del:    #D9708A;
     --diff-del-bg: #291720;
+
+    /* 终端调色板（M19）：仅 xterm 内容区使用。yellow 系偏橄榄/赭石（#B8A94A / 亮 #CFC06A），
+       比 --gate 琥珀金 #F2B32C 更绿、更低饱和，一眼可区分。 */
+    --term-bg:               #191817;
+    --term-fg:               #F2F0EA;
+    --term-cursor:           #4FA8D0;
+    --term-selection:        #3D4A55;
+    --term-black:            #1F1E1D;
+    --term-red:              #EE7093;
+    --term-green:            #2BA88C;
+    --term-yellow:           #B8A94A;
+    --term-blue:             #5AA9FF;
+    --term-magenta:          #C792EA;
+    --term-cyan:             #4FB8C9;
+    --term-white:            #A8A59D;
+    --term-bright-black:     #55534E;
+    --term-bright-red:       #F28BA5;
+    --term-bright-green:     #3FC4A3;
+    --term-bright-yellow:    #CFC06A;
+    --term-bright-blue:      #7FBFFF;
+    --term-bright-magenta:   #D8ADEF;
+    --term-bright-cyan:      #6FD0DE;
+    --term-bright-white:     #F2F0EA;
   }
 }
 
@@ -110,6 +160,29 @@
   --diff-add-bg: #14251F;
   --diff-del:    #D9708A;
   --diff-del-bg: #291720;
+
+  /* 终端调色板（M19）：仅 xterm 内容区使用。yellow 系偏橄榄/赭石（#B8A94A / 亮 #CFC06A），
+     比 --gate 琥珀金 #F2B32C 更绿、更低饱和，一眼可区分。 */
+  --term-bg:               #191817;
+  --term-fg:               #F2F0EA;
+  --term-cursor:           #4FA8D0;
+  --term-selection:        #3D4A55;
+  --term-black:            #1F1E1D;
+  --term-red:              #EE7093;
+  --term-green:            #2BA88C;
+  --term-yellow:           #B8A94A;
+  --term-blue:             #5AA9FF;
+  --term-magenta:          #C792EA;
+  --term-cyan:             #4FB8C9;
+  --term-white:            #A8A59D;
+  --term-bright-black:     #55534E;
+  --term-bright-red:       #F28BA5;
+  --term-bright-green:     #3FC4A3;
+  --term-bright-yellow:    #CFC06A;
+  --term-bright-blue:      #7FBFFF;
+  --term-bright-magenta:   #D8ADEF;
+  --term-bright-cyan:      #6FD0DE;
+  --term-bright-white:     #F2F0EA;
 }
 
 * { box-sizing: border-box; }
@@ -163,6 +236,152 @@ body {
   min-width: 0; /* 主区不横向滚动 */
   display: flex;
   flex-direction: column;
+}
+
+/* ── 终端面板（M19）：chrome 全中性/冷色（配色裁决第 2 条），内容区调色板见 --term-* ── */
+/* .main 外面套的一层：终端开启时右侧追加分隔条与面板，.main 内部规则不动 */
+.workspace {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+}
+
+.term-split {
+  flex: 0 0 6px;
+  cursor: col-resize;
+  touch-action: none; /* 触屏拖动不滚页面 */
+  background: transparent;
+}
+
+.term-split:hover,
+.term-split:focus-visible {
+  background: var(--border-strong);
+}
+
+/* 拖动期间禁止文本选中并钉住光标，否则拖动和选中打架 */
+body.resizing {
+  user-select: none;
+  cursor: col-resize;
+}
+
+.term-panel {
+  flex: 0 0 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--term-bg);
+  border-left: 1px solid var(--border);
+}
+
+/* 隐藏 = CSS 隐藏：xterm 实例、WS 连接与服务端 PTY 全部保留 */
+.term-panel.term-hidden {
+  display: none;
+}
+
+.term-titlebar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+
+.term-titlebar .btn {
+  padding: 2px 8px;
+  font-size: 12px;
+  flex: 0 0 auto;
+}
+
+/* 「‹ 返回」只在窄屏出现（宽屏用左栏入口开关面板） */
+.term-back {
+  display: none;
+}
+
+.term-cwd {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.term-exited {
+  flex: 0 0 auto;
+  font-size: 12px;
+  color: var(--text-faint);
+}
+
+/* 行内二次确认（与会话行删除同一纪律）：就地替换按钮，不弹模态 */
+.term-confirm {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.term-confirm-text {
+  font-size: 12px;
+  color: var(--text);
+  white-space: nowrap;
+}
+
+/* scrollback 被服务端 256KB 上限截断的提示：中性小字，不是错误 */
+.term-omitted {
+  flex: 0 0 auto;
+  padding: 3px 10px;
+  font-size: 12px;
+  color: var(--text-faint);
+  background: var(--surface-sunk);
+  border-bottom: 1px solid var(--border);
+}
+
+.term-error {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 10px;
+  font-size: 12px;
+  color: var(--danger);
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+
+.term-error-text {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.term-host {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 4px 0 4px 6px;
+}
+
+.term-host .xterm {
+  height: 100%;
+}
+
+/* 手机快捷键栏：宽屏不显示（键盘什么都有） */
+.term-keys {
+  display: none;
+}
+
+.term-key {
+  flex: 1 0 auto;
+  min-width: 44px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  padding: 6px 4px;
+  cursor: pointer;
 }
 
 /* ── 左栏 ────────────────────────────────── */
@@ -2269,11 +2488,39 @@ body {
     border-bottom: 1px solid var(--border);
     background: var(--surface);
   }
+  /* 终端在窄屏不做左右分栏：打开时占满主区（列表与会话主区都让位），「‹ 返回」回原视图 */
+  .app.term-open .sidebar,
+  .app.term-open .main {
+    display: none;
+  }
+  .workspace.term-open .term-split {
+    display: none;
+  }
+  /* 内联 style 带了 px 宽度，窄屏铺满要压过它（同 .page-view 的 !important 纪律） */
+  .workspace.term-open .term-panel {
+    flex: 1 1 auto;
+    width: auto !important;
+    border-left: none;
+  }
+  .term-back {
+    display: inline-flex;
+    align-items: center;
+  }
+  /* 快捷键栏在终端下方；安全区由 .app 的 env(safe-area-inset-*) 统一让位，这里不重复加 */
+  .workspace.term-open .term-keys {
+    display: flex;
+    gap: 4px;
+    overflow-x: auto;
+    padding: 4px 8px;
+    background: var(--surface);
+    border-top: 1px solid var(--border);
+  }
 }
 
 @media (pointer: coarse) {
   /* 触屏点按目标至少 44px */
   .btn, .icon-btn, .row-delete, .cfg-pill, .cfg-item { min-height: 44px; }
+  .term-key { min-height: 44px; }
   .send-btn { width: 44px; height: 44px; }
   .cfg-slider { width: 176px; height: 32px; }
   /* 没有 hover：删除按钮常显（点了还有确认步骤，不会误删） */
