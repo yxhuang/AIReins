@@ -4,7 +4,7 @@ import { execFileSync } from "node:child_process";
 import { strict as assert } from "node:assert";
 
 // 用 tsx 把 TS 模块加载进来
-const { extractMentionTokens, mentionQueryAt, mentionTokenEnd, stripMentionCandidates } =
+const { extractMentionTokens, mentionQueryAt, mentionTokenEnd, stripMentionCandidates, mentionSegments } =
   await import("../src/mentions.ts");
 
 let pass = 0;
@@ -81,6 +81,13 @@ t("文件名真带逗号仍整 token 命中（截断只是回退路径）", () =
   assert.equal(token, "report，final.txt");
   // report 与 report，final.txt 同时存在：整 token 优先，不得被中段截断冤枉成 report
   assert.equal(resolve(token, ["report", "report，final.txt"]), "report，final.txt");
+});
+
+// 用户消息里的 @ 标签（M21）：止于句读标点、剥尾部标点，其余原样作普通文本
+const tags = (text) => mentionSegments(text).map((s) => (s.mention ? `[${s.text}]` : s.text)).join("");
+t("@ 标签截在句读标点处且不吞正文", () => {
+  assert.equal(tags("看 @a.ts，然后 @b/c.md。"), "看 [@a.ts]，然后 [@b/c.md]。");
+  assert.equal(tags("@x.ts 和 foo@bar.com 以及 @，"), "[@x.ts] 和 foo@bar.com 以及 @，");
 });
 
 if (!process.exitCode) console.log(`✅ mentions 解析单测全过（${pass} 例）`);

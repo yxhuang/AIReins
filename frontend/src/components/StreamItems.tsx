@@ -1,4 +1,4 @@
-import { forwardRef, useState } from "react";
+import { forwardRef, memo, useState } from "react";
 import type {
   GateView,
   ExternalHistoryBlock,
@@ -21,13 +21,13 @@ import {
   type AskSelection,
 } from "../ask";
 import { store } from "../store";
-import { messageRoleLabel } from "../format";
 import type { AgentKind } from "../types";
+import { HistoryMessageView, MarkdownMessage, UserMessageText } from "./MarkdownMessage";
 
 export function UserBlockView({ item }: { item: UserBlock }) {
   return (
     <div className="user-block">
-      <span className="user-text">{item.text}</span>
+      <UserMessageText text={item.text} />
     </div>
   );
 }
@@ -35,45 +35,42 @@ export function UserBlockView({ item }: { item: UserBlock }) {
 export function ExternalHistoryView({ item, agent }: { item: ExternalHistoryBlock; agent: AgentKind }) {
   return (
     <section className="session-history" aria-label="在别处继续的对话">
-      <p className="session-history-note">以下为在别处（VSCode/CLI 等）继续的对话，仅消息文本，不含工具调用。</p>
+      <p className="session-history-note">在别处（VSCode/CLI 等）继续的对话 · 仅消息文本，不含工具调用。</p>
       {item.truncated && <p className="session-history-note">原生记录超出单次读取窗口，这里只显示可读取的最新消息。</p>}
       <ul className="session-history-list">
         {item.messages.map((message, index) => (
-          <li key={`${item.key}:${index}`} className={`history-msg history-msg-${message.role}`}>
-            <span className="history-msg-role">{messageRoleLabel(message.role, agent)}</span>
-            <span className="history-msg-text">{message.text}</span>
-            <span className="history-msg-time mono">{message.timestamp ? new Date(message.timestamp).toLocaleString() : "时间未知"}</span>
-          </li>
+          <li key={`${item.key}:${index}`}><HistoryMessageView message={message} agent={agent} showTime /></li>
         ))}
       </ul>
-      <div className="session-history-divider" role="separator"><span>以上为在别处继续的对话 · 仅消息文本</span></div>
+      <div className="session-history-divider" role="separator" />
     </section>
   );
 }
 
-export function TextBlockView({ item, streaming }: { item: TextBlock; streaming: boolean }) {
+export const TextBlockView = memo(function TextBlockView({ item, streaming }: { item: TextBlock; streaming: boolean }) {
   return (
     <div className="text-block">
-      {item.text}
+      <MarkdownMessage text={item.text} />
       {streaming && <span className="cursor" aria-hidden="true">▍</span>}
     </div>
   );
-}
+}, (previous, next) => previous.item.text === next.item.text && previous.streaming === next.streaming);
 
-export function ThoughtBlockView({ item }: { item: ThoughtBlock }) {
+export const ThoughtBlockView = memo(function ThoughtBlockView({ item }: { item: ThoughtBlock }) {
   const [open, setOpen] = useState(false);
+  const hasContent = item.text.length > 0;
   return (
     <div className="thought-block">
-      <button type="button" className="thought-head" onClick={() => setOpen((v) => !v)}>
-        <span className="chevron">{open ? "▾" : "▸"}</span>
-        思考 · {item.text.length} 字
+      <button type="button" className="thought-head" disabled={!hasContent} aria-expanded={hasContent ? open : undefined} onClick={() => setOpen((v) => !v)}>
+        {hasContent && <span className="chevron">{open ? "▾" : "▸"}</span>}
+        思考{hasContent && ` · ${item.text.length} 字`}
       </button>
-      {open && <div className="thought-body">{item.text}</div>}
+      {hasContent && open && <div className="thought-body">{item.text}</div>}
     </div>
   );
-}
+}, (previous, next) => previous.item.text === next.item.text);
 
-export function ToolCard({ item }: { item: ToolView }) {
+export const ToolCard = memo(function ToolCard({ item }: { item: ToolView }) {
   const [open, setOpen] = useState(false);
   const statusLabel = item.status === "running" ? "进行中" : item.status === "ok" ? "成功" : "失败";
   return (
@@ -97,7 +94,12 @@ export function ToolCard({ item }: { item: ToolView }) {
       )}
     </div>
   );
-}
+}, (previous, next) =>
+  previous.item.status === next.item.status &&
+  previous.item.toolName === next.item.toolName &&
+  previous.item.input === next.item.input &&
+  previous.item.result === next.item.result,
+);
 
 // 签名元素：闸门块。暖色边框 + 暖色浅底 + 直角，与圆角卡片形成硬边对比。
 // dead 会话里的未决闸门降级为中性「已失效」态：无暖色、不可点击。
@@ -358,7 +360,7 @@ export const QuestionBlock = forwardRef<HTMLDivElement, { item: GateView; sessio
 );
 
 export function SystemLine({ item }: { item: SystemBlock }) {
-  return <div className={`system-line${item.tone === "error" ? " system-error" : ""}`}>{item.text}</div>;
+  return <div className={`system-line${item.tone === "error" ? " system-error" : ""}${item.text.startsWith("会话已创建") ? " system-created" : ""}`}>{item.text}</div>;
 }
 
 export function RawLine({ item }: { item: RawBlock }) {

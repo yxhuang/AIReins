@@ -427,9 +427,25 @@ frontend/
 - 角色名（2026-09-28）：外部续聊区块、导入历史区、历史页预览统一用 `format.ts` 的 `messageRoleLabel`——用户显示「我」，助手按会话 agent 显示 Claude Code / Codex / Kimi（取不到 agent 时回落「助手」）。
 - **打桩测试**：`frontend/scripts/render-items.test.mjs` 覆盖新事件载荷归一、与前后文本分块及新用户消息的顺序。**代码复核**：`SessionView` 的事件分支和 `ExternalHistoryView` 的文案、样式复用。**待真机**：Claude 新建会话在 VSCode 与 CLI resume 列表可见；三家在别处续聊后回工作台发送、断线回放及异常提示；视觉与手机布局。
 
+### M21 消息显示改版阶段 1：Markdown + 时间线 + 降噪（2026-09-28）
+
+规划与裁决见 `docs/message-display-redesign.md` §3–§5（ROADMAP P1-5）。实现由 Codex 按工单完成（会话 `00000000-0000-4000-8000-000000000007`）。主会话验收时修了两处视觉问题：深色下代码块与页面底色几乎相同看不出边界，以及分隔线文字挪走后留下的缺口。
+
+- **Markdown**：助手文字经 `components/MarkdownMessage.tsx`（`react-markdown` 10.1.0 + `remark-gfm` 4.0.1）渲染。`skipHtml` 不渲染原始 HTML，也不走 `innerHTML`；链接用 react-markdown 默认的 URL 过滤，并加 `target="_blank" rel="noopener noreferrer"`。段落用 `white-space: pre-line` 保留单换行（agent 常用单换行分行，Markdown 默认会把它折成空格）。代码块用编辑器底色加细边框，右上角有「复制」按钮（Clipboard API 不可用或被拒时显示「复制失败」），块内横滚；表格外包横滚容器。没有语法高亮（shiki 在阶段 3）。
+- **用户消息**：描边圆角框，`@` 引用画成行内标签（`mentions.ts` 的 `mentionSegments`）。标签在第一个句读标点处截断并剥掉尾部标点，所以 `@a.ts，然后` 只画 `@a.ts`。这只影响显示，解析不受影响。
+- **时间线**：同一轮的 text / thought / tool 挂在一条细竖线上，每项一个 7px 圆点（`render-items.ts` 给这三类条目加了 `turn` 字段）。圆点默认次级灰，工具成功或失败换色，进行中闪烁（`prefers-reduced-motion` 下关闭）。闸门卡片和提问卡片不上时间线。
+- **降噪**：空思考只显示一行灰字「思考」，不可展开也不显示字数。「本轮结束」只在异常时出现，文案为「本轮异常结束：<原因>」，判定规则：claude 看 `subtype≠success` 或 `isError`；codex 看 `error` 非空或 `status≠completed`；kimi 看 `stopReason≠end_turn`。按现有 transcript 实测，正常轮次（claude 28、codex 7、kimi 20）都不显示，异常轮次（claude 3 个 `error_during_execution`、kimi 1 个 `cancelled`）都显示。「会话已创建」变淡。
+- **版式**：流区限宽 820px 居中。外部续聊区、导入历史区、历史页预览复用 `HistoryMessageView`（用户框 + Markdown），来源说明移到区块顶部；底部分隔线只剩一条细线，保留它是因为 prepend 滚动补偿要用它当锚点。
+- **流式性能**：`store.ts` 把 `agent_text_delta` / `thought_delta` 引起的通知按 `requestAnimationFrame` 合批，其他事件立即通知并取消挂起的帧。文本、思考、工具三类块都用 `React.memo`。
+- **配色**：`styles.css` 顶部加了「消息显示配色裁决」；新令牌 `--msg-*` 在浅色一份、深色两份，`check:theme` 由 46 项增至 54 项。
+- **包体积**：主 JS 从 290.82 kB 增至 448.10 kB（gzip 从 90.33 kB 增至 138.24 kB），增量来自 react-markdown/remark-gfm。
+- **测试**：新增 `npm run test:markdown`（`frontend/scripts/markdown.test.mjs`），断言 `<script>`、`<img onerror>`、`javascript:` 链接渲染后都没有可执行内容，普通链接带 `rel`。`render-items.test.mjs` 新增正常结束、异常结束和旧事件三组断言；`resume-config-flow.test.mjs` 的两条源码断言改为核查共用的 `HistoryMessageView`；`mentions.test.mjs` 新增 @ 标签边界用例（共 41 例）。
+- **评审**：Codex 只读评审（会话 `00000000-0000-4000-8000-000000000008`）结论为「修完再合并」，提了四条，核实后都已修复：单换行被折叠、@ 标签吞掉后文、复制失败没有反馈、「通用边界」里关于 `@a.ts，然后` 的过时说明。
+- **截图验收**（playwright 注入合成三家会话，1280 / 390 × 深浅色共 12 张）：全部没有页面横向滚动、没有 `script`/`onerror`/`javascript:` 节点、没有页面错误。**待真机**：8790 与手机上的实际观感，以及长回复流式输出时的手感。
+
 ### 通用边界
 
-- `@token` 严格按空白切段：句末紧跟的标点（如 `@a.ts，`）自 M12 起会在解析时逐级剥尾部标点、剥后命中真实文件才采纳；但标点后无空格直接接文字（如 `@a.ts，然后`）标点不在 token 尾部，仍判「未找到」，需要在引用后敲空格。
+- `@token` 提取仍按空白切段，解析时整 token 优先，命中不了再回退到剥离候选：先逐级剥掉尾部标点（如 `@a.ts，`），再在中段句读标点处截断（如 `@a.ts，然后` 解析为 `a.ts`，见 `mentions.test.mjs`）。候选必须命中真实文件才采纳。用户消息里的 `@` 标签（M21）也用同一套句读边界截断显示。
 
 - 未引入 UI 组件库、图标库、路由库：图标用 Unicode / 内联 SVG，路由用 hash（`#/session/<id>`、`#/page/<id>`、`#/history`）。
 - 扩展页面（`pages/`）只在前端启动时取一次列表（server 同样只在启动时扫描）；iframe 直接嵌 manifest 的 `url`，server 不反代；目标站点带 `x-frame-options: DENY` 时浏览器端无法探测，自 M13 起由后端 health 接口的 `embeddable` 判定（false → 完全不渲染 iframe 的降级面板；null/无法确定 → iframe + 空白提示 + 常驻新标签页出口）。

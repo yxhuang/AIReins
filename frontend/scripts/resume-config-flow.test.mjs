@@ -282,11 +282,14 @@ await t("源码接线：resumedFrom 才挂历史区；分隔线文案；用户/�
     "SessionView 未按 resumedFrom 挂载历史区",
   );
   const history = readFileSync(new URL("../src/components/ResumedHistory.tsx", import.meta.url), "utf8");
-  assert.ok(history.includes("以上为导入前的历史对话"), "分隔线文案缺失");
+  assert.ok(history.includes("仅用户与助手文本，不含工具调用与思考过程"), "历史来源与省略项说明缺失");
+  assert.ok(history.includes('className="session-history-divider" role="separator" ref={dividerRef}'), "滚动补偿分隔线缺失");
   assert.ok(history.includes("加载更早的消息"), "翻页按钮文案缺失");
   assert.ok(history.includes("加载中…"), "加载中文案缺失");
   assert.ok(history.includes("重试"), "失败重试缺失");
-  assert.ok(history.includes("messageRoleLabel(message.role, session.agent)"), "应只有用户/助手两态");
+  const sharedMessage = readFileSync(new URL("../src/components/MarkdownMessage.tsx", import.meta.url), "utf8");
+  assert.ok(history.includes("<HistoryMessageView message={message} agent={agent}"), "应复用用户/助手消息视图");
+  assert.ok(sharedMessage.includes("messageRoleLabel(message.role, agent)") && sharedMessage.includes('message.role === "user"'), "共用视图应只有用户/助手两态");
   const { messageRoleLabel } = await import("../src/format.ts");
   assert.equal(messageRoleLabel("user", "claude"), "我");
   assert.equal(messageRoleLabel("assistant", "claude"), "Claude Code");

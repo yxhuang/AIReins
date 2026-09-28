@@ -341,5 +341,22 @@ t("promptCacheExpiry：起点取最近一次 usage，TTL 取最近一次写缓�
   assert.equal(promptCacheExpiry([usage("2026-09-26T10:00:00Z", null)]), null, "没有 cache_creation 分项就不猜");
 });
 
+t("正常与旧版无字段的 turn_completed 不显示，三家异常均带原因", () => {
+  const cases = [
+    ["claude", { subtype: "success", isError: false }, null],
+    ["claude", { subtype: "error_max_turns", isError: true }, "error_max_turns"],
+    ["codex", { status: "completed" }, null],
+    ["codex", { status: "failed", error: { message: "执行失败" } }, "执行失败"],
+    ["kimi", { stopReason: "end_turn" }, null],
+    ["kimi", { stopReason: "cancelled" }, "cancelled"],
+    ["claude", {}, null], ["codex", {}, null], ["kimi", {}, null],
+  ];
+  for (const [agent, payload, reason] of cases) {
+    const items = buildRenderItems([ev(1, "turn_completed", payload)], agent);
+    if (reason) assert.match(items[0].text, new RegExp(reason));
+    else assert.equal(items.length, 0);
+  }
+});
+
 if (!process.exitCode) console.log(`✅ render-items / commands 单测全过（${pass} 例）`);
 else console.error(`部分用例失败（通过 ${pass} 例）`);

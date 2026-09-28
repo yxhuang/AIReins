@@ -152,17 +152,20 @@ export function SessionView({ session }: { session: SessionRecord }) {
         )}
         {items.map((item, index) => {
           const isLast = index === items.length - 1;
+          const next = items[index + 1];
+          if (item.kind === "text" || item.kind === "thought" || item.kind === "tool") {
+            const continues = (next?.kind === "text" || next?.kind === "thought" || next?.kind === "tool") && next.turn === item.turn;
+            const dot = item.kind === "tool" ? ` timeline-${item.status}` : "";
+            const view = item.kind === "text"
+              ? <TextBlockView item={item} streaming={isLast && running} />
+              : item.kind === "thought" ? <ThoughtBlockView item={item} /> : <ToolCard item={item} />;
+            return <div key={item.key} className={`timeline-item${continues ? " timeline-continues" : ""}${dot}`}>{view}</div>;
+          }
           switch (item.kind) {
             case "user":
               return <UserBlockView key={item.key} item={item} />;
             case "external-history":
               return <ExternalHistoryView key={item.key} item={item} agent={session.agent} />;
-            case "text":
-              return <TextBlockView key={item.key} item={item} streaming={isLast && running} />;
-            case "thought":
-              return <ThoughtBlockView key={item.key} item={item} />;
-            case "tool":
-              return <ToolCard key={item.key} item={item} />;
             case "gate": {
               // AskUserQuestion 渲染为提问选择卡片；与普通闸门共用 pendingGates/贴条机制
               const Block = item.questions?.length ? QuestionBlock : GateBlock;

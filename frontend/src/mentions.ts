@@ -23,6 +23,28 @@ const BOUNDARY_RE = new RegExp(
 // matchAll 内部会克隆正则，模块级共享是安全的。
 const MENTION_RE = new RegExp(`(?:^|${BOUNDARY_RE.source})@([^\\s]+)`, "g");
 
+/** 与发送时同一套 @ 边界，用于把可见的引用画成行内标签。 */
+export function mentionSegments(text: string): { text: string; mention: boolean }[] {
+  const segments: { text: string; mention: boolean }[] = [];
+  let end = 0;
+  for (const match of text.matchAll(MENTION_RE)) {
+    const raw = match[0];
+    const marker = raw.indexOf("@");
+    const start = (match.index ?? 0) + marker;
+    // 标签止于第一个句读标点并剥掉尾部标点（「@a.ts，然后」只画 @a.ts）；真带标点的文件名只是显示被截短，解析不受影响。
+    let tag = raw.slice(marker);
+    const cut = tag.slice(1).search(BOUNDARY_RE);
+    if (cut >= 0) tag = tag.slice(0, cut + 1);
+    while (tag.length > 1 && TRAILING_STRIP.has(tag.charAt(tag.length - 1))) tag = tag.slice(0, -1);
+    if (tag.length === 1) continue;
+    if (start > end) segments.push({ text: text.slice(end, start), mention: false });
+    segments.push({ text: tag, mention: true });
+    end = start + tag.length;
+  }
+  if (end < text.length) segments.push({ text: text.slice(end), mention: false });
+  return segments;
+}
+
 /** 从整段文本提取去重后的引用路径（不含 @），保持出现顺序。 */
 export function extractMentionTokens(text: string): string[] {
   const out: string[] = [];

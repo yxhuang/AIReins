@@ -1,13 +1,15 @@
-/* 设计令牌：暖色只留给「需要人出手」的审批元素；其余一律冷色或中性。 */
+/* 设计令牌：琥珀金 --gate 系只留给闸门、提问和待处理贴条。 */
 /* 配色不变量（改色前务必读）：
    底色前提 = Claude 网页版风格：浅色 = 象牙白 #FAF9F5、深色 = 暖深灰 #1F1E1D（非纯黑）。
    三家身份色 = 各自品牌色，与 ai-usage 面板(8788)的进度条保持一致：
      claude 珊瑚橙 #D97757 / codex 青绿 #10A37F / kimi 蓝 #1A73E8
    claude 珊瑚橙作文字时用 -ink 变体（原色在象牙白上对比度仅 2.96）。
-   闸门专用色 = 琥珀金（浅 #8F5806 / 底 #F6E3AE，深 #F2B32C / 底 #3A2E10），全站仅审批相关元素可用。
+   闸门专用色 = 琥珀金（浅 #8F5806 / 底 #F6E3AE，深 #F2B32C / 底 #3A2E10），仅闸门卡片、提问卡片和「N 个闸门等待处理」贴条可用。
    claude 的珊瑚橙与琥珀金色相相邻但明度饱和度差异大，不要把两者互相靠近。
    --danger 冷调洋红仅用于「拒绝」与错误；--diff-del* 仅用于 diff 删除行。
-   新增任何颜色前先问：它会不会被误读成「有闸门在等我」。
+   消息显示配色裁决（2026-09-28 用户拍板，docs/message-display-redesign.md §3）：
+     消息内容区（Markdown、代码块、工具行、时间线）配色以 VSCode 的 Claude Code 扩展为准，不受暖色限制；
+     闸门卡片、提问卡片和「N 个闸门等待处理」贴条仍独占琥珀金 --gate 系，其他元素不得使用 --gate 系令牌。
    终端配色裁决（2026-09-26 用户拍板，docs/terminal-panel-design.md §4/§9）：
      1) 终端内容区豁免配色不变量，视同外来内容（先例：PageView iframe 渲染用户自己的页面）；
      2) 终端 chrome（标题条、按钮、分隔条、左栏入口）一律中性或冷色，禁暖色；
@@ -40,6 +42,14 @@
   --diff-add-bg: #E2F1EC;
   --diff-del:    #A63D57;
   --diff-del-bg: #F6E9ED;
+  --msg-code-bg:       #F3F3F3;
+  --msg-inline-bg:     #EDEDED;
+  --msg-tool-bg:       #F7F7F7;
+  --msg-line:          #C5C5C5;
+  --msg-dot:           #777777;
+  --msg-dot-success:   #2D7D4D;
+  --msg-dot-failure:   #B23B30;
+  --msg-link:          #075B9F;
 
   /* 终端调色板（M19）：仅 xterm 内容区使用（该区豁免配色不变量，见顶部裁决）。
      yellow 系往橄榄偏（浅 #757100 / 亮 #9A8F00，色相近 60°），与琥珀金 --gate（色相近 35°）拉开。 */
@@ -106,6 +116,14 @@
     --diff-add-bg: #14251F;
     --diff-del:    #D9708A;
     --diff-del-bg: #291720;
+    --msg-code-bg:       #1E1E1E;
+    --msg-inline-bg:     #343434;
+    --msg-tool-bg:       #252526;
+    --msg-line:          #555555;
+    --msg-dot:           #A8A8A8;
+    --msg-dot-success:   #74C991;
+    --msg-dot-failure:   #C74E39;
+    --msg-link:          #73B9EA;
 
     /* 终端调色板（M19）：仅 xterm 内容区使用。yellow 系偏橄榄/赭石（#B8A94A / 亮 #CFC06A），
        比 --gate 琥珀金 #F2B32C 更绿、更低饱和，一眼可区分。 */
@@ -160,6 +178,14 @@
   --diff-add-bg: #14251F;
   --diff-del:    #D9708A;
   --diff-del-bg: #291720;
+  --msg-code-bg:       #1E1E1E;
+  --msg-inline-bg:     #343434;
+  --msg-tool-bg:       #252526;
+  --msg-line:          #555555;
+  --msg-dot:           #A8A8A8;
+  --msg-dot-success:   #74C991;
+  --msg-dot-failure:   #C74E39;
+  --msg-link:          #73B9EA;
 
   /* 终端调色板（M19）：仅 xterm 内容区使用。yellow 系偏橄榄/赭石（#B8A94A / 亮 #CFC06A），
      比 --gate 琥珀金 #F2B32C 更绿、更低饱和，一眼可区分。 */
@@ -934,13 +960,44 @@ body.resizing {
   display: flex;
   flex-direction: column;
   gap: 10px;
+  overflow-x: hidden;
+  min-width: 0;
 }
+
+.stream > * { width: min(100%, 820px); margin-inline: auto; box-sizing: border-box; min-width: 0; }
+
+.timeline-item { position: relative; padding-left: 30px; min-width: 0; }
+.timeline-item::before {
+  content: "";
+  position: absolute;
+  top: 9px;
+  left: 9px;
+  z-index: 1;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--msg-dot);
+}
+.timeline-item.timeline-ok::before { background: var(--msg-dot-success); }
+.timeline-item.timeline-error::before { background: var(--msg-dot-failure); }
+.timeline-item.timeline-running::before { animation: timeline-pulse 1s ease-in-out infinite; }
+.timeline-item.timeline-continues::after {
+  content: "";
+  position: absolute;
+  top: 14px;
+  bottom: -17px;
+  left: 12px;
+  width: 1px;
+  background: var(--msg-line);
+}
+@keyframes timeline-pulse { 50% { opacity: 0.25; } }
 
 .user-block {
   display: flex;
   gap: 8px;
   align-items: baseline;
-  background: var(--surface-sunk);
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
   border-radius: var(--radius);
   padding: 8px 12px;
 }
@@ -950,12 +1007,45 @@ body.resizing {
   overflow-wrap: anywhere; /* 长 URL/无空格路径不撑出横向滚动 */
 }
 
+.mention-tag {
+  display: inline;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--msg-inline-bg);
+  color: var(--text);
+  font-size: 0.9em;
+  font-family: var(--font-mono);
+  box-decoration-break: clone;
+}
+
 .text-block {
-  white-space: pre-wrap;
   overflow-wrap: anywhere; /* 同上：实时流与历史视图同一纪律 */
   line-height: 1.65;
   padding: 0 2px;
 }
+
+.markdown-message { min-width: 0; max-width: 100%; font-size: 15px; line-height: 1.65; overflow-wrap: anywhere; }
+.markdown-message > :first-child { margin-top: 0; }
+.markdown-message > :last-child { margin-bottom: 0; }
+.markdown-message p, .markdown-message ul, .markdown-message ol, .markdown-message blockquote { margin: 0.6em 0; }
+.markdown-message h1, .markdown-message h2, .markdown-message h3,
+.markdown-message h4, .markdown-message h5, .markdown-message h6 { line-height: 1.3; margin: 1em 0 0.4em; }
+.markdown-message h1 { font-size: 1.5em; }
+.markdown-message h2 { font-size: 1.3em; }
+.markdown-message h3 { font-size: 1.15em; }
+.markdown-message ul, .markdown-message ol { padding-left: 1.5em; }
+.markdown-message blockquote { border-left: 3px solid var(--msg-line); padding-left: 12px; color: var(--text-muted); }
+.markdown-message a { color: var(--msg-link); }
+/* 保留段内单换行：agent 常用单换行分行，Markdown 默认会把它折成空格 */
+.markdown-message p { white-space: pre-line; }
+.markdown-message :not(pre) > code { background: var(--msg-inline-bg); border-radius: 3px; padding: 1px 4px; font-family: var(--font-mono); font-size: 0.9em; }
+.markdown-code-block { position: relative; max-width: 100%; min-width: 0; margin: 0.7em 0; background: var(--msg-code-bg); border: 1px solid var(--border); border-radius: 6px; }
+.markdown-code-block pre { max-width: 100%; overflow-x: auto; margin: 0; padding: 34px 12px 12px; line-height: 1.5; font-size: 13px; }
+.markdown-code-block code { font-family: var(--font-mono); white-space: pre; }
+.markdown-copy { position: absolute; right: 7px; top: 5px; border: 1px solid var(--border-strong); border-radius: 4px; background: var(--surface); color: var(--text-muted); padding: 2px 8px; cursor: pointer; }
+.markdown-table-scroll { max-width: 100%; overflow-x: auto; margin: 0.7em 0; }
+.markdown-table-scroll table { border-collapse: collapse; width: max-content; min-width: 100%; }
+.markdown-table-scroll th, .markdown-table-scroll td { border: 1px solid var(--border); padding: 4px 8px; text-align: left; }
 
 /* 流式光标：全站唯一装饰性动画 */
 .cursor {
@@ -972,6 +1062,11 @@ body.resizing {
   border: 1px solid var(--border);
   border-radius: var(--radius);
 }
+.thought-block { background: transparent; border: 0; border-radius: 0; }
+.thought-head { padding-left: 0; }
+.thought-head:disabled { cursor: default; }
+.tool-card { background: var(--msg-tool-bg); min-width: 0; }
+.tool-head { min-height: 40px; }
 
 .thought-head, .tool-head, .raw-head {
   display: flex;
@@ -1013,7 +1108,7 @@ body.resizing {
 .tool-status-ok { color: var(--ok); }
 .tool-status-error { color: var(--danger); }
 
-.tool-card.tool-error { border-color: var(--danger); }
+.tool-card.tool-error { border-color: var(--msg-dot-failure); }
 
 .tool-body { padding: 0 10px 10px; }
 
@@ -1045,6 +1140,7 @@ body.resizing {
 }
 
 .system-error { color: var(--danger); }
+.system-created { opacity: 0.65; }
 
 /* ── 闸门块：暖色 + 直角，签名元素 ─────────── */
 .gate-block {
@@ -1784,7 +1880,7 @@ body.resizing {
 
 /* 减少动态：关光标闪烁、徽标脉冲与浮层动画 */
 @media (prefers-reduced-motion: reduce) {
-  .cursor, .gate-badge, .settings-panel, .cmd-panel, .cfg-menu { animation: none; }
+  .cursor, .gate-badge, .settings-panel, .cmd-panel, .cfg-menu, .timeline-item.timeline-running::before { animation: none; }
 }
 
 /* ── 扩展页面：左栏分区与页面视图（全部冷色/中性，暖色仍是闸门专用） ── */
@@ -2232,6 +2328,7 @@ body.resizing {
   min-height: 0;
   overflow-y: auto;
   padding: 10px 16px;
+  background: var(--surface-sunk);
 }
 
 .history-messages {
@@ -2244,9 +2341,8 @@ body.resizing {
 }
 
 .history-msg {
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 6px 8px;
+  min-width: 0;
+  padding: 4px 0;
 }
 
 .history-msg-role {
@@ -2267,6 +2363,10 @@ body.resizing {
   max-height: 180px;
   overflow-y: auto;
 }
+.history-msg .markdown-message { font-size: 15px; }
+.history-msg .user-block { margin: 0; }
+.history-preview-body .history-msg .markdown-message,
+.history-preview-body .history-msg .user-block { max-height: 180px; overflow-y: auto; }
 
 /* 中性说明（预览截断 / 导入代价 / 无可预览消息）：不是警告，不用暖色不用 --danger */
 .history-note {
@@ -2293,6 +2393,7 @@ body.resizing {
   padding: 8px 10px;
   margin-bottom: 10px;
   font-size: 12.5px;
+  min-width: 0;
 }
 
 .session-history-note {
@@ -2331,7 +2432,7 @@ body.resizing {
 
 /* 历史区内的消息复用 .history-msg 基础样式，底色再压一层以示弱化 */
 .session-history-list .history-msg {
-  background: var(--surface);
+  background: transparent;
 }
 
 /* timestamp：等宽小字 */
@@ -2342,20 +2443,18 @@ body.resizing {
   margin-top: 3px;
 }
 
-/* 历史区与实时区的分隔线：「以上为导入前的历史对话」 */
-.session-history-divider {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-top: 10px;
-  color: var(--text-faint);
-  font-size: 11.5px;
+@media (max-width: 640px) {
+  .stream { padding-inline: 10px; }
+  .timeline-item { padding-left: 13px; }
+  .timeline-item::before { left: 1px; }
+  .timeline-item.timeline-continues::after { left: 4px; }
+  .tool-head { min-height: 40px; padding-block: 9px; }
+  .markdown-message, .markdown-code-block, .markdown-table-scroll { min-width: 0; max-width: 100%; }
 }
 
-.session-history-divider::before,
-.session-history-divider::after {
-  content: "";
-  flex: 1;
+/* 历史区与实时区的分隔线（无文字；来源说明在历史区顶部，这条线也是 prepend 滚动补偿的锚点） */
+.session-history-divider {
+  margin-top: 10px;
   border-top: 1px solid var(--border);
 }
 

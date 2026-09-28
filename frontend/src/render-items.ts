@@ -10,6 +10,7 @@ export interface TextBlock {
   key: string;
   seq: number;
   text: string;
+  turn: number;
 }
 
 export interface ThoughtBlock {
@@ -17,6 +18,7 @@ export interface ThoughtBlock {
   key: string;
   seq: number;
   text: string;
+  turn: number;
 }
 
 export interface UserBlock {
@@ -35,6 +37,7 @@ export interface ToolView {
   input: string;
   status: "running" | "ok" | "error";
   result: string;
+  turn: number;
 }
 
 export interface EditChunk {
@@ -187,12 +190,29 @@ export function gateFromEvent(event: UnifiedEvent, agent: AgentKind): GateView {
 }
 
 // 按 seq 顺序把事件流折叠为渲染条目。
+function abnormalTurnReason(payload: Record<string, unknown>, agent: AgentKind): string | null {
+  if (agent === "claude") {
+    if (typeof payload.subtype === "string" && payload.subtype !== "success") return payload.subtype;
+    return payload.isError === true ? "Claude 报告错误" : null;
+  }
+  if (agent === "codex") {
+    const error = asRecord(payload.error);
+    const message = typeof error.message === "string" ? error.message :
+      typeof payload.error === "string" ? payload.error : "";
+    if (message) return message;
+    if (payload.error != null) return "Codex 报告错误";
+    return typeof payload.status === "string" && payload.status !== "completed" ? payload.status : null;
+  }
+  return typeof payload.stopReason === "string" && payload.stopReason !== "end_turn" ? payload.stopReason : null;
+}
+
 export function buildRenderItems(events: UnifiedEvent[], agent: AgentKind): RenderItem[] {
   const items: RenderItem[] = [];
   const tools = new Map<string, ToolView>();
   const gates = new Map<string, GateView>();
   let lastText: TextBlock | undefined;
   let lastThought: ThoughtBlock | undefined;
+  let turn = 0;
 
   const breakRun = () => {
     lastText = undefined;
@@ -207,7 +227,7 @@ export function buildRenderItems(events: UnifiedEvent[], agent: AgentKind): Rend
         if (lastText) {
           lastText.text += text;
         } else {
-          lastText = { kind: "text", key: `text:${event.seq}`, seq: event.seq, text };
+          lastText = { kind: "text", key: `text:${event.seq}`, seq: event.seq, text, turn };
           items.push(lastText);
         }
         lastThought = undefined;
@@ -218,7 +238,7 @@ export function buildRenderItems(events: UnifiedEvent[], agent: AgentKind): Rend
         if (lastThought) {
           lastThought.text += text;
         } else {
-          lastThought = { kind: "thought", key: `thought:${event.seq}`, seq: event.seq, text };
+          lastThought = { kind: "thought", key: `thought:${event.seq}`, seq: event.seq, text, turn };
           items.push(lastThought);
         }
         lastText = undefined;
@@ -226,6 +246,7 @@ export function buildRenderItems(events: UnifiedEvent[], agent: AgentKind): Rend
       }
       case "user_message":
         breakRun();
+        turn++;
         items.push({
           kind: "user",
           key: `user:${event.seq}`,
@@ -258,6 +279,7 @@ export function buildRenderItems(events: UnifiedEvent[], agent: AgentKind): Rend
           input: toolInputText(p),
           status: "running",
           result: "",
+          turn,
         };
         tools.set(id, view);
         items.push(view);
@@ -312,16 +334,16 @@ export function buildRenderItems(events: UnifiedEvent[], agent: AgentKind): Rend
           tone: "muted",
         });
         break;
-      case "turn_completed":
+      case "turn_completed": {
         breakRun();
-        items.push({
-          kind: "system",
-          key: `sys:${event.seq}`,
-          seq: event.seq,
-          text: "本轮结束",
-          tone: "muted",
+        turn++;
+        const reason = abnormalTurnReason(p, agent);
+        if (reason) items.push({
+          kind: "system", key: `sys:${event.seq}`, seq: event.seq,
+          text: `本轮异常结束：${reason}`, tone: "error",
         });
         break;
+      }
       case "session_error":
         breakRun();
         items.push({

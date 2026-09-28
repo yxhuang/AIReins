@@ -8,7 +8,8 @@ import {
   SOURCE_LABELS,
   type SourceFilter,
 } from "../history";
-import { messageRoleLabel, relativeTime } from "../format";
+import { relativeTime } from "../format";
+import { HistoryMessageView } from "./MarkdownMessage";
 import { store, type Store } from "../store";
 import { shallowEqual, useStore } from "../useStore";
 
@@ -380,6 +381,7 @@ function HistoryPreviewPane({ item, onBack }: { item: HistorySession | undefined
         </p>
       </div>
       <div className="history-preview-body">
+        <p className="session-history-note">{item.agent} 原生会话预览 · 仅用户与助手文本。</p>
         {state?.phase === "loading" && <p className="history-note">读取预览中…</p>}
         {state?.phase === "error" && (
           <p className="history-error" role="alert">
@@ -395,12 +397,7 @@ function HistoryPreviewPane({ item, onBack }: { item: HistorySession | undefined
             ) : (
               <ul className="history-messages">
                 {state.preview.messages.map((message, index) => (
-                  <li key={index} className={`history-msg history-msg-${message.role}`}>
-                    <span className="history-msg-role">
-                      {messageRoleLabel(message.role, item?.agent)}
-                    </span>
-                    <span className="history-msg-text">{message.text}</span>
-                  </li>
+                  <li key={index}><HistoryMessageView message={message} agent={item.agent} /></li>
                 ))}
               </ul>
             )}

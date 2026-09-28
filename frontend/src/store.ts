@@ -97,6 +97,7 @@ export class Store {
   version = 0;
 
   private listeners = new Set<() => void>();
+  private streamFrame: number | undefined;
   private socket: WebSocket | null = null;
   private reconnectDelay = 1000;
   private reconnectTimer: ReturnType<typeof setTimeout> | undefined;
@@ -128,9 +129,25 @@ export class Store {
   };
 
   private notify(): void {
+    if (this.streamFrame !== undefined) {
+      cancelAnimationFrame(this.streamFrame);
+      this.streamFrame = undefined;
+    }
     this.refreshTickSchedule();
     this.version++;
     for (const listener of this.listeners) listener();
+  }
+
+  private notifyStreamDelta(): void {
+    if (typeof requestAnimationFrame !== "function") {
+      this.notify();
+      return;
+    }
+    if (this.streamFrame !== undefined) return;
+    this.streamFrame = requestAnimationFrame(() => {
+      this.streamFrame = undefined;
+      this.notify();
+    });
   }
 
   private startClock(): void {
@@ -545,7 +562,8 @@ export class Store {
       void this.refreshSessions();
     }
     this.scheduleListRefresh();
-    this.notify();
+    if (event.type === "agent_text_delta" || event.type === "thought_delta") this.notifyStreamDelta();
+    else this.notify();
   }
 
   /**

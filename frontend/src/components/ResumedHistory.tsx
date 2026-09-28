@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
 import type { SessionRecord } from "../types";
-import { messageRoleLabel } from "../format";
+import { HistoryMessageView } from "./MarkdownMessage";
 import { fetchHistoryMessages } from "../api";
 import {
   HISTORY_MAX_MESSAGES,
@@ -17,7 +17,7 @@ type Phase = "loading" | "ready" | "error";
  * 续接会话的历史消息区：渲染在实时事件流上方，进入会话默认加载最近一页，
  * 顶部「加载更早的消息」按 nextCursor 向更早翻页（prepend，不一次拉全）。
  * 与实时区视觉可区分：弱化底色 + 底部分隔线「以上为导入前的历史对话」；默认展开，不折叠。
- * 历史消息没有工具调用/思考块（后端归一时已丢弃），只渲染用户/助手两态，文本原样。
+ * 历史消息没有工具调用/思考块（后端归一时已丢弃），只渲染用户/助手两态。
  */
 export function ResumedHistory({
   session,
@@ -109,11 +109,7 @@ export function ResumedHistory({
   return (
     <section className="session-history" aria-label="导入前的历史对话">
       <p className="session-history-note">
-        此会话续接自 {resumedFrom.agent} 原生会话（
-        <span className="mono">{resumedFrom.nativeSessionId}</span>
-        {typeof resumedFrom.messageCount === "number" &&
-          `，约 ${resumedFrom.messageCount} 条消息`}
-        ）。以下为导入前的历史消息，只含用户与助手文本。
+        导入前的 {resumedFrom.agent} 原生会话 · 仅用户与助手文本，不含工具调用与思考过程。
       </p>
       {phase === "loading" && <p className="session-history-note">正在加载历史消息…</p>}
       {phase === "error" && (
@@ -169,26 +165,13 @@ export function ResumedHistory({
           )}
           <ul className="session-history-list">
             {state.messages.map((message, index) => (
-              <li
-                key={`${message.role}:${message.timestamp ?? "null"}:${index}`}
-                className={`history-msg history-msg-${message.role}`}
-              >
-                <span className="history-msg-role">
-                  {messageRoleLabel(message.role, session.agent)}
-                </span>
-                <span className="history-msg-text">{message.text}</span>
-                <span className="history-msg-time mono">
-                  {message.timestamp
-                    ? new Date(message.timestamp).toLocaleString()
-                    : "时间未知"}
-                </span>
+              <li key={`${message.role}:${message.timestamp ?? "null"}:${index}`}>
+                <HistoryMessageView message={message} agent={agent} showTime />
               </li>
             ))}
           </ul>
           <div className="session-history-divider" role="separator" ref={dividerRef}>
-            {/* 必须如实说明省略了什么：历史只有消息文本，看不到工具调用。
-                否则用户向上翻看到「已写入。」这类回复，会以为 agent 凭空声称做了事。 */}
-            <span>以上为导入前的历史对话 · 仅消息文本，不含工具调用与思考过程</span>
+            {/* 分隔线仍是 prepend 滚动补偿的定位锚点；来源与省略项已在上方一行说明。 */}
           </div>
         </>
       )}
