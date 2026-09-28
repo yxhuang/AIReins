@@ -8,7 +8,7 @@ import {
   SOURCE_LABELS,
   type SourceFilter,
 } from "../history";
-import { relativeTime } from "../format";
+import { messageRoleLabel, relativeTime } from "../format";
 import { store, type Store } from "../store";
 import { shallowEqual, useStore } from "../useStore";
 
@@ -397,7 +397,7 @@ function HistoryPreviewPane({ item, onBack }: { item: HistorySession | undefined
                 {state.preview.messages.map((message, index) => (
                   <li key={index} className={`history-msg history-msg-${message.role}`}>
                     <span className="history-msg-role">
-                      {message.role === "user" ? "用户" : "助手"}
+                      {messageRoleLabel(message.role, item?.agent)}
                     </span>
                     <span className="history-msg-text">{message.text}</span>
                   </li>

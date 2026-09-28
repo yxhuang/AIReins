@@ -1,4 +1,4 @@
-import type { SessionRecord, UnifiedEvent } from "./types";
+import type { AgentKind, SessionRecord, UnifiedEvent } from "./types";
 
 // 相对时间：左栏「刚刚 / N分钟前」等。
 export function relativeTime(iso: string, now: number): string {
@@ -11,6 +11,13 @@ export function relativeTime(iso: string, now: number): string {
   const hours = Math.floor(minutes / 60);
   if (hours < 24) return `${hours} 小时前`;
   return `${Math.floor(hours / 24)} 天前`;
+}
+
+// 历史 / 外部续聊消息的角色名：用户显示「我」，助手显示所属 CLI。
+const AGENT_NAMES: Record<AgentKind, string> = { claude: "Claude Code", codex: "Codex", kimi: "Kimi" };
+export function messageRoleLabel(role: string, agent: AgentKind | undefined): string {
+  if (role === "user") return "我";
+  return agent ? AGENT_NAMES[agent] : "助手";
 }
 
 // 用时：1m12s / 2h03m 这种紧凑格式，等宽展示。

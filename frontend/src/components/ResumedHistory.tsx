@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
 import type { SessionRecord } from "../types";
+import { messageRoleLabel } from "../format";
 import { fetchHistoryMessages } from "../api";
 import {
   HISTORY_MAX_MESSAGES,
@@ -173,7 +174,7 @@ export function ResumedHistory({
                 className={`history-msg history-msg-${message.role}`}
               >
                 <span className="history-msg-role">
-                  {message.role === "user" ? "用户" : "助手"}
+                  {messageRoleLabel(message.role, session.agent)}
                 </span>
                 <span className="history-msg-text">{message.text}</span>
                 <span className="history-msg-time mono">

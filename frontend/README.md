@@ -424,6 +424,7 @@ frontend/
 
 - Claude worker 以 `claude-vscode` 身份落盘。历史导入说明已更新：工作台新建的 Claude 会话可在 VSCode/CLI 的 resume 列表中出现；导入仍是对原生记录的就地续接。
 - `external_messages_added` 被归一成 `external-history` 渲染条目，放在本轮 `user_message` 前；使用与「导入前的历史对话」相同的弱化底色、用户/助手文本样式，并明确说明没有工具调用。事件进入 transcript，快照和断线回放按 `seq` 还原。
+- 角色名（2026-09-28）：外部续聊区块、导入历史区、历史页预览统一用 `format.ts` 的 `messageRoleLabel`——用户显示「我」，助手按会话 agent 显示 Claude Code / Codex / Kimi（取不到 agent 时回落「助手」）。
 - **打桩测试**：`frontend/scripts/render-items.test.mjs` 覆盖新事件载荷归一、与前后文本分块及新用户消息的顺序。**代码复核**：`SessionView` 的事件分支和 `ExternalHistoryView` 的文案、样式复用。**待真机**：Claude 新建会话在 VSCode 与 CLI resume 列表可见；三家在别处续聊后回工作台发送、断线回放及异常提示；视觉与手机布局。
 
 ### 通用边界

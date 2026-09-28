@@ -286,7 +286,13 @@ await t("源码接线：resumedFrom 才挂历史区；分隔线文案；用户/�
   assert.ok(history.includes("加载更早的消息"), "翻页按钮文案缺失");
   assert.ok(history.includes("加载中…"), "加载中文案缺失");
   assert.ok(history.includes("重试"), "失败重试缺失");
-  assert.ok(history.includes('message.role === "user" ? "用户" : "助手"'), "应只有用户/助手两态");
+  assert.ok(history.includes("messageRoleLabel(message.role, session.agent)"), "应只有用户/助手两态");
+  const { messageRoleLabel } = await import("../src/format.ts");
+  assert.equal(messageRoleLabel("user", "claude"), "我");
+  assert.equal(messageRoleLabel("assistant", "claude"), "Claude Code");
+  assert.equal(messageRoleLabel("assistant", "codex"), "Codex");
+  assert.equal(messageRoleLabel("assistant", "kimi"), "Kimi");
+  assert.equal(messageRoleLabel("assistant", undefined), "助手");
   assert.ok(!/tool_call|thought/i.test(history), "历史区不应渲染工具调用/思考块");
   assert.ok(!/display:\s*"?none/.test(history), "历史区不应默认折叠隐藏");
 });

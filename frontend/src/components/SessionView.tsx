@@ -156,7 +156,7 @@ export function SessionView({ session }: { session: SessionRecord }) {
             case "user":
               return <UserBlockView key={item.key} item={item} />;
             case "external-history":
-              return <ExternalHistoryView key={item.key} item={item} />;
+              return <ExternalHistoryView key={item.key} item={item} agent={session.agent} />;
             case "text":
               return <TextBlockView key={item.key} item={item} streaming={isLast && running} />;
             case "thought":

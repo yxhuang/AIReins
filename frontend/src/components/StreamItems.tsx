@@ -21,6 +21,8 @@ import {
   type AskSelection,
 } from "../ask";
 import { store } from "../store";
+import { messageRoleLabel } from "../format";
+import type { AgentKind } from "../types";
 
 export function UserBlockView({ item }: { item: UserBlock }) {
   return (
@@ -30,7 +32,7 @@ export function UserBlockView({ item }: { item: UserBlock }) {
   );
 }
 
-export function ExternalHistoryView({ item }: { item: ExternalHistoryBlock }) {
+export function ExternalHistoryView({ item, agent }: { item: ExternalHistoryBlock; agent: AgentKind }) {
   return (
     <section className="session-history" aria-label="在别处继续的对话">
       <p className="session-history-note">以下为在别处（VSCode/CLI 等）继续的对话，仅消息文本，不含工具调用。</p>
@@ -38,7 +40,7 @@ export function ExternalHistoryView({ item }: { item: ExternalHistoryBlock }) {
       <ul className="session-history-list">
         {item.messages.map((message, index) => (
           <li key={`${item.key}:${index}`} className={`history-msg history-msg-${message.role}`}>
-            <span className="history-msg-role">{message.role === "user" ? "用户" : "助手"}</span>
+            <span className="history-msg-role">{messageRoleLabel(message.role, agent)}</span>
             <span className="history-msg-text">{message.text}</span>
             <span className="history-msg-time mono">{message.timestamp ? new Date(message.timestamp).toLocaleString() : "时间未知"}</span>
           </li>
