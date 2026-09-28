@@ -497,3 +497,50 @@ Kimi 这里不是 input/output 分项，而是上下文已用量 `used` 与总�
 - [x] 5. 三家 usage/token 字段均贴出真实 capture 样本。
 - [x] 通用实现：Node 22 + 仓库内 tsx/TypeScript；逐行解析、非 JSON 容错、双向逐行 capture、stderr 分离、180s 超时均已实现。
 - [x] 安全范围：agent 文件写入只落在 `spikes/sandbox/`；未改 PROMPT.md，未改三个 CLI 配置/软链，未用 npm 全局安装、sudo、浏览器、Windows 程序或删除操作；capture 凭证字段在写入前打码。
+
+## 7. kimi 2.1.1 工具调用字段（2026-09-28 抓包）
+
+来源：`spikes/kimi-tools-capture.ts` → `spikes/captures/kimi-tools.ndjson`。七步工具任务（读/搜/列/改/写/跑命令/抓取），沙箱 cwd，权限一律自动批准。结论：**`kind` / `locations` / `rawInput` 确实存在**，但出现时机分阶段。
+
+**初始 `tool_call`**：只有短名 title + kind + 空 content，**无 locations、无 rawInput**：
+
+```json
+{"sessionUpdate":"tool_call","toolCallId":"0:tool_HXOB…","title":"Read","kind":"read","status":"pending","content":[{"type":"content","content":{"type":"text","text":""}}]}
+```
+
+**`tool_call_update` 流式阶段**：`content` 的 text 是入参 JSON 的增量（如 `{"path":"`）；进入 `in_progress` 时有一条同时带人话 title、kind 和完整 `rawInput`：
+
+```json
+{"sessionUpdate":"tool_call_update","toolCallId":"0:tool_HXOB…","status":"in_progress","title":"Reading a.ts","kind":"read","rawInput":{"path":"a.ts"},"content":[{"type":"content","content":{"type":"text","text":"{\"path\":\"a.ts\"}"}}]}
+```
+
+**完成态**：`status` 为 `completed` / `failed`，`content` 文本换成结果，另带 `rawOutput`（Bash 例外，见下）。
+
+实测 kind 值：`read`（Read/Grep/Glob）、`edit`（Edit/Write）、`execute`（Bash）、`other`（FetchURL）。search/fetch/think 等 ACP 枚举值未出现——搜索与列目录都归 `read`，抓取归 `other`。
+
+| 工具 | 初始 title → 人话 title | kind | rawInput（实测一例） | locations |
+|---|---|---|---|---|
+| 读 Read | `Read` → `Reading a.ts` | read | `{"path":"a.ts"}` | 文件的绝对路径 |
+| 搜索 Grep | `Grep` → `Searching for 'TODO' in <目录绝对路径>` | read | `{"pattern":"TODO","output_mode":"content"}` | 目录的绝对路径 |
+| 列目录 Glob | `Glob` → `Searching **/*.ts` | read | `{"pattern":"**/*.ts"}` | 目录的绝对路径 |
+| 编辑 Edit | `Edit` → `Editing a.ts` | edit | `{"path":"a.ts","old_string":"function foo() {}","new_string":"function bar() {}"}` | 文件的绝对路径 |
+| 写入 Write | `Write` → `Writing b.txt` | edit | `{"path":"b.txt","content":"hello"}` | 文件的绝对路径 |
+| 命令 Bash | `Bash` → `Running: ls -la && false` | execute | `{"command":"ls -la && false"}` | 全程无 locations |
+| 抓取 FetchURL | `FetchURL` → `Fetching: https://example.com` | other | `{"url":"https://example.com"}` | 全程无 locations |
+
+完成态 content / rawOutput 一例（截短）：
+
+- Read：`rawOutput` 是带行号的内容 `"1\tfunction foo() {}\n2\t// TODO: fix"`，content 同文本。
+- Grep：`"a.ts:2:// TODO: fix\nnotes.md:3:- TODO: 补上说明"`。
+- Glob：`"a.ts\nsub/c.ts"`。
+- Edit：`"Replaced 1 occurrence in a.ts"`（纯结论文本，无 diff）。
+- Write：`"Wrote 5 bytes to b.txt"`。
+- FetchURL：页面正文文本（开头带「引用此页」提示句）。
+
+**terminal 类 content（Bash）**：完成态 content 只有终端引用，**没有输出文本、没有 rawOutput**；输出只能经 `terminal/output` 另取（印证 HANDOFF「阶段 2 的两个坑」第一条）。`status` 反映退出码：`ls -la && false` 完成态为 `"failed"`。
+
+```json
+{"sessionUpdate":"tool_call_update","toolCallId":"0:tool_9VNP…","status":"failed","content":[{"type":"terminal","terminalId":"tools-1790607026567-0"}]}
+```
+
+未出现：多条目 locations（每个工具至多一条）、edit 的 diff 型 content、`kind` 的其他取值。本次 7 类工具全部出现，无「未出现」项。

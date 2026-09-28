@@ -443,6 +443,40 @@ frontend/
 - **评审**：Codex 只读评审（会话 `00000000-0000-4000-8000-000000000008`）结论为「修完再合并」，提了四条，核实后都已修复：单换行被折叠、@ 标签吞掉后文、复制失败没有反馈、「通用边界」里关于 `@a.ts，然后` 的过时说明。
 - **截图验收**（playwright 注入合成三家会话，1280 / 390 × 深浅色共 12 张）：全部没有页面横向滚动、没有 `script`/`onerror`/`javascript:` 节点、没有页面错误。**待真机**：8790 与手机上的实际观感，以及长回复流式输出时的手感。
 
+### M22 消息显示改版阶段 2：工具行人话化（2026-09-28）
+
+规划见 `docs/message-display-redesign.md` §3「工具行」、§4 阶段 2。分工如下：
+- 采样：Kimi，会话 `session_00000000-0000-4000-8000-000000000009`；
+- 后端 kimi driver：Codex，会话 `00000000-0000-4000-8000-000000000010`；
+- 前端：Kimi，会话 `session_00000000-0000-4000-8000-000000000011`；
+- 主会话负责验收、截图和提交。
+
+- **样本**：`frontend/scripts/fixtures/tool-events/{claude,codex,kimi}.ndjson` 取自 18790 临时实例上三家的真实会话。三家跑的是同一个 7 步任务：读、搜、列、改名、新建、失败命令、抓网页。临时路径统一换成 `/work/proj`。
+  - claude：TodoWrite×9、Bash×3、ToolSearch×2，Read、Edit、Write、WebFetch 各 1；
+  - codex：commandExecution×4、fileChange×2、webSearch×1；
+  - kimi：Read、Grep、Glob、Edit、Write、Bash、FetchURL 各 1。
+  - 这些数都是主会话重新数过的。
+- **摘要器**：`frontend/src/tool-summary.ts` 是纯函数，`summarizeTool(agent, tool, cwd) → { verb, target, note, body }`。
+  - body 有 command / diff / read / raw 四种。
+  - kimi 按 ACP `kind` 优先分类，其次看短名，最后看人话标题，能处理完成事件不带名字的情况。
+  - codex 命令会剥掉 `bash -lc` 外壳；fileChange 改了多个文件时，每块 diff 都标出所属路径。
+  - Grep 的计数区分「N 处」和「N 个文件」，判断不了模式就不写。
+  - 认不出的工具一律回落成「原名 + 原始入参与结果」，不再按入参形状猜类型。
+  - 失败时折叠行显示错误首行，展开后能看到完整错误；读取失败时不显示行数。
+- **ToolCard**：折叠态是一行「动词 + 对象 + 附注 + 状态」。
+  - 附注和工具名都可以收缩、显示省略号，状态文字始终可见；工具全名放在 `title` 里。
+  - 展开后：命令显示前 20 行输出，可点「显示全部」，附退出码和截断标记；编辑显示 `DiffView`；读取只给路径和行数；其他工具显示原始文本。
+  - `ToolView` 新增 `baseToolName`、`rawInput`、`rawResult`、`toolKind`、`locations`、`terminalOutput` 等字段。kimi 完成事件不再用结果覆盖入参。
+- **DiffView**：从闸门卡片里抽成共用组件 `components/DiffView.tsx`。闸门传入的是单段、无标题的 diff，生成的标签结构与原来逐字相同；浅色截图与阶段 1 逐像素一致。
+- **后端契约**：见 `server/README.md`。kimi 的 `tool_call_completed` 多了 `terminalOutput`，内容是命令输出末尾最多 64 KiB，来自独立的尾部缓冲，所以超过 ACP 上限的长输出也能拿到最后一行。`terminal/release` 之后，这份输出在一个最多 64 条的表里留存。kimi 的工具事件还会透传 `kind` 和 `locations`。ACP `terminal/output` 原有的返回语义没变。
+- **包体积**：主 JS 为 458.66 kB（gzip 141.48 kB），比 M21 多约 10 kB。
+- **测试**：新增 `npm run test:tool-summary`，共 25 例。三家样本逐个工具核对 verb/target/note；另有合成用例覆盖 terminalOutput、仅凭 kind 分类、名字中途变化、未知工具回落、多文件 fileChange、失败诊断、Grep 口径、cwd 外路径。其中「读取失败不显示行数」做过红绿验证。后端新增 `server/kimi-tool-output.test.ts`。
+- **评审**：Codex 只读评审（会话 `00000000-0000-4000-8000-000000000012`）两轮。第一轮提了 7 条重要问题、2 条次要问题，都由原执行者修复，第二轮逐条确认已修；第二轮又提了 2 条小问题，由主会话修复。
+- **截图**：`frontend/scripts/msg-display-shots.mjs` 新增 `FIXTURES=1` 模式，直接回放上面的真实样本。真实样本和合成数据各 12 张，都没有页面横滚、没有 XSS 节点、没有页面错误。
+- **待真机**：
+  - 8790 上的实际观感。后端改动要 `workbench restart` 才生效，重启前 kimi 命令不会显示输出。
+  - codex 会话里 `raw_event`（「调试事件」）行偏多，来源是 `turn/diff/updated`、`hook/*`、`account/updated` 这类通知，不在本次范围，见 HANDOFF 待办。
+
 ### 通用边界
 
 - `@token` 提取仍按空白切段，解析时整 token 优先，命中不了再回退到剥离候选：先逐级剥掉尾部标点（如 `@a.ts，`），再在中段句读标点处截断（如 `@a.ts，然后` 解析为 `a.ts`，见 `mentions.test.mjs`）。候选必须命中真实文件才采纳。用户消息里的 `@` 标签（M21）也用同一套句读边界截断显示。

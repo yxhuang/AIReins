@@ -1,6 +1,7 @@
 import type { AgentKind, AskQuestion, HistoryMessage, PermissionDecision, UnifiedEvent } from "./types";
 import { asRecord, stringifyBlock } from "./format";
 import { normalizeQuestions } from "./ask";
+import type { ToolLocation, ToolTerminalOutput } from "./tool-summary";
 
 // 把统一事件折叠成渲染条目：同一 turn 内的文本增量、思考增量合并成块；
 // 工具调用按 toolCallId 聚合三阶段；闸门按 requestId 聚合请求与结果。
@@ -38,6 +39,17 @@ export interface ToolView {
   status: "running" | "ok" | "error";
   result: string;
   turn: number;
+  /** tool_call_started 时的最初短名（kimi 后来会把 toolName 改成人话标题；摘要器靠它分类） */
+  baseToolName: string;
+  /** 原始入参对象（claude 的 input、codex 的整个 item、kimi 的 rawInput）；旧 transcript 缺省 */
+  rawInput?: unknown;
+  /** 原始结果（claude result / kimi content / codex item）；旧 transcript 缺省 */
+  rawResult?: unknown;
+  /** ACP kind（read/edit/execute/…），有就优先用它分类 */
+  toolKind?: string;
+  locations?: ToolLocation[];
+  /** kimi 命令类工具的终端输出（后端阶段 2 契约的可选字段；没有时输出仍不可见） */
+  terminalOutput?: ToolTerminalOutput;
 }
 
 export interface EditChunk {
@@ -270,16 +282,21 @@ export function buildRenderItems(events: UnifiedEvent[], agent: AgentKind): Rend
       case "tool_call_started": {
         breakRun();
         const id = String(p.toolCallId ?? event.seq);
+        const toolName = String(p.toolName ?? "tool");
         const view: ToolView = {
           kind: "tool",
           key: `tool:${id}`,
           seq: event.seq,
           toolCallId: id,
-          toolName: String(p.toolName ?? "tool"),
+          toolName,
           input: toolInputText(p),
           status: "running",
           result: "",
           turn,
+          baseToolName: toolName,
+          ...(isPlainObject(p.input) ? { rawInput: p.input } : {}),
+          ...(typeof p.kind === "string" ? { toolKind: p.kind } : {}),
+          ...(Array.isArray(p.locations) ? { locations: normalizeLocations(p.locations) } : {}),
         };
         tools.set(id, view);
         items.push(view);
@@ -288,9 +305,11 @@ export function buildRenderItems(events: UnifiedEvent[], agent: AgentKind): Rend
       case "tool_call_updated": {
         const view = tools.get(String(p.toolCallId ?? ""));
         if (view) {
+          // kimi 跑命令时的 content 是终端引用（{type:"terminal"}），不是入参，不能覆盖真实入参
           const updated = toolInputText(p);
-          if (updated) view.input = updated;
+          if (updated && !isTerminalRefContent(p.content)) view.input = updated;
           if (typeof p.toolName === "string") view.toolName = p.toolName;
+          mergeToolExtras(view, p);
         }
         break;
       }
@@ -300,9 +319,20 @@ export function buildRenderItems(events: UnifiedEvent[], agent: AgentKind): Rend
           view.status = p.isError ? "error" : "ok";
           // claude 给 result，kimi 给 content，宽容取其一。
           view.result = toolResultText(p.result ?? p.content);
+          if (p.result !== undefined || p.content !== undefined) view.rawResult = p.result ?? p.content;
           if (typeof p.toolName === "string") view.toolName = p.toolName;
-          const updated = toolInputText(p);
-          if (updated) view.input = updated;
+          // 完成态只更新结果：入参保持最后一次真实入参，不被结果 content 覆盖
+          mergeToolExtras(view, p);
+          const term = asRecord(p.terminalOutput);
+          if (typeof term.output === "string") {
+            view.terminalOutput = {
+              terminalId: String(term.terminalId ?? ""),
+              output: term.output,
+              truncated: term.truncated === true,
+              exitCode: typeof term.exitCode === "number" ? term.exitCode : null,
+              signal: typeof term.signal === "string" ? term.signal : null,
+            };
+          }
         }
         break;
       }
@@ -389,14 +419,46 @@ function toolInputText(p: Record<string, unknown>): string {
   return "";
 }
 
+// 摘要器要的原始字段：kind/locations/rawInput 在任何阶段事件上出现就记下（有就优先用）。
+function mergeToolExtras(view: ToolView, p: Record<string, unknown>): void {
+  if (isPlainObject(p.input)) view.rawInput = p.input;
+  if (typeof p.kind === "string") view.toolKind = p.kind;
+  if (Array.isArray(p.locations)) view.locations = normalizeLocations(p.locations);
+}
+
+function isPlainObject(value: unknown): boolean {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+// kimi 命令阶段的 content 只有终端引用块（{type:"terminal",terminalId}），不是入参文本
+function isTerminalRefContent(content: unknown): boolean {
+  return Array.isArray(content) && content.length > 0
+    && content.every((block) => asRecord(block).type === "terminal");
+}
+
+function normalizeLocations(value: unknown[]): ToolLocation[] {
+  return value
+    .map(asRecord)
+    .filter((l) => typeof l.path === "string" && l.path)
+    .map((l) => ({ path: String(l.path), ...(typeof l.line === "number" ? { line: l.line } : {}) }));
+}
+
 function toolResultText(result: unknown): string {
   if (typeof result === "string") return result;
-  // claude 的 tool_result content 是块数组；提取其中的 text 块，其余走 JSON。
+  // claude 的 tool_result content 是块数组；kimi 的是嵌套块（{type:"content",content:{type:"text"}}）。
+  // 提取其中的 text 块，其余走 JSON。
   if (Array.isArray(result)) {
     const texts = result
       .map((block) => asRecord(block))
-      .filter((block) => block.type === "text" && typeof block.text === "string")
-      .map((block) => String(block.text));
+      .map((block) => {
+        if (block.type === "text" && typeof block.text === "string") return block.text;
+        if (block.type === "content") {
+          const inner = asRecord(block.content);
+          if (inner.type === "text" && typeof inner.text === "string") return inner.text;
+        }
+        return null;
+      })
+      .filter((text): text is string => text !== null);
     if (texts.length > 0 && texts.length === result.length) return texts.join("\n");
   }
   return stringifyBlock(result);

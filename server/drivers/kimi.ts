@@ -40,13 +40,79 @@ const KIMI_CLIENT_CAPABILITIES = {
   elicitation: { form: {} },
 };
 
-interface TerminalState {
+interface TerminalEventOutputState {
+  eventTail: Buffer;
+  eventTruncated: boolean;
+  exitCode?: number;
+  signal?: string;
+}
+
+interface TerminalState extends TerminalEventOutputState {
   process: ChildProcessWithoutNullStreams;
   output: string;
   truncated: boolean;
-  exitCode?: number;
-  signal?: NodeJS.Signals;
   done: Promise<void>;
+}
+
+const TERMINAL_EVENT_OUTPUT_BYTES = 64 * 1024;
+const RELEASED_TERMINAL_LIMIT = 64;
+
+function appendKimiTerminalTail(state: Pick<TerminalState, "eventTail" | "eventTruncated">, chunk: Buffer): void {
+  const combined = Buffer.concat([state.eventTail, chunk]);
+  let start = Math.max(0, combined.length - TERMINAL_EVENT_OUTPUT_BYTES);
+  if (start > 0) {
+    while (start < combined.length && (combined[start] & 0xc0) === 0x80) start++;
+    state.eventTruncated = true;
+  }
+  state.eventTail = combined.subarray(start);
+}
+
+export function collectKimiTerminalChunk(
+  state: Pick<TerminalState, "output" | "truncated" | "eventTail" | "eventTruncated">,
+  chunk: Buffer,
+  outputLimit: number,
+): void {
+  appendKimiTerminalTail(state, chunk);
+  // ACP terminal/output keeps its existing head-of-output limit.
+  const remaining = outputLimit - Buffer.byteLength(state.output);
+  if (remaining <= 0) {
+    state.truncated = true;
+    state.eventTruncated = true;
+    return;
+  }
+  const slice = chunk.subarray(0, remaining);
+  state.output += slice.toString("utf8");
+  if (slice.length < chunk.length) {
+    state.truncated = true;
+    state.eventTruncated = true;
+  }
+}
+
+function terminalOutputForEvent(
+  content: unknown,
+  lookup: (terminalId: string) => TerminalEventOutputState | undefined,
+): { terminalId: string; output: string; truncated: boolean; exitCode: number | null; signal: string | null } | undefined {
+  if (!Array.isArray(content)) return undefined;
+  const terminalId = content.find((item) => item?.type === "terminal" && typeof item.terminalId === "string")?.terminalId;
+  if (terminalId === undefined) return undefined;
+  const state = lookup(terminalId);
+  if (!state) return undefined;
+  const bytes = state.eventTail;
+  let end = bytes.length;
+  if (end > 0) {
+    let last = end - 1;
+    while (last > 0 && (bytes[last] & 0xc0) === 0x80) last--;
+    const lead = bytes[last];
+    const width = lead >= 0xf0 && lead <= 0xf4 ? 4 : lead >= 0xe0 && lead <= 0xef ? 3 : lead >= 0xc2 && lead <= 0xdf ? 2 : 1;
+    if (end - last < width) end = last;
+  }
+  return {
+    terminalId,
+    output: bytes.subarray(0, end).toString("utf8"),
+    truncated: state.eventTruncated || end < bytes.length,
+    exitCode: state.exitCode ?? null,
+    signal: state.signal ?? null,
+  };
 }
 
 interface AcpConfigOption {
@@ -133,6 +199,7 @@ export class KimiDriver extends BaseDriver {
   private readonly rpc = new Map<number, PendingRpc>();
   private readonly permissions = new Map<string, KimiPermission>();
   private readonly terminals = new Map<string, TerminalState>();
+  private readonly releasedTerminals = new Map<string, TerminalEventOutputState>();
   private nativeSessionId = "";
   private terminalCounter = 0;
   private configOptions: AcpConfigOption[] = [];
@@ -278,6 +345,7 @@ export class KimiDriver extends BaseDriver {
       } catch { /* process shutdown remains authoritative */ }
     }
     await super.stop();
+    this.releasedTerminals.clear();
   }
 
   protected handleStdoutLine(line: string): void {
@@ -423,6 +491,7 @@ export class KimiDriver extends BaseDriver {
   protected handleProcessExit(): void {
     this.permissions.clear();
     this.rpc.clear();
+    this.releasedTerminals.clear();
   }
 
   private cancelElicitations(): void {
@@ -483,18 +552,11 @@ export class KimiDriver extends BaseDriver {
       process: processHandle,
       output: "",
       truncated: false,
+      eventTail: Buffer.alloc(0),
+      eventTruncated: false,
       done: new Promise<void>((resolve) => { finish = resolve; }),
     };
-    const collect = (chunk: Buffer) => {
-      const remaining = outputLimit - Buffer.byteLength(state.output);
-      if (remaining <= 0) {
-        state.truncated = true;
-        return;
-      }
-      const slice = chunk.subarray(0, remaining);
-      state.output += slice.toString("utf8");
-      if (slice.length < chunk.length) state.truncated = true;
-    };
+    const collect = (chunk: Buffer) => collectKimiTerminalChunk(state, chunk, outputLimit);
     processHandle.stdout.on("data", collect);
     processHandle.stderr.on("data", collect);
     processHandle.on("close", (code, signal) => {
@@ -504,6 +566,7 @@ export class KimiDriver extends BaseDriver {
     });
     processHandle.on("error", (error) => {
       state.output += error.message;
+      appendKimiTerminalTail(state, Buffer.from(error.message));
       finish();
     });
     this.terminals.set(terminalId, state);
@@ -567,12 +630,22 @@ export class KimiDriver extends BaseDriver {
   }
 
   private handleTerminalRelease(id: string | number, params: Record<string, any>): void {
-    const terminal = this.terminals.get(String(params.terminalId));
+    const terminalId = String(params.terminalId);
+    const terminal = this.terminals.get(terminalId);
     if (!terminal) {
       this.replyError(id, -32602, "unknown terminal");
       return;
     }
-    this.terminals.delete(String(params.terminalId));
+    this.releasedTerminals.set(terminalId, {
+      eventTail: terminal.eventTail,
+      eventTruncated: terminal.eventTruncated,
+      exitCode: terminal.exitCode,
+      signal: terminal.signal,
+    });
+    if (this.releasedTerminals.size > RELEASED_TERMINAL_LIMIT) {
+      this.releasedTerminals.delete(this.releasedTerminals.keys().next().value!);
+    }
+    this.terminals.delete(terminalId);
     this.replyResult(id, {});
   }
 
@@ -603,6 +676,8 @@ export class KimiDriver extends BaseDriver {
         toolName: update.title,
         input: update.rawInput ?? update.content ?? [],
         status: update.status,
+        ...(typeof update.kind === "string" ? { kind: update.kind } : {}),
+        ...(Array.isArray(update.locations) ? { locations: update.locations } : {}),
       });
       return;
     }
@@ -613,9 +688,17 @@ export class KimiDriver extends BaseDriver {
         input: update.rawInput,
         content: update.content,
         status: update.status,
+        ...(typeof update.kind === "string" ? { kind: update.kind } : {}),
+        ...(Array.isArray(update.locations) ? { locations: update.locations } : {}),
       };
       if (["completed", "failed"].includes(update.status)) {
-        this.callbacks.emit("tool_call_completed", { ...payload, isError: update.status === "failed" });
+        const terminalOutput = terminalOutputForEvent(update.content,
+          (terminalId) => this.terminals.get(terminalId) ?? this.releasedTerminals.get(terminalId));
+        this.callbacks.emit("tool_call_completed", {
+          ...payload,
+          isError: update.status === "failed",
+          ...(terminalOutput ? { terminalOutput } : {}),
+        });
       } else {
         this.callbacks.emit("tool_call_updated", payload);
       }

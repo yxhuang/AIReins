@@ -3,6 +3,7 @@
 // playwright 不是项目依赖：在任意目录 npm i playwright@1.63.0（对上 ~/.cache/ms-playwright 的 chromium_headless_shell-1243），
 // 用法：PLAYWRIGHT=<该目录>/node_modules/playwright/index.mjs node frontend/scripts/msg-display-shots.mjs <输出目录>
 const { chromium } = await import(process.env.PLAYWRIGHT ?? "playwright");
+import { readFileSync } from "node:fs";
 const out = process.argv[2] ?? "shots";
 const base = "http://127.0.0.1:8790";
 const md = `## 改动摘要
@@ -58,7 +59,7 @@ function events(sid, agent) {
 }
 const ids = { claude: "FAKECLAUDE000000000000000A", codex: "FAKECODEX0000000000000000B", kimi: "FAKEKIMI00000000000000000C" };
 const real = (await (await fetch(`${base}/api/sessions`)).json()).data.sessions[0];
-const record = (agent) => ({ ...real, id: ids[agent], agent, status: "idle", seq: 99, cwd: "/home/user/dev/workbench", transcriptPath: "/dev/null" });
+const record = (agent) => ({ ...real, id: ids[agent], agent, status: "idle", seq: 99, cwd: process.env.FIXTURES ? "/work/proj" : "/home/user/dev/workbench", transcriptPath: "/dev/null" });
 const browser = await chromium.launch();
 const report = [];
 for (const scheme of ["light", "dark"]) for (const [w, h] of [[1280, 2600], [390, 3400]]) {
@@ -71,7 +72,10 @@ for (const scheme of ["light", "dark"]) for (const [w, h] of [[1280, 2600], [390
     ? r.fulfill({ json: { code: 0, msg: "success", data: { sessions: Object.keys(ids).map(record) } } }) : r.continue());
   await page.route("**/api/sessions/*/snapshot", (r) => {
     const agent = Object.keys(ids).find((a) => r.request().url().includes(ids[a]));
-    const evs = events(ids[agent], agent);
+    // FIXTURES=1：改用 frontend/scripts/fixtures/tool-events/<agent>.ndjson 的真实事件（阶段 2 工具行验收）
+    const evs = process.env.FIXTURES
+      ? readFileSync(new URL(`./fixtures/tool-events/${agent}.ndjson`, import.meta.url), "utf8").trim().split("\n").map((l) => ({ ...JSON.parse(l), sessionId: ids[agent] }))
+      : events(ids[agent], agent);
     r.fulfill({ json: { code: 0, msg: "success", data: { session: record(agent), seq: evs.length, events: evs } } });
   });
   for (const agent of Object.keys(ids)) {

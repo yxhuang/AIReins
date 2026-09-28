@@ -158,7 +158,7 @@ export function SessionView({ session }: { session: SessionRecord }) {
             const dot = item.kind === "tool" ? ` timeline-${item.status}` : "";
             const view = item.kind === "text"
               ? <TextBlockView item={item} streaming={isLast && running} />
-              : item.kind === "thought" ? <ThoughtBlockView item={item} /> : <ToolCard item={item} />;
+              : item.kind === "thought" ? <ThoughtBlockView item={item} /> : <ToolCard item={item} agent={session.agent} cwd={session.cwd} />;
             return <div key={item.key} className={`timeline-item${continues ? " timeline-continues" : ""}${dot}`}>{view}</div>;
           }
           switch (item.kind) {

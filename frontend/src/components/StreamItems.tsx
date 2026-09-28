@@ -22,6 +22,8 @@ import {
 } from "../ask";
 import { store } from "../store";
 import type { AgentKind } from "../types";
+import { summarizeTool, type ToolSummary } from "../tool-summary";
+import { DiffView, countLines } from "./DiffView";
 import { HistoryMessageView, MarkdownMessage, UserMessageText } from "./MarkdownMessage";
 
 export function UserBlockView({ item }: { item: UserBlock }) {
@@ -70,36 +72,121 @@ export const ThoughtBlockView = memo(function ThoughtBlockView({ item }: { item:
   );
 }, (previous, next) => previous.item.text === next.item.text);
 
-export const ToolCard = memo(function ToolCard({ item }: { item: ToolView }) {
+export const ToolCard = memo(function ToolCard({ item, agent, cwd }: { item: ToolView; agent: AgentKind; cwd: string }) {
   const [open, setOpen] = useState(false);
+  const [showAll, setShowAll] = useState(false);
+  const summary = summarizeTool(agent, item, cwd);
   const statusLabel = item.status === "running" ? "进行中" : item.status === "ok" ? "成功" : "失败";
   return (
     <div className={`tool-card tool-${item.status}`}>
-      <button type="button" className="tool-head" onClick={() => setOpen((v) => !v)}>
+      <button type="button" className="tool-head" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
         <span className="chevron">{open ? "▾" : "▸"}</span>
-        <span className="tool-name mono">{item.toolName}</span>
-        <span className="tool-summary mono">{summarize(item.input)}</span>
+        <span className="tool-name" title={summary.verb}>{summary.verb}</span>
+        {summary.target && <span className="tool-summary mono">{summary.target}</span>}
+        {summary.note && <span className="tool-note">{summary.note}</span>}
         <span className={`tool-status tool-status-${item.status}`}>{statusLabel}</span>
       </button>
       {open && (
         <div className="tool-body">
-          {item.input && <pre className="code-block">{item.input}</pre>}
-          {item.result && (
-            <>
-              <div className="tool-result-label">{item.status === "error" ? "错误输出" : "结果"}</div>
-              <pre className="code-block">{item.result}</pre>
-            </>
-          )}
+          <ToolBodyView body={summary.body} status={item.status} showAll={showAll} onShowAll={() => setShowAll(true)} />
         </div>
       )}
     </div>
   );
 }, (previous, next) =>
+  previous.agent === next.agent &&
+  previous.cwd === next.cwd &&
   previous.item.status === next.item.status &&
   previous.item.toolName === next.item.toolName &&
+  previous.item.baseToolName === next.item.baseToolName &&
   previous.item.input === next.item.input &&
-  previous.item.result === next.item.result,
+  previous.item.result === next.item.result &&
+  previous.item.rawInput === next.item.rawInput &&
+  previous.item.rawResult === next.item.rawResult &&
+  previous.item.toolKind === next.item.toolKind &&
+  previous.item.locations === next.item.locations &&
+  previous.item.terminalOutput === next.item.terminalOutput,
 );
+
+const COMMAND_OUTPUT_PREVIEW_LINES = 20;
+
+function ToolBodyView({ body, status, showAll, onShowAll }: {
+  body: ToolSummary["body"];
+  status: ToolView["status"];
+  showAll: boolean;
+  onShowAll: () => void;
+}) {
+  switch (body.type) {
+    case "command": {
+      const lines = body.output ? body.output.replace(/\n+$/, "").split("\n") : [];
+      const collapsed = !showAll && lines.length > COMMAND_OUTPUT_PREVIEW_LINES;
+      const visible = collapsed ? lines.slice(0, COMMAND_OUTPUT_PREVIEW_LINES).join("\n") : body.output;
+      return (
+        <>
+          {body.command && <pre className="code-block">{body.command}</pre>}
+          {body.output && (
+            <>
+              <div className="tool-result-label">{status === "error" ? "错误输出" : "输出"}</div>
+              <pre className="code-block">{visible}</pre>
+              {collapsed && (
+                <button type="button" className="tool-show-all" onClick={onShowAll}>
+                  显示全部（共 {lines.length} 行）
+                </button>
+              )}
+            </>
+          )}
+          {body.truncated && <div className="tool-exit-code">输出过长，已被截断</div>}
+          {(body.exitCode !== null || body.signal) && (
+            <div className="tool-exit-code">
+              {body.exitCode !== null && `退出码 ${body.exitCode}`}
+              {body.signal && ` · 信号 ${body.signal}`}
+            </div>
+          )}
+        </>
+      );
+    }
+    case "diff":
+      return (
+        <>
+          {body.path && <div className="tool-path mono">{body.path}</div>}
+          <DiffView chunks={body.chunks} />
+          {body.error && (
+            <>
+              <div className="tool-result-label">错误输出</div>
+              <pre className="code-block">{body.error}</pre>
+            </>
+          )}
+        </>
+      );
+    case "read":
+      return (
+        <>
+          <div className="tool-read-summary">
+            <span className="mono">{body.path}</span>
+            {body.lineCount !== null && ` · ${body.lineCount} 行`}
+          </div>
+          {body.error && (
+            <>
+              <div className="tool-result-label">错误输出</div>
+              <pre className="code-block">{body.error}</pre>
+            </>
+          )}
+        </>
+      );
+    default:
+      return (
+        <>
+          {body.input && <pre className="code-block">{body.input}</pre>}
+          {body.result && (
+            <>
+              <div className="tool-result-label">{status === "error" ? "错误输出" : "结果"}</div>
+              <pre className="code-block">{body.result}</pre>
+            </>
+          )}
+        </>
+      );
+  }
+}
 
 // 签名元素：闸门块。暖色边框 + 暖色浅底 + 直角，与圆角卡片形成硬边对比。
 // dead 会话里的未决闸门降级为中性「已失效」态：无暖色、不可点击。
@@ -163,16 +250,7 @@ export const GateBlock = forwardRef<HTMLDivElement, { item: GateView; sessionId:
                 : `写入内容 · +${addedCount} 行`}
             </button>
             {contentOpen && (
-              <pre className="code-block diff-block">
-                {isEdit && item.removed &&
-                  splitLines(item.removed).map((line, i) => (
-                    <span key={`d${i}`} className="diff-line diff-del">{`- ${line}`}</span>
-                  ))}
-                {addedText &&
-                  splitLines(addedText).map((line, i) => (
-                    <span key={`a${i}`} className="diff-line diff-add">{`+ ${line}`}</span>
-                  ))}
-              </pre>
+              <DiffView chunks={[{ removed: isEdit ? item.removed : "", added: addedText }]} />
             )}
           </div>
         )}
@@ -374,21 +452,4 @@ export function RawLine({ item }: { item: RawBlock }) {
       {open && <pre className="code-block">{item.text}</pre>}
     </div>
   );
-}
-
-// 工具入参摘要：单行截断，全文展开看。
-function summarize(input: string): string {
-  const oneLine = input.replace(/\s+/g, " ").trim();
-  if (!oneLine) return "";
-  return oneLine.length > 60 ? `${oneLine.slice(0, 60)}…` : oneLine;
-}
-
-// 行数统计：去掉末尾换行后按 \n 计。
-function countLines(text: string): number {
-  if (!text) return 0;
-  return splitLines(text).length;
-}
-
-function splitLines(text: string): string[] {
-  return text.replace(/\n+$/, "").split("\n");
 }

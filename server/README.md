@@ -424,6 +424,8 @@ interface PageHealth {
 
 事件最小集为 `session_created / config_update_started / external_messages_added / user_message / agent_text_delta / thought_delta / tool_call_started / tool_call_updated / tool_call_completed / permission_request / permission_resolved / commands_updated / config_updated / usage_updated / turn_completed / session_error / process_exited`；另有容错用 `raw_event`。每个 session 独立计数，`seq` 单调递增。
 
+Kimi 的 `tool_call_started / tool_call_updated / tool_call_completed` 在 ACP 更新含 `kind`（字符串）或 `locations`（`{path, line?}` 数组）时，分别原样透传为 payload 的同名字段；缺失时不添加。Kimi 命令工具的完成事件若 `content` 含 `{type:"terminal", terminalId}` 且终端仍在运行或已释放，会额外包含 `terminalOutput: {terminalId, output, truncated, exitCode, signal}`。事件另行收集真正的输出末尾，`output` 最多保留末尾 64 KiB（按 UTF-8 字节并在字符边界截取）；发生过截断，包括 ACP 终端原收集上限造成的截断，`truncated` 为 `true`。ACP `terminal/output` 仍按其 `outputByteLimit` 返回输出开头，语义不变。尚未退出时事件返回已收集部分，`exitCode` 为 `null`；无退出信号时 `signal` 为 `null`。多个 terminal content 只取第一个；找不到终端则不添加 `terminalOutput`。已释放终端最多保留最近 64 个，每条仅存事件尾部与退出状态，随会话结束清空。以上新增字段只有 Kimi driver 提供，Claude、Codex 的工具事件契约不变。
+
 上行至少支持：
 
 ```json
