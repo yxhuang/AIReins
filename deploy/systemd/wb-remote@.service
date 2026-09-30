@@ -1,0 +1,10 @@
+# wb-remote.socket 每接一个连接起一个实例；逻辑见 wb-remote-conn.py。
+# 输出必须显式进 journal：Accept=yes 下默认会继承到手机那条连接上。
+[Unit]
+Description=workbench remote entry connection
+
+[Service]
+ExecStart=/usr/bin/python3 /home/user/dev/workbench/deploy/systemd/wb-remote-conn.py
+StandardInput=socket
+StandardOutput=journal
+StandardError=journal

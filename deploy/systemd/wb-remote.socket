@@ -1,0 +1,15 @@
+# 手机远程按需拉起 wb：systemd 替 wb 占住 Tailscale Serve 的转发目标 8792，
+# wb 平时不必运行；每个连接交给 wb-remote@.service，wb 没在跑就先拉起再转发。
+# 前提：~/.workbench/remote.json 的 port 改为 8793（wb 自己的远程监听）。
+# 安装：systemctl --user link <本目录>/wb-remote.socket <本目录>/wb-remote@.service
+#       systemctl --user enable --now wb-remote.socket
+[Unit]
+Description=workbench remote entry (on-demand, 127.0.0.1:8792)
+
+[Socket]
+ListenStream=127.0.0.1:8792
+Accept=yes
+MaxConnections=256
+
+[Install]
+WantedBy=sockets.target
