@@ -50,7 +50,7 @@ export function UserMessageText({ text }: { text: string }) {
   )}</span>;
 }
 
-export function HistoryMessageView({ message, agent, showTime = false }: { message: Pick<HistoryMessage, "role" | "text"> & { timestamp?: string | null }; agent: AgentKind; showTime?: boolean }) {
+export function HistoryMessageView({ message, agent, showTime = false }: { message: Pick<Extract<HistoryMessage, { text: string }>, "role" | "text"> & { timestamp?: string | null }; agent: AgentKind; showTime?: boolean }) {
   return (
     <div className={`history-msg history-msg-${message.role}`}>
       <span className="history-msg-role">{messageRoleLabel(message.role, agent)}</span>

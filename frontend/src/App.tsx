@@ -1,4 +1,5 @@
-import { lazy, Suspense, useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
+import { isTerminalToggleKey } from "./terminal";
 import { Sidebar } from "./components/Sidebar";
 import { SessionView } from "./components/SessionView";
 import { PageView } from "./components/PageView";
@@ -46,6 +47,26 @@ export function App() {
   }, [termOpen]);
   // 能力位按请求入口由后端计算（本机恒 true，远程看 remote.json）；false 时入口与面板都不出现
   const terminalCapable = useStore((value) => value.meta?.capabilities.terminal === true);
+  useEffect(() => {
+    if (!terminalCapable) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!isTerminalToggleKey(event)) return;
+      event.preventDefault();
+      if (!event.repeat) setTermOpen((value) => !value);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [terminalCapable]);
+  const wasTermOpen = useRef(false);
+  useEffect(() => {
+    const closed = wasTermOpen.current && !termOpen;
+    wasTermOpen.current = termOpen;
+    if (!closed) return;
+    const raf = requestAnimationFrame(() => {
+      document.querySelector<HTMLTextAreaElement>(".main .composer-box textarea:not(:disabled)")?.focus();
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [termOpen]);
   const current = useStore(selectCurrentSession);
   const currentPage = useStore(selectCurrentPage);
   const [historyOpen, currentPageId, lastError, errorContext, removalNotice] = useStore(

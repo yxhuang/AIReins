@@ -11,7 +11,7 @@ import type {
   UnifiedCommand,
   UserMessageInput,
 } from "../types.js";
-import { BaseDriver, errorMessage, parseJsonLine, readMentionText, userMessageText, withTimeout } from "./base.js";
+import { BaseDriver, errorMessage, mentionFallbackNote, parseJsonLine, tryReadMentionText, userMessageText, withTimeout } from "./base.js";
 import { StdioRpcProbe } from "./rpc-probe.js";
 
 interface PendingRpc {
@@ -252,19 +252,38 @@ export class KimiDriver extends BaseDriver {
   async sendUserMessage(message: UserMessageInput): Promise<void> {
     if (!this.nativeSessionId) throw new Error("Kimi session 尚未就绪");
     const prompt: Record<string, unknown>[] = [];
-    const text = userMessageText(message);
-    if (text) prompt.push({ type: "text", text });
+    let text = userMessageText(message);
+    const fallbackNotes: string[] = [];
+    const attachments: Record<string, unknown>[] = [];
     for (const mention of message.mentions ?? []) {
-      prompt.push({
+      if (mention.type === "image") {
+        attachments.push({
+          type: "image",
+          mimeType: mention.mimeType,
+          data: readFileSync(mention.path).toString("base64"),
+        });
+        continue;
+      }
+      const mentionText = tryReadMentionText(mention);
+      if (mentionText === null) {
+        fallbackNotes.push(mentionFallbackNote(mention.path));
+        continue;
+      }
+      attachments.push({
         type: "resource",
         resource: {
           uri: pathToFileURL(mention.path).href,
           mimeType: "text/plain",
-          text: readMentionText(mention),
+          text: mentionText,
           _meta: { name: mention.name ?? basename(mention.path) },
         },
       });
     }
+    if (fallbackNotes.length > 0) {
+      text = `${text ? `${text}\n` : ""}${fallbackNotes.join("\n")}`;
+    }
+    if (text) prompt.push({ type: "text", text });
+    prompt.push(...attachments);
     this.callbacks.status("running");
     void this.request("session/prompt", {
       sessionId: this.nativeSessionId,

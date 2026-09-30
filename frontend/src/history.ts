@@ -55,8 +55,9 @@ export function findImportedSession(
   sessions: SessionRecord[],
   item: Pick<HistorySession, "agent" | "nativeSessionId">,
 ): SessionRecord | undefined {
-  return sessions.find(
+  return sessions.filter(
     (session) =>
       session.agent === item.agent && session.nativeSessionId === item.nativeSessionId,
-  );
+  ).sort((a, b) => Number(a.status === "dead") - Number(b.status === "dead")
+    || Date.parse(b.lastActivityAt ?? b.createdAt) - Date.parse(a.lastActivityAt ?? a.createdAt))[0];
 }

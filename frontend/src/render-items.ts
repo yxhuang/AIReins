@@ -1,4 +1,4 @@
-import type { AgentKind, AskQuestion, HistoryMessage, PermissionDecision, UnifiedEvent } from "./types";
+import type { AgentKind, AskQuestion, HistoryMessage, Mention, PermissionDecision, UnifiedEvent } from "./types";
 import { asRecord, stringifyBlock } from "./format";
 import { normalizeQuestions } from "./ask";
 import type { ToolLocation, ToolTerminalOutput } from "./tool-summary";
@@ -27,6 +27,8 @@ export interface UserBlock {
   key: string;
   seq: number;
   text: string;
+  /** 随消息下行的附件/引用（@ 文件引用、「+」附件）；旧事件缺省 */
+  mentions?: Mention[];
 }
 
 export interface ToolView {
@@ -36,7 +38,7 @@ export interface ToolView {
   toolCallId: string;
   toolName: string;
   input: string;
-  status: "running" | "ok" | "error";
+  status: "running" | "ok" | "error" | "unknown";
   result: string;
   turn: number;
   /** tool_call_started 时的最初短名（kimi 后来会把 toolName 改成人话标题；摘要器靠它分类） */
@@ -256,22 +258,33 @@ export function buildRenderItems(events: UnifiedEvent[], agent: AgentKind): Rend
         lastText = undefined;
         break;
       }
-      case "user_message":
+      case "user_message": {
         breakRun();
         turn++;
+        const mentions = mentionsFromPayload(p.mentions);
         items.push({
           kind: "user",
           key: `user:${event.seq}`,
           seq: event.seq,
           text: String(p.text ?? ""),
+          ...(mentions.length > 0 ? { mentions } : {}),
         });
         break;
+      }
       case "external_messages_added": {
         breakRun();
         const messages: HistoryMessage[] = Array.isArray(p.messages)
-          ? p.messages.flatMap((raw) => {
+          ? p.messages.flatMap<HistoryMessage>((raw) => {
               if (!raw || typeof raw !== "object") return [];
               const item = raw as Record<string, unknown>;
+              if (item.role === "tool") {
+                const tool = asRecord(item.tool);
+                if (typeof tool.id !== "string" || typeof tool.name !== "string") return [];
+                return [{ role: "tool", timestamp: typeof item.timestamp === "string" ? item.timestamp : null,
+                  tool: { id: tool.id, name: tool.name, input: tool.input,
+                    result: typeof tool.result === "string" ? tool.result : undefined, rawResult: tool.rawResult,
+                    status: tool.status === "ok" || tool.status === "error" ? tool.status : "unknown" } }];
+              }
               if ((item.role !== "user" && item.role !== "assistant") || typeof item.text !== "string") return [];
               return [{ role: item.role, text: item.text, timestamp: typeof item.timestamp === "string" ? item.timestamp : null }];
             })
@@ -394,6 +407,16 @@ export function buildRenderItems(events: UnifiedEvent[], agent: AgentKind): Rend
           tone: "muted",
         });
         break;
+      case "worker_released":
+        breakRun();
+        items.push({
+          kind: "system",
+          key: `sys:${event.seq}`,
+          seq: event.seq,
+          text: workerReleasedText(p),
+          tone: "muted",
+        });
+        break;
       case "raw_event":
         breakRun();
         items.push({
@@ -443,6 +466,24 @@ function normalizeLocations(value: unknown[]): ToolLocation[] {
     .map((l) => ({ path: String(l.path), ...(typeof l.line === "number" ? { line: l.line } : {}) }));
 }
 
+/** user_message 下行的 mentions：容错解析，非数组/缺字段的项跳过（旧事件与残缺项不影响其他项）。 */
+function mentionsFromPayload(value: unknown): Mention[] {
+  if (!Array.isArray(value)) return [];
+  const mentions: Mention[] = [];
+  for (const raw of value) {
+    const item = asRecord(raw);
+    const path = typeof item.path === "string" ? item.path : "";
+    if (!path) continue;
+    const name = typeof item.name === "string" ? item.name : undefined;
+    if (item.type === "image" && typeof item.mimeType === "string") {
+      mentions.push({ type: "image", path, mimeType: item.mimeType, ...(name ? { name } : {}) });
+    } else if (item.type === "file") {
+      mentions.push({ type: "file", path, ...(name ? { name } : {}) });
+    }
+  }
+  return mentions;
+}
+
 function toolResultText(result: unknown): string {
   if (typeof result === "string") return result;
   // claude 的 tool_result content 是块数组；kimi 的是嵌套块（{type:"content",content:{type:"text"}}）。
@@ -462,6 +503,16 @@ function toolResultText(result: unknown): string {
     if (texts.length > 0 && texts.length === result.length) return texts.join("\n");
   }
   return stringifyBlock(result);
+}
+
+// worker_released 的弱化系统行文案：空闲自动释放带分钟数，手动释放不带来源细节。
+function workerReleasedText(p: Record<string, unknown>): string {
+  if (p.reason === "idle") {
+    const minutes = Number(p.idleMinutes);
+    const why = Number.isFinite(minutes) && minutes > 0 ? `空闲 ${minutes} 分钟` : "空闲超时";
+    return `已释放（${why}）；下次发送时从磁盘续接`;
+  }
+  return "已释放（手动）；下次发送时从磁盘续接";
 }
 
 /**

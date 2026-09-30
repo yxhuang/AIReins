@@ -27,6 +27,7 @@ const [{ SessionManager }, { CLAUDE_CONFIG_SCHEMA, claudeLaunchArgs }] = await P
 class FakeClaudeDriver implements Driver {
   readonly kind = "claude" as const;
   stopped = false;
+  remoteEnabled = false;
   private config: SessionConfig;
 
   constructor(readonly options: DriverOptions, private readonly schema: DriverConfigSchema) {
@@ -52,6 +53,15 @@ class FakeClaudeDriver implements Driver {
   async setConfig(config: SessionConfig): Promise<SessionConfig> {
     this.config = { ...this.config, ...config };
     return { ...this.config };
+  }
+
+  async setRemoteControl(enabled: boolean) {
+    this.remoteEnabled = enabled;
+    const state = enabled
+      ? { status: "connected" as const, sessionUrl: "https://claude.ai/code/session_test" }
+      : { status: "disconnected" as const };
+    this.options.callbacks.metadata({ remoteControl: state });
+    return state;
   }
 
   async sendUserMessage(_message: UserMessageInput): Promise<void> {
@@ -214,11 +224,14 @@ assert.equal(initEvent.payload.effectiveEffortSource, "settings");
 assert.equal(manager.list().find((session) => session.id === created.id)!.effectiveModel, "claude-opus-5");
 assert.equal(manager.getSnapshot(created.id)!.session.effectiveEffort, "high");
 instances[0].finish("native-test-session");
+await manager.setRemoteControl(created.id, true);
+assert.equal(manager.getSnapshot(created.id)?.session.remoteControl?.status, "connected");
 
 const beforeRestartSeq = manager.get(created.id)!.seq;
 const switched = await manager.setConfig(created.id, { model: "sonnet", effort: "high" });
 assert.equal(instances.length, 2);
 assert.equal(instances[0].stopped, true);
+assert.equal(instances[1].remoteEnabled, true);
 assert.equal(instances[1].options.resumeSessionId, "native-test-session");
 assert.deepEqual(instances[1].options.config, {
   model: "sonnet",
@@ -236,7 +249,7 @@ assert.equal(switched.effectiveEffortSource, "session");
 assert.ok(switched.seq > beforeRestartSeq);
 assert.deepEqual(
   events.filter((event) => event.seq > beforeRestartSeq).map((event) => event.type),
-  ["config_update_started", "config_updated"],
+  ["config_update_started", "remote_control_updated", "remote_control_updated", "config_updated"],
 );
 const restartConfigEvent = events.at(-1)!;
 assert.equal(restartConfigEvent.payload.effectiveModel, "sonnet");
@@ -258,6 +271,19 @@ assert.deepEqual(resumed.resumedFrom, {
   nativeSessionId: "existing-native-session",
 });
 assert.equal(resumed.nativeSessionId, "existing-native-session");
+
+// 服务端内部字段 historyCursor（导入时刻的截止 cursor）：写入 resumedFrom 并随注册表持久化
+const resumedWithCursor = await manager.create({
+  agent: "claude",
+  cwd: process.cwd(),
+  resumeSessionId: "cursor-native-session",
+  historyCursor: "CUR_IMPORT_END",
+});
+assert.deepEqual(resumedWithCursor.resumedFrom, {
+  agent: "claude",
+  nativeSessionId: "cursor-native-session",
+  historyCursor: "CUR_IMPORT_END",
+});
 
 const overridden = await manager.create({
   agent: "claude",
@@ -379,6 +405,11 @@ assert.equal(reloadedOverride.config.model, "haiku");
 assert.equal(reloadedOverride.model, "claude-haiku-4-5-20251001");
 assert.equal(reloadedOverride.effectiveModel, "claude-haiku-4-5-20251001");
 assert.equal(reloadedOverride.effectiveModelSource, "init");
+assert.equal(
+  emptySettingsManager.get(resumedWithCursor.id)!.resumedFrom?.historyCursor,
+  "CUR_IMPORT_END",
+  "historyCursor 应随注册表持久化并在重启后读回",
+);
 const noSettings = await emptySettingsManager.create({ agent: "claude", cwd: process.cwd() });
 assert.equal(noSettings.effectiveModel, null);
 assert.equal(noSettings.effectiveEffort, null);

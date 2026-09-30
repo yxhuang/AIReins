@@ -1,11 +1,10 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
-import type { SessionRecord } from "../types";
-import { HistoryMessageView } from "./MarkdownMessage";
+import type { AgentKind, SessionRecord } from "../types";
+import { HistoryTimeline } from "./HistoryTimeline";
 import { fetchHistoryMessages } from "../api";
 import {
-  HISTORY_MAX_MESSAGES,
   HISTORY_PAGE_SIZE,
-  historyCapReached,
+  fetchInitialHistoryPage,
   initialHistoryPage,
   prependHistoryPage,
   type HistoryPageState,
@@ -13,20 +12,23 @@ import {
 
 type Phase = "loading" | "ready" | "error";
 
-/**
- * 续接会话的历史消息区：渲染在实时事件流上方，进入会话默认加载最近一页，
- * 顶部「加载更早的消息」按 nextCursor 向更早翻页（prepend，不一次拉全）。
- * 与实时区视觉可区分：弱化底色 + 底部分隔线「以上为导入前的历史对话」；默认展开，不折叠。
- * 历史消息没有工具调用/思考块（后端归一时已丢弃），只渲染用户/助手两态。
- */
-export function ResumedHistory({
-  session,
-  streamRef,
-}: {
-  session: SessionRecord;
-  streamRef: RefObject<HTMLDivElement | null>;
+/** Imported history and preview share the same latest-first reader. */
+export function ResumedHistory({ session, streamRef }: { session: SessionRecord; streamRef: RefObject<HTMLDivElement | null> }) {
+  if (!session.resumedFrom) return null;
+  return <PagedHistory key={`${session.resumedFrom.agent}:${session.resumedFrom.nativeSessionId}`}
+    agent={session.resumedFrom.agent} nativeSessionId={session.resumedFrom.nativeSessionId}
+    cwd={session.cwd} streamRef={streamRef} imported initialCursor={session.resumedFrom.historyCursor} />;
+}
+
+export function PagedHistory({ agent, nativeSessionId, cwd, streamRef, imported = false, startAtEnd = false, initialCursor }: {
+  agent: AgentKind; nativeSessionId: string; cwd: string;
+  streamRef: RefObject<HTMLDivElement | null>; imported?: boolean;
+  /** 首页加载后滚到底（历史页预览：首屏是最后几轮） */
+  startAtEnd?: boolean;
+  /** 导入时刻的截止 cursor：首页截止在导入前；缺省从最新一页开始（历史页预览不传） */
+  initialCursor?: string;
 }) {
-  const resumedFrom = session.resumedFrom;
+  const pendingEnd = useRef(startAtEnd);
   const [state, setState] = useState<HistoryPageState | null>(null);
   const [phase, setPhase] = useState<Phase>("loading");
   const [error, setError] = useState<string | null>(null);
@@ -41,17 +43,17 @@ export function ResumedHistory({
   /** 请求代次：resumedFrom 变化（组件按会话 key 重挂载，正常不会变）时作废旧响应 */
   const reqGen = useRef(0);
 
-  const agent = resumedFrom?.agent ?? session.agent;
-  const nativeSessionId = resumedFrom?.nativeSessionId ?? "";
-
   const loadLatest = useCallback(async () => {
     const gen = ++reqGen.current;
     setPhase("loading");
     setError(null);
+    setState(null);
     try {
-      const page = await fetchHistoryMessages(agent, nativeSessionId, {
-        limit: HISTORY_PAGE_SIZE,
-      });
+      const page = await fetchInitialHistoryPage(
+        (opts) => fetchHistoryMessages(agent, nativeSessionId, opts),
+        initialCursor,
+        HISTORY_PAGE_SIZE,
+      );
       if (gen !== reqGen.current) return; // 过期响应丢弃
       setState(initialHistoryPage(page));
       setPhase("ready");
@@ -60,14 +62,16 @@ export function ResumedHistory({
       setError(e instanceof Error ? e.message : String(e));
       setPhase("error");
     }
-  }, [agent, nativeSessionId]);
+  }, [agent, nativeSessionId, initialCursor]);
 
   // 进入会话即默认加载最近一页
   useEffect(() => {
     void loadLatest();
+    return () => { reqGen.current += 1; };
   }, [loadLatest]);
 
   const loadOlder = async () => {
+    const gen = reqGen.current;
     const cursor = state?.nextCursor;
     if (!cursor || loadingMore) return;
     dividerTopBefore.current = dividerRef.current?.offsetTop ?? null;
@@ -78,15 +82,17 @@ export function ResumedHistory({
         limit: HISTORY_PAGE_SIZE,
         cursor,
       });
+      if (gen !== reqGen.current) return;
       // 空页不 prepend（见 prependHistoryPage），messages 条数不变，补偿 effect 不会触发
       if (page.messages.length === 0) dividerTopBefore.current = null;
       setState((prev) => (prev ? prependHistoryPage(prev, page) : initialHistoryPage(page)));
     } catch (e) {
+      if (gen !== reqGen.current) return;
       // 翻页失败不丢已加载内容：错误就地显示，可重试（cursor 没变）
       dividerTopBefore.current = null;
       setError(e instanceof Error ? e.message : String(e));
     } finally {
-      setLoadingMore(false);
+      if (gen === reqGen.current) setLoadingMore(false);
     }
   };
 
@@ -99,17 +105,16 @@ export function ResumedHistory({
     const divider = dividerRef.current;
     if (before !== null && container && divider) {
       container.scrollTop += divider.offsetTop - before;
+    } else if (pendingEnd.current && container && state?.messages.length) {
+      pendingEnd.current = false;
+      container.scrollTop = container.scrollHeight;
     }
   }, [state?.messages.length, streamRef]);
-
-  if (!resumedFrom) return null;
-
-  const capped = state ? historyCapReached(state) : false;
 
   return (
     <section className="session-history" aria-label="导入前的历史对话">
       <p className="session-history-note">
-        导入前的 {resumedFrom.agent} 原生会话 · 仅用户与助手文本，不含工具调用与思考过程。
+        {agent} 原生会话 · 用户、助手与工具调用；工具可展开。
       </p>
       {phase === "loading" && <p className="session-history-note">正在加载历史消息…</p>}
       {phase === "error" && (
@@ -123,10 +128,10 @@ export function ResumedHistory({
       {state && state.messages.length === 0 && phase === "ready" && (
         <p className="session-history-note">原生会话中没有可显示的历史消息。</p>
       )}
-      {state && state.messages.length > 0 && (
+      {state && (
         <>
           <div className="session-history-more">
-            {state.nextCursor && !capped && (
+            {state.nextCursor && (
               <button
                 type="button"
                 className="btn"
@@ -138,11 +143,6 @@ export function ResumedHistory({
             )}
             {!state.nextCursor && (
               <span className="session-history-note">已到最早的消息</span>
-            )}
-            {capped && (
-              <span className="session-history-note">
-                为控制页面长度，最多加载最近 {HISTORY_MAX_MESSAGES} 条；更早的内容在原生会话文件中。
-              </span>
             )}
             {error && phase === "ready" && (
               <span className="session-history-error" role="alert">
@@ -163,15 +163,9 @@ export function ResumedHistory({
               部分页受单次读取窗口限制，个别消息可能不完整。
             </p>
           )}
-          <ul className="session-history-list">
-            {state.messages.map((message, index) => (
-              <li key={`${message.role}:${message.timestamp ?? "null"}:${index}`}>
-                <HistoryMessageView message={message} agent={agent} showTime />
-              </li>
-            ))}
-          </ul>
+          <HistoryTimeline messages={state.messages} agent={agent} cwd={cwd} />
           <div className="session-history-divider" role="separator" ref={dividerRef}>
-            {/* 分隔线仍是 prepend 滚动补偿的定位锚点；来源与省略项已在上方一行说明。 */}
+            {imported ? "以上为导入前的历史对话" : "以上为原生历史记录"}
           </div>
         </>
       )}

@@ -200,14 +200,14 @@ M1 就能满足「随时可以使用 terminal」。M2 之前刷新页面会断�
 REST（沿用现有 `{code, msg, data}` 包装）：
 
 - `GET /api/terminals` → `data: { terminals: TerminalInfo[] }`
-- `POST /api/terminals`，body `{ cwd?: string, cols: number, rows: number }` → `data: TerminalInfo`。cwd 缺省或不存在时用 server 的 defaultCwd；shell 取 `$SHELL`，缺省 `bash`，以登录交互 shell 启动。
+- `POST /api/terminals`，body `{ cwd?: string, shell?: "bash" | "powershell", cols: number, rows: number }` → `data: TerminalInfo`。cwd 缺省或不存在时用 server 的 defaultCwd；可选 `shell: "bash" | "powershell"`（白名单，不收路径；缺省 bash）：bash 以登录交互 shell（`bash -l -i`）启动；powershell 的 cwd 只在 `/mnt/<盘符>` 下才沿用，否则用 Windows 用户目录（从 WSL 追加的 Windows PATH 里取 `/mnt/c/Users/<名>`，取不到用 `/mnt/c`）；powershell 优先 `/mnt/c/Program Files/PowerShell/7/pwsh.exe`，没有则 Windows PowerShell 5.1，参数 `-NoLogo`。`TerminalInfo` 带 `kind`。
 - `POST /api/terminals/:id/kill` → `data: { ok: true }`。结束进程，不是删文件；不用 DELETE 动词。
 
-`TerminalInfo = { id: string, cwd: string, shell: string, cols: number, rows: number, createdAt: string, exited: boolean, exitCode: number | null }`
+`TerminalInfo = { id: string, cwd: string, kind: "bash" | "powershell", shell: string, cols: number, rows: number, createdAt: string, exited: boolean, exitCode: number | null }`
 
 WS `/ws/terminal`（与 `/ws` 同一套 Host / Origin / Tailscale 身份检查；能力位为 false 时拒绝升级），全部 JSON 文本帧（PTY 输出本就是 UTF-8 字符串，不再做二进制分帧，偏离 §3 原建议，换实现简单）：
 
-- 上行 `{type:"attach", terminalId}`：服务端先回 `{type:"attached", terminalId, omitted}`（`omitted` = scrollback 因 256KB 上限丢掉的字节数，>0 时前端顶部提示「已省略较早输出」），再发一条 `{type:"data", terminalId, data}` 装当前全部 scrollback，之后实时推送。同一连接可 attach 多个；重复 attach 同一 id 视为重新回放（前端先 `reset()` 再写）。
+- 上行 `{type:"attach", terminalId}`：服务端先回 `{type:"attached", terminalId, omitted}`（`omitted` = scrollback 因 256KB 上限丢掉的字节数，>0 时前端顶部提示「已省略较早输出」），再发一条 `{type:"data", terminalId, data}` 装当前全部 scrollback，之后实时推送。同一连接可 attach 多个；重复 attach 同一 id 视为重新回放（前端先 `reset()` 再写）。上行 `{type:"detach", terminalId}` 解除该连接对它的订阅（PTY 与 scrollback 保留），前端切换 shell 时对切走的终端发送。
 - 上行 `{type:"input", terminalId, data}`、`{type:"resize", terminalId, cols, rows}`。
 - 下行 `{type:"data", terminalId, data}`、`{type:"exit", terminalId, exitCode}`、`{type:"error", terminalId?, message}`（未知 id、已退出等）。
 - 服务端每终端保留最近 256KB 输出；进程退出后记录保留（`exited: true`），直到 server 重启。server 重启 = 全部终端结束，这是已知行为。

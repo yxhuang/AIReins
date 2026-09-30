@@ -55,10 +55,11 @@ export class NativeConversationReader {
     const firstUser = added.findIndex((message) => message.role === "user");
     const messages = (firstUser < 0 ? [] : added.slice(firstUser))
       .map(({ startOffset: _offset, ...message }) => message);
+    const bounded = boundExternalMessages(session.nativeSessionId ?? "", messages);
     return {
       mark: snapshot.mark,
-      messages,
-      truncated: snapshot.mark.path !== previous.path || snapshot.mark.size < previous.size
+      messages: bounded.messages,
+      truncated: bounded.truncated || snapshot.mark.path !== previous.path || snapshot.mark.size < previous.size
         || !snapshot.lines.some((line) => line.startOffset === previous.offset),
     };
   }
@@ -195,4 +196,44 @@ async function safeDirs(path: string): Promise<string[]> {
 async function safeFiles(path: string): Promise<string[]> {
   try { return (await readdir(path, { withFileTypes: true })).filter((item) => item.isFile()).map((item) => item.name); }
   catch { return []; }
+}
+
+/** Bound the self-contained event, counting UTF-8 bytes including JSON escaping. */
+export function boundExternalMessages(nativeSessionId: string, messages: HistoryMessage[]): { messages: HistoryMessage[]; truncated: boolean } {
+  const limit = 512 * 1024;
+  const result = messages.map((message) => message.role === "tool" ? { ...message, tool: { ...message.tool } } : { ...message });
+  const size = (message: HistoryMessage) => Buffer.byteLength(JSON.stringify(message));
+  const overhead = Buffer.byteLength(JSON.stringify({ nativeSessionId, messages: [], truncated: false }));
+  let total = overhead + result.reduce((sum, message) => sum + size(message) + 1, 0);
+  let truncated = false;
+  for (const message of result) {
+    if (total <= limit) break;
+    if (message.role !== "tool") continue;
+    const before = size(message);
+    message.tool.input = "[truncated]";
+    message.tool.result = "[truncated]";
+    delete message.tool.rawResult;
+    total += size(message) - before;
+    truncated = true;
+  }
+  // Text-only or exceptionally many calls may still exceed the event budget.
+  let start = 0;
+  while (total > limit && start < result.length - 1) {
+    total -= size(result[start++]!) + 1;
+    truncated = true;
+  }
+  const kept = result.slice(start);
+  if (total > limit && kept[0]?.role !== "tool" && kept[0]) {
+    const message = kept[0];
+    let low = 0, high = message.text.length;
+    const original = message.text;
+    while (low < high) {
+      const mid = Math.ceil((low + high) / 2);
+      message.text = original.slice(0, mid) + "…[truncated]";
+      if (overhead + size(message) + 1 <= limit) low = mid; else high = mid - 1;
+    }
+    message.text = original.slice(0, low) + "…[truncated]";
+    truncated = true;
+  }
+  return { messages: kept, truncated };
 }

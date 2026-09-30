@@ -1,5 +1,11 @@
 # M0：三家 CLI 协议 spike 与报文抓取
 
+## Claude Remote Control（2026-09-29）
+
+已实测环境：Claude Code 2.1.281、无头 `--print --input-format stream-json --output-format stream-json --replay-user-messages`，`CLAUDE_CODE_ENTRYPOINT=claude-vscode`。此模式不会自行执行 `remoteControlAtStartup`，宿主需向 stdin 发 `{"type":"control_request","request_id":"<id>","request":{"subtype":"remote_control","enabled":true}}`；可选 `name`。成功的 `control_response.response.response` 含 `session_url`、`connect_url`、`environment_id`、`bridge_epoch`、`bridge_session_id`。stdout 先有 `system/bridge_state:ready`，开启后有 `connected`；关闭发同一请求且 `enabled:false`，实测 success。其他 bridge state 值尚无协议实测，Workbench 作为中间态或错误态容错。
+
+2026-09-29 在隔离的 18790 实例上再次真机验证：空白 Claude 会话自动开启并得到 `https://claude.ai/code/session_...`；页面胶囊点关、点开均成功，关闭后 snapshot 为 `disconnected`，全程没有发送对话消息。CLI 返的 `session_url` 每次开启可能变化。收到 `remote_control_work_secret` 只属于旧 RC 会话重新挂接，本工单未实现；Workbench 会按未知控制请求回复 error，避免 CLI 悬挂。来自手机的普通 user 消息如何出现在 stdout 尚未真机验证，按 `--replay-user-messages` 与 driver 代码推演接入。
+
 ## P1-1：结构化提问协议复核（2026-09-26）
 
 本次复核使用 `codex-cli 0.157.1` 的 `codex app-server generate-json-schema --out /tmp/codex-schema-0157` 产物，以及本机 `~/.kimi-code/bin/kimi` 2.1.1 ELF 内嵌的 ACP SDK 与 `interaction-bridge` 实现。以下为 schema/本机实现事实；尚未做真实模型触发提问的冒烟验证。
@@ -544,3 +550,51 @@ Kimi 这里不是 input/output 分项，而是上下文已用量 `used` 与总�
 ```
 
 未出现：多条目 locations（每个工具至多一条）、edit 的 diff 型 content、`kind` 的其他取值。本次 7 类工具全部出现，无「未出现」项。
+
+## 8. Claude 跨宿主续接：缓存、模型与分叉（CLI 2.1.284，2026-09-30）
+
+对照工单 `.work-orders/2026-09-30-resume-parity-prompt.md`。审计工具：`node server/scripts/cache-audit.mjs <jsonl|id 前缀> [--ttl 3600] [--json]`，`--since 14d` 扫全部。
+
+**系统提示快照让跨宿主续接不破缓存**。续接时 CLI 按 jsonl 里的 `prompt_snapshot` / `deferred_tools_record` 附件重放上次的系统提示和工具表，之后的变化只以 `deferred_tools_delta` / `agent_listing_delta` / `mcp_instructions_delta` 追加在对话尾部，所以 VSCode 与 wb 追加提示不同也不动前缀。VSCode 扩展在 initialize 里显式传 `systemPromptSnapshot: true` 并把「VSCode Extension Context」作为 `appendSystemPrompt`；wb 的 initialize 不带这两个字段，快照开关走默认值（开），同样生效。VSCode 独有工具（`FetchInboxMessage` / `ReadNotifications` / `SendUserFile`）也是 delta，不破缓存。
+- 真实会话 00000205（VSCode ↔ wb 来回切）：4 轮 0 次意外失效，切换轮 read 57169 / write 737、read 57906 / write 649。
+- scratch 实测（haiku，模拟 VSCode 宿主 = 扩展自带二进制 + 同参数同 env + 同 initialize，`/tmp/.../scratchpad/smoke/host.mjs`）：对照组 c745eec9 同宿主关→开两次，3 轮 0 失效（read 21894 → 45283 → 46450）；切换组 be402171「宿主 → wb 续接 → 宿主 → wb（走 replaceWorker）→ 宿主」5 轮 0 失效（read 21894 → 45108 → 46171 → 46540 → 46630）。
+- 模拟宿主写入的用户条目 `turnOrigin` 是 `sdk`，真实 VSCode 面板是 `human`；来源字段不影响缓存，只影响防分叉 hook 提示里的「来源」文字。
+
+**缓存按组织隔离**。另有约 21–22.5k 的全局静态 CC 前缀跨组织共享。00000206 #46（2026-09-23 23:31，read 21134 / write 162204，前一轮 read 176033）就是换账号后组织缓存全丢、只命中全局前缀，不是 wb 的问题。
+
+**CLI 自带破缓存诊断**：开调试（env `DEBUG` / `DEBUG_SDK` 或 `--debug`）时，调试日志里会有 `[PROMPT CACHE]` 行和原因。日志路径取 `CLAUDE_CODE_DEBUG_LOGS_DIR`（按文件路径用），未设时写 `~/.claude/debug/<sessionId>.txt`。
+
+**续接时的模型**：不带 `--model` 续接时，CLI 恢复该会话最后一条助手消息的模型；显式 `--model` / `ANTHROPIC_MODEL` 优先（`-p` stream-json 实测 d35fb1d6；模拟宿主 c745eec9 续接两次都不带 `--model`，仍是 haiku）。所以 wb 续接不传 `--model`，与原生「关掉再打开」一致；首个 `system/init` 到达之前，界面可能先显示配置默认值。
+
+**wb worker 与 VSCode 对齐的 env**：`CLAUDE_CODE_ENTRYPOINT=claude-vscode`、`CLAUDE_CODE_ENABLE_TASKS=0`（与 VSCode 一样用 TodoWrite，不用 Task* 工具，wb 渲染已核对）、`MCP_CONNECTION_NONBLOCKING=true`，另删掉从 VSCode 终端继承来的 `CLAUDE_CODE_SSE_PORT`，并设 `CC_FORK_GUARD=0`（见下）。不对齐的两项：`CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING` 只打开 SDK 模式的文件备份（给 rewind 用，wb 没有这个功能）；`CLAUDE_CODE_SDK_READS_SESSION_STATE=1` 是 Agent SDK 自动补上的宿主标志。这两项都不进 prompt 和工具表，上面的切换组宿主设了、wb 没设，照样 0 失效。
+
+**没有原生的「别的进程写过本会话」检测**。`~/.claude/sessions/<pid>.json` 活进程登记（pid、sessionId、procStart、kind、entrypoint、status）只被后台 agents 的「在别处打开」路径用。工单列的 `CLAUDE_CODE_RESUME_TOLERATES_CONTEXT_APPENDS`、`sessionMirror`、`CLAUDE_CODE_SDK_READS_SESSION_STATE` 都不做这件事。因此防分叉靠全局 hook `~/.claude/hooks/fork-guard.py`（SessionStart / UserPromptSubmit / Stop），相关 hook 事实：
+- hook 进程 env 有 `CLAUDE_PID`（发起 hook 的 claude 进程）和 `CLAUDE_CODE_SESSION_ID`；hook 的父进程是 `sh`。
+- UserPromptSubmit 触发时，本条用户消息**还没写进** jsonl；它的 `prompt_id` 等于 jsonl 的 `promptId`。
+- UserPromptSubmit 以 exit 2 退出时，stream-json 输出 `system/informational`（`prevent_continuation:true`，content 带 stderr），随后是 `num_turns:0` 的 result，不挂住。
+- `turnOrigin` 实见取值：`human`（VSCode / 终端 / 手机）、`sdk`（wb、`claude -p`）、`task_notification`、`peer`、`system`，以及缺失（中断续接提示）。hook 只把 `human` / `sdk` 当成人类消息。
+- 双进程实测（scratch，haiku）：A 空闲，B `--resume` 写一轮，A 再发被拦；A 重开后放行。`-p` 模式下排队消息逐条出队、各走一轮，不误拦。
+- wb 自己在发送前会从磁盘刷新（`refreshBeforeSend`），所以 worker 设 `CC_FORK_GUARD=0` 关掉这个 hook。
+
+**Remote Control 与缓存**。b583f2f4（2026-09-29，CLI 2.1.281，opus）第 2、3 轮 read 都只有 22555（只命中全局前缀），各重写约 35k。当时 wb transcript 显示两轮之间 RC 被关掉又重开（04:49:27 disconnecting → 04:49:33 connected，bridge 会话从 `cse_01FVA…` 换成 `cse_01JBJ…`，jsonl 第 30–32 行）。wb 在这期间只转发了 RC 开关，没有动 prompt；三轮都由同一个 worker 进程发出，所以这是 CLI 内部的行为，不是 wb 的问题。2.1.284 在 scratch 复现（00000207，haiku，临时 wb 18790）：
+- RC 一直连着，手机隔 34 分钟发两轮（`turnOrigin:human`）：read 44502 / write 1257、read 45759 / write 81。RC 新增的 `FetchInboxMessage` / `ReadNotifications` / `SendUserFile` 和 claude.ai MCP 都以 `deferred_tools_delta` 追加在尾部。
+- RC 关→开（bridge 换成新会话）后，wb 发两轮：read 45840 / write 81、read 45921 / write 81。
+- 接着手机往新 bridge 发一轮：read 46002 / write 81。
+- 全程 0 次意外失效，调试日志里没有 `[PROMPT CACHE]` 行。
+结论：当前版本 RC 不破缓存，b583f2f4 那次只在 2.1.281 上出现过（没有旧版本可复测，opus 与 haiku 的差别也没排除）。用户 2026-09-30 决定 RC 保持按 `remoteControlAtStartup` 自动开启；之后用 `cache-audit --since` 定期扫一遍。
+- 同一进程收到的手机消息照样触发 UserPromptSubmit / Stop，并带 `prompt_id`（探针实测），所以防分叉 hook 不会误拦 RC 消息。
+
+## 9. Codex turn/start 图片输入（0.159.2 schema 核对，2026-09-30）
+
+来源：`codex app-server generate-json-schema --out /tmp/codex-schema-wb`（codex-cli 0.159.2）的 `v2/TurnStartParams.json` → `UserInput` oneOf。
+
+`UserInput` 图片项的真实形状确认如下（与预期一致）：
+
+```json
+{"type":"localImage","path":"<绝对路径>","detail":null}
+```
+
+- `type` 枚举为 `localImage`，`path` 必填字符串；`detail` 可选，取值 `auto | low | high | original`（`ImageDetail`），缺省/null 均可。
+- 另有 `{type:"image", url}` 与 `{type:"image", fileId}`（远程/已上传图片），以及 `localAudio`、`skill`、`mention`、`text` 变体。
+- Workbench 只发 `localImage`（不带 `detail`）；文件引用仍走 `{type:"mention", name, path}` + `text_elements`，图片不占 `text_elements` 占位。
+- Codex 本周期额度用尽，未做真机 turn 冒烟；以上仅为 schema 核对结论。

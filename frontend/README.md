@@ -58,7 +58,7 @@ frontend/
       ResumedHistory.tsx 续接会话的历史消息区：实时流上方、默认加载最近一页、「加载更早的消息」nextCursor 翻页 prepend、弱化底色 + 分隔线与实时区区分、用户/助手两态（不伪造工具/思考块）
       StreamItems.tsx   用户消息 / 文本块 / 思考折叠块 / 工具卡片 / 闸门块 / 提问选择卡片（AskUserQuestion）/ 系统行
       TerminalPanel.tsx 终端面板：xterm + 专用 WS /ws/terminal（重连后重新 attach 回放）、可拖分隔条、标题条（cwd + 结束/隐藏/新建）、手机快捷键栏；隐藏只是 CSS 隐藏，实例与连接保留
-    styles.css          设计令牌（深浅两套）与全部样式
+    styles.css          颜色令牌（light-dark() 深浅成对）与全部样式
 ```
 
 ### 状态模型
@@ -83,6 +83,7 @@ frontend/
 流内块级元素，暖色边框 + 暖色浅底 + 直角（其余卡片 8px 圆角）。三家 payload 在 `render-items.ts` 的 `gateFromEvent` 统一提取：命令（kimi terminal/create、claude Bash、codex params.command）等宽全文默认展开；文件写入内容可折叠；兜底「完整入参」JSON。决策按钮只有「允许」「拒绝」；点击后进入提交中态（按钮禁用），直到 `permission_resolved` 广播到达、闸门降级为中性样式（显示「已允许 / 已拒绝」）。dead 会话里的未决闸门渲染为中性「会话已结束，此审批已失效」态，无暖色、不可点击。未决闸门滚出视口时，输入框上方贴暖色细条「N 个闸门等待处理 ↑」，点击滚动定位到第一个；左栏收起时收起按钮旁显示全部会话未决总数的暖色小徽标（为 0 不显示），点击展开左栏。
 
 ## 验收自查
+以下按当时版本记录实施与检查；旧 check:theme 校验脚本已在 2026-09-29 随深色令牌合并移除。当前验收以根目录的 npm test、两项 typecheck 和 build 为准。
 
 实测日期：2026-08-21；Node v22.23.1，vite 8.2.2，react 19.2.8，后端 M1 实跑（kimi 0.38.0 / claude 2.1.238）。
 
@@ -474,8 +475,17 @@ frontend/
 - **评审**：Codex 只读评审（会话 `00000000-0000-4000-8000-000000000012`）两轮。第一轮提了 7 条重要问题、2 条次要问题，都由原执行者修复，第二轮逐条确认已修；第二轮又提了 2 条小问题，由主会话修复。
 - **截图**：`frontend/scripts/msg-display-shots.mjs` 新增 `FIXTURES=1` 模式，直接回放上面的真实样本。真实样本和合成数据各 12 张，都没有页面横滚、没有 XSS 节点、没有页面错误。
 - **待真机**：
-  - 8790 上的实际观感。后端改动要 `workbench restart` 才生效，重启前 kimi 命令不会显示输出。
+  - 8790 上的实际观感。后端改动要 `wb restart` 才生效，重启前 kimi 命令不会显示输出。
   - codex 会话里 `raw_event`（「调试事件」）行偏多，来源是 `turn/diff/updated`、`hook/*`、`account/updated` 这类通知，不在本次范围，见 HANDOFF 待办。
+
+### M23 Claude Remote Control 胶囊（2026-09-29）
+
+- **实测**：18790 隔离实例创建空白 Claude 会话后，胶囊自动高亮且取得 `session_url`；页面点击关闭变灰，再点开启重新高亮；最终关闭后 snapshot 仍为灰态。未发任何对话消息。`npm test`、`npm run build` 通过。
+- **实测截图**：`scratch/remote-control-20260929/composer-{1280,390}-{light,dark}.png`；四种尺寸主题都无页面横向溢出和页面错误。已连接胶囊蓝底白字，旁边 `↗` 在新标签页打开 `session_url`；按钮 title 也含 URL。
+- **代码复核**：只有 Claude 显示；灰、连接中、重连中、关闭中、错误态由会话记录与 `remote_control_updated` 驱动，失败原因放 title。刷新和重连从 snapshot 对齐。收到未知 bridge state 不崩。worker 替换后按设置或此前开启状态恢复 RC。
+- **远程消息识别（验收后返工）**：第一版在 RC 关闭时也会把对不上号的 user 文本当成远程消息，每轮 `result` 又会清空本机回显表，追加的消息可能重复显示。已改为：只在 connecting、connected、reconnecting 三种状态下识别；排除子代理和合成消息；回显表改为 FIFO，上限 20 条，不再随 `result` 清空。单测见 `server/claude-remote-control.test.ts`。
+- **同批顺带改动**：Claude 的 Bash 工具行有 `description` 就显示它，命令留在展开区（`tool-summary.ts`；对应 M22 的「动词 + 对象」规则，Codex 和 Kimi 不受影响）。
+- **待真机验证**：手机 claude.ai/code 发来的 user 消息在 Workbench 中的实际 stdout 形状、去重和续聊指纹；本次冒烟依要求没有发送消息。
 
 ### 通用边界
 
@@ -487,3 +497,48 @@ frontend/
 - 会话状态没有专属 WS 事件，左栏状态靠事件推断 + 2 秒防抖重拉列表对齐，可能有一拍延迟。
 - 「允许并记住」按钮已移除（M2 返工 B3）：后端把 `updatedInput` 直接采信为工具入参（`updatedInput ?? pending.input`），没有承载 `permissionSuggestions` 的通道，前端把 suggestions[0] 当 updatedInput 回传会把用户批准的写文件入参替换成 setMode 对象。在后端有正规通道之前只提供「允许」「拒绝」；`permissionSuggestions` 的提取逻辑保留在 `render-items.ts` 备用。
 - 每会话事件数组有 2000 条内存上限，超出丢弃最旧；快照接口永远返回全量 transcript，重进会话即恢复。
+
+
+### M24 模型版本、终端字体与字号设置（2026-09-30）
+
+- Claude 模型菜单优先读取 initialize 的 `displayName` 版本，兼容旧 `description`；Fable 按数字分段取最大版本，其他三档精确匹配别名，缺失时回退「（最新）」。跟随项保留会话有效配置展示，不用全局探测默认值替代。
+- 等宽 UI 优先使用本地 Maple Mono NF CN，正文 UI 字体不变。终端打开后显式请求本地字体，完成或 1.5 秒超时后重新度量并 fit；不下载 webfont，不阻塞终端连接。
+- 有终端能力时，Ctrl+` 开关终端；首次按需挂载，打开聚焦终端，收起尝试聚焦会话输入框。xterm 放行该组合，自动重复不反复切换。
+- 设置 → 外观新增小／默认／大／特大（0.9／1／1.15／1.3），保存到 `workbench-font-scale`，首屏内联恢复。只对 `.sidebar` 和 `.main` 使用 zoom；终端为兄弟节点，字号单独按 13px × 系数更新并 fit。手机在会话视图点「会话列表」、在终端点「返回」后可进入列表底部设置。
+- 字体竞态是防御性修复：源码此前没有字体就绪后的重新度量，但不能仅凭源码确认系统字体加载竞态或 Powerline 缺字的实际原因。浏览器字体选择、选区坐标、真机布局和焦点仍待实际验证；命令验收结果见 `.work-orders/2026-09-30-ui-prefs-report.md`。
+
+
+### M25 原生历史工具时间线与最新页预览（2026-09-30）
+
+- 三处历史共用 `HistoryTimeline`：用户框复用 UserBlockView，助手用 Markdown，工具用实时 ToolCard/summarizeTool，默认折叠且可展开；unknown 不显示成功/失败。仅使用现有配色令牌。
+- 预览与导入历史共用 PagedHistory 和 `/messages`：首次读取最新 50 条，顶部持续加载更早，取消原 500 条上限；保留 prepend 滚动补偿和过期请求丢弃，空窗口仍可继续翻页。删除文件头 preview API、类型和专用解析代码。
+- 外部续聊支持工具与旧文字事件混排，仍从第一条真实新用户消息开始；跳转优先非 dead，同类取最近活动时间（缺省用创建时间）。
+- **实测**：`npm run typecheck`、`npm run build` 通过并更新 dist；以 `node --import tsx` 运行 history、native-conversation、history-flow、resume-config-flow、render-items 相关测试，覆盖三家工具配对、跨页 unknown、行内分页、限长、迟到刷盘、稳定指纹、512 KiB 事件上限、旧事件兼容和跳转优先级。
+- **代码复核**：三处均复用实时工具摘要与折叠组件，原生历史只读，闸门和 driver 未改；Kimi wire 的 tool.call/tool.result 形状已只读抽样核对。
+- **主会话验收后补的修正**：预览首屏没落在底部 → `PagedHistory` 加 `startAtEnd`（只在首页加载后滚到底一次，`HistoryView` 传）；390 宽出现横滚 → `.history-preview-pane` 加 `min-width: 0`；会话顶栏按钮换行 → `.session-head-actions` 不收缩、按钮 `nowrap`。
+- **实测（主会话）**：完整 `npm test` 通过；本机 >1MB 的 Claude 会话在 1280 与 390 两个宽度下预览首屏为最后一轮，可一直翻到第一条用户消息，无横滚。
+- **未做**：超长工具正文仍有截断，跨页工具结果不追加读取，思考块仍不显示；窄屏下 ToolCard 动词会被截成「运…」（改版前就有）。
+
+### M26 「到 VSCode/终端继续」+ 空闲自动释放 worker（2026-09-30）
+
+- **顶栏按钮**：会话头操作区新增「到 VSCode/终端继续」（三家都显示），点击调 `POST /api/sessions/:id/release`，成功后把 `resumeCommand` 复制到剪贴板（Clipboard API 失败退回 `window.prompt` 手动复制），结果在按钮旁短暂提示（成功灰字、失败错误色，复用现有令牌）。仅 `idle` 且有 `nativeSessionId` 的会话可点，其他状态的禁用原因写在 title。释放后输入框照常可用，发送时后端自动从磁盘续接。
+- **事件渲染**：`worker_released` 归一成弱化系统行「已释放（空闲 N 分钟 / 手动）；下次发送时从磁盘续接」；空闲自动释放（无客户端动作）靠该事件把列表项对齐为已释放（`store.ts` 置 `released:true`、清 `processId`）。
+- **设置**：设置菜单新增「会话 → 空闲自动释放」（关闭 / 15 / 30 / 60 / 120 分钟），读写 `/api/prefs`；服务端存了非档位值时补一个如实显示的选项。乐观更新，写失败回滚。
+- **后端契约**：见 `server/README.md`「释放（release）worker」小节。释放后再发走与「别处续聊」同一条 `refreshBeforeSend` 路径（比对指纹 → 起新 worker 续接 → 需要时广播 `external_messages_added`），released 会话没有旧 worker 可停。
+- **实测**：`npm run typecheck`、`npm run typecheck:frontend`、`npm test`、`npm run build` 全部通过。新增 `server/worker-release.test.ts`（假 driver 覆盖手动释放不标 dead、释放后按原原生 id 续接发送、释放期间外部新增先广播 `external_messages_added`、自动释放跳过 running/待处理闸门/RC 已连接/未到时间/N=0、`setConfig`/`setRemoteControl` 先拉起、续接失败保持 released 可重试、`resumeCommand` 引号转义）与 `server/prefs.test.ts`（校验边界、持久化往返、坏文件回落默认）；`render-items.test.mjs` 新增 `worker_released` 文案用例。
+- **主会话验收后补的修正**：`release()` 先从 `workers` 删除、置 `released` 并清 `processId`，再 `await stop()`，避免 stop 期间的发送落到正在退出的 worker；服务重启后所有会话都是 dead，加载时清掉 `released`；released 会话的模型/权限/RC 胶囊保持可用（点了会先拉起 worker）。
+- **实测（主会话，临时实例 18790 + scratch 会话）**：wb 发 → 释放 → 模拟 VSCode 宿主续聊 → wb 再发，走 released 路径并广播 `external_messages_added`；三轮往返 6 回合缓存无异常、会话链无分叉。
+- **待真机**：8790 上实际释放一个 Codex 会话后在 CLI `codex resume` 解除单写者锁的体验；空闲自动释放的线上观察；按钮与提示的深浅色观感。
+- **导入历史截止在导入时刻**（2026-09-30）：续接创建时服务端把「该原生消息文件当时的大小」编码成 cursor 存进 `resumedFrom.historyCursor`；`ResumedHistory` 把它作为 `PagedHistory` 的新可选参数 `initialCursor` 传给首页加载（`fetchInitialHistoryPage`），「导入前的历史对话」不再混入导入之后的轮次；翻更早的页照旧用返回的 `nextCursor`。cursor 失效（原生文件被截断/改写，服务端 400）时退回不带 cursor 的最新一页，不整块报错。历史页预览（`HistoryView`）不传 `initialCursor`，仍从最新一页开始；没有该字段的旧会话行为不变。实测（18790）：续接 scratch 会话后在 wb 再发一轮，「导入前」区块仍止于导入前最后一轮，新一轮只出现在实时流里；客户端请求体里伪造的 `historyCursor` 被服务端覆盖。
+
+### M27 输入框「+」附件（手机传图 / 选电脑文件 / 粘贴拖入）（2026-09-30）
+
+- **入口**：Composer 底栏最左「+」按钮（`.attach-btn`），会话 dead 或 driver `mentions:false` 时禁用。菜单两项：「照片 / 文件」触发隐藏 `<input type="file" multiple>`（不设 accept，iOS 才给 照片图库/拍照/选取文件 三选项）；「电脑上的文件」打开 `DirectoryBrowser` 的 `mode="file"`（目录照常进入、文件可点选、初始路径 = 会话 cwd，配套 `GET /api/fs/dirs?files=1`）。点外 / Esc 关闭。
+- **上传**：`POST /api/uploads?sessionId&name`（原始字节，非 multipart）。`image/*` 且（>3.5 MB 或非 png/jpeg/gif/webp，如 HEIC）时前端先 `createImageBitmap` + canvas 缩到长边 ≤2048 转 JPEG 0.85 再传；解码失败原样上传（`attachments.ts` 的 `needsImageReencode` / `prepareImageForUpload`）。
+- **附件条**：输入框上方 `.attach-bar`，图片显示缩略图（上传附件用 `URL.createObjectURL`，local 选电脑文件用文件名标签），每张卡 ✕ 移除；上传中显示「上传中…」，失败显示错误且不进发送帧。发送成功清空、失败保留（与草稿纪律一致）；文本与附件可只有其一。
+- **粘贴 / 拖放**：textarea `onPaste` 剪贴板有文件时拦截上传（截图场景），`.composer-box` 拖放文件走同一上传流程。
+- **发送帧**：ready 附件经 `attachmentMention` 转 `{type:"image",path,mimeType,name}`（mimeType 属 png/jpeg/gif/webp）或 `{type:"file",path,name}`，在 `store.sendComposerInput(sessionId, text, extraMentions)` 里与 @token 引用合并（按 path 去重、合计截到 20）；带附件时不走结构化 command 分支。
+- **消息气泡**：`user_message` 事件的 `payload.mentions` 进 `UserBlock.mentions`（`render-items.ts` 容错解析），`UserBlockView` 在文本下方渲染附件区：image 缩略图走 `GET /api/uploads/file?path=`（`onError` 降级为文件名标签），file 显示 `name ?? basename`。历史回放 / snapshot 共用同一链路。
+- **实测**：`npm run typecheck` / `npm run typecheck:frontend` / `npm test`（含新增 `test:attach` 7 例与 server 侧 19 个测试文件）/ `npm run build` 全部通过；18790 隔离实例真机冒烟：生成写着 `WB-IMG-7Q2K` 的 PNG 经 `/api/uploads` 上传后以 image mention 发给 Claude 与 Kimi，两家回复均恰含 `WB-IMG-7Q2K`（原始回复与记录见 `scratch/attach-smoke/` 与 `scratch/attach-report.md`）。
+- **截图验收**（playwright，390px × 深浅色，`scratch/attach-*.png`）：「+」菜单打开、附件条一张图一个文件、已发送气泡含缩略图，六张均无页面横滚、无页面错误。
+- **代码复核未实测**：Codex 的 `localImage` 形状只经 `codex app-server generate-json-schema`（0.159.2）核对 + 单测，本周期额度用尽未真跑；iOS 三选项与拖放手感待真机；图片压缩路径（HEIC→JPEG）在 node 测试里只覆盖判定逻辑，canvas 部分未跑。

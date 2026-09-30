@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, utimes, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, mkdtemp, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { HistoryIndex, HistoryQueryError } from "./history.js";
@@ -206,19 +206,8 @@ const secondPage = await history.list({ limit: 20, cursor: firstPage.nextCursor 
 assert.equal(secondPage.sessions.length, 6);
 assert.equal(new Set([...firstPage.sessions, ...secondPage.sessions].map((session) => session.nativeSessionId)).size, 8);
 
-const preview = await history.preview("claude", interactiveClaudeId);
-assert.ok(preview);
-assert.deepEqual(preview.messages.map((message) => `${message.role}:${message.text}`), [
-  "user:真正的人类标题",
-  "assistant:预览回复",
-  "user:Claude 第二问",
-  "assistant:Claude 第二答",
-  "user:Claude 第三问",
-  "assistant:Claude 第三答",
-]);
-
 const claudePages = await readAllMessages(history, "claude", interactiveClaudeId, 2);
-assert.deepEqual(claudePages.map((message) => `${message.role}:${message.text}`), [
+assert.deepEqual(claudePages.map((message) => `${message.role}:${"text" in message ? message.text : message.tool.name}`), [
   "user:真正的人类标题",
   "assistant:预览回复",
   "user:Claude 第二问",
@@ -227,14 +216,14 @@ assert.deepEqual(claudePages.map((message) => `${message.role}:${message.text}`)
   "assistant:Claude 第三答",
 ]);
 const codexMessages = await readAllMessages(history, "codex", codexId, 2);
-assert.deepEqual(codexMessages.map((message) => `${message.role}:${message.text}`), [
+assert.deepEqual(codexMessages.map((message) => `${message.role}:${"text" in message ? message.text : message.tool.name}`), [
   "user:Codex 真实标题",
   "assistant:Codex 第一答",
   "user:Codex 第二问",
   "assistant:Codex 第二答",
 ]);
 const kimiMessages = await readAllMessages(history, "kimi", kimiId, 2);
-assert.deepEqual(kimiMessages.map((message) => `${message.role}:${message.text}`), [
+assert.deepEqual(kimiMessages.map((message) => `${message.role}:${"text" in message ? message.text : message.tool.name}`), [
   "user:Kimi 真实标题",
   "assistant:Kimi 第一答",
   "user:Kimi 第二问",
@@ -271,7 +260,6 @@ console.log(JSON.stringify({
   skipped: all.skipped,
   titles: all.sessions.map((session) => session.title),
   pagination: [firstPage.sessions.length, secondPage.sessions.length],
-  previewMessages: preview.messages.length,
   historyMessages: {
     claude: claudePages.length,
     codex: codexMessages.length,
@@ -305,3 +293,117 @@ async function readAllMessages(
   } while (cursor);
   return pages.reverse().flatMap((page) => page.messages);
 }
+
+// Tools stay in native block order; result records never masquerade as users.
+const { parseHistoryMessages } = await import("./history.js");
+const parse = (agent: "claude" | "codex" | "kimi", rows: unknown[]) => parseHistoryMessages(agent,
+  rows.map((row, startOffset) => ({ text: JSON.stringify(row), startOffset })));
+const use = { type: "assistant", uuid: "tools", cwd: "/repo/tools", message: { role: "assistant", content: [
+  { type: "text", text: "before" }, { type: "tool_use", id: "a", name: "Bash", input: { command: "pwd" } },
+  { type: "text", text: "between" }, { type: "tool_use", id: "b", name: "Read", input: { file_path: "/repo/a" } },
+  { type: "text", text: "after" },
+] } };
+const result = { type: "user", uuid: "result", toolUseResult: { stdout: "hello", stderr: "" }, message: { role: "user", content: [
+  { type: "tool_result", tool_use_id: "a", content: "hello", is_error: false },
+  { type: "tool_result", tool_use_id: "b", content: [{ type: "text", text: "missing" }], is_error: true },
+] } };
+const parsed = parse("claude", [use, result, { ...use, isSidechain: true }]);
+assert.deepEqual(parsed.map(m => m.role), ["assistant", "tool", "assistant", "tool", "assistant"]);
+assert.ok(parsed[1]?.role === "tool" && parsed[3]?.role === "tool");
+assert.equal(parsed[1].tool.status, "ok");
+assert.equal(parsed[1].tool.result, "hello");
+assert.deepEqual(parsed[1].tool.rawResult, result.toolUseResult);
+assert.equal(parsed[3].tool.status, "error");
+const longTool = parse("claude", [
+  { ...use, message: { role: "assistant", content: [{ type: "tool_use", id: "a", name: "Bash", input: { command: "x".repeat(10000) } }] } },
+  { ...result, toolUseResult: { stdout: "x".repeat(10000) }, message: { role: "user", content: [{ type: "tool_result", tool_use_id: "a", content: "x".repeat(10000) }] } },
+])[0]!;
+assert.ok(longTool.role === "tool");
+for (const value of [longTool.tool.input, longTool.tool.result, longTool.tool.rawResult]) {
+  assert.ok(JSON.stringify(value).length <= 4010);
+  assert.match(JSON.stringify(value), /truncated/);
+}
+const codexTools = parse("codex", [
+  { type: "event_msg", payload: { type: "user_message", message: "run" } },
+  { type: "response_item", payload: { type: "function_call", call_id: "c", name: "functions.exec_command", arguments: '{"cmd":"pwd"}' } },
+  { type: "response_item", payload: { type: "function_call_output", call_id: "c", output: "Process exited with code 1\nerror" } },
+  { type: "response_item", payload: { type: "custom_tool_call", call_id: "p", name: "apply_patch", input: "*** patch" } },
+  { type: "response_item", payload: { type: "custom_tool_call_output", call_id: "p", output: "done" } },
+]);
+assert.equal(codexTools.length, 3);
+assert.ok(codexTools[1]?.role === "tool" && codexTools[2]?.role === "tool");
+assert.equal(codexTools[1].tool.name, "commandExecution");
+assert.equal(codexTools[1].tool.status, "error");
+assert.equal((codexTools[1].tool.input as { command: string }).command, "pwd");
+assert.equal(codexTools[2].tool.result, "done");
+const kimiTools = parse("kimi", [
+  { type: "context.append_loop_event", agentId: "main", event: { type: "tool.call", toolCallId: "k", name: "Read", args: { path: "a" } } },
+  { type: "context.append_loop_event", agentId: "main", event: { type: "tool.result", toolCallId: "k", result: { output: "contents" } } },
+]);
+assert.ok(kimiTools[0]?.role === "tool");
+assert.equal(kimiTools[0].tool.result, "contents");
+assert.equal(kimiTools[0].tool.status, "ok");
+
+// limit counts every block, even several blocks on the same JSONL line.
+await writeJsonl(interactiveClaudePath, [
+  { type: "user", cwd: "/repo/tools", message: { role: "user", content: "tools" } }, use, result,
+]);
+const oneAtATime = await readAllMessages(history, "claude", interactiveClaudeId, 1);
+assert.deepEqual(oneAtATime.map(m => m.role), ["user", "assistant", "tool", "assistant", "tool", "assistant"]);
+assert.ok(oneAtATime[2]?.role === "tool");
+assert.equal(oneAtATime[2].tool.status, "unknown", "result in a newer page is outside the cursor window");
+const fullTools = await history.messages("claude", interactiveClaudeId, { limit: 20 });
+assert.ok(fullTools?.messages[2]?.role === "tool");
+assert.equal(fullTools.messages[2].tool.status, "ok");
+
+await writeJsonl(codexPath, [
+  { type: "session_meta", payload: { id: codexId, cwd: "/repo/codex" } },
+  { type: "event_msg", payload: { type: "user_message", message: "run" } },
+  { type: "response_item", payload: { type: "function_call", call_id: "c", name: "exec_command", arguments: '{"cmd":"pwd"}' } },
+  { type: "event_msg", payload: { type: "agent_message", message: "waiting" } },
+  { type: "response_item", payload: { type: "function_call_output", call_id: "c", output: "Process exited with code 0\n/repo" } },
+]);
+const codexSplit = await readAllMessages(history, "codex", codexId, 1);
+assert.ok(codexSplit[1]?.role === "tool");
+assert.equal(codexSplit[1].tool.status, "unknown");
+console.log("history tool pairing, bounded bodies and block pagination passed");
+
+const patchTool = parse("codex", [{ type: "response_item", payload: {
+  type: "custom_tool_call", call_id: "edit", name: "apply_patch",
+  input: "*** Begin Patch\n*** Update File: a.ts\n@@\n-old\n+new\n*** End Patch",
+} }])[0]!;
+assert.ok(patchTool.role === "tool");
+assert.equal(patchTool.tool.name, "fileChange");
+assert.equal((patchTool.tool.input as { changes: Array<{ path: string }> }).changes[0]?.path, "a.ts");
+
+// Do not merge across a tool-bearing source line: that would lose its leading text at a byte cursor boundary.
+await writeJsonl(interactiveClaudePath, [
+  { type: "user", cwd: "/repo/tools", message: { role: "user", content: "tools" } },
+  { type: "assistant", message: { role: "assistant", content: [{ type: "text", text: "earlier" }] } },
+  use, result,
+]);
+const boundary = await readAllMessages(history, "claude", interactiveClaudeId, 1);
+assert.equal(boundary.flatMap(m => m.role === "assistant" ? [m.text] : []).join(""), "earlierbeforebetweenafter");
+
+// endCursor：偏移量 = 消息文件当前大小（Kimi 取 agents/main/wire.jsonl）；截止在该时刻，之后追加的消息不进这页。
+const claudeEndCursor = await history.endCursor("claude", interactiveClaudeId);
+const kimiEndCursor = await history.endCursor("kimi", kimiId);
+assert.ok(claudeEndCursor);
+assert.ok(kimiEndCursor);
+assert.equal(await history.endCursor("claude", "ffffffff-ffff-4fff-8fff-ffffffffffff"), undefined);
+await appendFile(interactiveClaudePath, `${JSON.stringify({
+  type: "user", message: { role: "user", content: "导入后的追加问题" },
+})}\n`, "utf8");
+await appendFile(kimiWirePath, `${JSON.stringify({
+  type: "turn.prompt", input: [{ type: "text", text: "导入后的追加问题" }],
+})}\n`, "utf8");
+const appended = (m: { role: string; text?: string }) => "text" in m && m.text === "导入后的追加问题";
+const claudeAtImport = await history.messages("claude", interactiveClaudeId, { limit: 50, cursor: claudeEndCursor! });
+const kimiAtImport = await history.messages("kimi", kimiId, { limit: 50, cursor: kimiEndCursor! });
+assert.ok(claudeAtImport && !claudeAtImport.messages.some(appended), "claude：截止 cursor 的页不应含追加消息");
+assert.ok(kimiAtImport && !kimiAtImport.messages.some(appended), "kimi：截止 cursor 的页不应含追加消息");
+const claudeLatest = await history.messages("claude", interactiveClaudeId, { limit: 50 });
+const kimiLatest = await history.messages("kimi", kimiId, { limit: 50 });
+assert.ok(claudeLatest?.messages.some(appended), "claude：不带 cursor 应含追加消息");
+assert.ok(kimiLatest?.messages.some(appended), "kimi：不带 cursor 应含追加消息");
+console.log("history endCursor cutoff passed");

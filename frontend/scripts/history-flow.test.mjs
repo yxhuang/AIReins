@@ -3,7 +3,7 @@
 // - buildHistoryQuery：空值省略、cursor 原样带回、中文 q 编码；
 // - filterBySource：「全部」不过滤，按来源过滤只作用于给定条目；
 // - findImportedSession：同一 agent + 同一 nativeSessionId 才算「已在工作台中」；
-// - fetchHistory / fetchHistoryPreview：URL 组装与信封解析（fetch 打桩）；
+// - fetchHistory / fetchHistoryMessages：URL 组装与信封解析（fetch 打桩）；
 // - store 路由：#/history 与 #/session/<id>、#/page/<id> 互斥。
 // 浏览器依赖（window / WebSocket / fetch）全部打桩，不需要真实 server。
 // 运行：npx tsx frontend/scripts/history-flow.test.mjs
@@ -19,7 +19,7 @@ const {
   findImportedSession,
   SOURCE_LABELS,
 } = await import("../src/history.ts");
-const { fetchHistory, fetchHistoryPreview } = await import("../src/api.ts");
+const { fetchHistory, fetchHistoryMessages } = await import("../src/api.ts");
 const { Store } = await import("../src/store.ts");
 
 let pass = 0;
@@ -119,21 +119,21 @@ await t("fetchHistory：query 正确，data 字段（含 nextCursor/truncated/sk
   assert.equal(data.discovered, 467);
 });
 
-// --- 用例 5：fetchHistoryPreview URL 编码与错误信封抛中文 msg ---
-await t("fetchHistoryPreview：路径编码正确；错误信封抛出中文 msg", async () => {
+// --- 用例 5：fetchHistoryMessages URL 编码与错误信封抛中文 msg ---
+await t("fetchHistoryMessages：路径编码正确；错误信封抛出中文 msg", async () => {
   const calls = [];
   globalThis.fetch = async (url) => {
     calls.push(String(url));
     return envelope({ session: historyItem(), messages: [], truncated: true });
   };
-  const preview = await fetchHistoryPreview("kimi", "session_ab-c_1");
-  assert.equal(calls[0], "/api/history/kimi/session_ab-c_1");
+  const preview = await fetchHistoryMessages("kimi", "session_ab-c_1");
+  assert.equal(calls[0], "/api/history/kimi/session_ab-c_1/messages");
   assert.equal(preview.truncated, true, "truncated:true 是常态，原样透传");
   assert.deepEqual(preview.messages, []);
   globalThis.fetch = async () => ({
     json: async () => ({ code: 40404, msg: "历史会话不存在", data: null, request_id: "t" }),
   });
-  await assert.rejects(fetchHistoryPreview("claude", "gone"), /历史会话不存在/);
+  await assert.rejects(fetchHistoryMessages("claude", "gone"), /历史会话不存在/);
 });
 
 // --- 用例 6：#/history 与既有两类路由互斥 ---
@@ -157,6 +157,18 @@ await t("store 路由：#/history 置 historyOpen 且与 session/page 互斥", a
   s["onHashChange"]();
   assert.equal(s.historyOpen, false, "其余 hash 回空态");
   assert.equal(s.currentId, null);
+});
+
+await t("跳转优先存活会话，同类选择最新活动，缺省使用创建时间", () => {
+  const base = { agent: "claude", nativeSessionId: "abc-123", createdAt: "2026-01-01" };
+  const rows = [
+    { ...base, id: "dead-new", status: "dead", lastActivityAt: "2026-09-30" },
+    { ...base, id: "live-old", status: "idle", lastActivityAt: "2026-08-01" },
+    { ...base, id: "live-new", status: "running", createdAt: "2026-09-01" },
+  ];
+  assert.equal(findImportedSession(rows, historyItem()).id, "live-new");
+  assert.equal(findImportedSession(rows.map(r => ({ ...r, status: "dead" })), historyItem()).id, "dead-new");
+  assert.equal(rows[0].id, "dead-new", "must not mutate registry order");
 });
 
 console.log(`✅ history 前端逻辑回归全过（${pass} 例）`);

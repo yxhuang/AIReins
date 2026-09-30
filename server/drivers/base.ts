@@ -139,6 +139,20 @@ export function readMentionText(mention: FileMention): string {
   }
 }
 
+/** 读不了（二进制或超 1 MiB）时返回 null 而不是抛错，由调用方降级为路径提示。 */
+export function tryReadMentionText(mention: FileMention): string | null {
+  try {
+    return readMentionText(mention);
+  } catch {
+    return null;
+  }
+}
+
+/** 二进制/超大文件引用的降级提示行，追加在用户文本末尾（agent 可自行用工具读取）。 */
+export function mentionFallbackNote(path: string): string {
+  return `[附件] ${path}（二进制或超过 1 MiB，未嵌入，请用工具读取）`;
+}
+
 export async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
   return await Promise.race([
     promise,

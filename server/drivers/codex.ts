@@ -268,7 +268,10 @@ export class CodexDriver extends BaseDriver {
     let text = userMessageText(message);
     const textElements: Array<{ byteRange: { start: number; end: number }; placeholder: string }> = [];
     let searchFrom = 0;
-    for (const mention of message.mentions ?? []) {
+    // text_elements 与 mention 项只覆盖文件引用；图片走 localImage（schema 见 spikes/PROTOCOL-NOTES.md）
+    const fileMentions = (message.mentions ?? []).filter((mention) => mention.type === "file");
+    const imageMentions = (message.mentions ?? []).filter((mention) => mention.type === "image");
+    for (const mention of fileMentions) {
       const name = this.mentionPath(mention.path);
       const marker = `@${name}`;
       let markerIndex = text.indexOf(marker, searchFrom);
@@ -284,11 +287,17 @@ export class CodexDriver extends BaseDriver {
       searchFrom = markerIndex + marker.length;
     }
     if (text) input.push({ type: "text", text, text_elements: textElements });
-    for (const mention of message.mentions ?? []) {
+    for (const mention of fileMentions) {
       const name = this.mentionPath(mention.path);
       input.push({
         type: "mention",
         name,
+        path: mention.path,
+      });
+    }
+    for (const mention of imageMentions) {
+      input.push({
+        type: "localImage",
         path: mention.path,
       });
     }

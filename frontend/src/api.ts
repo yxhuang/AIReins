@@ -1,4 +1,4 @@
-import type { ApiEnvelope, CommandInfo, DirectoryListing, HistoryListData, HistoryMessagesPage, HistoryPreview, MetaInfo, PageHealth, PageManifest, SessionConfig, SessionRecord, Snapshot, SnapshotPreflight, TerminalInfo } from "./types";
+import type { ApiEnvelope, CommandInfo, DirectoryListing, HistoryListData, HistoryMessagesPage, MetaInfo, PageHealth, PageManifest, SessionConfig, SessionRecord, ShellKind, Snapshot, SnapshotPreflight, TerminalInfo, WorkbenchPrefs } from "./types";
 import type { AgentKind } from "./types";
 import { buildHistoryQuery, type HistoryQueryInput } from "./history";
 
@@ -33,10 +33,34 @@ export function fetchMeta(): Promise<MetaInfo> {
   return call<MetaInfo>("/api/meta");
 }
 
-/** 不传 path 时从服务端 $HOME 浏览。 */
-export function fetchDirectories(path?: string): Promise<DirectoryListing> {
-  const query = path === undefined ? "" : `?${new URLSearchParams({ path })}`;
-  return call<DirectoryListing>(`/api/fs/dirs${query}`);
+/** 不传 path 时从服务端 $HOME 浏览；files=true 时同层普通文件一并返回（选文件模式）。 */
+export function fetchDirectories(path?: string, files?: boolean): Promise<DirectoryListing> {
+  const params = new URLSearchParams();
+  if (path !== undefined) params.set("path", path);
+  if (files) params.set("files", "1");
+  const query = params.toString();
+  return call<DirectoryListing>(`/api/fs/dirs${query ? `?${query}` : ""}`);
+}
+
+/**
+ * 附件上传：请求体是原始字节（不是 multipart，body 直接给 Blob）。
+ * 信封 data 带落盘后的 path/name/size/mimeType；错误码 40401/40070/41301。
+ */
+export function uploadAttachment(
+  sessionId: string,
+  body: Blob,
+  name: string,
+): Promise<{ path: string; name: string; size: number; mimeType: string }> {
+  const query = new URLSearchParams({ sessionId, name });
+  return call<{ path: string; name: string; size: number; mimeType: string }>(
+    `/api/uploads?${query}`,
+    { method: "POST", body },
+  );
+}
+
+/** uploads 目录内文件的直接字节地址（content-type 按扩展名），可作 <img src>；目录外一律 404。 */
+export function uploadsFileUrl(path: string): string {
+  return `/api/uploads/file?path=${encodeURIComponent(path)}`;
 }
 
 export function fetchSessions(): Promise<SessionRecord[]> {
@@ -108,6 +132,7 @@ export function fetchTerminals(): Promise<TerminalInfo[]> {
 /** 新建终端：cwd 缺省或不存在时后端用 defaultCwd。 */
 export function createTerminal(input: {
   cwd?: string;
+  shell?: ShellKind;
   cols: number;
   rows: number;
 }): Promise<TerminalInfo> {
@@ -125,6 +150,26 @@ export function killTerminal(id: string): Promise<{ ok: true }> {
   });
 }
 
+/** 释放会话 worker（停进程、保留会话）；返回带 cwd 的原生续接命令。 */
+export function releaseSession(id: string): Promise<{ session: SessionRecord; resumeCommand: string }> {
+  return call<{ session: SessionRecord; resumeCommand: string }>(
+    `/api/sessions/${encodeURIComponent(id)}/release`,
+    { method: "POST" },
+  );
+}
+
+export function fetchPrefs(): Promise<WorkbenchPrefs> {
+  return call<WorkbenchPrefs>("/api/prefs");
+}
+
+export function savePrefs(prefs: WorkbenchPrefs): Promise<WorkbenchPrefs> {
+  return call<WorkbenchPrefs>("/api/prefs", {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(prefs),
+  });
+}
+
 /** 启动时已注册的扩展页面列表（原始返回，类型过滤在 pages.ts 的 partitionPages）。 */
 export function fetchPages(): Promise<PageManifest[]> {
   return call<{ pages: PageManifest[] }>("/api/pages").then((data) => data.pages);
@@ -139,16 +184,6 @@ export function fetchPageHealth(id: string): Promise<PageHealth> {
 export function fetchHistory(input: HistoryQueryInput): Promise<HistoryListData> {
   const query = buildHistoryQuery(input);
   return call<HistoryListData>(`/api/history${query ? `?${query}` : ""}`);
-}
-
-/** 导入前预览：有界读取会话头部，messages ≤8 条。 */
-export function fetchHistoryPreview(
-  agent: AgentKind,
-  nativeSessionId: string,
-): Promise<HistoryPreview> {
-  return call<HistoryPreview>(
-    `/api/history/${encodeURIComponent(agent)}/${encodeURIComponent(nativeSessionId)}`,
-  );
 }
 
 /**

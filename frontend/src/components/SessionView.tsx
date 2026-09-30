@@ -5,13 +5,16 @@ import { buildRenderItems, promptCacheExpiry } from "../render-items";
 import { filterCommands, noteCommandUsed, readRecentCommands, recentInTable } from "../commands";
 import { extractMentionTokens, mentionQueryAt, mentionTokenEnd } from "../mentions";
 import { needsRestartNote, effectiveFor, pillText, EFFECTIVE_SOURCE_LABELS, ALIAS_NOTE, RESTART_NOTE } from "../config-view";
-import { fetchFiles } from "../api";
+import { fetchFiles, uploadAttachment } from "../api";
+import { attachmentMention, localImageMimeType, prepareImageForUpload, type Attachment } from "../attachments";
 import { MAX_MENTIONS, store, type Store } from "../store";
 import { shallowEqual, useStore } from "../useStore";
-import { ExternalHistoryView, GateBlock, QuestionBlock, RawLine, SystemLine, TextBlockView, ThoughtBlockView, ToolCard, UserBlockView } from "./StreamItems";
+import { GateBlock, QuestionBlock, RawLine, SystemLine, TextBlockView, ThoughtBlockView, ToolCard, UserBlockView } from "./StreamItems";
+import { ExternalHistoryView } from "./HistoryTimeline";
 import { ResumedHistory } from "./ResumedHistory";
 import { ClockIcon, ConfigPills, SendIcon, type MenuGroup, type MenuItem } from "./ConfigMenu";
 import { STATUS_HINTS, STATUS_LABELS } from "./Sidebar";
+import { DirectoryBrowser } from "./DirectoryBrowser";
 
 const selectMeta = (value: Store) => value.meta;
 const selectWsState = (value: Store) => value.wsState;
@@ -106,7 +109,6 @@ export function SessionView({ session }: { session: SessionRecord }) {
           <div className="session-sub mono">
             <UsageView agent={session.agent} usage={data?.latestUsage} meta={meta} />
             <ElapsedTime session={session} running={running} />
-            <span> · seq {data?.seq ?? session.seq}</span>
             <span title={STATUS_HINTS[session.status] ?? session.status}>
               {" · "}{STATUS_LABELS[session.status] ?? session.status}
             </span>
@@ -125,6 +127,7 @@ export function SessionView({ session }: { session: SessionRecord }) {
         </div>
         <div className="session-head-actions">
           <span className={`ws-dot ws-${wsState}`} title={`连接：${wsState}`} />
+          <ReleaseButton session={session} />
           <button
             type="button"
             className="btn"
@@ -165,7 +168,7 @@ export function SessionView({ session }: { session: SessionRecord }) {
             case "user":
               return <UserBlockView key={item.key} item={item} />;
             case "external-history":
-              return <ExternalHistoryView key={item.key} item={item} agent={session.agent} />;
+              return <ExternalHistoryView key={item.key} item={item} agent={session.agent} cwd={session.cwd} />;
             case "gate": {
               // AskUserQuestion 渲染为提问选择卡片；与普通闸门共用 pendingGates/贴条机制
               const Block = item.questions?.length ? QuestionBlock : GateBlock;
@@ -200,6 +203,63 @@ export function SessionView({ session }: { session: SessionRecord }) {
 
       <Composer session={session} dead={dead} errored={session.status === "error"} />
     </div>
+  );
+}
+
+// 「到 VSCode/终端继续」：释放本会话 worker 并把原生续接命令复制到剪贴板。
+// 三家都显示；不可用原因写进 title，释放结果（含失败）就地短暂显示。
+function ReleaseButton({ session }: { session: SessionRecord }) {
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState<{ text: string; error: boolean } | null>(null);
+  const noticeTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+
+  useEffect(() => () => clearTimeout(noticeTimer.current), []);
+
+  const showNotice = (text: string, error: boolean) => {
+    clearTimeout(noticeTimer.current);
+    setNotice({ text, error });
+    noticeTimer.current = setTimeout(() => setNotice(null), 6000);
+  };
+
+  const canRelease = !busy && session.status === "idle" && !session.released && Boolean(session.nativeSessionId);
+  const title = session.released
+    ? "worker 已释放；下次发送时自动从磁盘续接"
+    : !session.nativeSessionId
+      ? "首轮完成前没有原生会话 id，无法释放"
+      : session.status !== "idle"
+        ? "会话空闲时才能释放"
+        : "停掉工作台里的 worker，把续接命令复制到剪贴板，去 VSCode 或终端继续";
+
+  const onClick = async () => {
+    setBusy(true);
+    try {
+      const command = await store.release(session.id);
+      try {
+        await navigator.clipboard.writeText(command);
+        showNotice("已释放，续接命令已复制", false);
+      } catch {
+        // 剪贴板不可用（权限/非安全上下文）：弹窗让用户手动复制
+        window.prompt("已释放。手动复制续接命令：", command);
+        showNotice("已释放", false);
+      }
+    } catch (error) {
+      showNotice(error instanceof Error ? error.message : String(error), true);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <>
+      {notice && (
+        <span className={`release-note${notice.error ? " release-note-error" : ""}`} role={notice.error ? "alert" : "status"}>
+          {notice.text}
+        </span>
+      )}
+      <button type="button" className="btn" disabled={!canRelease} title={title} onClick={() => void onClick()}>
+        {busy ? "释放中…" : "到 VSCode/终端继续"}
+      </button>
+    </>
   );
 }
 
@@ -262,7 +322,8 @@ function ConfigControls({ session }: { session: SessionRecord }) {
   const options = meta?.drivers[session.agent]?.options ?? [];
   const pending = store.configPending.get(session.id);
   // 重启切换进行中（claude model/effort）：全部控件禁用，就地显示后端给的过渡文案
-  const live = Boolean(session.processId) && session.status !== "dead";
+  // 已释放会话改配置时后端会先按原生 id 续接再改（ensureWorker）
+  const live = (Boolean(session.processId) || Boolean(session.released)) && session.status !== "dead";
   if (options.length === 0) return null;
 
   const build = (option: DriverConfigOption) => {
@@ -385,6 +446,27 @@ function CacheTimer({ session }: { session: SessionRecord }) {
   );
 }
 
+function RemoteControlPill({ session }: { session: SessionRecord }) {
+  const state = session.remoteControl ?? { status: "disconnected" as const };
+  const busy = state.status === "connecting" || state.status === "reconnecting" || state.status === "disconnecting";
+  const connected = state.status === "connected";
+  const label = state.status === "connecting" ? "连接中" : state.status === "reconnecting" ? "重连中"
+    : state.status === "disconnecting" ? "关闭中" : state.status === "error" ? "连接失败" : "Remote Control";
+  const title = connected ? `Remote Control 已连接：${state.sessionUrl ?? "会话链接暂不可用"}；点击关闭`
+    : state.status === "error" ? `Remote Control 失败：${state.reason ?? "未知原因"}；点击重试`
+    : busy ? `Remote Control ${label}${state.reason ? `：${state.reason}` : ""}`
+    : "Remote Control 未开启；点击开启";
+  return (
+    <span className="rc-control">
+      <button type="button" className={`rc-pill rc-${state.status}`} title={title}
+        aria-label={`Remote Control：${label}`} disabled={busy || session.status === "dead" || (!session.processId && !session.released)}
+        onClick={() => store.setRemoteControl(session.id, !connected)}>{label}</button>
+      {connected && state.sessionUrl && <a className="rc-open" href={state.sessionUrl} target="_blank" rel="noopener noreferrer"
+        title="在 claude.ai 打开此 Remote Control 会话" aria-label="打开 Remote Control 会话">↗</a>}
+    </span>
+  );
+}
+
 function ConfigStatus({ session }: { session: SessionRecord }) {
   const { error, hint, switching } = useConfigState(session.id);
   if (!error && !hint && !switching) return null;
@@ -491,10 +573,26 @@ function Composer({ session, dead, errored }: { session: SessionRecord; dead: bo
   const pendingCursor = useRef<number | null>(null);
   /** @ 检索序号：晚到的旧响应丢弃 */
   const searchSeq = useRef(0);
+  // 「+」附件：附件条状态、弹出菜单、「电脑上的文件」浏览器
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const [attachMenuOpen, setAttachMenuOpen] = useState(false);
+  const [fileBrowseOpen, setFileBrowseOpen] = useState(false);
+  const attachMenuRef = useRef<HTMLSpanElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const attachSeq = useRef(0);
+  /** 图片卡片的 createObjectURL 预览：移除卡片/卸载组件时必须 revoke，防泄漏 */
+  const previewUrls = useRef(new Set<string>());
 
   const caps = meta?.drivers[session.agent];
   const commandsSupported = caps?.commands === true;
   const mentionsSupported = caps?.mentions === true;
+  /** 附件入口可用 = 会话活着且 driver 支持 mentions（与 @ 引用同一能力位） */
+  const attachEnabled = !dead && mentionsSupported;
+  // ready 附件 → 上行 mentions（uploading/error 不进发送帧）
+  const readyMentions = attachments.flatMap((att) => {
+    const mention = attachmentMention(att);
+    return mention ? [mention] : [];
+  });
   const table = commands ?? [];
 
   // 仅行首 / 触发（整段文本即「/query」形态）；行中间的 /（如路径）是普通字符
@@ -608,6 +706,101 @@ function Composer({ session, dead, errored }: { session: SessionRecord; dead: bo
     }
   }, [text]);
 
+  // 卸载时回收全部本地预览 URL
+  useEffect(() => {
+    const urls = previewUrls.current;
+    return () => {
+      for (const url of urls) URL.revokeObjectURL(url);
+    };
+  }, []);
+
+  // 「+」菜单：Esc 或点外部关闭（与配置胶囊浮层同一纪律）
+  useEffect(() => {
+    if (!attachMenuOpen) return;
+    const onMenuKeyDown = (e: globalThis.KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        setAttachMenuOpen(false);
+      }
+    };
+    const onPointerDown = (e: PointerEvent) => {
+      if (attachMenuRef.current && !attachMenuRef.current.contains(e.target as Node)) {
+        setAttachMenuOpen(false);
+      }
+    };
+    document.addEventListener("keydown", onMenuKeyDown);
+    document.addEventListener("pointerdown", onPointerDown);
+    return () => {
+      document.removeEventListener("keydown", onMenuKeyDown);
+      document.removeEventListener("pointerdown", onPointerDown);
+    };
+  }, [attachMenuOpen]);
+
+  const updateAttachment = (id: string, patch: Partial<Attachment>) => {
+    setAttachments((list) => list.map((att) => (att.id === id ? { ...att, ...patch } : att)));
+  };
+
+  const removeAttachment = (id: string) => {
+    setAttachments((list) => {
+      const target = list.find((att) => att.id === id);
+      if (target?.previewUrl) {
+        URL.revokeObjectURL(target.previewUrl);
+        previewUrls.current.delete(target.previewUrl);
+      }
+      return list.filter((att) => att.id !== id);
+    });
+  };
+
+  // 选中/粘贴/拖入的文件统一入口：先按需重编码图片，再上传；卡片从 uploading → ready/error
+  const uploadFiles = (picked: File[]) => {
+    for (const file of picked) {
+      const id = `att-${++attachSeq.current}`;
+      setAttachments((list) => [
+        ...list,
+        { id, source: "upload", name: file.name || "附件", status: "uploading", size: file.size },
+      ]);
+      void (async () => {
+        try {
+          const prepared = await prepareImageForUpload({ blob: file, name: file.name || "image", type: file.type });
+          if (prepared.type.startsWith("image/")) {
+            const previewUrl = URL.createObjectURL(prepared.blob);
+            previewUrls.current.add(previewUrl);
+            updateAttachment(id, { previewUrl });
+          }
+          const saved = await uploadAttachment(session.id, prepared.blob, prepared.name);
+          updateAttachment(id, {
+            status: "ready",
+            path: saved.path,
+            mimeType: saved.mimeType,
+            name: saved.name,
+            size: saved.size,
+          });
+        } catch (error) {
+          updateAttachment(id, {
+            status: "error",
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      })();
+    }
+  };
+
+  // 「电脑上的文件」：不上传，直接按绝对路径引用（mimeType 按扩展名猜，非图片省略）
+  const addLocalFile = (path: string, name: string) => {
+    const mimeType = localImageMimeType(name);
+    setAttachments((list) => [
+      ...list,
+      {
+        id: `att-${++attachSeq.current}`,
+        source: "local",
+        name,
+        status: "ready",
+        path,
+        ...(mimeType ? { mimeType } : {}),
+      },
+    ]);
+  };
+
   const confirm = (cmd: CommandInfo, fillOnly: boolean) => {
     if (!fillOnly && !cmd.argHint) {
       // 无参数命令：确认即直接发（结构化 command，不拼 text）；失败保留文本，错误条提示
@@ -634,18 +827,31 @@ function Composer({ session, dead, errored }: { session: SessionRecord; dead: bo
 
   const send = () => {
     const trimmed = text.trim();
-    if (!trimmed || dead) return;
-    // 「/命令 参数」整行形态经 sendComposerInput 走结构化 command，同样记入最近使用
-    if (willBeCommand && cmdMatch) noteCommandUsed(session.agent, cmdMatch[1]!);
-    // 先清空（mentions 异步路径下「确认成功」不好定义）；失败时把文本还回输入框。
+    if (dead) return;
+    if (!trimmed && readyMentions.length === 0) return;
+    // 「/命令 参数」整行形态经 sendComposerInput 走结构化 command，同样记入最近使用；
+    // 带附件时 store 不走 command 分支（按文本+mentions 发），这里也就不记
+    if (readyMentions.length === 0 && willBeCommand && cmdMatch) noteCommandUsed(session.agent, cmdMatch[1]!);
+    // 先清空（mentions 异步路径下「确认成功」不好定义）；失败时把文本还回输入框、附件条原样保留。
     // 草稿语义统一走草稿缓存：输入即草稿；发送成功由 store 侧清草稿（文本框也已清空）；
     // 失败时草稿本来就在，这里只需把可见文本还回。
     // 失败提示走 send() 已置的 lastError 全局错误条，不静默。
     setText("");
     setDismissed(false);
-    void store.sendComposerInput(session.id, trimmed).then((ok) => {
+    void store.sendComposerInput(session.id, trimmed, readyMentions).then((ok) => {
       // 用户趁间隙输入了新内容时不覆盖，只在自己清出的空框里还回
-      if (!ok) setText((current) => (current === "" ? trimmed : current));
+      if (!ok) {
+        setText((current) => (current === "" ? trimmed : current));
+        return;
+      }
+      // 发送成功清空附件条并回收预览 URL；失败保留（与草稿纪律一致）
+      for (const att of attachments) {
+        if (att.previewUrl) {
+          URL.revokeObjectURL(att.previewUrl);
+          previewUrls.current.delete(att.previewUrl);
+        }
+      }
+      setAttachments([]);
     });
   };
 
@@ -844,7 +1050,50 @@ function Composer({ session, dead, errored }: { session: SessionRecord; dead: bo
           Codex 不支持斜杠命令
         </div>
       )}
-      <div className="composer-box">
+      {attachments.length > 0 && (
+        <div className="attach-bar" aria-label="待发送附件">
+          {attachments.map((att) => (
+            <div key={att.id} className={`attach-card${att.status === "error" ? " is-error" : ""}`}>
+              {att.previewUrl ? (
+                <img className="attach-thumb" src={att.previewUrl} alt={att.name} />
+              ) : (
+                <span className="attach-name mono" title={att.path ?? att.name}>{att.name}</span>
+              )}
+              {att.status === "uploading" && <span className="attach-status">上传中…</span>}
+              {att.status === "error" && (
+                <span className="attach-err" role="alert" title={att.error}>{att.error ?? "上传失败"}</span>
+              )}
+              <button
+                type="button"
+                className="attach-remove"
+                aria-label={`移除附件 ${att.name}`}
+                title="移除附件"
+                onClick={() => removeAttachment(att.id)}
+              >
+                ×
+              </button>
+            </div>
+          ))}
+          {readyMentions.length + tokens.length > MAX_MENTIONS && (
+            <span className="mention-missing">
+              附件与 @ 引用合计超过 {MAX_MENTIONS} 个，超出的不会附加
+            </span>
+          )}
+        </div>
+      )}
+      <div
+        className="composer-box"
+        onDragOver={(e) => {
+          // 只拦文件拖入；文本拖动不受影响
+          if (attachEnabled && e.dataTransfer.types.includes("Files")) e.preventDefault();
+        }}
+        onDrop={(e) => {
+          const dropped = Array.from(e.dataTransfer.files);
+          if (dropped.length === 0 || !attachEnabled) return;
+          e.preventDefault();
+          uploadFiles(dropped);
+        }}
+      >
         <textarea
           ref={textareaRef}
           value={text}
@@ -870,23 +1119,93 @@ function Composer({ session, dead, errored }: { session: SessionRecord; dead: bo
             setText(e.currentTarget.value);
             setCursor(e.currentTarget.selectionStart);
           }}
+          onPaste={(e) => {
+            // 剪贴板里有文件（截图等）时上传为附件；纯文本粘贴走默认行为
+            const pasted = Array.from(e.clipboardData.files);
+            if (pasted.length === 0 || !attachEnabled) return;
+            e.preventDefault();
+            uploadFiles(pasted);
+          }}
           onKeyDown={onKeyDown}
         />
         <div className="cfg-bar">
+          <span className="attach-menu-wrap" ref={attachMenuRef}>
+            <button
+              type="button"
+              className="attach-btn"
+              disabled={!attachEnabled}
+              title={attachEnabled ? "添加附件（照片、截图或电脑上的文件）" : "该会话不支持附件"}
+              aria-label="添加附件"
+              aria-haspopup="menu"
+              aria-expanded={attachMenuOpen}
+              onClick={() => setAttachMenuOpen((v) => !v)}
+            >
+              ＋
+            </button>
+            {attachMenuOpen && (
+              <div className="attach-menu" role="menu" aria-label="添加附件">
+                {/* 不设 accept：iOS 才会给 照片图库/拍照/选取文件 三选项 */}
+                <button
+                  type="button"
+                  className="attach-item"
+                  role="menuitem"
+                  onClick={() => {
+                    setAttachMenuOpen(false);
+                    fileInputRef.current?.click();
+                  }}
+                >
+                  照片 / 文件
+                </button>
+                <button
+                  type="button"
+                  className="attach-item"
+                  role="menuitem"
+                  onClick={() => {
+                    setAttachMenuOpen(false);
+                    setFileBrowseOpen(true);
+                  }}
+                >
+                  电脑上的文件
+                </button>
+              </div>
+            )}
+          </span>
           {session.agent === "claude" && <CacheTimer session={session} />}
           <ConfigControls session={session} />
+          {session.agent === "claude" && <RemoteControlPill session={session} />}
           <button
             type="button"
             className="send-btn"
             aria-label="发送"
             title="发送"
-            disabled={dead || !text.trim()}
+            disabled={dead || (!text.trim() && readyMentions.length === 0)}
             onClick={send}
           >
             <SendIcon />
           </button>
         </div>
       </div>
+      {/* 隐藏的文件选择器：照片/文件入口；再次选择同名文件也要触发 change */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        multiple
+        hidden
+        onChange={(e) => {
+          const picked = Array.from(e.target.files ?? []);
+          e.target.value = "";
+          if (picked.length > 0) uploadFiles(picked);
+        }}
+      />
+      {fileBrowseOpen && (
+        <DirectoryBrowser
+          mode="file"
+          initialPath={session.cwd}
+          onSelect={() => setFileBrowseOpen(false)}
+          onSelectFile={addLocalFile}
+          onClose={() => setFileBrowseOpen(false)}
+        />
+      )}
     </div>
   );
 }

@@ -3,6 +3,7 @@
 import { strict as assert } from "node:assert";
 
 const {
+  isTerminalToggleKey,
   TERM_MIN_WIDTH,
   TERM_MAIN_MIN_WIDTH,
   TERM_DEFAULT_WIDTH,
@@ -17,6 +18,16 @@ const {
 
 let pass = 0;
 const t = (name, fn) => { try { fn(); pass++; } catch (e) { console.error(`❌ ${name}\n   ${e.message}`); process.exitCode = 1; } };
+
+t("Ctrl+Backquote requires exactly Ctrl and physical Backquote", () => {
+  const key = { ctrlKey: true, code: "Backquote", altKey: false, metaKey: false, shiftKey: false };
+  assert.equal(isTerminalToggleKey(key), true);
+  for (const modifier of ["altKey", "metaKey", "shiftKey"]) {
+    assert.equal(isTerminalToggleKey({ ...key, [modifier]: true }), false);
+  }
+  assert.equal(isTerminalToggleKey({ ...key, ctrlKey: false }), false);
+  assert.equal(isTerminalToggleKey({ ...key, code: "KeyQ" }), false);
+});
 
 // ══ clampPanelWidth ══
 t("clamp：区间内原样保留", () => {
@@ -154,9 +165,11 @@ t("新建终端 cwd：当前会话优先，没有会话取 defaultCwd，都没�
   assert.equal(pickTerminalCwd(undefined, undefined), undefined);
 });
 
-t("attach 目标：第一个未退出的；全退出返回 null（调用方新建）", () => {
-  const term = (id, exited) => ({ id, cwd: "/", shell: "bash", cols: 80, rows: 24, createdAt: "", exited, exitCode: null });
-  assert.equal(pickAttachTarget([term("a", true), term("b", false), term("c", false)])?.id, "b");
+t("attach 目标：该种 shell 第一个未退出的；默认 bash；没有返回 null（调用方新建）", () => {
+  const term = (id, exited, kind = "bash") => ({ id, cwd: "/", kind, shell: kind, cols: 80, rows: 24, createdAt: "", exited, exitCode: null });
+  assert.equal(pickAttachTarget([term("p", false, "powershell"), term("a", true), term("b", false), term("c", false)])?.id, "b");
+  assert.equal(pickAttachTarget([term("a", false), term("p", true, "powershell"), term("q", false, "powershell")], "powershell")?.id, "q");
+  assert.equal(pickAttachTarget([term("a", false)], "powershell"), null);
   assert.equal(pickAttachTarget([term("a", true)]), null);
   assert.equal(pickAttachTarget([]), null);
 });

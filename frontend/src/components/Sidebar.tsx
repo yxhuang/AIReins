@@ -202,7 +202,7 @@ function TerminalNav({
       <button
         type="button"
         className={`page-nav-item${open ? " active" : ""}`}
-        title="终端：工作区级内置终端，切会话不影响"
+        title="终端（Ctrl+`）：工作区级内置终端，切会话不影响"
         aria-label="终端"
         aria-pressed={open}
         onClick={onToggle}

@@ -17,9 +17,14 @@ interface DirectoryBrowserProps {
   initialPath: string;
   onSelect: (path: string) => void;
   onClose: () => void;
+  /** "file" = 选文件模式（「+」附件的「电脑上的文件」）：同层文件也可点选，隐藏「选定此目录」 */
+  mode?: "dir" | "file";
+  /** file 模式下点击文件条目触发；随后浏览器自行 onClose */
+  onSelectFile?: (path: string, name: string) => void;
 }
 
-export function DirectoryBrowser({ initialPath, onSelect, onClose }: DirectoryBrowserProps) {
+export function DirectoryBrowser({ initialPath, onSelect, onClose, mode = "dir", onSelectFile }: DirectoryBrowserProps) {
+  const fileMode = mode === "file";
   const [listing, setListing] = useState<DirectoryListing | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -32,7 +37,7 @@ export function DirectoryBrowser({ initialPath, onSelect, onClose }: DirectoryBr
     setLoading(true);
     setError(null);
     try {
-      const result = await fetchDirectories(path);
+      const result = await fetchDirectories(path, fileMode);
       if (id !== requestId.current) return;
       setListing(result);
     } catch (cause) {
@@ -40,7 +45,7 @@ export function DirectoryBrowser({ initialPath, onSelect, onClose }: DirectoryBr
       const message = cause instanceof Error ? cause.message : String(cause);
       if (fallback !== undefined) {
         try {
-          const home = await fetchDirectories(fallback || undefined);
+          const home = await fetchDirectories(fallback || undefined, fileMode);
           if (id !== requestId.current) return;
           setListing(home);
           setError(`${path} 无法浏览（${message}），已改为打开 ${home.path}。`);
@@ -63,13 +68,15 @@ export function DirectoryBrowser({ initialPath, onSelect, onClose }: DirectoryBr
     // 打开时只读取一次表单路径；后续目录导航由按钮触发。
   }, []);
 
+  const entries = (listing?.dirs.length ?? 0) + (fileMode ? listing?.files?.length ?? 0 : 0);
+
   return (
     <div className="dir-overlay" onKeyDown={(event) => {
       if (event.key === "Escape") { event.stopPropagation(); onClose(); }
     }}>
-      <div className="dir-dialog" role="dialog" aria-modal="true" aria-label="浏览工作目录">
+      <div className="dir-dialog" role="dialog" aria-modal="true" aria-label={fileMode ? "选择文件" : "浏览工作目录"}>
         <div className="dir-heading">
-          <h2>选择工作目录</h2>
+          <h2>{fileMode ? "选择文件" : "选择工作目录"}</h2>
           <button ref={closeButton} className="btn" type="button" onClick={onClose}>取消</button>
         </div>
         <p className="dir-path mono" aria-label="当前路径">{listing?.path ?? "正在读取目录…"}</p>
@@ -83,14 +90,23 @@ export function DirectoryBrowser({ initialPath, onSelect, onClose }: DirectoryBr
         </div>
         {error && <p className="new-error" role="alert">{error}</p>}
         {listing?.truncated && <p className="new-hint">此目录下子目录超过 1000 个，仅显示前 1000 个。</p>}
-        <div className="dir-list" aria-label="子目录列表">
-          {loading ? <p className="new-hint">正在读取…</p> : listing?.dirs.length ? listing.dirs.map((dir) => (
-            <button className="dir-entry mono" type="button" key={dir.path} onClick={() => void load(dir.path)}>{dir.name}</button>
-          )) : <p className="new-hint">没有可浏览的子目录。</p>}
+        <div className="dir-list" aria-label={fileMode ? "目录与文件列表" : "子目录列表"}>
+          {loading ? <p className="new-hint">正在读取…</p> : entries > 0 ? (
+            <>
+              {listing?.dirs.map((dir) => (
+                <button className="dir-entry mono" type="button" key={dir.path} onClick={() => void load(dir.path)}>{dir.name}</button>
+              ))}
+              {fileMode && listing?.files?.map((file) => (
+                <button className="dir-entry dir-file mono" type="button" key={file.path} onClick={() => { onSelectFile?.(file.path, file.name); onClose(); }}>{file.name}</button>
+              ))}
+            </>
+          ) : <p className="new-hint">{fileMode ? "没有可浏览的目录或文件。" : "没有可浏览的子目录。"}</p>}
         </div>
-        <div className="dir-actions">
-          <button className="btn btn-primary" type="button" disabled={!listing || loading} onClick={() => { if (listing) onSelect(listing.path); }}>选定此目录</button>
-        </div>
+        {!fileMode && (
+          <div className="dir-actions">
+            <button className="btn btn-primary" type="button" disabled={!listing || loading} onClick={() => { if (listing) onSelect(listing.path); }}>选定此目录</button>
+          </div>
+        )}
       </div>
     </div>
   );

@@ -8,9 +8,12 @@ export const MAX_SCROLLBACK_BYTES = 256 * 1024;
 export const MAX_TERMINAL_COLS = 500;
 export const MAX_TERMINAL_ROWS = 300;
 
+export type ShellKind = "bash" | "powershell";
+
 export interface TerminalInfo {
   id: string;
   cwd: string;
+  kind: ShellKind;
   shell: string;
   cols: number;
   rows: number;
@@ -54,6 +57,42 @@ export function validateTerminalSize(cols: unknown, rows: unknown): { cols: numb
   return { cols, rows };
 }
 
+const POWERSHELL_CANDIDATES = [
+  "/mnt/c/Program Files/PowerShell/7/pwsh.exe",
+  "/mnt/c/WINDOWS/System32/WindowsPowerShell/v1.0/powershell.exe",
+];
+
+/** 只认白名单种类，不接受路径——远程入口也会调到这里。 */
+export function resolveShell(kind: unknown, exists: (path: string) => boolean = fileExists): { kind: ShellKind; file: string; args: string[] } {
+  if (kind === undefined || kind === "bash") return { kind: "bash", file: "bash", args: ["-l", "-i"] };
+  if (kind !== "powershell") throw new TerminalError("invalid", "shell 只能是 bash 或 powershell");
+  const file = POWERSHELL_CANDIDATES.find(exists);
+  if (!file) throw new TerminalError("invalid", "本机没有找到 PowerShell");
+  return { kind, file, args: ["-NoLogo"] };
+}
+
+/** /mnt/<盘符> 下的路径 = Windows 目录，PowerShell 直接用。 */
+export function isWindowsMount(path: string): boolean {
+  return /^\/mnt\/[a-z](\/|$)/i.test(path);
+}
+
+/** Windows 用户目录（/mnt/c/Users/<名>）：WSL 追加的 Windows PATH 里一定带它；找不到退 /mnt/c。 */
+export function windowsHome(pathEnv = process.env.PATH ?? "", exists: (path: string) => boolean = directoryExists): string {
+  for (const entry of pathEnv.split(":")) {
+    const home = /^(\/mnt\/[a-z]\/Users\/[^/]+)\//i.exec(entry)?.[1];
+    if (home && exists(home)) return home;
+  }
+  return "/mnt/c";
+}
+
+function directoryExists(path: string): boolean {
+  try { return statSync(path).isDirectory(); } catch { return false; }
+}
+
+function fileExists(path: string): boolean {
+  try { return statSync(path).isFile(); } catch { return false; }
+}
+
 /** 用户自由终端的独立注册表；不会接入 session/driver 的终端协议。 */
 export class TerminalRegistry {
   private readonly records = new Map<string, TerminalRecord>();
@@ -73,18 +112,23 @@ export class TerminalRegistry {
     return info && { ...info };
   }
 
-  create(input: { cwd?: string; cols: number; rows: number }): TerminalInfo {
+  create(input: { cwd?: string; shell?: unknown; cols: number; rows: number }): TerminalInfo {
     if (this.stopping) throw new TerminalError("invalid", "server 正在停止，不能新建终端");
     const { cols, rows } = validateTerminalSize(input.cols, input.rows);
     if (input.cwd !== undefined && typeof input.cwd !== "string") {
       throw new TerminalError("invalid", "cwd 必须是字符串");
     }
-    const cwd = this.existingDirectory(input.cwd) ?? this.defaultCwd;
-    const shell = process.env.SHELL || "bash";
-    const pty = this.spawnPty(shell, ["-l", "-i"], { cwd, cols, rows, env: process.env, name: "xterm-256color" });
+    const { kind, file: shell, args } = resolveShell(input.shell);
+    const requested = this.existingDirectory(input.cwd);
+    // PowerShell 不跟 WSL 目录：当前在 Windows 目录就用它，否则进 Windows 用户目录
+    const cwd = kind === "powershell"
+      ? (requested && isWindowsMount(requested) ? requested : windowsHome())
+      : requested ?? this.defaultCwd;
+    const pty = this.spawnPty(shell, args, { cwd, cols, rows, env: process.env, name: "xterm-256color" });
     const info: TerminalInfo = {
       id: `term_${ulid()}`,
       cwd,
+      kind,
       shell,
       cols,
       rows,

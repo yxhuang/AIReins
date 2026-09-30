@@ -13,9 +13,11 @@ import { getMeta, SERVER_VERSION } from "./meta.js";
 import { feishuSender, GateNotifier, larkCliSender, loadNotifyConfig, type NotifyConfig } from "./notify.js";
 import { checkPageHealth, proxyPage, scanPages } from "./pages.js";
 import { workbenchHome } from "./persistence.js";
+import { isValidIdleReleaseMinutes, loadPrefs, savePrefs, type WorkbenchPrefs } from "./prefs.js";
 import { SessionManager } from "./session-manager.js";
 import { preflightSnapshot, SnapshotCwdError } from "./snapshot.js";
 import { TerminalError, TerminalRegistry, terminalEnabled, type TerminalEvent } from "./terminals.js";
+import { IMAGE_MENTION_MIME_TYPES, resolveUploadFile, saveUpload, UploadError } from "./uploads.js";
 import {
   AGENTS,
   CONFIG_OPTION_IDS,
@@ -74,6 +76,7 @@ const terminals = new TerminalRegistry(process.cwd());
 const history = new HistoryIndex();
 const pages = scanPages();
 const pagesById = new Map(pages.map((page) => [page.id, page]));
+let prefs: WorkbenchPrefs = loadPrefs();
 void getMeta(); // 启动时探测一次并缓存，不让首个 /api/meta 承担延迟。
 const wss = new WebSocketServer({ noServer: true });
 const terminalWss = new WebSocketServer({ noServer: true, maxPayload: 1024 * 1024 });
@@ -100,6 +103,14 @@ const heartbeat = setInterval(() => {
   }
 }, 25_000);
 heartbeat.unref();
+
+// 空闲自动释放：每分钟扫一次，N 来自 prefs（PUT /api/prefs 立即生效）；0 = 关闭。
+const idleReleaseSweep = setInterval(() => {
+  void manager.releaseIdleSessions(prefs.idleReleaseMinutes).catch((error) => {
+    log("warn", "idle release sweep failed", { message: error instanceof Error ? error.message : String(error) });
+  });
+}, 60_000);
+idleReleaseSweep.unref();
 
 manager.onEvent((event) => {
   for (const client of clients) sendEvent(client, event);
@@ -215,6 +226,9 @@ terminalWss.on("connection", (socket) => {
         sendTerminalWs(socket, { type: "attached", terminalId, omitted: replay.omitted });
         sendTerminalWs(socket, { type: "data", terminalId, data: replay.data });
         if (replay.exited) sendTerminalWs(socket, { type: "exit", terminalId, exitCode: replay.exitCode });
+      } else if (message.type === "detach") {
+        attachments.get(terminalId)?.();
+        attachments.delete(terminalId);
       } else if (message.type === "input") {
         terminals.input(terminalId, message.data);
       } else if (message.type === "resize") {
@@ -273,6 +287,7 @@ async function shutdown(signal: string): Promise<void> {
   shuttingDown = true;
   log("info", "workbench server stopping", { signal });
   clearInterval(heartbeat);
+  clearInterval(idleReleaseSweep);
   for (const client of clients) client.socket.close(1001, "server shutdown");
   for (const socket of terminalClients.keys()) socket.close(1001, "server shutdown");
   terminals.shutdown();
@@ -297,7 +312,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       const meta = await getMeta();
       respond(response, 200, 0, "success", {
         ...meta,
-        capabilities: { ...(meta.capabilities as Record<string, unknown>), terminal: terminalEnabled(policy, REMOTE_CONFIG) },
+        capabilities: { terminal: terminalEnabled(policy, REMOTE_CONFIG) },
       }, requestId);
     } else if (url.pathname === "/api/terminals" && method === "GET") {
       requireTerminalEnabled(policy);
@@ -307,8 +322,8 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       const input = await readJson(request);
       if (!input || typeof input !== "object" || Array.isArray(input)) throw new ApiError(400, 40040, "请求体必须是 JSON 对象");
       try {
-        const { cwd, cols, rows } = input as Record<string, unknown>;
-        respond(response, 201, 0, "success", terminals.create({ cwd: cwd as string | undefined, cols: cols as number, rows: rows as number }), requestId);
+        const { cwd, shell, cols, rows } = input as Record<string, unknown>;
+        respond(response, 201, 0, "success", terminals.create({ cwd: cwd as string | undefined, shell, cols: cols as number, rows: rows as number }), requestId);
       } catch (error) {
         throw asTerminalApiError(error);
       }
@@ -323,13 +338,53 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       }
     } else if (method === "GET" && url.pathname === "/api/fs/dirs") {
       try {
-        respond(response, 200, 0, "success", await listDirectories(url.searchParams.get("path") ?? undefined), requestId);
+        const files = url.searchParams.get("files");
+        if (files !== null && files !== "1" && files !== "0") {
+          throw new ApiError(400, 40036, "files 参数只接受 1 或 0");
+        }
+        respond(response, 200, 0, "success", await listDirectories(url.searchParams.get("path") ?? undefined, { files: files === "1" }), requestId);
       } catch (error) {
         if (error instanceof DirListError) throw new ApiError(400, 40035, error.message);
         throw error;
       }
+    } else if (method === "POST" && url.pathname === "/api/uploads") {
+      const sessionId = url.searchParams.get("sessionId") ?? "";
+      if (!manager.get(sessionId)) throw new ApiError(404, 40401, `会话不存在：${sessionId || "（空）"}`);
+      const name = url.searchParams.get("name") ?? "";
+      if (!name.trim()) throw new ApiError(400, 40070, "name 参数必须是非空文件名");
+      try {
+        respond(response, 201, 0, "success", await saveUpload(sessionId, name, request), requestId);
+      } catch (error) {
+        if (error instanceof UploadError) throw new ApiError(error.status, error.code, error.message);
+        throw error;
+      }
+    } else if (method === "GET" && url.pathname === "/api/uploads/file") {
+      const file = await resolveUploadFile(url.searchParams.get("path") ?? "");
+      if (!file) throw new ApiError(404, 40450, "文件不在上传目录内或不存在");
+      const size = statSync(file.path).size;
+      response.writeHead(200, {
+        "content-type": file.mimeType,
+        "content-length": size,
+        "cache-control": "private, max-age=3600",
+        "x-content-type-options": "nosniff",
+        // 上传的 SVG/HTML 被直接打开时不能在工作台同源下跑脚本；<img> 不受影响
+        "content-security-policy": "sandbox",
+      });
+      createReadStream(file.path).pipe(response);
     } else if (method === "GET" && url.pathname === "/api/pages") {
       respond(response, 200, 0, "success", { pages }, requestId);
+    } else if (url.pathname === "/api/prefs" && method === "GET") {
+      respond(response, 200, 0, "success", { ...prefs }, requestId);
+    } else if (url.pathname === "/api/prefs" && method === "PUT") {
+      const input = await readJson(request);
+      if (!input || typeof input !== "object" || Array.isArray(input)) throw new ApiError(400, 40061, "请求体必须是 JSON 对象");
+      const idleReleaseMinutes = (input as Record<string, unknown>).idleReleaseMinutes;
+      if (!isValidIdleReleaseMinutes(idleReleaseMinutes)) {
+        throw new ApiError(400, 40062, "idleReleaseMinutes 必须是 0 到 1440 的整数");
+      }
+      prefs = { idleReleaseMinutes };
+      savePrefs(prefs);
+      respond(response, 200, 0, "success", { ...prefs }, requestId);
     } else if (method === "GET" && url.pathname === "/api/sessions") {
       respond(response, 200, 0, "success", { sessions: manager.list() }, requestId);
     } else if (method === "GET" && url.pathname === "/api/history") {
@@ -350,15 +405,28 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       }
     } else if (method === "POST" && url.pathname === "/api/sessions") {
       const input = validateCreateSession(await readJson(request));
-      const session = await manager.create(input);
+      // 续接导入：在 create 前记下原生消息文件的截止 cursor（historyCursor 是服务端内部字段，
+      // 客户端即使在请求体里传了也会被这里覆盖）；算不出只记日志，照常创建。
+      let historyCursor: string | undefined;
+      if (input.resumeSessionId) {
+        try {
+          historyCursor = await history.endCursor(input.agent, input.resumeSessionId);
+        } catch (error) {
+          log("warn", "history endCursor failed; creating without cursor", {
+            agent: input.agent,
+            errorMessage: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
+      const session = await manager.create({ ...input, historyCursor });
       respond(response, 201, 0, "success", { session }, requestId);
     } else {
       const snapshotMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/snapshot$/);
       const commandsMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/commands$/);
       const filesMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/files$/);
+      const releaseMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/release$/);
       const detailMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)$/);
       const historyMessagesMatch = url.pathname.match(/^\/api\/history\/([^/]+)\/([^/]+)\/messages$/);
-      const historyPreviewMatch = url.pathname.match(/^\/api\/history\/([^/]+)\/([^/]+)$/);
       const pageHealthMatch = url.pathname.match(/^\/api\/pages\/([^/]+)\/health$/);
       const pageProxyMatch = url.pathname.match(/^\/pages\/([^/]+)(\/.*)?$/);
       if (method === "GET" && pageHealthMatch) {
@@ -384,6 +452,15 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
         const limit = validateFileLimit(url.searchParams.get("limit"));
         const files = await searchFiles(session.cwd, query, limit);
         respond(response, 200, 0, "success", { files }, requestId);
+      } else if (method === "POST" && releaseMatch) {
+        const id = decodeURIComponent(releaseMatch[1]);
+        if (!manager.get(id)) throw new ApiError(404, 40401, `会话不存在：${id}`);
+        try {
+          const result = await manager.release(id, "manual");
+          respond(response, 200, 0, "success", result, requestId);
+        } catch (error) {
+          throw new ApiError(400, 40060, error instanceof Error ? error.message : String(error));
+        }
       } else if (method === "GET" && historyMessagesMatch) {
         const agent = validateHistoryAgent(decodeHistorySegment(historyMessagesMatch[1]));
         const nativeSessionId = validateNativeSessionId(decodeHistorySegment(historyMessagesMatch[2]));
@@ -395,12 +472,6 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
           if (error instanceof HistoryQueryError) throw new ApiError(400, 40034, error.message);
           throw error;
         }
-      } else if (method === "GET" && historyPreviewMatch) {
-        const agent = validateHistoryAgent(decodeHistorySegment(historyPreviewMatch[1]));
-        const nativeSessionId = validateNativeSessionId(decodeHistorySegment(historyPreviewMatch[2]));
-        const preview = await history.preview(agent, nativeSessionId);
-        if (!preview) throw new ApiError(404, 40430, "历史会话不存在或无法读取");
-        respond(response, 200, 0, "success", preview, requestId);
       } else if (method === "GET" && detailMatch) {
         const id = decodeURIComponent(detailMatch[1]);
         const session = manager.get(id);
@@ -515,6 +586,9 @@ async function handleWsMessage(client: WsClientState, text: string): Promise<voi
       await manager.interrupt(sessionId);
     } else if (message.type === "set_config") {
       await manager.setConfig(sessionId, validateSessionConfig(message.config, "set_config.config"));
+    } else if (message.type === "set_remote_control") {
+      if (typeof message.enabled !== "boolean") throw new Error("set_remote_control.enabled 必须是布尔值");
+      await manager.setRemoteControl(sessionId, message.enabled);
     } else {
       throw new Error(`不支持的 WS 上行类型：${String(message.type)}`);
     }
@@ -751,14 +825,25 @@ function validateUserMessage(value: Record<string, any>): UserMessageInput {
       throw new ApiError(400, 40016, `user_message.mentions[${index}] 必须是对象`);
     }
     const item = mention as Record<string, unknown>;
-    if (item.type !== "file") {
-      throw new ApiError(400, 40017, `user_message.mentions[${index}].type 目前只支持 file`);
+    if (item.type !== "file" && item.type !== "image") {
+      throw new ApiError(400, 40017, `user_message.mentions[${index}].type 只支持 file 或 image`);
     }
     if (typeof item.path !== "string" || !item.path.trim()) {
       throw new ApiError(400, 40018, `user_message.mentions[${index}].path 必须是非空字符串`);
     }
     if (item.name !== undefined && typeof item.name !== "string") {
       throw new ApiError(400, 40019, `user_message.mentions[${index}].name 必须是字符串`);
+    }
+    if (item.type === "image") {
+      if (typeof item.mimeType !== "string" || !IMAGE_MENTION_MIME_TYPES.has(item.mimeType)) {
+        throw new ApiError(400, 40024, `user_message.mentions[${index}].mimeType 必须是 image/png、image/jpeg、image/gif 或 image/webp`);
+      }
+      return {
+        type: "image" as const,
+        path: item.path,
+        mimeType: item.mimeType,
+        ...(item.name !== undefined ? { name: item.name } : {}),
+      };
     }
     return {
       type: "file" as const,

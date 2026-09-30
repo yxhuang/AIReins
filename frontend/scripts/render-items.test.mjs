@@ -75,6 +75,19 @@ t("外部续聊事件归一成历史区，排在新一轮用户消息之前", ()
   assert.equal(items[2].text, "工作台续聊");
 });
 
+t("worker_released 渲染成弱化系统行（手动 / 空闲带分钟数）", () => {
+  const items = buildRenderItems([
+    ev(1, "agent_text_delta", { text: "旧回复" }),
+    ev(2, "worker_released", { reason: "manual", resumeCommand: "cd '/work' && claude --resume abc" }),
+    ev(3, "worker_released", { reason: "idle", idleMinutes: 30, resumeCommand: "cd '/work' && claude --resume abc" }),
+    ev(4, "user_message", { text: "续接发送" }),
+  ], "claude");
+  assert.deepEqual(items.map((item) => item.kind), ["text", "system", "system", "user"]);
+  assert.equal(items[1].text, "已释放（手动）；下次发送时从磁盘续接");
+  assert.equal(items[1].tone, "muted");
+  assert.equal(items[2].text, "已释放（空闲 30 分钟）；下次发送时从磁盘续接");
+});
+
 t("thought_delta 独立合并，与文本互不混入", () => {
   const items = buildRenderItems(
     [
@@ -356,6 +369,20 @@ t("正常与旧版无字段的 turn_completed 不显示，三家异常均带原�
     if (reason) assert.match(items[0].text, new RegExp(reason));
     else assert.equal(items.length, 0);
   }
+});
+
+t("external history accepts old text events and new mixed tool events", () => {
+  const old = { role: "assistant", text: "old", timestamp: null };
+  const tool = { role: "tool", timestamp: null, tool: { id: "t", name: "Bash", input: { command: "pwd" }, result: "/repo", status: "ok" } };
+  const items = buildRenderItems([
+    ev(1, "external_messages_added", { messages: [old], truncated: false }),
+    ev(2, "external_messages_added", { messages: [{ role: "user", text: "new" }, tool, old], truncated: true }),
+  ], "claude");
+  assert.equal(items[0].kind, "external-history");
+  assert.deepEqual(items[0].messages, [old]);
+  assert.deepEqual(items[1].messages.map(m => m.role), ["user", "tool", "assistant"]);
+  assert.equal(items[1].messages[1].tool.result, "/repo");
+  assert.equal(items[1].truncated, true);
 });
 
 if (!process.exitCode) console.log(`✅ render-items / commands 单测全过（${pass} 例）`);

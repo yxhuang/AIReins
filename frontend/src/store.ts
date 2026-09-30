@@ -2,7 +2,7 @@ import type {
   CommandInfo,
   ConfigOptionId,
   EffectiveSource,
-  FileMention,
+  Mention,
   MetaInfo,
   PageManifest,
   PermissionDecision,
@@ -11,7 +11,7 @@ import type {
   SessionStatus,
   UnifiedEvent,
 } from "./types";
-import { createSession, deleteSession, fetchCommands, fetchFiles, fetchMeta, fetchPages, fetchSessions, fetchSnapshot, type CreateSessionInput } from "./api";
+import { createSession, deleteSession, fetchCommands, fetchFiles, fetchMeta, fetchPages, fetchSessions, fetchSnapshot, releaseSession, type CreateSessionInput } from "./api";
 import { extractMentionTokens, stripMentionCandidates } from "./mentions";
 import { partitionPages, type SkippedPage } from "./pages";
 
@@ -519,6 +519,9 @@ export class Store {
           // claude model/effort 重启切换开始：控件禁用 + 就地显示后端给的过渡文案，
           // config_updated / session_error 到达才解除（见下方两处）。
           this.configSwitching.set(event.sessionId, switchMessageFromPayload(event.payload));
+        } else if (event.type === "remote_control_updated") {
+          const current = this.sessions.find((item) => item.id === event.sessionId);
+          if (current) current.remoteControl = event.payload as unknown as SessionRecord["remoteControl"];
         } else if (event.type === "session_error") {
           // 切换中途失败（续接 worker 初始化失败等）：解除过渡态，错误就地显示在控件旁，
           // 不渲染成全局故障。
@@ -554,6 +557,14 @@ export class Store {
       const status = statusFromEvent(event);
       if (status) session.status = status;
       if (event.type === "config_updated") this.applyConfigUpdated(event, session);
+      if (event.type === "remote_control_updated") {
+        session.remoteControl = event.payload as unknown as SessionRecord["remoteControl"];
+      }
+      if (event.type === "worker_released") {
+        // 空闲自动释放没有客户端动作，靠这条事件把列表项对齐成已释放
+        session.released = true;
+        session.processId = undefined;
+      }
       const sessions = [...this.sessions];
       sessions[sessionIndex] = session;
       this.sessions = sessions;
@@ -631,7 +642,7 @@ export class Store {
   }
 
   /** 上行失败（socket 非 OPEN）返回 false 并置 lastError，调用方据此把文本还回输入框。 */
-  sendUserMessage(sessionId: string, text: string, mentions?: FileMention[]): boolean {
+  sendUserMessage(sessionId: string, text: string, mentions?: Mention[]): boolean {
     return this.send({
       type: "user_message",
       sessionId,
@@ -648,22 +659,25 @@ export class Store {
   /**
    * 输入框统一入口：行首「/命令表内名称 + 可选参数」走结构化 command（不附 mentions），
    * 其余一律按普通文本（能力位为 false 的 driver 绝不拼结构化 command）。
+   * extraMentions 非空（「+」附件）时不走 command 分支，直接按文本+mentions 发。
    * mentions 能力位 true 时解析 @token：仅确认存在的路径进 mentions，文本原样发送。
    * 全部路径返回是否真正上行（mentions 分支是异步解析，故整体为 Promise）。
    * 真正上行成功时清掉该会话草稿——仅当草稿内容仍是本次发送的文本
    * （发送间隙用户又输入的新内容不能误清）；失败时草稿本来就在，不用动。
    */
-  sendComposerInput(sessionId: string, text: string): Promise<boolean> {
-    return this.dispatchComposerInput(sessionId, text).then((ok) => {
+  sendComposerInput(sessionId: string, text: string, extraMentions?: Mention[]): Promise<boolean> {
+    return this.dispatchComposerInput(sessionId, text, extraMentions).then((ok) => {
       if (ok && this.drafts.get(sessionId)?.trim() === text.trim()) this.clearDraft(sessionId);
       return ok;
     });
   }
 
-  private dispatchComposerInput(sessionId: string, text: string): Promise<boolean> {
+  private dispatchComposerInput(sessionId: string, text: string, extraMentions?: Mention[]): Promise<boolean> {
     const session = this.session(sessionId);
     const caps = session ? this.meta?.drivers[session.agent] : undefined;
-    if (caps?.commands) {
+    const extras = extraMentions ?? [];
+    // 附件与结构化 command 互斥：带附件时即使命中命令形态也按文本+mentions 发
+    if (extras.length === 0 && caps?.commands) {
       const match = /^\/([^\s]+)(?:\s+([\s\S]*))?$/.exec(text);
       if (match) {
         const hit = (this.commands.get(sessionId) ?? []).find((c) => c.name === match[1]);
@@ -673,9 +687,11 @@ export class Store {
       }
     }
     if (!caps?.mentions) {
-      return Promise.resolve(this.sendUserMessage(sessionId, text));
+      return Promise.resolve(
+        this.sendUserMessage(sessionId, text, extras.length > 0 ? extras.slice(0, MAX_MENTIONS) : undefined),
+      );
     }
-    return this.sendWithMentions(sessionId, text);
+    return this.sendWithMentions(sessionId, text, extras);
   }
 
   /** 读会话草稿（无草稿返回空串）。内存未命中时回落 localStorage（刷新后恢复）。 */
@@ -796,10 +812,10 @@ export class Store {
     return path;
   }
 
-  /** 发送前解析 @token：只把生效路径放进 mentions（去重、≤20），文本原样发送。 */
-  private async sendWithMentions(sessionId: string, text: string): Promise<boolean> {
+  /** 发送前解析 @token：只把生效路径放进 mentions（去重、≤20），文本原样发送；「+」附件追加在后（同按 path 去重，合计截到 MAX_MENTIONS）。 */
+  private async sendWithMentions(sessionId: string, text: string, extraMentions: Mention[] = []): Promise<boolean> {
     const tokens = extractMentionTokens(text).slice(0, MAX_MENTIONS);
-    const mentions: FileMention[] = [];
+    const mentions: Mention[] = [];
     const seen = new Set<string>(); // 不同 token 可能解析到同一路径（@a.ts 与 @a.ts，），按生效路径去重
     for (const token of tokens) {
       const path = await this.resolveMentionPath(sessionId, token);
@@ -807,6 +823,12 @@ export class Store {
         seen.add(path);
         mentions.push({ type: "file", path });
       }
+    }
+    for (const extra of extraMentions) {
+      if (mentions.length >= MAX_MENTIONS) break;
+      if (!extra.path || seen.has(extra.path)) continue;
+      seen.add(extra.path);
+      mentions.push(extra);
     }
     return this.sendUserMessage(sessionId, text, mentions);
   }
@@ -835,6 +857,13 @@ export class Store {
 
   interrupt(sessionId: string): void {
     this.send({ type: "interrupt", sessionId });
+  }
+
+  setRemoteControl(sessionId: string, enabled: boolean): void {
+    if (!this.send({ type: "set_remote_control", sessionId, enabled })) {
+      this.lastError = { message: "连接已断开，无法切换 Remote Control", sessionId };
+      this.notify();
+    }
   }
 
   /**
@@ -915,6 +944,22 @@ export class Store {
       ...(result.nativeTranscriptPath ? { path: result.nativeTranscriptPath } : {}),
     };
     this.notify();
+  }
+
+  /**
+   * 手动释放会话 worker（「到 VSCode/终端继续」）：后端停进程、广播 worker_released，
+   * 返回带 cwd 的原生续接命令；成功响应里的 session 直接覆盖本地列表项。
+   */
+  async release(id: string): Promise<string> {
+    const result = await releaseSession(id);
+    const index = this.sessions.findIndex((s) => s.id === id);
+    if (index >= 0) {
+      const next = [...this.sessions];
+      next[index] = result.session;
+      this.sessions = next;
+    }
+    this.notify();
+    return result.resumeCommand;
   }
 
   dismissRemovalNotice(): void {

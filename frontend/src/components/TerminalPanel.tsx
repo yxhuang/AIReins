@@ -2,9 +2,10 @@ import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } f
 import { Terminal, type ITheme } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
-import type { TerminalInfo } from "../types";
+import type { ShellKind, TerminalInfo } from "../types";
 import { createTerminal, fetchTerminals, killTerminal } from "../api";
 import {
+  isTerminalToggleKey,
   TERM_DEFAULT_WIDTH,
   TERM_SHORTCUT_KEYS,
   buildTerminalWsUrl,
@@ -16,6 +17,7 @@ import {
   type TermSessionState,
 } from "../terminal";
 import { store } from "../store";
+import { FONT_SCALE_EVENT } from "../font-scale";
 
 const WIDTH_STORAGE_KEY = "workbench-term-width";
 
@@ -41,7 +43,7 @@ function writeSavedWidth(width: number): void {
   }
 }
 
-/** xterm 主题字段 ← --term-* 令牌（深浅两套在 styles.css，运行时读计算样式跟随主题切换）。 */
+/** xterm 主题字段 ← --term-* 令牌；通过 color 属性解析 light-dark()。 */
 const TERM_THEME_VARS: [keyof ITheme, string][] = [
   ["foreground", "--term-fg"],
   ["background", "--term-bg"],
@@ -67,11 +69,18 @@ const TERM_THEME_VARS: [keyof ITheme, string][] = [
 ];
 
 function readTermTheme(): ITheme {
-  const styles = getComputedStyle(document.documentElement);
   const theme: Record<string, string> = {};
-  for (const [key, varName] of TERM_THEME_VARS) {
-    const value = styles.getPropertyValue(varName).trim();
-    if (value) theme[key] = value;
+  const probe = document.createElement("span");
+  probe.style.cssText = "position:absolute;visibility:hidden;pointer-events:none";
+  probe.setAttribute("aria-hidden", "true");
+  document.body.appendChild(probe);
+  try {
+    for (const [key, varName] of TERM_THEME_VARS) {
+      probe.style.color = `var(${varName})`;
+      theme[key] = getComputedStyle(probe).color;
+    }
+  } finally {
+    probe.remove();
   }
   return theme as ITheme;
 }
@@ -85,18 +94,33 @@ function readTermFontFamily(): string {
   return mono ? `${NERD_FONTS}, ${mono}` : `${NERD_FONTS}, monospace`;
 }
 
+function readTermFontSize(): number {
+  // Read the applied value, so storage failures do not prevent live updates.
+  const scale = Number(getComputedStyle(document.documentElement).getPropertyValue("--font-scale"));
+  // 宽屏对齐用户 VSCode 终端的 16px；手机窄屏 13px，不然一行放不下几个字
+  const base = window.matchMedia("(max-width: 720px)").matches ? 13 : 16;
+  return base * (Number.isFinite(scale) && scale > 0 ? scale : 1);
+}
+
+const SHELL_OPTIONS: Array<{ kind: ShellKind; label: string }> = [
+  { kind: "bash", label: "bash" },
+  { kind: "powershell", label: "PowerShell" },
+];
+
 interface TermRuntime {
+  focus: () => void;
   fit: () => void;
   sendInput: (data: string) => void;
   paste: (text: string) => void;
-  createNew: () => Promise<void>;
+  createNew: (kind: ShellKind) => Promise<void>;
+  switchShell: (kind: ShellKind) => Promise<void>;
   reconnectNow: () => void;
 }
 
 /**
  * 终端面板（工作区级，不绑会话）。挂载后常驻：隐藏只是 CSS display:none，
  * xterm 实例、WS 连接与服务端 PTY 全部保留。首次挂载完成引导：
- * GET /api/terminals 有未退出的 attach 第一个，没有就 POST 新建。
+ * GET /api/terminals 有未退出的 bash attach 第一个，没有就 POST 新建。标题栏可切 PowerShell。
  */
 export function TerminalPanel({ open, onClose }: { open: boolean; onClose: () => void }) {
   const hostRef = useRef<HTMLDivElement>(null);
@@ -112,6 +136,7 @@ export function TerminalPanel({ open, onClose }: { open: boolean; onClose: () =>
   const [error, setError] = useState<string | null>(null);
   const [confirmKill, setConfirmKill] = useState(false);
   const [killBusy, setKillBusy] = useState(false);
+  const [switching, setSwitching] = useState(false);
   const runtimeRef = useRef<TermRuntime | null>(null);
 
   // 手机上 xterm 的隐藏 textarea 拿不到长按粘贴菜单；读不了剪贴板（拒绝授权 / 不支持）时退回 prompt 手动粘贴
@@ -134,11 +159,13 @@ export function TerminalPanel({ open, onClose }: { open: boolean; onClose: () =>
     const term = new Terminal({
       theme: readTermTheme(),
       fontFamily: readTermFontFamily(),
-      fontSize: 13,
+      fontSize: readTermFontSize(),
     });
     const fitAddon = new FitAddon();
     term.loadAddon(fitAddon);
     term.open(host);
+    // Returning false skips xterm handling without stopping DOM bubbling.
+    term.attachCustomKeyEventHandler((event) => !isTerminalToggleKey(event));
 
     let disposed = false;
     let socket: WebSocket | null = null;
@@ -170,21 +197,58 @@ export function TerminalPanel({ open, onClose }: { open: boolean; onClose: () =>
       }
     };
 
+    const applyFontScale = () => {
+      if (disposed) return;
+      term.options.fontSize = readTermFontSize();
+      fit();
+    };
+    window.addEventListener(FONT_SCALE_EVENT, applyFontScale);
+
+    const remeasureFont = () => {
+      if (disposed) return;
+      // Assign a different value first: assigning the same family may be a no-op.
+      const family = readTermFontFamily();
+      term.options.fontFamily = "monospace";
+      term.options.fontFamily = family;
+      fit();
+    };
+    // Never block opening/PTY setup on local font availability. Also retry on a
+    // late resolution after the timeout; unmounted instances are guarded above.
+    const fontTimer = window.setTimeout(remeasureFont, 1500);
+    try {
+      void document.fonts.load(`${term.options.fontSize}px "Maple Mono NF CN"`, "M汉\uE0B0").then(() => {
+        clearTimeout(fontTimer);
+        remeasureFont();
+      }, () => {
+        clearTimeout(fontTimer);
+        remeasureFont();
+      });
+    } catch {
+      clearTimeout(fontTimer);
+      remeasureFont();
+    }
+
     const attach = (id: string) => {
+      // 单面板只看一个终端：切走的解除订阅（PTY 与 scrollback 仍在服务端），免得后台输出挤占这条 WS
+      if (attachedId && attachedId !== id) sendFrame({ type: "detach", terminalId: attachedId });
       attachedId = id;
       termState = initialTermState();
+      // 尺寸缓存按终端失效：切回的终端 PTY 可能还是旧尺寸，attached 后的 fit 必须重发
+      lastSentCols = 0;
+      lastSentRows = 0;
       setOmitted(0);
       setExit(null);
       setConfirmKill(false);
       sendFrame({ type: "attach", terminalId: id });
     };
 
-    const createNew = async () => {
+    const createNew = async (kind: ShellKind) => {
       const dims = fitAddon.proposeDimensions() ?? { cols: 80, rows: 24 };
       const current = store.currentId ? store.session(store.currentId) : undefined;
       const cwd = pickTerminalCwd(current?.cwd, store.meta?.defaultCwd);
       const created = await createTerminal({
         ...(cwd ? { cwd } : {}),
+        shell: kind,
         cols: dims.cols,
         rows: dims.rows,
       });
@@ -254,7 +318,8 @@ export function TerminalPanel({ open, onClose }: { open: boolean; onClose: () =>
     document.addEventListener("visibilitychange", onVisibilityChange);
 
     term.onData((data) => {
-      if (attachedId && !termState.exited) {
+      // attached 之前屏幕还是上一个终端的内容，输入不发（切换 / 重连的窗口期）
+      if (attachedId && termState.attached && !termState.exited) {
         sendFrame({ type: "input", terminalId: attachedId, data });
       }
     });
@@ -274,40 +339,48 @@ export function TerminalPanel({ open, onClose }: { open: boolean; onClose: () =>
     const resizeObserver = new ResizeObserver(() => fit());
     resizeObserver.observe(host);
 
-    // 引导：有未退出的 attach 第一个，没有就新建
-    void (async () => {
+    // 引导与切换 shell：该种 shell 有未退出的就 attach，没有就新建；切走的留在后台
+    const showShell = async (kind: ShellKind) => {
+      const target = pickAttachTarget(await fetchTerminals(), kind);
+      if (disposed) return;
+      if (target) {
+        setInfo(target);
+        attach(target.id);
+      } else {
+        await createNew(kind);
+      }
+    };
+    // 引导 / 切换 / 新建串行：在途时按钮禁用、再点忽略，杜绝重复 POST 与晚到响应覆盖新选择
+    let busy = false;
+    const runGuarded = async (task: () => Promise<void>) => {
+      if (busy) return;
+      busy = true;
+      setSwitching(true);
+      setError(null);
       try {
-        const target = pickAttachTarget(await fetchTerminals());
-        if (disposed) return;
-        if (target) {
-          setInfo(target);
-          attach(target.id);
-        } else {
-          await createNew();
-        }
+        await task();
       } catch (e) {
         if (!disposed) setError(e instanceof Error ? e.message : String(e));
+      } finally {
+        busy = false;
+        if (!disposed) setSwitching(false);
       }
-    })();
+    };
+    void runGuarded(() => showShell("bash"));
     connect();
 
     runtimeRef.current = {
+      focus: () => term.focus(),
       fit,
       sendInput: (data) => {
-        if (attachedId && !termState.exited) {
+        if (attachedId && termState.attached && !termState.exited) {
           sendFrame({ type: "input", terminalId: attachedId, data });
         }
       },
       // 走 term.paste：bracketed paste 与换行归一由 xterm 处理，再经 onData 上行
       paste: (text) => term.paste(text),
-      createNew: async () => {
-        setError(null);
-        try {
-          await createNew();
-        } catch (e) {
-          if (!disposed) setError(e instanceof Error ? e.message : String(e));
-        }
-      },
+      createNew: (kind) => runGuarded(() => createNew(kind)),
+      switchShell: (kind) => runGuarded(() => showShell(kind)),
       reconnectNow: onVisibilityChange,
     };
 
@@ -315,6 +388,8 @@ export function TerminalPanel({ open, onClose }: { open: boolean; onClose: () =>
       disposed = true;
       runtimeRef.current = null;
       clearTimeout(reconnectTimer);
+      clearTimeout(fontTimer);
+      window.removeEventListener(FONT_SCALE_EVENT, applyFontScale);
       document.removeEventListener("visibilitychange", onVisibilityChange);
       themeObserver.disconnect();
       colorScheme.removeEventListener("change", applyTheme);
@@ -329,7 +404,10 @@ export function TerminalPanel({ open, onClose }: { open: boolean; onClose: () =>
   // 面板从隐藏变为可见：等 CSS 生效后 fit 一次（ResizeObserver 也会补，这里是确定性兜底）
   useEffect(() => {
     if (!open) return;
-    const raf = requestAnimationFrame(() => runtimeRef.current?.fit());
+    const raf = requestAnimationFrame(() => {
+      runtimeRef.current?.fit();
+      runtimeRef.current?.focus();
+    });
     return () => cancelAnimationFrame(raf);
   }, [open]);
 
@@ -421,6 +499,20 @@ export function TerminalPanel({ open, onClose }: { open: boolean; onClose: () =>
           <button type="button" className="btn term-back" aria-label="返回" onClick={onClose}>
             ‹ 返回
           </button>
+          <span className="term-shells" role="group" aria-label="切换 shell">
+            {SHELL_OPTIONS.map(({ kind, label }) => (
+              <button
+                key={kind}
+                type="button"
+                className={`term-shell${info?.kind === kind ? " active" : ""}`}
+                aria-pressed={info?.kind === kind}
+                disabled={confirmKill || switching}
+                onClick={() => { if (info?.kind !== kind) void runtimeRef.current?.switchShell(kind); }}
+              >
+                {label}
+              </button>
+            ))}
+          </span>
           <span className="term-cwd mono" title={info?.cwd ?? ""}>
             {info?.cwd ?? "…"}
           </span>
@@ -458,7 +550,8 @@ export function TerminalPanel({ open, onClose }: { open: boolean; onClose: () =>
             <button
               type="button"
               className="btn"
-              onClick={() => void runtimeRef.current?.createNew()}
+              disabled={switching}
+              onClick={() => void runtimeRef.current?.createNew(info?.kind ?? "bash")}
             >
               新建终端
             </button>

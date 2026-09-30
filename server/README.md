@@ -20,6 +20,14 @@ npm run server
 
 服务启动会把注册表中的旧会话统一标记为 `dead`，不会接管或自动续接旧进程。需要续接时，新建会话可传原生 `resumeSessionId`；Claude 使用 `--resume`，Codex 使用 `thread/resume`，Kimi 使用 `session/resume`。
 
+### Claude Remote Control 契约（M23）
+
+Claude 会话的列表、详情和 snapshot `session` 额外包含 `remoteControl:{status,sessionUrl?,reason?}`；状态为 `disconnected / connecting / connected / reconnecting / disconnecting / error`。`sessionUrl` 仅在已连接或重连中保留，`reason` 用于 title 提示。Codex、Kimi 没有此字段。状态变化写入统一 transcript、snapshot，并通过 WS `remote_control_updated` 广播同一状态对象；进程退出变为 `disconnected`。刷新和断线重连以 session/snapshot 对齐。
+
+WS 上行 `{"type":"set_remote_control","sessionId":"...","enabled":true|false}`，成功收到常规 `ack`，失败收到带 `action:"set_remote_control"` 的常规 `error`；仅 Claude 活 worker 可用。driver 发送 `remote_control` 控制请求，15 秒未回复进入错误态。用户 `~/.claude/settings.json` 明确设 `remoteControlAtStartup:true` 时，新 worker 自动开启；project/local 设置明确 `false` 时禁止自动开启，读不到按关闭。已开启的会话因外部续聊或配置切换替换 worker 时自动恢复 RC，`session_url` 可变化。此功能不修改用户的 Claude 设置。
+
+Claude stdout 的 `bridge_state`、控制应答驱动胶囊状态；未知 state 安全显示中间态。`--replay-user-messages` 的 user 文本只在 RC 为 `connecting / connected / reconnecting`、且不是本机回显、子代理、合成记录或 CLI 注入包装时，才由 driver 发 `user_message`；RC 关闭时沿用原有行为，只处理其中的工具结果。本机回显以最多 20 条的先进先出列表匹配，`result` 不清空它。这样远端消息进入统一 transcript 和现有用户气泡，回合结束更新原生会话指纹，避免下次发送被误判为别处续聊。**手机发送消息的 stdout 形状及上述去重仍待真机验证**；本次无对话消息冒烟未覆盖它。`remote_control_work_secret` 重挂接不支持，收到会回复控制错误。
+
 ## 访问控制
 
 `server/access.ts` 按请求从哪个监听进来，套用不同的策略。
@@ -74,13 +82,13 @@ Serve 会剥掉客户端自带的同名身份头，再注入真实身份。远�
 | 现象 | 常见原因 | 处理 |
 |---|---|---|
 | 手机打不开，一直超时 | 手机 Tailscale 没连上；代理客户端 TUN 抢了路由；电脑睡眠或关机了 | 看手机 Tailscale 的连接状态；TUN 模式要把 `100.64.0.0/10` 与 `*.ts.net` 设为直连；电脑那边远程开机 |
-| 502 Bad Gateway | workbench 没在跑；或 `remote.json` 没配、配错了，8792 没有监听 | 用 `workbench status` 看「远程」那一行；`workbench logs` 里搜 `remote` |
+| 502 Bad Gateway | workbench 没在跑；或 `remote.json` 没配、配错了，8792 没有监听 | 用 `wb status` 看「远程」那一行；`wb logs` 里搜 `remote` |
 | 403「没有 Tailscale 身份」 | 没走 Serve，比如直连了 8792；或请求来自 Funnel、打了 tag 的设备 | 改用 `https://<机器域名>/` 访问 |
-| 403「Tailscale 账号 X 未授权」 | X 不在 `allowedLogins` 里 | 把 X 加进 `remote.json`，然后 `workbench restart` |
+| 403「Tailscale 账号 X 未授权」 | X 不在 `allowedLogins` 里 | 把 X 加进 `remote.json`，然后 `wb restart` |
 | 403「Origin 不匹配」或「Host 不在远程白名单」 | `remote.json` 里的 `origin` 和地址栏不一致（大小写、结尾斜杠、机器改了名） | 改成地址栏里的 `https://<机器域名>`，不带结尾斜杠，然后 restart |
 | 页面能打开，但一直「连接中」，圆点不变绿 | WS 握手被拒（日志里有 `websocket rejected`），或 Serve 没转发 WS | 按日志里的原因处理；如果是 Serve 的问题，记下现象报告给用户 |
 | 电脑浏览器突然 403 | 用了白名单以外的地址访问，比如局域网 IP、自定义的 hosts 名 | 改用 `http://127.0.0.1:8790` 或 `http://localhost:8790` |
-| 手机上改了后端却没变化 | 后端改动要 `workbench restart` 才生效（前端 `dist` 刷新即可） | 重启前先查 `/api/sessions` 有无活会话 |
+| 手机上改了后端却没变化 | 后端改动要 `wb restart` 才生效（前端 `dist` 刷新即可） | 重启前先查 `/api/sessions` 有无活会话 |
 
 ## 闸门提醒
 
@@ -110,21 +118,28 @@ webhook 地址就是密钥：文件权限设为 600，也不要写进日志或�
 
 - `POST /api/sessions`：创建会话，统一配置见下文
 - `POST /api/snapshot/preflight`：建会话前检查 cwd 是否需要及能够自动快照
-- `GET /api/fs/dirs?path=<绝对路径>`：只读列出一级子目录；省略 `path` 时使用 `~/dev`（不存在则 `$HOME`）
+- `GET /api/fs/dirs?path=<绝对路径>&files=1`：只读列出一级子目录；省略 `path` 时使用 `~/dev`（不存在则 `$HOME`）；带 `files=1` 时同层普通文件一并列出（供「+」附件的电脑文件选择）
+- `POST /api/uploads?sessionId=<id>&name=<文件名>`：上传附件，请求体为原始字节（非 multipart）；保存到 `~/.workbench/uploads/<sessionId>/`，返回 `{path,name,size,mimeType}`
+- `GET /api/uploads/file?path=<绝对路径>`：读取上传目录内的文件字节（缩略图用）；只允许 `~/.workbench/uploads/` 之下
 - `GET /api/sessions`
 - `GET /api/sessions/:id`
 - `GET /api/sessions/:id/snapshot`
 - `GET /api/sessions/:id/commands`：当前活动会话的实时归一命令表
+- `POST /api/sessions/:id/release`：释放会话 worker（见「三家 CLI 原生历史」末尾「释放」小节）
+- `GET /api/prefs` / `PUT /api/prefs`：服务端偏好，当前只有 `idleReleaseMinutes`（整数 0–1440 分钟，0 = 关闭空闲自动释放；校验失败 400）
 - `GET /api/sessions/:id/files?q=<关键词>&limit=<默认50>`：在会话 `cwd` 内检索可引用的普通文件
 - `DELETE /api/sessions/:id`：停止 worker 并移除注册表条目；不删除 Workbench 或原生 CLI transcript
 - `GET /api/history`：只读列出三家 CLI 自己保存的历史会话
-- `GET /api/history/:agent/:nativeSessionId`：有界读取会话头部，返回导入前预览
 - `GET /api/history/:agent/:nativeSessionId/messages`：从最新消息向前分页读取完整原生历史
-- `GET /api/meta`：server/CLI 实测版本、全局能力、三 driver 能力位与配置 schema
+- `GET /api/meta`：server/CLI 实测版本、按请求入口计算的终端能力位、三 driver 能力位与配置 schema
 - `GET /api/pages`：启动时已注册的扩展页面列表
 - `GET /api/pages/:id/health`：限时探测一个扩展页面的目标服务
 
-`GET /api/fs/dirs` 的 `data` 为 `{path,parent,dirs:[{name,path}],truncated}`。路径先规范化；根目录 `/` 的 `parent` 为 `null`。不限制浏览根目录，包括 `/mnt/c/...`；隐藏目录不列出，指向目录的有效符号链接会列出，断链和无权限条目跳过。子目录按名称排序，最多返回 1000 项，更多时 `truncated:true`。路径无效、不存在、不是目录或无权限读取时返回 HTTP 400、错误码 `40035`。
+`GET /api/fs/dirs` 的 `data` 为 `{path,parent,dirs:[{name,path}],truncated}`；带 `files=1` 时追加 `files:[{name,path}]`（同层普通文件，含指向文件的有效符号链接，同样最多 1000 项，目录或文件任一达到上限都会置 `truncated:true`）；`files` 只接受 `1`/`0`，其他值返回 HTTP 400、错误码 `40036`。路径先规范化；根目录 `/` 的 `parent` 为 `null`。不限制浏览根目录，包括 `/mnt/c/...`；隐藏目录不列出，指向目录的有效符号链接会列出，断链和无权限条目跳过。子目录按名称排序，最多返回 1000 项，更多时 `truncated:true`。路径无效、不存在、不是目录或无权限读取时返回 HTTP 400、错误码 `40035`。
+
+`POST /api/uploads` 的查询参数 `sessionId` 必须是已存在的会话（否则 404/`40401`），`name` 必须非空（否则 400/`40070`）。请求体是附件原始字节；服务端只按查询参数里的文件名存盘：取 basename、替换路径分隔符与控制字符、去掉首尾部点和空白、限长 120 字符，保存为 `~/.workbench/uploads/<sessionId>/<YYYYMMDD-HHMMSS>-<清洗名>`（同秒同名追加 `-1` 等序号；目录 0700、文件 0600）。单文件上限 25 MB，超限返回 413/`41301` 且不留半截文件。成功返回 `data` 为 `{path,name,size,mimeType}`，`mimeType` 仅按扩展名判断（png/jpg/jpeg/gif/webp/heic/pdf/office 等常见扩展，未知为 `application/octet-stream`）。
+
+`GET /api/uploads/file` 不是信封接口，直接返回文件字节；`path` 经 `realpath` 后必须落在 `~/.workbench/uploads/` 之内且是普通文件（`..` 与指向目录外的符号链接一律拒绝），否则 404/`40450`。响应带 `content-type`（按扩展名）与 `cache-control: private, max-age=3600`。
 
 建会话时，三家统一使用 `config.model / config.effort / config.permissionMode`：
 
@@ -305,7 +320,6 @@ interface HistoryListData {
 
 `source` 表示原生会话的可识别创建来源，而不是当前读取者。Claude 老会话首个 `entrypoint:"sdk-cli"` 仍为 `workbench`；新 worker 明确设置 `CLAUDE_CODE_ENTRYPOINT=claude-vscode`，其新建会话靠 `~/.workbench/sessions.json` 中未带 `resumedFrom` 的注册表记录判为 `workbench`，其他 `claude-vscode` 会话为 `interactive`。Codex 的 `originator` 以 `workbench` 开头为 `workbench`，其他已知 originator 为 `interactive`；Kimi 的多代落盘格式没有稳定的客户端来源字段，也用未带 `resumedFrom` 的注册表记录回退为 `workbench`，其余为 `unknown`。导入的 VSCode/Kimi 原生会话保留原来源。
 
-`GET /api/history/:agent/:nativeSessionId` 值得保留：前端可在把原生 ID 交给创建接口前展示“导入前看一眼”。它返回 `{session, messages, truncated}`，`messages` 最多 8 条，只读文件头部最多 2 MiB；Kimi wire 缺失时仍返回 session 元数据、空 messages 和 `truncated:true`。ID 只接受 1–128 位字母、数字、下划线和连字符，后端先在对应事实源中解析匹配候选，不会把 URL 片段直接拼成任意文件路径。
 
 完整历史使用 `GET /api/history/:agent/:nativeSessionId/messages?limit=<默认50>&cursor=<可选>`。`limit` 范围 1–200；不传 cursor 时读取最新一页，带回服务端给出的不透明 `nextCursor` 可继续向更早消息翻页。每页内部仍按时间正序返回，前端可直接 prepend 到现有消息列表。单次最多倒读 4 MiB 原生 NDJSON，不会为了取一页全文解析巨大 transcript，也不会在三家原生目录或 Workbench 目录写索引、缓存或修复文件。
 
@@ -314,11 +328,13 @@ interface HistoryListData {
 ```ts
 interface HistoryMessagesPage {
   session: HistorySession;
-  messages: Array<{
-    role: "user" | "assistant";
-    text: string;
-    timestamp: string | null; // 原生记录缺失时间时为 null
-  }>;
+  messages: Array<
+    | { role: "user" | "assistant"; text: string; timestamp: string | null }
+    | { role: "tool"; timestamp: string | null; tool: {
+        id: string; name: string; input: unknown; result?: string; rawResult?: unknown;
+        status: "ok" | "error" | "unknown";
+      } }
+  >;
   nextCursor?: string;
   hasMore: boolean;
   truncated: boolean;        // 当前页受条数或 4 MiB 窗口限制
@@ -326,7 +342,9 @@ interface HistoryMessagesPage {
 }
 ```
 
-Claude 从非 meta/sidechain 的 `user` 和含文本块的 `assistant` 记录归一；Codex 优先读干净的 `event_msg.user_message / agent_message`，旧 transcript 缺少这些记录时回退到 `response_item.message`；Kimi 读取 `turn.prompt` 与 `context.append_loop_event/content.part(text)`。思考、工具调用及工具结果当前不进入消息数组，避免为它们引入跨文件、全量或高成本解析。
+Claude 跳过 meta/sidechain，按 assistant 内容块顺序输出文字与 `tool_use`，按 `tool_use_id` 回填 `tool_result` 和有界 `toolUseResult`；Task/Agent 工具本身保留。Codex 保留 event_msg 文字优先、response_item.message 回退，另按 `call_id` 配对 function/custom tool call 与 output：exec_command/shell_command/shell 映射 commandExecution，标准 apply_patch 映射 fileChange，其余保留原名和原始输入。Kimi 的 main wire 使用 `tool.call/tool.result` 的 toolCallId 配对，保留原名、args 与 output；思考不进入数组。
+
+工具 input、result、rawResult 各自序列化后最多约 4000 字符，超出带 `[truncated]`；超长结构化对象回落成有截断标记的文本。缺结果或无法确认状态时为 unknown，前端不伪造成功或失败。limit 计入工具；不透明 cursor 支持同一 JSONL 行内的多个块，不漏块。只在当前读取窗口配对，较早页的调用若结果落在更新页，返回 unknown，不扩大窗口。历史页预览和导入历史共用 `/messages`，默认最新 50 条，向前翻页可一直到开头；旧文件头 preview 路由已移除。ID 校验和事实源候选查找保持不变。
 
 历史列表本身严格只读；用户选择后，就地续接仍复用现有 `POST /api/sessions`，直接把列表项的 `nativeSessionId` 传为 `resumeSessionId`：
 
@@ -340,9 +358,19 @@ Claude 从非 meta/sidechain 的 `user` 和含文本块的 `assistant` 记录归
 
 这里没有 fork 语义：Claude 用 `--resume`，Codex 用 `thread/resume`，Kimi 用 `session/resume`。续接后，Workbench 中的新回合会由原生 CLI 追写进用户选择的真实会话；Claude worker 以 `claude-vscode` 身份落盘，工作台新建会话因此可进入 VSCode/CLI 的 resume 列表。仅做 initialize 的 Claude 模型标签探针不发送用户消息、不产生会话，仍清除该环境变量。
 
-空闲会话发消息前，服务端只读原生记录的末尾最多 4 MiB，比较最后一条归一化用户/助手消息的身份：Claude 用 `uuid`，Codex/Kimi 用追加文件的字节偏移与该行 SHA-256；标题、摘要、token 等元数据变化不触发。指纹之后若只有助手消息，视为本端上一轮在 `turn_completed` 之后才刷盘：静默推进指纹，不重启、不发事件。只有出现新的用户消息才判为外部续聊；第一条新用户消息之前的助手消息不进入事件。此时先停旧 worker、起新进程并以同一原生 ID 续接，再发送消息。Codex app-server 的 `thread/resume` 和 Kimi ACP 的 `session/resume` 都在新进程里执行，避免复用旧进程内存中的线程/会话。取不到原生 ID、文件或对话指纹时记录 warn 并照常发送；正在运行的回合不检测。重新续接失败会广播 `session_error`（`source:"external_resume"`），拒绝本轮发送，不回退到旧 worker。尾部窗口装不下全部外部消息时，事件只带读到的最新文本，并标 `truncated:true`。
+空闲会话发消息前，服务端只读原生记录的末尾最多 4 MiB，比较最后一条归一化用户/助手/工具调用消息的身份：Claude 用 `uuid`，Codex/Kimi 用追加文件的字节偏移与该行 SHA-256；标题、摘要、token 等元数据变化不触发。指纹之后若只有助手或工具消息，视为本端上一轮在 `turn_completed` 之后才刷盘：静默推进指纹，不重启、不发事件。只有出现新的用户消息才判为外部续聊；第一条新用户消息之前的助手和工具消息不进入事件。此时先停旧 worker、起新进程并以同一原生 ID 续接，再发送消息。Codex app-server 的 `thread/resume` 和 Kimi ACP 的 `session/resume` 都在新进程里执行，避免复用旧进程内存中的线程/会话。取不到原生 ID、文件或对话指纹时记录 warn 并照常发送；正在运行的回合不检测。重新续接失败会广播 `session_error`（`source:"external_resume"`），拒绝本轮发送，不回退到旧 worker。尾部窗口装不下全部外部消息时，事件只带读到的最新消息，并标 `truncated:true`。
 
-新增 `external_messages_added` 事件：`payload` 为 `{nativeSessionId:string, messages:Array<{role:"user"|"assistant",text:string,timestamp:string|null}>, truncated:boolean}`。消息使用历史接口的三家归一化规则，只包含用户和助手文本。它写入 Workbench transcript 并通过同一事件流广播，顺序在新一轮 `user_message` 之前；断线后的快照回放也包含它。原生目录仍只由各家 CLI 自己写入，server 的检查代码只读。
+`external_messages_added` 的 payload 为 `{nativeSessionId:string, messages:HistoryMessage[], truncated:boolean}`，HistoryMessage 与 `/messages` 相同；旧的纯文字事件仍兼容。payload 的 UTF-8 JSON 总上限为 512 KiB：先从最早的工具正文开始省略并标 `[truncated]`，仍超限则省略最早消息，单条超长文字最后截短，均设置 `truncated:true`。事件自包含，仍原样写入 Workbench transcript 并广播，顺序在本轮 `user_message` 之前，原生文件以后改写不影响回放。工具结果不是用户消息；Claude 指纹仍取最后一条归一化消息所在行的 uuid，纯结果追加不改变调用行指纹。原生目录始终只读。
+
+### 释放（release）worker
+
+`POST /api/sessions/:id/release` 把会话的 worker 停掉但保留会话：状态保持 `idle`，记录新增持久化字段 `released:true`，`processId` 置空，广播 `worker_released`（payload `{reason:"manual"|"idle", resumeCommand, idleMinutes?}`，写进统一 transcript）。成功响应的 `data` 为 `{session, resumeCommand}`。释放前提：会话 `idle`、没有进行中的回合或待处理闸门、不在重启/检查中、已有 `nativeSessionId`；不满足时手动释放返回 400 可读错误，自动释放直接跳过。worker 先从内存表删除再停止，因此 `exited` 回调不会把会话标成 `dead`；Claude 会话同时把 `remoteControl` 置为 `disconnected` 并广播 `remote_control_updated`。
+
+`resumeCommand` 是带 cwd 的原生续接命令，cwd 做 shell 单引号转义：Claude `cd '<cwd>' && claude --resume <id>`，Codex `cd '<cwd>' && codex resume <id>`，Kimi `cd '<cwd>' && kimi -S <id>`。
+
+已释放会话再发消息时走与「别处续聊」完全相同的续接路径（`refreshBeforeSend`）：比对原生指纹、起新进程以同一原生 ID 续接、有外部新增时先广播 `external_messages_added`，成功后清除 `released`；区别只是没有旧 worker 可停。`set_config`、`set_remote_control` 等需要 worker 的 WS 操作经 `ensureWorker` 先按同一路径拉起再执行；`interrupt` / `permission_resolved` 对已释放会话直接报「worker 已释放」。续接失败广播 `session_error`（`source:"external_resume"`），保持 `released` 与 `idle`，不标 `dead`，下次发送可重试。
+
+空闲自动释放：服务端每分钟扫一次，对 `idle`、未释放、`now - lastActivityAt ≥ idleReleaseMinutes` 且满足上述前提的会话执行释放；**开着 Remote Control（connected/connecting/reconnecting）的 Claude 会话跳过**（开 RC 就是要手机能随时找到它，释放会断开）。阈值存 `~/.workbench/prefs.json`（`{"idleReleaseMinutes":30}`，缺省 30，0 = 关闭，文件缺失或无效按默认值），经 `GET/PUT /api/prefs` 读写，PUT 立即生效无需重启。
 
 使用 `resumeSessionId` 成功建出的 session 会同时包含：
 
@@ -357,6 +385,8 @@ Claude 从非 meta/sidechain 的 `user` 和含文本块的 `assistant` 记录归
 ```
 
 `resumedFrom.messageCount` 为可选字段；当前创建路径不为统计它而全文扫描 transcript，因此默认省略。
+
+`resumedFrom.historyCursor` 为可选字段：带 `resumeSessionId` 创建时，服务端在 `manager.create` 之前用 `HistoryIndex.endCursor` 记下截止 cursor（偏移量 = 当时原生消息文件的大小，Kimi 取 `agents/main/wire.jsonl`；编码与 `/messages` 的 `nextCursor` 完全一致），写入 `resumedFrom` 并随注册表持久化。会话页的「导入前的历史对话」首页带上它，拿到的就是导入时刻之前的最新一页，导入之后的轮次不再混入该区块。计算失败（会话或文件不存在等）只记 warn 日志、照常创建且不带该字段；它是服务端内部字段，客户端请求体里的 `historyCursor` 一律被覆盖。旧会话没有该字段，历史区仍从最新一页开始。cursor 失效（原生文件被截断/改写，`/messages` 返回 400「消息 cursor 已失效」等）时前端退回不带 cursor 的最新一页，不整块报错。
 
 ## `pages/` 扩展页面
 
@@ -422,7 +452,7 @@ interface PageHealth {
 }
 ```
 
-事件最小集为 `session_created / config_update_started / external_messages_added / user_message / agent_text_delta / thought_delta / tool_call_started / tool_call_updated / tool_call_completed / permission_request / permission_resolved / commands_updated / config_updated / usage_updated / turn_completed / session_error / process_exited`；另有容错用 `raw_event`。每个 session 独立计数，`seq` 单调递增。
+事件最小集为 `session_created / config_update_started / external_messages_added / user_message / agent_text_delta / thought_delta / tool_call_started / tool_call_updated / tool_call_completed / permission_request / permission_resolved / commands_updated / config_updated / usage_updated / turn_completed / session_error / process_exited / worker_released`；另有容错用 `raw_event`。每个 session 独立计数，`seq` 单调递增。
 
 Kimi 的 `tool_call_started / tool_call_updated / tool_call_completed` 在 ACP 更新含 `kind`（字符串）或 `locations`（`{path, line?}` 数组）时，分别原样透传为 payload 的同名字段；缺失时不添加。Kimi 命令工具的完成事件若 `content` 含 `{type:"terminal", terminalId}` 且终端仍在运行或已释放，会额外包含 `terminalOutput: {terminalId, output, truncated, exitCode, signal}`。事件另行收集真正的输出末尾，`output` 最多保留末尾 64 KiB（按 UTF-8 字节并在字符边界截取）；发生过截断，包括 ACP 终端原收集上限造成的截断，`truncated` 为 `true`。ACP `terminal/output` 仍按其 `outputByteLimit` 返回输出开头，语义不变。尚未退出时事件返回已收集部分，`exitCode` 为 `null`；无退出信号时 `signal` 为 `null`。多个 terminal content 只取第一个；找不到终端则不添加 `terminalOutput`。已释放终端最多保留最近 64 个，每条仅存事件尾部与退出状态，随会话结束清空。以上新增字段只有 Kimi driver 提供，Claude、Codex 的工具事件契约不变。
 
@@ -432,6 +462,7 @@ Kimi 的 `tool_call_started / tool_call_updated / tool_call_completed` 在 ACP �
 {"type":"user_message","sessionId":"...","clientRequestId":"msg-01","text":"只回复 OK"}
 {"type":"user_message","sessionId":"...","command":{"name":"compact","arguments":"可选参数"}}
 {"type":"user_message","sessionId":"...","text":"概括引用内容","mentions":[{"type":"file","path":"server/README.md"}]}
+{"type":"user_message","sessionId":"...","text":"图片里写的是什么？","mentions":[{"type":"image","path":"/home/u/.workbench/uploads/<sessionId>/20260930-130337-photo.png","mimeType":"image/png"}]}
 {"type":"permission_resolved","sessionId":"...","requestId":"...","decision":"allow"}
 {"type":"permission_resolved","sessionId":"...","requestId":"...","decision":"allow","questionAnswers":{"早餐吃粥还是吃面？":"吃面"}}
 {"type":"set_config","sessionId":"...","clientRequestId":"cfg-01","config":{"permissionMode":"plan"}}
@@ -517,13 +548,13 @@ Claude 的 model/effort 切换先广播 `config_update_started`，其 payload �
 - Kimi 每次收到 ACP `session/update` 的 `available_commands_update.availableCommands` 都覆盖当前表，不把初始更新当成一次性快照。
 - Codex app-server 没有可枚举的斜杠命令协议，始终返回空数组；结构化命令会明确报错。
 
-`mentions` 当前只接受已存在的普通文件，`path` 可为会话 `cwd` 的相对路径或绝对路径，单条消息最多 20 个。三家翻译如下：
+`mentions` 接受两类条目：`{"type":"file","path","name"?}` 和 `{"type":"image","path","mimeType","name"?}`。`path` 可为会话 `cwd` 的相对路径或绝对路径，必须是已存在的普通文件；单条消息最多 20 个。`image` 额外要求 `mimeType` 属于 `image/png|jpeg|gif/webp`（否则 400/`40024`）且文件 ≤ 10 MB（否则发送前报错）。三家翻译如下：
 
-- Claude：读取 UTF-8 文件，发为 user content 中的 `document` block：`{type:"document",source:{type:"text",media_type:"text/plain",data},title}`。
-- Codex：在 `turn/start.input` 同时发送带 UTF-8 字节范围的 `text_elements` 文本项和 `{type:"mention",name,path}`；文本中的 `@` 名称使用相对会话 `cwd` 的真实路径，避免只给 basename 后让 agent 猜位置。
-- Kimi：使用 ACP embedded resource：`{type:"resource",resource:{uri:"file://...",mimeType:"text/plain",text}}`。
+- Claude：`file` 读取 UTF-8 文件，发为 user content 中的 `document` block：`{type:"document",source:{type:"text",media_type:"text/plain",data},title}`；`image` 读取文件字节，发为 `{type:"image",source:{type:"base64",media_type,data}}`。
+- Codex：`file` 在 `turn/start.input` 同时发送带 UTF-8 字节范围的 `text_elements` 文本项和 `{type:"mention",name,path}`；文本中的 `@` 名称使用相对会话 `cwd` 的真实路径，避免只给 basename 后让 agent 猜位置。`image` 发为 `{type:"localImage",path}`（0.159.2 schema 核对见 `spikes/PROTOCOL-NOTES.md` §9），不占 `text_elements`。
+- Kimi：`file` 使用 ACP embedded resource：`{type:"resource",resource:{uri:"file://...",mimeType:"text/plain",text}}`；`image` 发为 `{type:"image",mimeType,data}`（base64）。
 
-Claude 与 Kimi 需要把内容嵌入 prompt，因此只接受不超过 1 MiB 的 UTF-8 文本；不满足条件会在发送前明确报错。任何 driver 的 `mentions:false` 也会明确拒绝引用，不会把引用静默降级为普通文本。
+Claude 与 Kimi 需要把 `file` 内容嵌入 prompt：不超过 1 MiB 的 UTF-8 文本照上述嵌入；**不满足条件（PDF、docx、xlsx、大文件等二进制或超 1 MiB）不再报错**，改为在用户文本末尾追加一行 `[附件] <绝对路径>（二进制或超过 1 MiB，未嵌入，请用工具读取）`，由 agent 自行用工具读取。Codex 的 `file` 引用本来只传路径，行为不变。任何 driver 的 `mentions:false` 仍会明确拒绝引用，不会把引用静默降级为普通文本。
 
 Claude 的 `AskUserQuestion` 仍通过原 `permission_request` 审批闸门下行，但事件会额外带上：
 

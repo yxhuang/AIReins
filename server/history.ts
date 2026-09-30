@@ -32,17 +32,12 @@ export interface HistoryListResult {
   durationMs: number;
 }
 
-export interface HistoryPreviewMessage {
-  role: "user" | "assistant";
-  text: string;
-  timestamp?: string;
-}
-
-export interface HistoryMessage {
-  role: "user" | "assistant";
-  text: string;
-  timestamp: string | null;
-}
+export type HistoryMessage =
+  | { role: "user" | "assistant"; text: string; timestamp: string | null }
+  | { role: "tool"; timestamp: string | null; tool: {
+      id: string; name: string; input: unknown; result?: string; rawResult?: unknown;
+      status: "ok" | "error" | "unknown";
+    } };
 
 export interface HistoryMessagesInput {
   limit: number;
@@ -58,12 +53,6 @@ export interface HistoryMessagesPage {
   durationMs: number;
 }
 
-export interface HistoryPreview {
-  session: HistorySession;
-  messages: HistoryPreviewMessage[];
-  truncated: boolean;
-}
-
 export interface HistoryRoots {
   claude: string;
   codex: string;
@@ -76,7 +65,6 @@ export interface HistoryIndexOptions {
   timeoutMs?: number;
   maxDiscovered?: number;
   headBytes?: number;
-  previewBytes?: number;
   messagePageBytes?: number;
 }
 
@@ -116,6 +104,7 @@ interface HistoryMessageCursor {
   agent: AgentKind;
   nativeSessionId: string;
   offset: number;
+  beforeIndex?: number;
 }
 
 interface OffsetLine {
@@ -129,17 +118,13 @@ interface BackwardRead {
   truncated: boolean;
 }
 
-interface OffsetHistoryMessage extends HistoryMessage {
-  startOffset: number;
-}
+type OffsetHistoryMessage = HistoryMessage & { startOffset: number };
 
 const DEFAULT_TIMEOUT_MS = 3_000;
 const DEFAULT_MAX_DISCOVERED = 20_000;
 const DEFAULT_HEAD_BYTES = 512 * 1024;
-const DEFAULT_PREVIEW_BYTES = 2 * 1024 * 1024;
 const DEFAULT_MESSAGE_PAGE_BYTES = 4 * 1024 * 1024;
 const TITLE_LIMIT = 160;
-const PREVIEW_TEXT_LIMIT = 2_000;
 const AGENTS: AgentKind[] = ["claude", "codex", "kimi"];
 
 const INJECTED_TEXT_PREFIXES = [
@@ -171,7 +156,6 @@ export class HistoryIndex {
   private readonly timeoutMs: number;
   private readonly maxDiscovered: number;
   private readonly headBytes: number;
-  private readonly previewBytes: number;
   private readonly messagePageBytes: number;
   private readonly cache = new Map<string, CachedSession>();
   private registryFingerprint = "";
@@ -189,7 +173,6 @@ export class HistoryIndex {
     this.timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     this.maxDiscovered = options.maxDiscovered ?? DEFAULT_MAX_DISCOVERED;
     this.headBytes = options.headBytes ?? DEFAULT_HEAD_BYTES;
-    this.previewBytes = options.previewBytes ?? DEFAULT_PREVIEW_BYTES;
     this.messagePageBytes = options.messagePageBytes ?? DEFAULT_MESSAGE_PAGE_BYTES;
   }
 
@@ -239,33 +222,25 @@ export class HistoryIndex {
     };
   }
 
-  async preview(agent: AgentKind, nativeSessionId: string, limit = 8): Promise<HistoryPreview | undefined> {
+  /**
+   * 「导入前的历史对话」截止点：偏移量 = 该原生会话消息文件当前大小的消息 cursor，
+   * 编码与 messages() 的 nextCursor 完全一致；用它调 messages() 拿到的就是该时刻之前的最新一页。
+   * 文件定位与 messages() 相同（Kimi 用 agents/main/wire.jsonl）。找不到会话或文件时返回 undefined。
+   */
+  async endCursor(agent: AgentKind, nativeSessionId: string): Promise<string | undefined> {
     const deadline = Date.now() + this.timeoutMs;
     const discovery = await this.discover([agent], deadline);
     const candidate = discovery.candidates.find((item) => item.idHint === nativeSessionId);
     if (!candidate) return undefined;
-    const session = await this.parseCandidate(candidate);
-    if (!session) return undefined;
-    const workbenchIds = await this.loadWorkbenchSessionIds();
     const path = agent === "kimi"
       ? join(dirname(candidate.path), "agents", "main", "wire.jsonl")
       : candidate.path;
-    let head: HeadRead;
     try {
-      head = await readHead(path, this.previewBytes);
+      const metadata = await stat(path);
+      return encodeMessageCursor(agent, nativeSessionId, metadata.size);
     } catch {
-      return {
-        session: decorateSource(session, workbenchIds),
-        messages: [],
-        truncated: true,
-      };
+      return undefined;
     }
-    const messages = parsePreview(agent, head.lines, limit);
-    return {
-      session: decorateSource(session, workbenchIds),
-      messages,
-      truncated: head.truncated || messages.length >= limit,
-    };
   }
 
   async messages(
@@ -309,16 +284,31 @@ export class HistoryIndex {
     }
 
     const window = await readBackward(path, endOffset, this.messagePageBytes);
-    const normalized = mergeHistoryMessages(parseHistoryMessages(agent, window.lines));
+    let normalized = mergeHistoryMessages(parseHistoryMessages(agent, window.lines));
+    if (cursor?.beforeIndex !== undefined) {
+      const lastOffset = window.lines.at(-1)?.startOffset;
+      const first = normalized.findIndex((message) => message.startOffset === lastOffset);
+      if (first >= 0) normalized = normalized.slice(0, first + cursor.beforeIndex);
+    }
     const selected = normalized.slice(-input.limit);
     let nextOffset: number | undefined;
-    if (normalized.length > selected.length) nextOffset = selected[0]?.startOffset;
+    let beforeIndex: number | undefined;
+    if (normalized.length > selected.length) {
+      const first = selected[0]!;
+      const earlierInLine = normalized.slice(0, -selected.length).filter((message) => message.startOffset === first.startOffset).length;
+      nextOffset = first.startOffset;
+      if (earlierInLine) {
+        const lineIndex = window.lines.findIndex((line) => line.startOffset === first.startOffset);
+        nextOffset = window.lines[lineIndex + 1]?.startOffset ?? endOffset;
+        beforeIndex = earlierInLine;
+      }
+    }
     else if (window.earlierOffset !== undefined) nextOffset = window.earlierOffset;
     const hasMore = nextOffset !== undefined && nextOffset > 0;
     return {
       session: decorated,
       messages: selected.map(({ startOffset: _startOffset, ...message }) => message),
-      ...(hasMore ? { nextCursor: encodeMessageCursor(agent, nativeSessionId, nextOffset!) } : {}),
+      ...(hasMore ? { nextCursor: encodeMessageCursor(agent, nativeSessionId, nextOffset!, beforeIndex) } : {}),
       hasMore,
       truncated: window.truncated || normalized.length > selected.length,
       durationMs: Date.now() - started,
@@ -681,6 +671,23 @@ async function readBackward(path: string, endOffset: number, maxBytes: number): 
 
 export function parseHistoryMessages(agent: AgentKind, lines: OffsetLine[]): OffsetHistoryMessage[] {
   const messages: OffsetHistoryMessage[] = [];
+  const calls = new Map<string, Extract<HistoryMessage, { role: "tool" }>>();
+  function addTool(id: unknown, name: unknown, input: unknown, time: unknown, startOffset: number) {
+    if (typeof id !== "string" || typeof name !== "string") return;
+    const message: OffsetHistoryMessage & { role: "tool" } = {
+      role: "tool", timestamp: historyTimestamp(time), startOffset,
+      tool: { id: id.slice(0, 256), name: name.slice(0, 256), input: boundedToolValue(input ?? null), status: "unknown" },
+    };
+    calls.set(id, message);
+    messages.push(message);
+  }
+  function finishTool(id: string, result: unknown, error?: boolean, rawResult?: unknown) {
+    const message = calls.get(id);
+    if (!message) return;
+    message.tool.result = boundedToolText(typeof result === "string" ? result : fullText(result, ["text"]) ?? JSON.stringify(result ?? null));
+    if (rawResult !== undefined) message.tool.rawResult = boundedToolValue(rawResult);
+    message.tool.status = error === undefined ? "unknown" : error ? "error" : "ok";
+  }
   const codexHasEventMessages = agent === "codex" && lines.some((line) => {
     const record = parseLine(line.text);
     return record?.type === "event_msg" && ["user_message", "agent_message"].includes(record.payload?.type);
@@ -689,12 +696,46 @@ export function parseHistoryMessages(agent: AgentKind, lines: OffsetLine[]): Off
     const record = parseLine(line.text);
     if (!record) continue;
     if (agent === "claude") {
-      if (record.type === "user" && record.message?.role === "user" && !record.isMeta && !record.isSidechain) {
-        pushHistoryMessage(messages, "user", fullHumanText(record.message.content), record.timestamp, line.startOffset);
-      } else if (record.type === "assistant" && record.message?.role === "assistant") {
-        pushHistoryMessage(messages, "assistant", fullText(record.message.content, ["text"]), record.timestamp, line.startOffset);
+      if (record.isMeta || record.isSidechain) continue;
+      const content = record.message?.content;
+      if (record.type === "assistant" && record.message?.role === "assistant") {
+        for (const block of Array.isArray(content) ? content : [{ type: "text", text: content }]) {
+          if (!block || typeof block !== "object") continue;
+          if (block.type === "text") pushHistoryMessage(messages, "assistant", stringValue(block.text), record.timestamp, line.startOffset);
+          if (block.type === "tool_use") addTool(block.id, block.name, block.input, record.timestamp, line.startOffset);
+        }
+      } else if (record.type === "user" && record.message?.role === "user") {
+        for (const block of Array.isArray(content) ? content : []) {
+          if (!block || typeof block !== "object") continue;
+          if (block.type === "tool_result") finishTool(block.tool_use_id, block.content, block.is_error === true, record.toolUseResult);
+        }
+        pushHistoryMessage(messages, "user", fullHumanText(content), record.timestamp, line.startOffset);
       }
     } else if (agent === "codex") {
+      const payload = record.payload;
+      if (record.type === "response_item" && ["function_call", "custom_tool_call"].includes(payload?.type)) {
+        let input = payload.arguments ?? payload.input;
+        if (typeof input === "string") { try { input = JSON.parse(input); } catch { /* raw custom input */ } }
+        const name = String(payload.name ?? "tool").replace(/^functions\./, "");
+        if (["exec_command", "shell_command", "shell"].includes(name)) {
+          const args = input && typeof input === "object" ? input : {};
+          addTool(payload.call_id, "commandExecution", { ...args, command: args.cmd ?? args.command ?? input }, record.timestamp, line.startOffset);
+        } else if (name === "apply_patch") {
+          const changes = nativePatchChanges(input);
+          addTool(payload.call_id, changes ? "fileChange" : name, changes ? { changes } : input, record.timestamp, line.startOffset);
+        } else addTool(payload.call_id, name, input, record.timestamp, line.startOffset);
+        continue;
+      }
+      if (record.type === "response_item" && ["function_call_output", "custom_tool_call_output"].includes(payload?.type)) {
+        let decoded = payload.output;
+        if (typeof decoded === "string") { try { decoded = JSON.parse(decoded); } catch { /* native terminal text */ } }
+        const output = decoded && typeof decoded === "object" && typeof decoded.output === "string" ? decoded.output : payload.output;
+        const code = decoded?.metadata?.exit_code ?? (typeof output === "string" ? /(?:Process exited with code|Exit code:)\s*(-?\d+)/.exec(output)?.[1] : undefined);
+        const call = calls.get(payload.call_id);
+        finishTool(payload.call_id, output, code !== undefined ? Number(code) !== 0 : undefined,
+          call?.tool.name === "commandExecution" ? { aggregatedOutput: output, ...(code !== undefined ? { exitCode: Number(code) } : {}) } : undefined);
+        continue;
+      }
       if (codexHasEventMessages) {
         if (record.type === "event_msg" && record.payload?.type === "user_message") {
           pushHistoryMessage(messages, "user", stringValue(record.payload.message), record.timestamp, line.startOffset);
@@ -709,6 +750,11 @@ export function parseHistoryMessages(agent: AgentKind, lines: OffsetLine[]): Off
       } else if (record.payload.role === "assistant") {
         pushHistoryMessage(messages, "assistant", fullText(record.payload.content, ["output_text", "text"]), record.timestamp, line.startOffset);
       }
+    } else if (record.type === "context.append_loop_event" && (!record.agentId || record.agentId === "main") && record.event?.type === "tool.call") {
+      addTool(record.event.toolCallId, record.event.name, record.event.args, record.time, line.startOffset);
+    } else if (record.type === "context.append_loop_event" && (!record.agentId || record.agentId === "main") && record.event?.type === "tool.result") {
+      const result = record.event.result;
+      finishTool(record.event.toolCallId, result?.output ?? result, result?.isError ?? result?.is_error ?? Boolean(result?.error), result);
     } else if (record.type === "turn.prompt") {
       pushHistoryMessage(messages, "user", fullHumanText(record.input), record.time, line.startOffset);
     } else if (record.type === "context.append_loop_event" && record.event?.type === "content.part") {
@@ -721,15 +767,51 @@ export function parseHistoryMessages(agent: AgentKind, lines: OffsetLine[]): Off
   return messages;
 }
 
+const TOOL_BODY_LIMIT = 4000;
+function boundedToolText(text: string): string {
+  if (JSON.stringify(text).length <= TOOL_BODY_LIMIT) return text;
+  const suffix = "…[truncated]";
+  let low = 0, high = Math.min(text.length, TOOL_BODY_LIMIT);
+  while (low < high) {
+    const mid = Math.ceil((low + high) / 2);
+    if (JSON.stringify(text.slice(0, mid) + suffix).length <= TOOL_BODY_LIMIT) low = mid;
+    else high = mid - 1;
+  }
+  return text.slice(0, low) + suffix;
+}
+function boundedToolValue(value: unknown): unknown {
+  const serialized = JSON.stringify(value);
+  return serialized.length <= TOOL_BODY_LIMIT ? value : boundedToolText(serialized);
+}
+
+function nativePatchChanges(input: unknown): Array<{ path: string; kind: { type: string; move_path?: string }; diff: string }> | undefined {
+  if (typeof input !== "string" || !input.startsWith("*** Begin Patch")) return undefined;
+  const changes: Array<{ path: string; kind: { type: string; move_path?: string }; diff: string }> = [];
+  for (const line of input.split("\n")) {
+    const header = /^\*\*\* (Add|Update|Delete) File: (.+)$/.exec(line);
+    if (header) changes.push({ path: header[2]!, kind: { type: header[1] === "Add" ? "add" : header[1] === "Delete" ? "delete" : "update" }, diff: "" });
+    else {
+      const last = changes.at(-1);
+      if (!last) continue;
+      if (line.startsWith("*** Move to: ")) last.kind.move_path = line.slice(13);
+      else if (!line.startsWith("***")) last.diff += line + "\n";
+    }
+  }
+  return changes.length ? changes : undefined;
+}
+
 function stringValue(value: unknown): string | undefined {
   return typeof value === "string" && value ? value : undefined;
 }
 
 export function mergeHistoryMessages(messages: OffsetHistoryMessage[]): OffsetHistoryMessage[] {
   const merged: OffsetHistoryMessage[] = [];
+  const toolLines = new Set(messages.filter((message) => message.role === "tool").map((message) => message.startOffset));
   for (const message of messages) {
     const previous = merged.at(-1);
-    if (previous?.role === "assistant" && message.role === "assistant") {
+    if (previous?.role === "assistant" && message.role === "assistant"
+      && (previous.startOffset === message.startOffset
+        || (!toolLines.has(previous.startOffset) && !toolLines.has(message.startOffset)))) {
       previous.text += message.text;
       continue;
     }
@@ -790,7 +872,7 @@ function fullText(content: unknown, types: string[]): string | undefined {
 
 function pushHistoryMessage(
   messages: OffsetHistoryMessage[],
-  role: HistoryMessage["role"],
+  role: "user" | "assistant",
   text: string | undefined,
   timestamp: unknown,
   startOffset: number,
@@ -807,65 +889,6 @@ function pushHistoryMessage(
 function historyTimestamp(value: unknown): string | null {
   if (typeof value === "string" && value) return value;
   return numberTimestamp(value) ?? null;
-}
-
-function parsePreview(agent: AgentKind, lines: string[], limit: number): HistoryPreviewMessage[] {
-  const messages: HistoryPreviewMessage[] = [];
-  for (const line of lines) {
-    if (messages.length >= limit) break;
-    const record = parseLine(line);
-    if (!record) continue;
-    if (agent === "claude") {
-      if (record.type === "user" && record.message?.role === "user" && !record.isMeta && !record.isSidechain) {
-        pushPreview(messages, "user", firstHumanText(record.message.content), record.timestamp);
-      } else if (record.type === "assistant" && record.message?.role === "assistant") {
-        pushPreview(messages, "assistant", firstText(record.message.content, ["text"]), record.timestamp, true);
-      }
-    } else if (agent === "codex") {
-      if (record.type !== "response_item" || record.payload?.type !== "message") continue;
-      if (record.payload.role === "user") {
-        pushPreview(messages, "user", firstHumanText(record.payload.content), record.timestamp);
-      } else if (record.payload.role === "assistant") {
-        pushPreview(messages, "assistant", firstText(record.payload.content, ["output_text", "text"]), record.timestamp, true);
-      }
-    } else if (record.type === "turn.prompt") {
-      pushPreview(messages, "user", firstHumanText(record.input), numberTimestamp(record.time));
-    } else if (record.type === "context.append_loop_event" && record.event?.type === "content.part") {
-      const part = record.event.part;
-      if (part?.type === "text" && typeof part.text === "string") {
-        pushPreview(messages, "assistant", part.text, numberTimestamp(record.time), true);
-      }
-    }
-  }
-  return messages;
-}
-
-function firstText(content: unknown, types: string[]): string | undefined {
-  if (typeof content === "string") return normalizeText(content);
-  if (!Array.isArray(content)) return undefined;
-  for (const block of content) {
-    if (!block || typeof block !== "object") continue;
-    const item = block as Record<string, unknown>;
-    if (types.includes(String(item.type ?? "")) && typeof item.text === "string") return normalizeText(item.text);
-  }
-  return undefined;
-}
-
-function pushPreview(
-  messages: HistoryPreviewMessage[],
-  role: HistoryPreviewMessage["role"],
-  value: string | undefined,
-  timestamp?: string,
-  merge = false,
-): void {
-  if (!value) return;
-  const text = truncateText(value, PREVIEW_TEXT_LIMIT);
-  const previous = messages.at(-1);
-  if (merge && previous?.role === role) {
-    previous.text = truncateText(`${previous.text}${text}`, PREVIEW_TEXT_LIMIT);
-    return;
-  }
-  messages.push({ role, text, ...(timestamp ? { timestamp } : {}) });
 }
 
 function numberTimestamp(value: unknown): string | undefined {
@@ -904,8 +927,8 @@ function decodeCursor(value: string): CursorData {
   }
 }
 
-function encodeMessageCursor(agent: AgentKind, nativeSessionId: string, offset: number): string {
-  const value: HistoryMessageCursor = { version: 1, agent, nativeSessionId, offset };
+function encodeMessageCursor(agent: AgentKind, nativeSessionId: string, offset: number, beforeIndex?: number): string {
+  const value: HistoryMessageCursor = { version: 1, agent, nativeSessionId, offset, beforeIndex };
   return Buffer.from(JSON.stringify(value)).toString("base64url");
 }
 
@@ -918,6 +941,7 @@ function decodeMessageCursor(value: string): HistoryMessageCursor {
       || typeof parsed.nativeSessionId !== "string"
       || !Number.isSafeInteger(parsed.offset)
       || parsed.offset! < 0
+      || (parsed.beforeIndex !== undefined && (!Number.isSafeInteger(parsed.beforeIndex) || parsed.beforeIndex < 0))
     ) {
       throw new Error("invalid message cursor fields");
     }

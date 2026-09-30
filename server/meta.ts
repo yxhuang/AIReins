@@ -38,18 +38,7 @@ export function getMeta(): Promise<Record<string, unknown>> {
     // 用户在全新环境下会被锁在应用外面（2026-08-22 实测踩到）。
     defaultCwd: process.cwd(),
     cliVersions: { claude, codex, kimi },
-    capabilities: {
-      websocket: true,
-      snapshot: true,
-      ringReplay: true,
-      staticServing: true,
-    },
     drivers,
-    security: {
-      bindHost: "127.0.0.1",
-      authentication: false,
-      remoteAccess: false,
-    },
   }));
   return cached;
 }

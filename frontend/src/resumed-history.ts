@@ -1,16 +1,10 @@
 import type { HistoryMessage, HistoryMessagesPage } from "./types";
 
 // 续接会话历史消息区（ResumedHistory）的纯逻辑（无 DOM 依赖，可单测）：
-// 最新一页打底、nextCursor 向更早翻页 prepend、DOM 量上限。
+// 最新一页打底、nextCursor 向更早翻页 prepend。
 
 /** 每页条数：与后端默认一致（50），默认只加载最近一页，不一次拉全。 */
 export const HISTORY_PAGE_SIZE = 50;
-
-/**
- * 历史区 DOM 量上限：最多加载最近 500 条（10 页）。达到后不再继续翻页，
- * 如实提示「更早的内容在原生会话文件中」，不引虚拟滚动库。
- */
-export const HISTORY_MAX_MESSAGES = 500;
 
 export interface HistoryPageState {
   /** 已加载消息，整体按时间正序（新的在后） */
@@ -30,6 +24,30 @@ export function initialHistoryPage(page: HistoryMessagesPage): HistoryPageState 
     hasMore: page.hasMore,
     truncated: page.truncated,
   };
+}
+
+/** cursor 类失败（已失效/不匹配/无效）的判定：服务端 400 的中文消息都含 "cursor"。 */
+export function isStaleCursorError(error: unknown): boolean {
+  return error instanceof Error && error.message.includes("cursor");
+}
+
+/**
+ * 首页加载：有 initialCursor（导入时刻的截止 cursor）先按它取，拿到的就是导入前的最新一页；
+ * cursor 失效（原生文件被截断/改写等）时退回不带 cursor 的最新一页，不报错；
+ * 其余错误原样抛出，由调用方显示。
+ */
+export async function fetchInitialHistoryPage(
+  fetcher: (opts: { limit: number; cursor?: string }) => Promise<HistoryMessagesPage>,
+  initialCursor: string | undefined,
+  limit: number,
+): Promise<HistoryMessagesPage> {
+  if (!initialCursor) return fetcher({ limit });
+  try {
+    return await fetcher({ limit, cursor: initialCursor });
+  } catch (error) {
+    if (!isStaleCursorError(error)) throw error;
+    return fetcher({ limit });
+  }
 }
 
 /**
@@ -56,9 +74,4 @@ export function prependHistoryPage(
     hasMore: page.hasMore,
     truncated: prev.truncated || page.truncated,
   };
-}
-
-/** 是否已到 DOM 上限（达到后翻页按钮换成说明文字）。 */
-export function historyCapReached(state: HistoryPageState): boolean {
-  return state.messages.length >= HISTORY_MAX_MESSAGES;
 }

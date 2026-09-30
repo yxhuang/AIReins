@@ -3,7 +3,7 @@ import { isAbsolute, resolve } from "node:path";
 import { readClaudeEffectiveSettings, type ClaudeEffectiveSettings } from "./claude-settings.js";
 import { createDriver, DRIVER_CAPABILITIES } from "./drivers/index.js";
 import { log } from "./logger.js";
-import { NativeConversationReader, type NativeConversationMark } from "./native-conversation.js";
+import { NativeConversationReader, type NativeConversationChange, type NativeConversationMark } from "./native-conversation.js";
 import {
   cleanSessionConfig,
   configFromCreateInput,
@@ -18,6 +18,7 @@ import {
   transcriptPathFor,
 } from "./persistence.js";
 import { createSnapshotIfNeeded } from "./snapshot.js";
+import { IMAGE_MENTION_MIME_TYPES, MAX_IMAGE_MENTION_BYTES } from "./uploads.js";
 import type {
   CreateSessionInput,
   Driver,
@@ -29,6 +30,7 @@ import type {
   SessionConfig,
   SessionRecord,
   SessionStatus,
+  RemoteControlState,
   UnifiedCommand,
   UnifiedEvent,
   UserMessageInput,
@@ -52,6 +54,8 @@ export class SessionManager {
   private readonly promptedSessions = new Set<string>();
   private readonly nativeMarks = new Map<string, NativeConversationMark>();
   private readonly pendingMarkReads = new Map<string, Promise<void>>();
+  /** 未决审批闸门（requestId 集合）：释放 worker 的前提是没有待处理闸门 */
+  private readonly pendingGates = new Map<string, Set<string>>();
 
   constructor(
     private readonly driverFactory: DriverFactory = createDriver,
@@ -71,8 +75,11 @@ export class SessionManager {
       this.sessions.set(stored.id, {
         ...stored,
         status: "dead",
+        // 重启后所有会话都是 dead，已释放标记随之失效（否则前端会误显示「下次发送自动续接」）
+        released: undefined,
         seq,
         processId: undefined,
+        ...(stored.agent === "claude" ? { remoteControl: { status: "disconnected" as const } } : {}),
         config,
         model: stored.agent === "claude" && stored.model !== undefined ? stored.model : config.model,
         effort: stored.agent === "claude" && stored.effort !== undefined ? stored.effort : config.effort,
@@ -81,6 +88,7 @@ export class SessionManager {
       });
       this.rings.set(stored.id, events.slice(-RING_SIZE));
       this.commands.set(stored.id, []);
+      this.pendingGates.set(stored.id, pendingGatesFrom(events));
     }
     if (loaded.length > 0) this.persistRegistry();
   }
@@ -150,6 +158,7 @@ export class SessionManager {
         resumedFrom: {
           agent: input.agent,
           nativeSessionId: input.resumeSessionId,
+          ...(input.historyCursor ? { historyCursor: input.historyCursor } : {}),
         },
       } : {}),
       model: config.model,
@@ -158,10 +167,12 @@ export class SessionManager {
       permissionMode: config.permissionMode,
       config,
       riskyMode: isRiskyConfig(input.agent, config),
+      ...(input.agent === "claude" ? { remoteControl: { status: "disconnected" as const } } : {}),
     };
     this.sessions.set(id, record);
     this.rings.set(id, []);
     this.commands.set(id, []);
+    this.pendingGates.set(id, new Set());
     this.persistRegistry();
     this.emit(id, "session_created", {
       agent: input.agent,
@@ -225,11 +236,12 @@ export class SessionManager {
 
   async sendUserMessage(id: string, input: UserMessageInput): Promise<void> {
     if (this.restartingSessions.has(id)) throw new Error("正在切换模型，请稍候再发送消息");
-    this.requireWorker(id);
+    const record = this.sessions.get(id);
+    if (!record) throw new Error(`会话不存在：${id}`);
     if (this.checkingSessions.has(id)) throw new Error("正在检查原生会话，请稍候再发送消息");
     this.checkingSessions.add(id);
     try {
-      const record = this.sessions.get(id)!;
+      // idle 会话发送前：已释放的先拉起 worker，活着的比对原生指纹（详见 refreshBeforeSend）
       if (record.status === "idle") await this.refreshBeforeSend(id);
       const worker = this.requireWorker(id);
       const message = this.normalizeUserMessage(id, input);
@@ -245,6 +257,15 @@ export class SessionManager {
     }
   }
 
+  async setRemoteControl(id: string, enabled: boolean): Promise<RemoteControlState> {
+    const session = this.sessions.get(id);
+    if (!session || session.agent !== "claude") throw new Error("仅 Claude 会话支持 Remote Control");
+    if (this.restartingSessions.has(id)) throw new Error("Claude worker 正在重启");
+    const worker = await this.ensureWorker(id);
+    if (!worker.setRemoteControl) throw new Error("Claude driver 不支持 Remote Control");
+    return worker.setRemoteControl(enabled);
+  }
+
   async resolvePermission(
     id: string,
     requestId: string,
@@ -252,6 +273,7 @@ export class SessionManager {
     updatedInput?: unknown,
     questionAnswers?: QuestionAnswers,
   ): Promise<void> {
+    this.requireLiveWorker(id);
     const worker = this.requireWorker(id);
     await worker.resolvePermission(requestId, decision, updatedInput, questionAnswers);
     this.emit(id, "permission_resolved", {
@@ -269,7 +291,7 @@ export class SessionManager {
     if (entries.length === 0) throw new Error("set_config.config 至少包含一个配置项");
     if (this.restartingSessions.has(id)) throw new Error("正在切换模型，请稍候");
     if (this.checkingSessions.has(id)) throw new Error("正在检查原生会话，请稍候再切换配置");
-    const worker = this.requireWorker(id);
+    const worker = await this.ensureWorker(id);
     const schema = worker.getConfigSchema();
     for (const [key, value] of entries) {
       const option = schema.options.find((item) => item.id === key);
@@ -296,6 +318,7 @@ export class SessionManager {
   }
 
   async interrupt(id: string): Promise<void> {
+    this.requireLiveWorker(id);
     await this.requireWorker(id).interrupt();
   }
 
@@ -312,10 +335,83 @@ export class SessionManager {
     this.promptedSessions.delete(id);
     this.nativeMarks.delete(id);
     this.pendingMarkReads.delete(id);
+    this.pendingGates.delete(id);
     this.rings.delete(id);
     this.commands.delete(id);
     this.persistRegistry();
     return cloneSession({ ...record, status: "dead", processId: undefined });
+  }
+
+  /**
+   * 释放会话 worker：停掉进程但保留会话记录（status 保持 idle，released=true 持久化），
+   * 下次发送或需要 worker 的操作会按原生会话 id 从磁盘续接（与「别处续聊」同一条路径）。
+   * 返回带 cwd 的原生续接命令，供用户去 VSCode/CLI/终端继续。
+   */
+  async release(
+    id: string,
+    reason: "manual" | "idle",
+    context: { idleMinutes?: number } = {},
+  ): Promise<{ session: SessionRecord; resumeCommand: string }> {
+    const record = this.sessions.get(id);
+    if (!record) throw new Error(`会话不存在：${id}`);
+    if (record.released) throw new Error("会话 worker 已释放；下次发送时会自动从磁盘续接");
+    const blocker = this.releaseBlocker(id, record);
+    if (blocker) throw new Error(blocker);
+    const worker = this.workers.get(id)!;
+    // 先从 workers 删除再 stop：stop 触发的 exited 回调因 current() 为假直接返回，不会把会话标成 dead
+    // 标记先于 await stop()：stop 期间到达的发送走已释放分支（从磁盘续接），而不是报「没有活动 worker」
+    this.workers.delete(id);
+    record.released = true;
+    record.processId = undefined;
+    await worker.stop();
+    if (record.agent === "claude") {
+      record.remoteControl = { status: "disconnected" };
+      this.emit(id, "remote_control_updated", { status: "disconnected" });
+    }
+    this.persistRegistry();
+    const resumeCommand = buildResumeCommand(record);
+    this.emit(id, "worker_released", {
+      reason,
+      resumeCommand,
+      ...(reason === "idle" && context.idleMinutes !== undefined ? { idleMinutes: context.idleMinutes } : {}),
+    });
+    return { session: cloneSession(record), resumeCommand };
+  }
+
+  /** 自动释放跳过的原因；null 表示可以释放。手动释放把这些原因转成可读错误。 */
+  private releaseBlocker(id: string, record: SessionRecord): string | null {
+    if (this.restartingSessions.has(id)) return "会话正在切换配置或续接，请稍候";
+    if (this.checkingSessions.has(id)) return "会话正在检查原生会话，请稍候";
+    if (record.status !== "idle") return `会话当前状态为 ${record.status}，空闲时才能释放`;
+    if ((this.pendingGates.get(id)?.size ?? 0) > 0) return "会话有待处理的审批闸门，处理后才能释放";
+    if (!record.nativeSessionId) return "会话还没有原生会话 id（首轮完成前），无法释放";
+    if (!this.workers.has(id)) return "会话没有活动 worker";
+    return null;
+  }
+
+  /**
+   * 空闲自动释放：每分钟由 server 调用一次。跳过 running/starting、有待处理闸门、
+   * 没有原生 id、正在重启/检查中的会话；开着 Remote Control 的 Claude 会话不释放
+   * （开 RC 就是要手机能随时找到它，释放会断开）。idleMinutes 为 0 时整体关闭。
+   */
+  async releaseIdleSessions(idleMinutes: number, now: Date = new Date()): Promise<void> {
+    if (!Number.isInteger(idleMinutes) || idleMinutes <= 0) return;
+    const thresholdMs = idleMinutes * 60_000;
+    for (const record of [...this.sessions.values()]) {
+      if (record.released) continue;
+      if (this.releaseBlocker(record.id, record)) continue;
+      if (now.getTime() - Date.parse(record.lastActivityAt) < thresholdMs) continue;
+      if (record.agent === "claude"
+        && ["connected", "connecting", "reconnecting"].includes(record.remoteControl?.status ?? "disconnected")) continue;
+      try {
+        await this.release(record.id, "idle", { idleMinutes });
+      } catch (error) {
+        log("warn", "idle release failed", {
+          sessionId: record.id,
+          errorMessage: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
   }
 
   async shutdown(): Promise<void> {
@@ -350,6 +446,7 @@ export class SessionManager {
     ring.push(event);
     if (ring.length > RING_SIZE) ring.splice(0, ring.length - RING_SIZE);
     this.rings.set(id, ring);
+    this.trackPendingGate(id, event);
     this.persistRegistry();
     for (const listener of this.listeners) listener(event);
     if (type === "turn_completed") {
@@ -370,6 +467,21 @@ export class SessionManager {
     const pid = this.workers.get(id)?.child?.pid;
     session.processId = status === "dead" ? undefined : pid;
     this.persistRegistry();
+  }
+
+  /** 释放前置条件要的未决闸门集合：请求进入、解决移除、进程退出清空。 */
+  private trackPendingGate(id: string, event: UnifiedEvent): void {
+    if (event.type === "permission_request") {
+      const requestId = String(event.payload.requestId ?? "");
+      if (!requestId) return;
+      const set = this.pendingGates.get(id) ?? new Set<string>();
+      set.add(requestId);
+      this.pendingGates.set(id, set);
+    } else if (event.type === "permission_resolved") {
+      this.pendingGates.get(id)?.delete(String(event.payload.requestId ?? ""));
+    } else if (event.type === "process_exited") {
+      this.pendingGates.get(id)?.clear();
+    }
   }
 
   private applyConfig(session: SessionRecord, update: SessionConfig): void {
@@ -430,62 +542,107 @@ export class SessionManager {
     });
   }
 
+  /**
+   * idle 会话发送前的共用续接逻辑（已释放会话与「别处续聊」走同一条路径）：
+   * 比对原生记录指纹；需要续接时（检测到外部新消息，或 worker 已释放必须重建）
+   * 起新进程以同一原生 ID 续接，有外部新消息时先广播 external_messages_added。
+   * 已释放会话没有旧 worker 可停；指纹缺失/比对失败时活会话照常发送，已释放会话仍必须重建 worker。
+   */
   private async refreshBeforeSend(id: string): Promise<void> {
     await this.pendingMarkReads.get(id);
     const record = this.sessions.get(id)!;
+    const released = record.released === true;
     const previous = this.nativeMarks.get(id);
+    let change: NativeConversationChange | undefined;
     if (!previous) {
       this.warnMissingNativeMark(record, "尚未记录上次同步的对话指纹");
-      return;
+      if (!released) return;
+    } else {
+      try {
+        change = await this.nativeReader.changed(record, previous);
+      } catch (error) {
+        this.warnMissingNativeMark(record, error instanceof Error ? error.message : String(error));
+        if (!released) return;
+      }
     }
-    let change;
-    try {
-      change = await this.nativeReader.changed(record, previous);
-    } catch (error) {
-      this.warnMissingNativeMark(record, error instanceof Error ? error.message : String(error));
-      return;
-    }
-    if (!change) return;
-    if (change.messages.length === 0) {
-      // Only our previous assistant reply was flushed late. Keep the live worker.
-      this.nativeMarks.set(id, change.mark);
-      return;
+    if (!released) {
+      if (!change) return;
+      if (change.messages.length === 0) {
+        // Only our previous assistant reply was flushed late. Keep the live worker.
+        this.nativeMarks.set(id, change.mark);
+        return;
+      }
     }
     const nativeSessionId = record.nativeSessionId;
     if (!nativeSessionId) {
       this.warnMissingNativeMark(record, "原生会话 ID 缺失");
+      if (released) throw new Error("会话已释放且缺少原生会话 ID，无法续接");
       return;
     }
-    const oldWorker = this.requireWorker(id);
+    const oldWorker = this.workers.get(id) ?? null;
     this.restartingSessions.add(id);
     this.setStatus(id, "starting");
     this.workers.delete(id);
     try {
       const replacement = await this.replaceWorker(id, oldWorker, record.config, nativeSessionId);
       record.processId = replacement.child?.pid;
-      this.nativeMarks.set(id, change.mark);
-      this.emit(id, "external_messages_added", {
-        nativeSessionId,
-        messages: change.messages,
-        truncated: change.truncated,
-      });
+      if (change) this.nativeMarks.set(id, change.mark);
+      else await this.captureNativeMark(id);
+      if (released) {
+        delete record.released;
+        this.setStatus(id, "idle");
+      }
+      if (change && change.messages.length > 0) {
+        this.emit(id, "external_messages_added", {
+          nativeSessionId,
+          messages: change.messages,
+          truncated: change.truncated,
+        });
+      }
     } catch (error) {
-      const message = `检测到别处续聊，但重新续接失败；本轮未发送：${error instanceof Error ? error.message : String(error)}`;
+      const detail = error instanceof Error ? error.message : String(error);
+      const message = released
+        ? `会话已释放，重新续接失败；本轮未发送：${detail}`
+        : `检测到别处续聊，但重新续接失败；本轮未发送：${detail}`;
       this.emit(id, "session_error", { message, source: "external_resume" });
-      this.setStatus(id, "error");
+      // 已释放会话失败时保持 released 与 idle（下次发送可再试），不标 dead
+      this.setStatus(id, released ? "idle" : "error");
       throw new Error(message);
     } finally {
       this.restartingSessions.delete(id);
     }
   }
 
+  /**
+   * 需要 worker 的操作（setConfig / setRemoteControl 等）统一入口：
+   * 活 worker 直接返回；已释放会话先按 refreshBeforeSend 的外部续接路径拉起再返回。
+   */
+  private async ensureWorker(id: string): Promise<Driver> {
+    const existing = this.workers.get(id);
+    if (existing) return existing;
+    const record = this.sessions.get(id);
+    if (!record) throw new Error(`会话不存在：${id}`);
+    // 只有 idle 的 released 会话可以原地拉起；server 重启后载入的 dead 会话只能新建续接
+    if (!record.released || record.status !== "idle") return this.requireWorker(id);
+    if (this.restartingSessions.has(id)) throw new Error("会话正在续接，请稍候");
+    await this.refreshBeforeSend(id);
+    return this.requireWorker(id);
+  }
+
+  /** interrupt / resolvePermission 不触发续接：已释放会话直接报可读错误。 */
+  private requireLiveWorker(id: string): void {
+    const record = this.sessions.get(id);
+    if (!record) throw new Error(`会话不存在：${id}`);
+    if (record.released) throw new Error("会话 worker 已释放；发送消息时会自动从磁盘续接");
+  }
+
   private async replaceWorker(
     id: string,
-    oldWorker: Driver,
+    oldWorker: Driver | null,
     config: SessionConfig,
     nativeSessionId?: string,
   ): Promise<Driver> {
-    await oldWorker.stop();
+    await oldWorker?.stop();
     const record = this.sessions.get(id)!;
     let replacement!: Driver;
     const callbacks = this.driverCallbacks(id, () => replacement);
@@ -496,9 +653,17 @@ export class SessionManager {
       resumeSessionId: nativeSessionId,
       callbacks,
     });
+    const restoreRemote = record.agent === "claude"
+      && ["connected", "reconnecting", "connecting"].includes(record.remoteControl?.status ?? "")
+      && !this.claudeSettingsResolver(record.cwd).remoteControlAtStartup;
     this.workers.set(id, replacement);
+    if (record.agent === "claude") {
+      record.remoteControl = { status: "disconnected" };
+      this.emit(id, "remote_control_updated", { ...record.remoteControl });
+    }
     try {
       await replacement.start();
+      if (restoreRemote) await replacement.setRemoteControl?.(true);
       return replacement;
     } catch (error) {
       if (this.workers.get(id) === replacement) this.workers.delete(id);
@@ -593,6 +758,10 @@ export class SessionManager {
         if (metadata.nativeTranscriptPath) session.nativeTranscriptPath = metadata.nativeTranscriptPath;
         if (metadata.config) this.applyConfig(session, metadata.config);
         if (metadata.effectiveConfig) this.applyEffectiveConfig(session, metadata.effectiveConfig);
+        if (metadata.remoteControl) {
+          session.remoteControl = metadata.remoteControl;
+          this.emit(id, "remote_control_updated", { ...metadata.remoteControl });
+        }
         const pid = worker().child?.pid;
         if (pid) session.processId = pid;
         this.persistRegistry();
@@ -609,6 +778,11 @@ export class SessionManager {
       exited: (info) => {
         if (!this.sessions.has(id) || !current()) return;
         this.emit(id, "process_exited", info as unknown as Record<string, unknown>);
+        const session = this.sessions.get(id);
+        if (session?.agent === "claude") {
+          session.remoteControl = { status: "disconnected" };
+          this.emit(id, "remote_control_updated", { status: "disconnected" });
+        }
         this.setStatus(id, "dead");
         this.workers.delete(id);
       },
@@ -652,6 +826,20 @@ export class SessionManager {
       const path = resolve(session.cwd, mention.path);
       const stats = statSync(path);
       if (!stats.isFile()) throw new Error(`引用路径不是文件：${path}`);
+      if (mention.type === "image") {
+        if (!IMAGE_MENTION_MIME_TYPES.has(mention.mimeType)) {
+          throw new Error(`图片附件 mimeType 不支持：${mention.mimeType}（仅 png/jpeg/gif/webp）`);
+        }
+        if (stats.size > MAX_IMAGE_MENTION_BYTES) {
+          throw new Error(`图片附件超过 10 MB 上限：${path}`);
+        }
+        return {
+          type: "image" as const,
+          path,
+          mimeType: mention.mimeType,
+          ...(mention.name ? { name: mention.name } : {}),
+        };
+      }
       return {
         type: "file" as const,
         path,
@@ -740,4 +928,29 @@ function cloneSession(session: SessionRecord): SessionRecord {
     config: { ...session.config },
     ...(session.resumedFrom ? { resumedFrom: { ...session.resumedFrom } } : {}),
   };
+}
+
+/** 从既有 transcript 重建未决闸门集合（启动加载注册表时用）。 */
+function pendingGatesFrom(events: UnifiedEvent[]): Set<string> {
+  const gates = new Set<string>();
+  for (const event of events) {
+    if (event.type === "permission_request") {
+      const requestId = String(event.payload.requestId ?? "");
+      if (requestId) gates.add(requestId);
+    } else if (event.type === "permission_resolved") {
+      gates.delete(String(event.payload.requestId ?? ""));
+    } else if (event.type === "process_exited") {
+      gates.clear();
+    }
+  }
+  return gates;
+}
+
+/** 带 cwd 的原生续接命令；cwd 做 shell 单引号转义（' → '\''）。 */
+function buildResumeCommand(record: SessionRecord): string {
+  const cwd = `'${record.cwd.replace(/'/g, `'\\''`)}'`;
+  const nativeId = record.nativeSessionId ?? "";
+  if (record.agent === "claude") return `cd ${cwd} && claude --resume ${nativeId}`;
+  if (record.agent === "codex") return `cd ${cwd} && codex resume ${nativeId}`;
+  return `cd ${cwd} && kimi -S ${nativeId}`;
 }

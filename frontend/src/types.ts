@@ -3,6 +3,11 @@
 
 export type AgentKind = "claude" | "codex" | "kimi";
 export type SessionStatus = "starting" | "idle" | "running" | "dead" | "error";
+export interface RemoteControlState {
+  status: "disconnected" | "connecting" | "connected" | "reconnecting" | "disconnecting" | "error";
+  sessionUrl?: string;
+  reason?: string;
+}
 export type PermissionDecision = "allow" | "deny" | "always";
 
 export type ConfigOptionId = "model" | "effort" | "permissionMode";
@@ -84,8 +89,12 @@ export interface SessionRecord {
     agent: AgentKind;
     nativeSessionId: string;
     messageCount?: number;
+    /** 服务端在导入时刻记下的历史分页截止 cursor；历史区首页截止在导入前，缺省则从最新一页开始 */
+    historyCursor?: string;
   };
   processId?: number;
+  /** true = worker 已释放（手动或空闲超时）；下次发送时后端按原生会话 id 从磁盘续接 */
+  released?: boolean;
   model?: string | null;
   effort?: string | null;
   permissionMode?: string | null;
@@ -99,6 +108,7 @@ export interface SessionRecord {
   snapshotPath?: string | null;
   /** true = 该会话已关闭 agent 主动询问（claude bypass/dontAsk、codex never、kimi yolo） */
   riskyMode: boolean;
+  remoteControl?: RemoteControlState;
 }
 
 /** GET /api/sessions/:id/commands 与 commands_updated 的命令项；name 不含开头的 /。 */
@@ -109,29 +119,30 @@ export interface CommandInfo {
   source: AgentKind;
 }
 
-/** WS user_message 的 mentions 项（当前只有文件引用）；path 为会话 cwd 相对路径。 */
+/** WS user_message 的 mentions 项：文件引用（@ 引用或「+」附件），path 为会话 cwd 相对路径或 uploads 绝对路径。 */
 export interface FileMention {
   type: "file";
   path: string;
+  name?: string;
 }
 
+/** 图片附件（「+」上传或粘贴/拖入）；mimeType 限 png/jpeg/gif/webp，path 为服务端绝对路径。 */
+export interface ImageMention {
+  type: "image";
+  path: string;
+  mimeType: string;
+  name?: string;
+}
+
+export type Mention = FileMention | ImageMention;
+
 export interface DriverCapabilities {
-  streaming: boolean;
-  thoughts: boolean;
-  toolCalls: boolean;
-  permissions: boolean;
-  permissionSuggestions: boolean;
-  updatedInput: boolean;
   usage: "detailed" | "context" | false;
   interrupt: boolean;
-  resume: boolean;
   /** false = 无斜杠命令枚举协议（codex）：不弹命令面板，结构化 command 会被后端拒绝 */
   commands: boolean;
   /** @ 文件引用能力位：false = 不弹 @ 面板、不显示预览条、发送不解析引用（纯文本原样发） */
   mentions: boolean;
-  terminal?: boolean;
-  fsWrite?: boolean;
-  finalApprovalGates?: string[];
 }
 
 /** meta.drivers.<agent> = 能力位 + 配置 schema（options 探针失败时为空数组并带 error） */
@@ -146,9 +157,8 @@ export interface MetaInfo {
   /** server 进程 cwd：新建会话表单 cwd 预填的最后一级回退 */
   defaultCwd: string;
   cliVersions: Record<AgentKind, string>;
-  capabilities: Record<string, unknown>;
+  capabilities: { terminal: boolean };
   drivers: Record<AgentKind, DriverMeta>;
-  security: Record<string, unknown>;
 }
 
 export interface Snapshot {
@@ -210,12 +220,14 @@ export interface SnapshotPreflight {
   snapshotPath: string | null;
 }
 
-/** GET /api/fs/dirs 的 data：一级子目录及可返回的逻辑父路径。 */
+/** GET /api/fs/dirs 的 data：一级子目录及可返回的逻辑父路径；files=1 时多带同层普通文件列表。 */
 export interface DirectoryListing {
   path: string;
   parent: string | null;
   dirs: { name: string; path: string }[];
   truncated: boolean;
+  /** 仅 files=1 时返回：同层普通文件（隐藏文件不列） */
+  files?: { name: string; path: string }[];
 }
 
 /** 三家 CLI 原生历史会话的可识别创建来源；unknown 如实显示「未知」，不猜。 */
@@ -244,27 +256,12 @@ export interface HistoryListData {
   durationMs: number;
 }
 
-/** GET /api/history/:agent/:nativeSessionId 的预览消息（≤8 条，只读文件头部）。 */
-export interface HistoryPreviewMessage {
-  role: "user" | "assistant";
-  text: string;
-  timestamp?: string;
-}
-
-export interface HistoryPreview {
-  session: HistorySession;
-  messages: HistoryPreviewMessage[];
-  /** true 是常态（只读头部），界面写中性说明，不渲染成警告 */
-  truncated: boolean;
-}
-
-/** GET …/messages 的归一历史消息：思考/工具调用已被后端丢弃，前端不伪造。 */
-export interface HistoryMessage {
-  role: "user" | "assistant";
-  text: string;
-  /** 原生记录缺失时间时为 null，前端如实不显示时间 */
-  timestamp: string | null;
-}
+export type HistoryMessage =
+  | { role: "user" | "assistant"; text: string; timestamp: string | null }
+  | { role: "tool"; timestamp: string | null; tool: {
+      id: string; name: string; input: unknown; result?: string; rawResult?: unknown;
+      status: "ok" | "error" | "unknown";
+    } };
 
 /** GET /api/history/:agent/:nativeSessionId/messages 的 data：最新一页 + 向更早翻页。 */
 export interface HistoryMessagesPage {
@@ -280,9 +277,12 @@ export interface HistoryMessagesPage {
 }
 
 /** 终端面板的终端信息（docs/terminal-panel-design.md §9 契约）。 */
+export type ShellKind = "bash" | "powershell";
+
 export interface TerminalInfo {
   id: string;
   cwd: string;
+  kind: ShellKind;
   shell: string;
   cols: number;
   rows: number;
@@ -296,4 +296,9 @@ export interface ApiEnvelope<T> {
   msg: string;
   data: T;
   request_id: string;
+}
+
+/** GET/PUT /api/prefs 的服务端偏好；idleReleaseMinutes 为 0 表示关闭空闲自动释放。 */
+export interface WorkbenchPrefs {
+  idleReleaseMinutes: number;
 }

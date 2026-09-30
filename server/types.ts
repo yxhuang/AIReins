@@ -17,15 +17,22 @@ export const EVENT_TYPES = [
   "permission_resolved",
   "commands_updated",
   "config_updated",
+  "remote_control_updated",
   "usage_updated",
   "turn_completed",
   "session_error",
   "process_exited",
+  "worker_released",
   "raw_event",
 ] as const;
 
 export type EventType = (typeof EVENT_TYPES)[number];
 export type SessionStatus = "starting" | "idle" | "running" | "dead" | "error";
+export interface RemoteControlState {
+  status: "disconnected" | "connecting" | "connected" | "reconnecting" | "disconnecting" | "error";
+  sessionUrl?: string;
+  reason?: string;
+}
 export type PermissionDecision = "allow" | "deny" | "always";
 export type QuestionAnswers = Record<string, string>;
 
@@ -83,6 +90,16 @@ export interface FileMention {
   name?: string;
 }
 
+/** 图片附件（「+」上传或粘贴/拖入）；mimeType 限 png/jpeg/gif/webp，path 为服务端绝对路径。 */
+export interface ImageMention {
+  type: "image";
+  path: string;
+  mimeType: string;
+  name?: string;
+}
+
+export type Mention = FileMention | ImageMention;
+
 export interface CommandInvocation {
   name: string;
   arguments?: string;
@@ -91,7 +108,7 @@ export interface CommandInvocation {
 export interface UserMessageInput {
   text?: string;
   command?: CommandInvocation;
-  mentions?: FileMention[];
+  mentions?: Mention[];
 }
 
 export interface UnifiedEvent {
@@ -120,8 +137,12 @@ export interface SessionRecord {
     agent: AgentKind;
     nativeSessionId: string;
     messageCount?: number;
+    /** 导入时刻算出的历史分页截止 cursor（offset = 当时原生消息文件大小）；历史区首页截止在导入前 */
+    historyCursor?: string;
   };
   processId?: number;
+  /** true = worker 已释放（手动或空闲超时）；下次发送时按原生会话 id 从磁盘续接 */
+  released?: boolean;
   model?: string | null;
   effort?: string | null;
   effectiveModel?: string | null;
@@ -131,23 +152,14 @@ export interface SessionRecord {
   permissionMode?: string | null;
   config: SessionConfig;
   riskyMode: boolean;
+  remoteControl?: RemoteControlState;
 }
 
 export interface DriverCapabilities {
-  streaming: boolean;
-  thoughts: boolean;
-  toolCalls: boolean;
-  permissions: boolean;
-  permissionSuggestions: boolean;
-  updatedInput: boolean;
   usage: "detailed" | "context" | false;
   interrupt: boolean;
-  resume: boolean;
   commands: boolean;
   mentions: boolean;
-  terminal?: boolean;
-  fsWrite?: boolean;
-  finalApprovalGates?: string[];
 }
 
 export interface DriverCallbacks {
@@ -157,6 +169,7 @@ export interface DriverCallbacks {
     nativeTranscriptPath?: string;
     config?: SessionConfig;
     effectiveConfig?: EffectiveConfigUpdate;
+    remoteControl?: RemoteControlState;
   }): void;
   commands(commands: UnifiedCommand[]): void;
   status(status: SessionStatus): void;
@@ -177,6 +190,7 @@ export interface Driver {
   start(): Promise<void>;
   getConfigSchema(): DriverConfigSchema;
   setConfig(config: SessionConfig): Promise<SessionConfig>;
+  setRemoteControl?(enabled: boolean): Promise<RemoteControlState>;
   sendUserMessage(message: UserMessageInput): Promise<void>;
   resolvePermission(
     requestId: string,
@@ -197,6 +211,8 @@ export interface CreateSessionInput {
   /** @deprecated Use config.model. */
   model?: string;
   resumeSessionId?: string;
+  /** 服务端内部字段：带 resumeSessionId 建会话时由服务端在 create 前算出；客户端传值一律被覆盖 */
+  historyCursor?: string;
   /** @deprecated Use config.permissionMode. */
   kimiMode?: "default" | "plan" | "auto" | "yolo";
   initialMessage?: string;

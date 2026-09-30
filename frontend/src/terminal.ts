@@ -1,6 +1,6 @@
 // 终端面板纯逻辑（无 DOM 依赖，tsx 单测直接 import）。
 // 接口形状以 docs/terminal-panel-design.md §9 为唯一契约，不自创字段。
-import type { TerminalInfo } from "./types";
+import type { ShellKind, TerminalInfo } from "./types";
 
 /** 面板宽度下限（px）：再窄终端就没法用了。 */
 export const TERM_MIN_WIDTH = 320;
@@ -128,7 +128,12 @@ export function pickTerminalCwd(
   return fallback || undefined;
 }
 
-/** GET /api/terminals 后决定 attach 谁：第一个未退出的；没有则返回 null（调用方新建）。 */
-export function pickAttachTarget(terminals: TerminalInfo[]): TerminalInfo | null {
-  return terminals.find((t) => !t.exited) ?? null;
+/** GET /api/terminals 后决定 attach 谁：该种 shell 第一个未退出的；没有则返回 null（调用方新建）。 */
+export function pickAttachTarget(terminals: TerminalInfo[], kind: ShellKind = "bash"): TerminalInfo | null {
+  return terminals.find((t) => !t.exited && t.kind === kind) ?? null;
+}
+
+/** Shared by the global listener and xterm passthrough; dispatch only on keydown. */
+export function isTerminalToggleKey(event: Pick<KeyboardEvent, "ctrlKey" | "code" | "altKey" | "metaKey" | "shiftKey">): boolean {
+  return event.ctrlKey && event.code === "Backquote" && !event.altKey && !event.metaKey && !event.shiftKey;
 }

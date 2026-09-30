@@ -1,4 +1,13 @@
 import { useEffect, useRef, useState } from "react";
+import { fetchPrefs, savePrefs } from "../api";
+import {
+  FONT_SCALE_EVENT,
+  FONT_SCALE_STORAGE_KEY,
+  fontScale,
+  fontScaleChoice,
+  readFontScaleChoice,
+  type FontScaleChoice,
+} from "../font-scale";
 
 type ThemeChoice = "system" | "light" | "dark";
 
@@ -36,6 +45,33 @@ const SETTING_GROUPS: SettingGroup[] = [
           { value: "dark", label: "深色" },
         ],
       },
+      {
+        id: "font-scale",
+        label: "字号",
+        options: [
+          { value: "small", label: "小" },
+          { value: "default", label: "默认" },
+          { value: "large", label: "大" },
+          { value: "xlarge", label: "特大" },
+        ],
+      },
+    ],
+  },
+  {
+    id: "sessions",
+    label: "会话",
+    items: [
+      {
+        id: "idle-release",
+        label: "空闲自动释放",
+        options: [
+          { value: "0", label: "关闭" },
+          { value: "15", label: "15 分钟" },
+          { value: "30", label: "30 分钟" },
+          { value: "60", label: "60 分钟" },
+          { value: "120", label: "120 分钟" },
+        ],
+      },
     ],
   },
 ];
@@ -63,9 +99,25 @@ function applyTheme(choice: ThemeChoice) {
 export function SettingsMenu() {
   const [open, setOpen] = useState(false);
   const [theme, setTheme] = useState<ThemeChoice>(() => readTheme());
+  const [scaleChoice, setScaleChoice] = useState<FontScaleChoice>(readFontScaleChoice);
+  const [idleRelease, setIdleRelease] = useState("30");
   const rootRef = useRef<HTMLDivElement>(null);
   const gearRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
+
+  // 空闲自动释放存在服务端（/api/prefs），打开面板时对齐一次
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    fetchPrefs()
+      .then((prefs) => {
+        if (!cancelled) setIdleRelease(String(prefs.idleReleaseMinutes));
+      })
+      .catch(() => { /* 拉取失败保持当前显示 */ });
+    return () => {
+      cancelled = true;
+    };
+  }, [open]);
 
   const close = (returnFocus: boolean) => {
     setOpen(false);
@@ -132,6 +184,43 @@ export function SettingsMenu() {
     }
   };
 
+  const chooseFontScale = (value: string) => {
+    const next = fontScaleChoice(value);
+    setScaleChoice(next);
+    document.documentElement.style.setProperty("--font-scale", String(fontScale(next)));
+    try {
+      localStorage.setItem(FONT_SCALE_STORAGE_KEY, next);
+    } catch {
+      /* localStorage 不可用时仅本次会话生效 */
+    }
+    window.dispatchEvent(new Event(FONT_SCALE_EVENT));
+  };
+
+  const chooseIdleRelease = (value: string) => {
+    const previous = idleRelease;
+    setIdleRelease(value);
+    savePrefs({ idleReleaseMinutes: Number(value) }).catch(() => setIdleRelease(previous));
+  };
+
+  const choose = (id: string, value: string) => {
+    if (id === "theme") chooseTheme(value);
+    else if (id === "font-scale") chooseFontScale(value);
+    else if (id === "idle-release") chooseIdleRelease(value);
+  };
+
+  const selectedValue = (id: string): string => {
+    if (id === "theme") return theme;
+    if (id === "font-scale") return scaleChoice;
+    return idleRelease;
+  };
+
+  /** 服务端存了非档位值（如手动编辑 prefs.json）时补一个如实显示的选项，不猜不改。 */
+  const optionsFor = (item: SettingItem): SettingOption[] => {
+    if (item.id !== "idle-release") return item.options;
+    if (item.options.some((option) => option.value === idleRelease)) return item.options;
+    return [...item.options, { value: idleRelease, label: `${idleRelease} 分钟` }];
+  };
+
   return (
     <div className="settings" ref={rootRef}>
       {open && (
@@ -163,23 +252,24 @@ export function SettingsMenu() {
                       );
                       const index = buttons.indexOf(e.target as HTMLButtonElement);
                       if (index === -1) return;
-                      const nextIndex = (index + dir + buttons.length) % buttons.length;
+                      const options = optionsFor(item);
+                      const nextIndex = (index + dir + options.length) % options.length;
                       const nextButton = buttons[nextIndex];
-                      const nextOption = item.options[nextIndex];
+                      const nextOption = options[nextIndex];
                       if (!nextButton || !nextOption) return;
                       nextButton.focus();
-                      chooseTheme(nextOption.value);
+                      choose(item.id, nextOption.value);
                     }}
                   >
-                    {item.options.map((option) => (
+                    {optionsFor(item).map((option) => (
                       <button
                         key={option.value}
                         type="button"
                         role="radio"
-                        aria-checked={theme === option.value}
-                        tabIndex={theme === option.value ? 0 : -1}
-                        className={`settings-option${theme === option.value ? " selected" : ""}`}
-                        onClick={() => chooseTheme(option.value)}
+                        aria-checked={selectedValue(item.id) === option.value}
+                        tabIndex={selectedValue(item.id) === option.value ? 0 : -1}
+                        className={`settings-option${selectedValue(item.id) === option.value ? " selected" : ""}`}
+                        onClick={() => choose(item.id, option.value)}
                       >
                         {option.label}
                       </button>

@@ -101,7 +101,7 @@ for (const agent of agents) {
 
   // assistant-only-flush-lag: turn_completed ran before the local answer reached disk.
   const markBeforeFlush = await reader.capture(session);
-  await appendFile(paths[agent], `${JSON.stringify(localAssistant(agent, 1))}\n`);
+  await appendFile(paths[agent], `${JSON.stringify(toolCall(agent, "local"))}\n${JSON.stringify(localAssistant(agent, 1))}\n`);
   const delayedOnly = await reader.changed(session, markBeforeFlush!);
   assert.ok(delayedOnly, `${agent}: assistant-only-flush-lag has a new native mark`);
   assert.deepEqual(delayedOnly.messages, [], `${agent}: assistant-only-flush-lag is not external`);
@@ -114,7 +114,7 @@ for (const agent of agents) {
   await (manager as unknown as { pendingMarkReads: Map<string, Promise<void>> }).pendingMarkReads.get(created.id);
 
   // flush-lag-before-external-turn: discard the local answer before the first new user line.
-  await appendFile(paths[agent], `${JSON.stringify(localAssistant(agent, 2))}\n${JSON.stringify(externalUser(agent))}\n${JSON.stringify(externalAssistant(agent))}\n`);
+  await appendFile(paths[agent], `${JSON.stringify(localAssistant(agent, 2))}\n${JSON.stringify(externalUser(agent))}\n${JSON.stringify(toolCall(agent, "external"))}\n${JSON.stringify(externalAssistant(agent))}\n`);
   await manager.sendUserMessage(created.id, { text: "工作台续聊" });
   assert.equal(instances.length, 2, `${agent}: flush-lag-before-external-turn must restart worker`);
   assert.equal(instances[0]!.stopped, true);
@@ -125,7 +125,7 @@ for (const agent of agents) {
   const nextUserAt = transcript.findIndex((event, index) => index > externalAt && event.type === "user_message");
   assert.ok(externalAt >= 0 && nextUserAt > externalAt, `${agent} event must precede new user message`);
   assert.deepEqual((transcript[externalAt]!.payload.messages as Array<{ role: string; text: string }>).map((item) => `${item.role}:${item.text}`), [
-    "user:外部问题", "assistant:外部回答",
+    "user:外部问题", "tool:undefined", "assistant:外部回答",
   ], `${agent}: flush-lag-before-external-turn must omit local assistant replies`);
   assert.deepEqual(transcript.map((event) => event.seq), transcript.map((_, index) => index + 1));
   await manager.shutdown();
@@ -216,3 +216,41 @@ function localAssistant(agent: AgentKind, turn: number): unknown {
   if (agent === "codex") return { type: "event_msg", payload: { type: "agent_message", message: `本端回复 ${turn}` } };
   return { type: "context.append_loop_event", event: { type: "content.part", part: { type: "text", text: `本端回复 ${turn}` } } };
 }
+
+function toolCall(agent: AgentKind, id: string): unknown {
+  if (agent === "claude") return { type: "assistant", uuid: `tool-${id}`, message: { role: "assistant", content: [{ type: "tool_use", id, name: "Bash", input: { command: "pwd" } }] } };
+  if (agent === "codex") return { type: "response_item", payload: { type: "function_call", call_id: id, name: "exec_command", arguments: '{"cmd":"pwd"}' } };
+  return { type: "context.append_loop_event", event: { type: "tool.call", toolCallId: id, name: "Bash", args: { command: "pwd" } } };
+}
+
+// A tool-only late flush advances the mark without creating an external turn.
+for (const agent of agents) {
+  const session = { agent, nativeSessionId: ids[agent], nativeTranscriptPath: paths[agent] } as SessionRecord;
+  const mark = await reader.capture(session);
+  await appendFile(paths[agent], `${JSON.stringify(toolCall(agent, "last"))}\n`);
+  const change = await reader.changed(session, mark!);
+  assert.ok(change);
+  assert.deepEqual(change.messages, []);
+  if (agent === "claude") assert.equal(change.mark.identity, "uuid:tool-last");
+  await appendFile(paths[agent], `${JSON.stringify({ type: "metadata", usage: 42 })}\n`);
+  assert.equal(await reader.changed(session, change.mark), undefined);
+  if (agent === "claude") {
+    await appendFile(paths.claude, `${JSON.stringify({ type: "user", uuid: "result-only", message: { role: "user", content: [{ type: "tool_result", tool_use_id: "last", content: "ok" }] } })}\n`);
+    assert.equal(await reader.changed(session, change.mark), undefined, "tool results must not destabilize the call-line UUID fingerprint");
+  }
+}
+const { boundExternalMessages } = await import("./native-conversation.js");
+const huge = Array.from({ length: 150 }, (_, index) => ({
+  role: "tool" as const, timestamp: null,
+  tool: { id: String(index), name: "Bash", input: "中".repeat(3900), result: "r".repeat(3900), status: "ok" as const },
+}));
+const bounded = boundExternalMessages("native", [{ role: "user", text: "external", timestamp: null }, ...huge]);
+assert.equal(bounded.truncated, true);
+assert.ok(Buffer.byteLength(JSON.stringify({ nativeSessionId: "native", ...bounded })) <= 512 * 1024);
+assert.equal(bounded.messages[0]?.role, "user");
+assert.ok(bounded.messages[1]?.role === "tool" && bounded.messages[1].tool.input === "[truncated]");
+assert.equal(huge[0]!.tool.input.length, 3900, "original messages remain untouched");
+const bigText = boundExternalMessages("native", [{ role: "user", timestamp: null, text: "中".repeat(600000) }]);
+assert.ok(Buffer.byteLength(JSON.stringify({ nativeSessionId: "native", ...bigText })) <= 512 * 1024);
+assert.equal(bigText.truncated, true);
+console.log("native tool-only flush, stable fingerprint and event cap passed");

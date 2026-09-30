@@ -11,7 +11,7 @@ import { fileURLToPath } from "node:url";
 import type { spawn } from "@lydell/node-pty";
 import { WebSocket } from "ws";
 import { localPolicy, remotePolicy } from "./access.js";
-import { MAX_SCROLLBACK_BYTES, TerminalRegistry, terminalEnabled } from "./terminals.js";
+import { MAX_SCROLLBACK_BYTES, TerminalRegistry, isWindowsMount, resolveShell, terminalEnabled, windowsHome } from "./terminals.js";
 
 type Pty = ReturnType<typeof spawn>;
 class FakePty {
@@ -47,7 +47,8 @@ const registry = new TerminalRegistry(process.cwd(), fakeSpawn);
 const created = registry.create({ cwd: "/path/that/does/not/exist", cols: 80, rows: 24 });
 assert.match(created.id, /^term_[0-9A-HJKMNP-TV-Z]{26}$/);
 assert.equal(created.cwd, process.cwd(), "不存在的 cwd 回退到 defaultCwd");
-assert.equal(spawned?.file, process.env.SHELL || "bash");
+assert.equal(created.kind, "bash", "省略 shell 默认 bash");
+assert.equal(spawned?.file, "bash", "选 bash 就跑 bash，不跟 $SHELL");
 assert.deepEqual(spawned?.args, ["-l", "-i"]);
 assert.equal(spawned?.options.cwd, process.cwd());
 assert.equal(spawned?.options.env, process.env);
@@ -96,6 +97,26 @@ ptys[1].output("y".repeat(20));
 const wrapped = registry.attach(second.id, () => undefined);
 assert.equal(wrapped.omitted, 10, "分块溢出累计丢弃字节数");
 assert.equal(wrapped.data, "x".repeat(MAX_SCROLLBACK_BYTES - 20) + "y".repeat(20));
+assert.equal(registry.create({ shell: "bash", cols: 80, rows: 24 }).kind, "bash");
+for (const bad of ["pwsh", "/bin/sh", "/mnt/c/Program Files/PowerShell/7/pwsh.exe", 1, null]) {
+  assert.throws(() => registry.create({ shell: bad, cols: 80, rows: 24 }), /shell 只能是/, `拒绝 ${String(bad)}`);
+}
+assert.deepEqual(resolveShell("powershell", (path) => path.endsWith("powershell.exe")), {
+  kind: "powershell", file: "/mnt/c/WINDOWS/System32/WindowsPowerShell/v1.0/powershell.exe", args: ["-NoLogo"],
+}, "没有 pwsh 7 时退到 Windows PowerShell");
+assert.equal(resolveShell("powershell", () => true).file, "/mnt/c/Program Files/PowerShell/7/pwsh.exe", "优先 pwsh 7");
+assert.throws(() => resolveShell("powershell", () => false), /没有找到 PowerShell/);
+assert.deepEqual(["/mnt/c", "/mnt/d/work", "/mnt/cdrom", "/home/me", "/mnt"].map(isWindowsMount), [true, true, false, false, false]);
+assert.equal(windowsHome("/usr/bin:/mnt/c/Users/user/AppData/Local/Microsoft/WindowsApps:/mnt/c/WINDOWS", () => true), "/mnt/c/Users/user");
+assert.equal(windowsHome("/usr/bin:/mnt/c/WINDOWS", () => true), "/mnt/c", "PATH 里没有用户目录退 /mnt/c");
+assert.equal(windowsHome("/mnt/c/Users/Gone/bin", () => false), "/mnt/c", "目录不存在不用");
+// 本机有 PowerShell 时走一遍真实 create（FakePty，不启动 Windows 程序）：WSL 目录进 Windows 用户目录，Windows 目录原样
+if ((() => { try { resolveShell("powershell"); return true; } catch { return false; } })()) { // 无 PowerShell 的机器跳过
+  const home = windowsHome();
+  assert.equal(registry.create({ shell: "powershell", cwd: process.cwd(), cols: 80, rows: 24 }).cwd, home);
+  assert.equal(registry.create({ shell: "powershell", cols: 80, rows: 24 }).cwd, home);
+  assert.equal(registry.create({ shell: "powershell", cwd: "/mnt/c", cols: 80, rows: 24 }).cwd, "/mnt/c");
+}
 registry.shutdown();
 assert.equal(registry.get(second.id)?.exited, true);
 assert.equal(ptys[1].kills, 1);
@@ -195,6 +216,34 @@ try {
     socket.on("error", () => undefined);
   });
   assert.equal(wsStatus, 403);
+
+  // 本机入口：detach 后该连接不再收旧终端输出，PTY 照常运行，重新 attach 能回放。
+  const localBase = `http://127.0.0.1:${localPort}`;
+  const createdRes = await fetch(`${localBase}/api/terminals`, {
+    method: "POST", headers: { "content-type": "application/json", origin: localBase }, body: JSON.stringify({ cols: 80, rows: 24 }),
+  });
+  const bashTerm = (await createdRes.json()).data;
+  assert.equal(bashTerm.kind, "bash");
+  const ws = new WebSocket(`ws://127.0.0.1:${localPort}/ws/terminal`, { headers: { origin: localBase } });
+  await once(ws, "open");
+  const frames: any[] = [];
+  ws.on("message", (raw) => frames.push(JSON.parse(raw.toString())));
+  const send = (frame: object) => ws.send(JSON.stringify(frame));
+  const waitFor = async (check: () => boolean, label: string) => {
+    for (let i = 0; i < 100 && !check(); i++) await new Promise((r) => setTimeout(r, 100));
+    assert(check(), label);
+  };
+  send({ type: "attach", terminalId: bashTerm.id });
+  await waitFor(() => frames.some((f) => f.type === "attached"), "attach 成功");
+  send({ type: "detach", terminalId: bashTerm.id });
+  await new Promise((r) => setTimeout(r, 200));
+  const before = frames.length;
+  send({ type: "input", terminalId: bashTerm.id, data: "echo DETACH_$((6*7))\r" });
+  await new Promise((r) => setTimeout(r, 1500));
+  assert.equal(frames.length, before, "detach 后不再推送该终端输出");
+  send({ type: "attach", terminalId: bashTerm.id });
+  await waitFor(() => frames.some((f) => f.type === "data" && String(f.data).includes("DETACH_42")), "重新 attach 回放 detach 期间的输出");
+  ws.close();
 } finally {
   child.kill("SIGTERM");
   if (child.exitCode === null) await once(child, "exit");

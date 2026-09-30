@@ -15,201 +15,79 @@
      2) 终端 chrome（标题条、按钮、分隔条、左栏入口）一律中性或冷色，禁暖色；
      3) ANSI yellow / bright-yellow 往橄榄/赭石偏（--term-yellow 系），与琥珀金 --gate 系明显拉开。 */
 :root {
-  --bg:               #FAF9F5;
-  --surface:          #FFFFFF;
-  --surface-sunk:     #F0EEE6;
-  --border:           #E3E0D6;
-  --border-strong:    #C9C5B8;
-  --text:             #1F1E1D;
-  --text-muted:       #5C5A54;
-  --text-faint:       #6E6B63;
-  --agent-claude:     #D97757;
-  --agent-claude-ink: #A8471F;
-  --agent-codex:      #10A37F;
-  --agent-codex-ink:  #0A7A5E;   /* 作文字用：#10A37F 在象牙白上仅 3.04 */
-  --agent-kimi:       #1A73E8;
-  --agent-kimi-ink:   #1663C6;   /* 作文字用：#1A73E8 在象牙白上仅 4.28 */
-  --gate:             #8F5806;
-  --gate-bg:          #F6E3AE;
-  --gate-border:      #C08A1E;
-  --gate-on:          #FFFFFF;
-  --ok:      #17806B;
-  --dead:    #8B95A6;
-  --busy:    #276C8D;
-  --danger:  #B3234A;
+  color-scheme: light dark;
+  --bg:               light-dark(#FAF9F5, #1F1E1D);
+  --surface:          light-dark(#FFFFFF, #262624);
+  --surface-sunk:     light-dark(#F0EEE6, #191817);
+  --border:           light-dark(#E3E0D6, #3A3936);
+  --border-strong:    light-dark(#C9C5B8, #55534E);
+  --text:             light-dark(#1F1E1D, #F2F0EA);
+  --text-muted:       light-dark(#5C5A54, #A8A59D);
+  --text-faint:       light-dark(#6E6B63, #8C8981);
+  --agent-claude:     light-dark(#D97757, #E08B6F);
+  --agent-claude-ink: light-dark(#A8471F, #EDA88E);
+  --agent-codex:      light-dark(#10A37F, #2BC49C);
+  --agent-codex-ink:  light-dark(#0A7A5E, #2BC49C);   /* 作文字用：#10A37F 在象牙白上仅 3.04 */
+  --agent-kimi:       light-dark(#1A73E8, #5AA9FF);
+  --agent-kimi-ink:   light-dark(#1663C6, #5AA9FF);   /* 作文字用：#1A73E8 在象牙白上仅 4.28 */
+  --gate:             light-dark(#8F5806, #F2B32C);
+  --gate-bg:          light-dark(#F6E3AE, #3A2E10);
+  --gate-border:      light-dark(#C08A1E, #8A6A1C);
+  --gate-on:          light-dark(#FFFFFF, #1A1204);
+  --ok:      light-dark(#17806B, #2BA88C);
+  --dead:    light-dark(#8B95A6, #78829A);
+  --busy:    light-dark(#276C8D, #4FA8D0);
+  --danger:  light-dark(#B3234A, #EE7093);
   /* diff 行：新增用 --ok 同色相，删除用冷调红；都不是暖色，也不复用 --danger */
-  --diff-add:    #126B59;
-  --diff-add-bg: #E2F1EC;
-  --diff-del:    #A63D57;
-  --diff-del-bg: #F6E9ED;
-  --msg-code-bg:       #F3F3F3;
-  --msg-inline-bg:     #EDEDED;
-  --msg-tool-bg:       #F7F7F7;
-  --msg-line:          #C5C5C5;
-  --msg-dot:           #777777;
-  --msg-dot-success:   #2D7D4D;
-  --msg-dot-failure:   #B23B30;
-  --msg-link:          #075B9F;
+  --diff-add:    light-dark(#126B59, #2BA88C);
+  --diff-add-bg: light-dark(#E2F1EC, #14251F);
+  --diff-del:    light-dark(#A63D57, #D9708A);
+  --diff-del-bg: light-dark(#F6E9ED, #291720);
+  --msg-code-bg:       light-dark(#F3F3F3, #1E1E1E);
+  --msg-inline-bg:     light-dark(#EDEDED, #343434);
+  --msg-tool-bg:       light-dark(#F7F7F7, #252526);
+  --msg-line:          light-dark(#C5C5C5, #555555);
+  --msg-dot:           light-dark(#777777, #A8A8A8);
+  --msg-dot-success:   light-dark(#2D7D4D, #74C991);
+  --msg-dot-failure:   light-dark(#B23B30, #C74E39);
+  --msg-link:          light-dark(#075B9F, #73B9EA);
 
   /* 终端调色板（M19）：仅 xterm 内容区使用（该区豁免配色不变量，见顶部裁决）。
      yellow 系往橄榄偏（浅 #757100 / 亮 #9A8F00，色相近 60°），与琥珀金 --gate（色相近 35°）拉开。 */
-  --term-bg:               #FBFAF7;
-  --term-fg:               #1F1E1D;
-  --term-cursor:           #276C8D;
-  --term-selection:        #D8E3EC;
-  --term-black:            #3D3B37;
-  --term-red:              #B3234A;
-  --term-green:            #17806B;
-  --term-yellow:           #757100;
-  --term-blue:             #1A73E8;
-  --term-magenta:          #7D3CB5;
-  --term-cyan:             #0E7C8C;
-  --term-white:            #8C8981;
-  --term-bright-black:     #6E6B63;
-  --term-bright-red:       #D43D5E;
-  --term-bright-green:     #1F9B7F;
-  --term-bright-yellow:    #9A8F00;
-  --term-bright-blue:      #3B8BF2;
-  --term-bright-magenta:   #9A5CD0;
-  --term-bright-cyan:      #1B97A8;
-  --term-bright-white:     #262624;
+  --term-bg:               light-dark(#FBFAF7, #191817);
+  --term-fg:               light-dark(#1F1E1D, #F2F0EA);
+  --term-cursor:           light-dark(#276C8D, #4FA8D0);
+  --term-selection:        light-dark(#D8E3EC, #3D4A55);
+  --term-black:            light-dark(#3D3B37, #1F1E1D);
+  --term-red:              light-dark(#B3234A, #EE7093);
+  --term-green:            light-dark(#17806B, #2BA88C);
+  --term-yellow:           light-dark(#757100, #B8A94A);
+  --term-blue:             light-dark(#1A73E8, #5AA9FF);
+  --term-magenta:          light-dark(#7D3CB5, #C792EA);
+  --term-cyan:             light-dark(#0E7C8C, #4FB8C9);
+  --term-white:            light-dark(#8C8981, #A8A59D);
+  --term-bright-black:     light-dark(#6E6B63, #55534E);
+  --term-bright-red:       light-dark(#D43D5E, #F28BA5);
+  --term-bright-green:     light-dark(#1F9B7F, #3FC4A3);
+  --term-bright-yellow:    light-dark(#9A8F00, #CFC06A);
+  --term-bright-blue:      light-dark(#3B8BF2, #7FBFFF);
+  --term-bright-magenta:   light-dark(#9A5CD0, #D8ADEF);
+  --term-bright-cyan:      light-dark(#1B97A8, #6FD0DE);
+  --term-bright-white:     light-dark(#262624, #F2F0EA);
 
   --font-ui:   system-ui, -apple-system, "Segoe UI", "Microsoft YaHei UI",
                "PingFang SC", "Noto Sans CJK SC", sans-serif;
-  --font-mono: ui-monospace, "Cascadia Code", "JetBrains Mono", Consolas,
+  --font-mono: "Maple Mono NF CN", ui-monospace, "Cascadia Code", "JetBrains Mono", Consolas,
                "Noto Sans Mono CJK SC", monospace;
+  --font-scale: 1;
 
-  /* 非颜色令牌：全主题同值，只在 :root 定义一次（不进两份深色块，check:theme 不校验） */
+  /* 非颜色令牌：全主题同值，只在 :root 定义一次。 */
   --radius:     8px;
   --shadow-pop: 0 6px 24px rgb(0 0 0 / 0.14);
 }
 
-/* 深色令牌出现两处，内容必须逐字保持一致（改一处务必同步另一处）：
-   1) 系统深色且用户未显式选浅色 → 跟随系统生效；
-   2) 用户显式选深色（data-theme="dark"）→ 任何系统设置下生效。
-   用户显式选浅色（data-theme="light"）时两处都不命中，回落到上方 :root 浅色令牌。 */
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
-    --bg:               #1F1E1D;
-    --surface:          #262624;
-    --surface-sunk:     #191817;
-    --border:           #3A3936;
-    --border-strong:    #55534E;
-    --text:             #F2F0EA;
-    --text-muted:       #A8A59D;
-    --text-faint:       #8C8981;
-    --agent-claude:     #E08B6F;
-    --agent-claude-ink: #EDA88E;   /* 比身份脊亮 1.35×，让文字与色脊分层 */
-    --agent-codex:      #2BC49C;
-    --agent-codex-ink:  #2BC49C;
-    --agent-kimi:       #5AA9FF;
-    --agent-kimi-ink:   #5AA9FF;
-    --gate:             #F2B32C;
-    --gate-bg:          #3A2E10;
-    --gate-border:      #8A6A1C;
-    --gate-on:          #1A1204;
-    --ok:      #2BA88C;
-    --dead:    #78829A;
-    --busy:    #4FA8D0;
-    --danger:  #EE7093;
-    --diff-add:    #2BA88C;
-    --diff-add-bg: #14251F;
-    --diff-del:    #D9708A;
-    --diff-del-bg: #291720;
-    --msg-code-bg:       #1E1E1E;
-    --msg-inline-bg:     #343434;
-    --msg-tool-bg:       #252526;
-    --msg-line:          #555555;
-    --msg-dot:           #A8A8A8;
-    --msg-dot-success:   #74C991;
-    --msg-dot-failure:   #C74E39;
-    --msg-link:          #73B9EA;
-
-    /* 终端调色板（M19）：仅 xterm 内容区使用。yellow 系偏橄榄/赭石（#B8A94A / 亮 #CFC06A），
-       比 --gate 琥珀金 #F2B32C 更绿、更低饱和，一眼可区分。 */
-    --term-bg:               #191817;
-    --term-fg:               #F2F0EA;
-    --term-cursor:           #4FA8D0;
-    --term-selection:        #3D4A55;
-    --term-black:            #1F1E1D;
-    --term-red:              #EE7093;
-    --term-green:            #2BA88C;
-    --term-yellow:           #B8A94A;
-    --term-blue:             #5AA9FF;
-    --term-magenta:          #C792EA;
-    --term-cyan:             #4FB8C9;
-    --term-white:            #A8A59D;
-    --term-bright-black:     #55534E;
-    --term-bright-red:       #F28BA5;
-    --term-bright-green:     #3FC4A3;
-    --term-bright-yellow:    #CFC06A;
-    --term-bright-blue:      #7FBFFF;
-    --term-bright-magenta:   #D8ADEF;
-    --term-bright-cyan:      #6FD0DE;
-    --term-bright-white:     #F2F0EA;
-  }
-}
-
-/* 与上方 @media 块内的深色令牌逐字一致，两处必须同步改 */
-:root[data-theme="dark"] {
-  --bg:               #1F1E1D;
-  --surface:          #262624;
-  --surface-sunk:     #191817;
-  --border:           #3A3936;
-  --border-strong:    #55534E;
-  --text:             #F2F0EA;
-  --text-muted:       #A8A59D;
-  --text-faint:       #8C8981;
-  --agent-claude:     #E08B6F;
-  --agent-claude-ink: #EDA88E;   /* 比身份脊亮 1.35×，让文字与色脊分层 */
-  --agent-codex:      #2BC49C;
-  --agent-codex-ink:  #2BC49C;
-  --agent-kimi:       #5AA9FF;
-  --agent-kimi-ink:   #5AA9FF;
-  --gate:             #F2B32C;
-  --gate-bg:          #3A2E10;
-  --gate-border:      #8A6A1C;
-  --gate-on:          #1A1204;
-  --ok:      #2BA88C;
-  --dead:    #78829A;
-  --busy:    #4FA8D0;
-  --danger:  #EE7093;
-  --diff-add:    #2BA88C;
-  --diff-add-bg: #14251F;
-  --diff-del:    #D9708A;
-  --diff-del-bg: #291720;
-  --msg-code-bg:       #1E1E1E;
-  --msg-inline-bg:     #343434;
-  --msg-tool-bg:       #252526;
-  --msg-line:          #555555;
-  --msg-dot:           #A8A8A8;
-  --msg-dot-success:   #74C991;
-  --msg-dot-failure:   #C74E39;
-  --msg-link:          #73B9EA;
-
-  /* 终端调色板（M19）：仅 xterm 内容区使用。yellow 系偏橄榄/赭石（#B8A94A / 亮 #CFC06A），
-     比 --gate 琥珀金 #F2B32C 更绿、更低饱和，一眼可区分。 */
-  --term-bg:               #191817;
-  --term-fg:               #F2F0EA;
-  --term-cursor:           #4FA8D0;
-  --term-selection:        #3D4A55;
-  --term-black:            #1F1E1D;
-  --term-red:              #EE7093;
-  --term-green:            #2BA88C;
-  --term-yellow:           #B8A94A;
-  --term-blue:             #5AA9FF;
-  --term-magenta:          #C792EA;
-  --term-cyan:             #4FB8C9;
-  --term-white:            #A8A59D;
-  --term-bright-black:     #55534E;
-  --term-bright-red:       #F28BA5;
-  --term-bright-green:     #3FC4A3;
-  --term-bright-yellow:    #CFC06A;
-  --term-bright-blue:      #7FBFFF;
-  --term-bright-magenta:   #D8ADEF;
-  --term-bright-cyan:      #6FD0DE;
-  --term-bright-white:     #F2F0EA;
-}
+:root[data-theme="light"] { color-scheme: light; }
+:root[data-theme="dark"] { color-scheme: dark; }
 
 * { box-sizing: border-box; }
 
@@ -263,6 +141,9 @@ body {
   display: flex;
   flex-direction: column;
 }
+
+/* 仅缩放应用 UI；终端是 .workspace 的独立子节点，不继承 zoom。 */
+.sidebar, .main { zoom: var(--font-scale); }
 
 /* ── 终端面板（M19）：chrome 全中性/冷色（配色裁决第 2 条），内容区调色板见 --term-* ── */
 /* .main 外面套的一层：终端开启时右侧追加分隔条与面板，.main 内部规则不动 */
@@ -324,6 +205,26 @@ body.resizing {
 .term-back {
   display: none;
 }
+
+/* shell 切换：中性分段按钮（琥珀金留给闸门） */
+.term-shells {
+  flex: 0 0 auto;
+  display: inline-flex;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.term-shell {
+  padding: 2px 8px;
+  border: 0;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+.term-shell + .term-shell { border-left: 1px solid var(--border-strong); }
+.term-shell.active { background: var(--surface-sunk); color: var(--text); font-weight: 600; }
+.term-shell:disabled { cursor: default; opacity: 0.6; }
 
 .term-cwd {
   flex: 1 1 auto;
@@ -859,6 +760,23 @@ body.resizing {
   display: flex;
   align-items: center;
   gap: 10px;
+  flex-shrink: 0;
+}
+/* 按钮文字不折行（「到 VSCode/终端继续」会把「中断」挤成竖排）；让左侧元信息去收缩 */
+.session-head-actions .btn { white-space: nowrap; }
+
+/* 「到 VSCode/终端继续」释放结果的短暂提示（成功灰字、失败错误色；不新增颜色令牌） */
+.release-note {
+  font-size: 12px;
+  color: var(--text-muted);
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.release-note-error {
+  color: var(--danger);
 }
 
 /* 配置控件行：位于 Composer 顶部（输入框正上方），紧凑单行 */
@@ -1005,6 +923,41 @@ body.resizing {
 .user-text {
   white-space: pre-wrap;
   overflow-wrap: anywhere; /* 长 URL/无空格路径不撑出横向滚动 */
+}
+
+/* 用户消息正文 + 附件区的纵向容器（附件在文本下方） */
+.user-block-body {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* 消息内附件区：图片缩略图 + 文件名标签，横排可换行 */
+.user-attach-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.user-attach-img {
+  width: 120px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  display: block;
+}
+
+.user-attach-tag {
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: var(--msg-inline-bg);
+  color: var(--text);
+  font-size: 12px;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .mention-tag {
@@ -1631,6 +1584,20 @@ body.resizing {
 
 .cache-timer.expired { color: var(--text-faint); }
 
+.rc-control { display: inline-flex; align-items: center; gap: 2px; flex: 0 0 auto; }
+.rc-pill, .rc-open {
+  border: 1px solid var(--border-strong); border-radius: 6px; background: var(--surface-sunk);
+  color: var(--text-muted); padding: 3px 7px; font: inherit; font-size: 12px;
+  white-space: nowrap; text-decoration: none;
+}
+.rc-pill { cursor: pointer; }
+.rc-pill:disabled { cursor: default; }
+.rc-connected { background: #2563b8; border-color: #2563b8; color: #fff; }
+.rc-connecting, .rc-reconnecting, .rc-disconnecting { border-color: var(--busy); color: var(--busy); }
+.rc-error { border-color: #c64c4c; color: #c64c4c; }
+.rc-open { color: var(--text); }
+.rc-pill:focus-visible, .rc-open:focus-visible { outline: 2px solid var(--busy); outline-offset: 2px; }
+
 .send-btn {
   flex: 0 0 auto;
   display: inline-grid;
@@ -1645,6 +1612,128 @@ body.resizing {
 }
 
 .send-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* ── 「+」附件入口与附件条：全部冷色/中性，暖色仍是闸门专用 ── */
+.attach-menu-wrap { position: relative; flex: 0 0 auto; }
+
+.attach-btn {
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-sunk);
+  color: var(--text-muted);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.attach-btn:hover:not(:disabled) { border-color: var(--border-strong); color: var(--text); }
+.attach-btn:disabled { opacity: 0.55; cursor: not-allowed; }
+
+/* 「+」弹出菜单：与 cfg-menu 同一浮层语言，锚定在按钮上方 */
+.attach-menu {
+  position: absolute;
+  bottom: calc(100% + 4px);
+  left: 0;
+  z-index: 20;
+  min-width: 150px;
+  max-width: calc(100vw - 32px); /* 窄屏不超出视口 */
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 4px;
+  box-shadow: var(--shadow-pop);
+  animation: settings-pop 0.12s ease-out;
+}
+
+.attach-item {
+  display: block;
+  width: 100%;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  padding: 6px 8px;
+  font-size: 13px;
+  font-family: inherit;
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+/* 焦点/悬停同命令面板选中项的纪律：冷色 --busy 竖条 */
+.attach-item:hover, .attach-item:focus-visible {
+  outline: none;
+  background: var(--surface-sunk);
+  box-shadow: inset 2px 0 0 var(--busy);
+}
+
+/* 输入框上方的附件条：横排可换行，不产生页面横滚 */
+.attach-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.attach-card {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+  padding: 4px 6px;
+  font-size: 12px;
+  color: var(--text);
+}
+
+.attach-card.is-error { border-color: var(--danger); }
+
+.attach-thumb {
+  flex: 0 0 auto;
+  width: 40px;
+  height: 40px;
+  object-fit: cover;
+  border-radius: 6px;
+  display: block;
+}
+
+.attach-name {
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.attach-status { color: var(--text-muted); white-space: nowrap; }
+
+.attach-err {
+  color: var(--danger);
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.attach-remove {
+  flex: 0 0 auto;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  padding: 2px;
+}
+
+.attach-remove:hover { color: var(--danger); }
 
 /* 新建表单里框底色跟卡片走 */
 .new-form .composer-box { background: var(--surface); }
@@ -1890,6 +1979,8 @@ body.resizing {
   gap: 6px;
 }
 
+.settings-item + .settings-item { margin-top: 12px; }
+
 .settings-item-label {
   font-size: 12.5px;
   color: var(--text-muted);
@@ -1917,7 +2008,7 @@ body.resizing {
 
 /* 减少动态：关光标闪烁、徽标脉冲与浮层动画 */
 @media (prefers-reduced-motion: reduce) {
-  .cursor, .gate-badge, .settings-panel, .cmd-panel, .cfg-menu, .timeline-item.timeline-running::before { animation: none; }
+  .cursor, .gate-badge, .settings-panel, .cmd-panel, .cfg-menu, .attach-menu, .timeline-item.timeline-running::before { animation: none; }
 }
 
 /* ── 扩展页面：左栏分区与页面视图（全部冷色/中性，暖色仍是闸门专用） ── */
@@ -2318,6 +2409,7 @@ body.resizing {
 /* 预览面板：右侧固定宽列 */
 .history-preview-pane {
   flex: 0 0 380px;
+  min-width: 0; /* 窄屏 flex:1 时别让 nowrap 的 id/cwd、长用户消息撑出横滚 */
   display: flex;
   flex-direction: column;
   min-height: 0;
@@ -2424,12 +2516,7 @@ body.resizing {
 /* ===== 续接会话的历史消息区（SessionView 实时流上方） ===== */
 /* 与实时区视觉区分：弱化底色（--surface-sunk）+ 底部分隔线；全部冷色/中性，无暖色 */
 .session-history {
-  background: var(--surface-sunk);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 8px 10px;
   margin-bottom: 10px;
-  font-size: 12.5px;
   min-width: 0;
 }
 
@@ -2608,7 +2695,7 @@ body.resizing {
   .app:not(.sidebar-collapsed) .sidebar > .sidebar-head { flex: 0 0 auto; }
   .app:not(.sidebar-collapsed) .sidebar > .btn-new { flex: 1 1 0; width: auto; }
   .sidebar,
-  .app.sidebar-collapsed .sidebar { width: 100%; border-right: none; }
+  .app.sidebar-collapsed .sidebar { width: calc(100% / var(--font-scale)); border-right: none; }
   .app.has-main .sidebar { display: none; }
   .app:not(.has-main) .main { display: none; }
   /* manifest 的 maxWidth（如 ai-usage 的 33%）是给宽屏的，单栏下铺满；!important 压过内联样式 */
@@ -2642,6 +2729,8 @@ body.resizing {
     display: inline-flex;
     align-items: center;
   }
+  /* 窄屏附件卡片收窄：文件名与错误文案不撑出附件条 */
+  .attach-name, .attach-err { max-width: 140px; }
   /* 快捷键栏在终端下方；安全区由 .app 的 env(safe-area-inset-*) 统一让位，这里不重复加 */
   .workspace.term-open .term-keys {
     display: flex;
@@ -2655,9 +2744,9 @@ body.resizing {
 
 @media (pointer: coarse) {
   /* 触屏点按目标至少 44px */
-  .btn, .icon-btn, .row-delete, .cfg-pill, .cfg-item { min-height: 44px; }
-  .term-key { min-height: 44px; }
-  .send-btn { width: 44px; height: 44px; }
+  .btn, .icon-btn, .row-delete, .cfg-pill, .cfg-item, .attach-item { min-height: 44px; }
+  .term-key, .term-shell { min-height: 44px; }
+  .send-btn, .attach-btn { width: 44px; height: 44px; }
   .cfg-slider { width: 176px; height: 32px; }
   /* 没有 hover：删除按钮常显（点了还有确认步骤，不会误删） */
   .row-delete { opacity: 1; min-width: 44px; }

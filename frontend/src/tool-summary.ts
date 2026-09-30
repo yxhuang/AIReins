@@ -28,7 +28,7 @@ export interface ToolSummarySource {
   baseToolName?: string;
   input: string;
   result: string;
-  status: "running" | "ok" | "error";
+  status: "running" | "ok" | "error" | "unknown";
   rawInput?: unknown;
   rawResult?: unknown;
   /** ACP kind（read/edit/execute/…）；注意不是 ToolView.kind（恒为 "tool"） */
@@ -127,7 +127,8 @@ export function summarizeTool(agent: AgentKind, tool: ToolSummarySource, cwd: st
     case "command": {
       verb = "运行";
       const command = commandOf(agent, input, resultItem) || titleArg;
-      target = command;
+      // Claude 的 Bash 自带一句 description（同 VSCode 扩展的工具标题），有就用它，命令留在展开区
+      target = str(input.description) || command;
       const run = commandResult(agent, tool, resultItem, text);
       if (tool.status === "error") {
         note = run.exitCode !== null ? `退出码 ${run.exitCode}` : firstLine(run.output);
@@ -328,7 +329,7 @@ function commandResult(
 ): { output: string; exitCode: number | null; truncated: boolean; signal: string | null } {
   if (agent === "codex") {
     return {
-      output: typeof resultItem.aggregatedOutput === "string" ? resultItem.aggregatedOutput : "",
+      output: typeof resultItem.aggregatedOutput === "string" ? resultItem.aggregatedOutput : text,
       exitCode: typeof resultItem.exitCode === "number" ? resultItem.exitCode : null,
       truncated: false,
       signal: null,

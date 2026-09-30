@@ -1,7 +1,6 @@
 import { forwardRef, memo, useState } from "react";
 import type {
   GateView,
-  ExternalHistoryBlock,
   RawBlock,
   SystemBlock,
   TextBlock,
@@ -21,31 +20,58 @@ import {
   type AskSelection,
 } from "../ask";
 import { store } from "../store";
-import type { AgentKind } from "../types";
+import { uploadsFileUrl } from "../api";
+import type { AgentKind, ImageMention } from "../types";
 import { summarizeTool, type ToolSummary } from "../tool-summary";
 import { DiffView, countLines } from "./DiffView";
-import { HistoryMessageView, MarkdownMessage, UserMessageText } from "./MarkdownMessage";
+import { MarkdownMessage, UserMessageText } from "./MarkdownMessage";
 
 export function UserBlockView({ item }: { item: UserBlock }) {
+  const mentions = item.mentions ?? [];
   return (
     <div className="user-block">
-      <UserMessageText text={item.text} />
+      <div className="user-block-body">
+        <UserMessageText text={item.text} />
+        {mentions.length > 0 && (
+          <div className="user-attach-list">
+            {mentions.map((mention, index) =>
+              mention.type === "image" ? (
+                <MentionImage key={`${mention.path}:${index}`} mention={mention} />
+              ) : (
+                <span key={`${mention.path}:${index}`} className="user-attach-tag mono" title={mention.path}>
+                  {mention.name ?? mentionBasename(mention.path)}
+                </span>
+              ),
+            )}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
 
-export function ExternalHistoryView({ item, agent }: { item: ExternalHistoryBlock; agent: AgentKind }) {
+function mentionBasename(path: string): string {
+  return path.split(/[\\/]/).filter(Boolean).pop() ?? path;
+}
+
+/** 消息内的图片附件：历史消息里的图片可能已被清理或不在 uploads 下，加载失败降级为文件名标签。 */
+function MentionImage({ mention }: { mention: ImageMention }) {
+  const [failed, setFailed] = useState(false);
+  if (failed) {
+    return (
+      <span className="user-attach-tag mono" title={mention.path}>
+        {mention.name ?? mentionBasename(mention.path)}
+      </span>
+    );
+  }
   return (
-    <section className="session-history" aria-label="在别处继续的对话">
-      <p className="session-history-note">在别处（VSCode/CLI 等）继续的对话 · 仅消息文本，不含工具调用。</p>
-      {item.truncated && <p className="session-history-note">原生记录超出单次读取窗口，这里只显示可读取的最新消息。</p>}
-      <ul className="session-history-list">
-        {item.messages.map((message, index) => (
-          <li key={`${item.key}:${index}`}><HistoryMessageView message={message} agent={agent} showTime /></li>
-        ))}
-      </ul>
-      <div className="session-history-divider" role="separator" />
-    </section>
+    <img
+      className="user-attach-img"
+      src={uploadsFileUrl(mention.path)}
+      alt={mention.name ?? mentionBasename(mention.path)}
+      title={mention.path}
+      onError={() => setFailed(true)}
+    />
   );
 }
 
@@ -76,7 +102,7 @@ export const ToolCard = memo(function ToolCard({ item, agent, cwd }: { item: Too
   const [open, setOpen] = useState(false);
   const [showAll, setShowAll] = useState(false);
   const summary = summarizeTool(agent, item, cwd);
-  const statusLabel = item.status === "running" ? "进行中" : item.status === "ok" ? "成功" : "失败";
+  const statusLabel = item.status === "running" ? "进行中" : item.status === "ok" ? "成功" : item.status === "error" ? "失败" : "";
   return (
     <div className={`tool-card tool-${item.status}`}>
       <button type="button" className="tool-head" aria-expanded={open} onClick={() => setOpen((v) => !v)}>

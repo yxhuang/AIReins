@@ -22,7 +22,7 @@ try {
   ]);
   await writeFile(
     join(userHome, ".claude", "settings.json"),
-    JSON.stringify({ model: "opus", effortLevel: "high" }),
+    JSON.stringify({ model: "opus", effortLevel: "high", remoteControlAtStartup: true }),
   );
   await writeFile(
     join(layeredCwd, ".claude", "settings.json"),
@@ -35,12 +35,17 @@ try {
   assert.deepEqual(readClaudeEffectiveSettings(layeredCwd, userHome), {
     model: "sonnet",
     effort: "xhigh",
+    remoteControlAtStartup: true,
   });
+  await writeFile(join(layeredCwd, ".claude", "settings.local.json"),
+    JSON.stringify({ effortLevel: "xhigh", remoteControlAtStartup: false }));
+  assert.equal(readClaudeEffectiveSettings(layeredCwd, userHome).remoteControlAtStartup, false);
 
   await writeFile(join(brokenCwd, ".claude", "settings.json"), "{ broken json");
   assert.deepEqual(readClaudeEffectiveSettings(brokenCwd, userHome), {
     model: "opus",
     effort: "high",
+    remoteControlAtStartup: true,
   });
 
   await writeFile(
@@ -51,12 +56,14 @@ try {
   assert.deepEqual(readClaudeEffectiveSettings(unreadableCwd, userHome), {
     model: "opus",
     effort: "high",
+    remoteControlAtStartup: true,
   });
   await chmod(unreadablePath, 0o600);
 
   assert.deepEqual(readClaudeEffectiveSettings(missingCwd, join(root, "empty-home")), {
     model: null,
     effort: null,
+    remoteControlAtStartup: false,
   });
 } finally {
   await chmod(unreadablePath, 0o600).catch(() => undefined);

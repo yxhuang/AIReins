@@ -1,6 +1,6 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { AgentKind, HistoryPreview, HistorySession } from "../types";
-import { fetchHistory, fetchHistoryPreview } from "../api";
+import type { AgentKind, HistorySession } from "../types";
+import { fetchHistory } from "../api";
 import {
   findImportedSession,
   filterBySource,
@@ -9,7 +9,7 @@ import {
   type SourceFilter,
 } from "../history";
 import { relativeTime } from "../format";
-import { HistoryMessageView } from "./MarkdownMessage";
+import { PagedHistory } from "./ResumedHistory";
 import { store, type Store } from "../store";
 import { shallowEqual, useStore } from "../useStore";
 
@@ -41,11 +41,6 @@ interface ListState {
 }
 
 type ListPhase = "loading" | "ready" | "error";
-
-type PreviewState =
-  | { phase: "loading" }
-  | { phase: "done"; preview: HistoryPreview }
-  | { phase: "error"; message: string };
 
 /**
  * 历史会话浏览视图（#/history）：只读列出三家 CLI 自己保存的历史会话，
@@ -306,35 +301,13 @@ function HistoryPreviewPane({ item, onBack }: { item: HistorySession | undefined
     [item],
   );
   const importedId = useStore(selectImportedId);
-  const [state, setState] = useState<PreviewState | null>(null);
+  const previewRef = useRef<HTMLDivElement | null>(null);
   const [importing, setImporting] = useState(false);
   const [importError, setImportError] = useState<string | null>(null);
 
   useEffect(() => {
     setImporting(false);
     setImportError(null);
-    if (!item) {
-      setState(null);
-      return;
-    }
-    let cancelled = false;
-    setState({ phase: "loading" });
-    fetchHistoryPreview(item.agent, item.nativeSessionId).then(
-      (preview) => {
-        if (!cancelled) setState({ phase: "done", preview });
-      },
-      (error: unknown) => {
-        if (!cancelled) {
-          setState({
-            phase: "error",
-            message: error instanceof Error ? error.message : String(error),
-          });
-        }
-      },
-    );
-    return () => {
-      cancelled = true;
-    };
   }, [item]);
 
   if (!item) {
@@ -380,34 +353,9 @@ function HistoryPreviewPane({ item, onBack }: { item: HistorySession | undefined
           {item.cwd}
         </p>
       </div>
-      <div className="history-preview-body">
-        <p className="session-history-note">{item.agent} 原生会话预览 · 仅用户与助手文本。</p>
-        {state?.phase === "loading" && <p className="history-note">读取预览中…</p>}
-        {state?.phase === "error" && (
-          <p className="history-error" role="alert">
-            预览读取失败：{state.message}
-          </p>
-        )}
-        {state?.phase === "done" && (
-          <>
-            {state.preview.messages.length === 0 ? (
-              <p className="history-note">
-                该会话暂无可预览的消息（原生消息记录缺失或为空）。
-              </p>
-            ) : (
-              <ul className="history-messages">
-                {state.preview.messages.map((message, index) => (
-                  <li key={index}><HistoryMessageView message={message} agent={item.agent} /></li>
-                ))}
-              </ul>
-            )}
-            {state.preview.truncated && (
-              <p className="history-note">
-                仅显示开头若干条消息（预览只读取会话文件头部），完整内容在原生会话文件中。
-              </p>
-            )}
-          </>
-        )}
+      <div className="history-preview-body" ref={previewRef}>
+        <PagedHistory key={`${item.agent}:${item.nativeSessionId}`} agent={item.agent}
+          nativeSessionId={item.nativeSessionId} cwd={item.cwd} streamRef={previewRef} startAtEnd />
       </div>
       <div className="history-actions">
         {importedId ? (

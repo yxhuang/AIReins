@@ -6,7 +6,8 @@
 //  3. 两种拒绝文案（回合进行中 / 首轮前无 nativeSessionId）经 WS error 帧就地落在 configErrors，措辞原样；
 //  4. 切换中途 session_error → 过渡态解除 + 错误就地显示；快照重取能重建未完成的过渡态；
 //  5. fetchHistoryMessages URL 组装与信封透传；initialHistoryPage/prependHistoryPage 翻页 prepend 与 DOM 上限；
-//  6. 源码接线：resumedFrom → 历史区挂载、分隔线文案、用户/助手两态（不伪造工具/思考块）。
+//  6. 源码接线：resumedFrom → 历史区挂载、分隔线文案、用户/助手两态（不伪造工具/思考块）；
+//  7. fetchInitialHistoryPage：initialCursor 用于首页请求、cursor 失效退回最新一页、其余错误原样抛出。
 // 浏览器依赖（WebSocket / fetch）全部打桩，不需要真实 server。运行：npm run test:resume
 import { strict as assert } from "node:assert";
 import { readFileSync } from "node:fs";
@@ -17,10 +18,10 @@ globalThis.WebSocket = { CONNECTING: 0, OPEN: 1, CLOSING: 2, CLOSED: 3 };
 const { Store } = await import("../src/store.ts");
 const { needsRestartNote, RESTART_NOTE, pillText } = await import("../src/config-view.ts");
 const {
-  HISTORY_MAX_MESSAGES,
   HISTORY_PAGE_SIZE,
-  historyCapReached,
+  fetchInitialHistoryPage,
   initialHistoryPage,
+  isStaleCursorError,
   prependHistoryPage,
 } = await import("../src/resumed-history.ts");
 const { fetchHistoryMessages } = await import("../src/api.ts");
@@ -265,39 +266,101 @@ await t("initialHistoryPage + prependHistoryPage：更早一页整页 prepend，
   assert.equal(state.truncated, true, "任一页 truncated 都应保留标注");
 });
 
-// --- 验收 4 打桩侧：DOM 上限 ---
-await t("historyCapReached：达到上限后不再翻页（提示看原生文件）", async () => {
-  const many = Array.from({ length: HISTORY_MAX_MESSAGES }, (_, i) => msg("user", `m${i}`));
-  const state = initialHistoryPage(page(many, { nextCursor: "C9", hasMore: true }));
-  assert.equal(historyCapReached(state), true, "达到上限应判 capped");
-  assert.equal(historyCapReached(initialHistoryPage(page(many.slice(0, 10)))), false);
-  assert.equal(HISTORY_PAGE_SIZE, 50, "默认页大小变了？（与后端默认对齐）");
+await t("历史可越过 500 条继续翻到开头", async () => {
+  const many = Array.from({ length: 550 }, (_, i) => msg("user", `m${i}`));
+  const state = initialHistoryPage(page(many, { nextCursor: "older", hasMore: true }));
+  const next = prependHistoryPage(state, page([msg("user", "first")], { hasMore: false }));
+  assert.equal(next.messages.length, 551);
+  assert.equal(next.messages[0].text, "first");
+  assert.equal(next.hasMore, false);
+  assert.equal(HISTORY_PAGE_SIZE, 50);
 });
 
 // --- 验收 3/5 打桩侧：源码接线——resumedFrom → 历史区、分隔线、两态渲染 ---
-await t("源码接线：resumedFrom 才挂历史区；分隔线文案；用户/助手两态，不伪造工具/思考块", async () => {
+await t("源码接线：resumedFrom 才挂历史区；分隔线文案；共用历史时间线与来源说明", async () => {
   const sessionView = readFileSync(new URL("../src/components/SessionView.tsx", import.meta.url), "utf8");
   assert.ok(
     /session\.resumedFrom\s*&&\s*<ResumedHistory/.test(sessionView),
     "SessionView 未按 resumedFrom 挂载历史区",
   );
   const history = readFileSync(new URL("../src/components/ResumedHistory.tsx", import.meta.url), "utf8");
-  assert.ok(history.includes("仅用户与助手文本，不含工具调用与思考过程"), "历史来源与省略项说明缺失");
+  assert.ok(history.includes("用户、助手与工具调用；工具可展开。"), "历史来源与省略项说明缺失");
   assert.ok(history.includes('className="session-history-divider" role="separator" ref={dividerRef}'), "滚动补偿分隔线缺失");
   assert.ok(history.includes("加载更早的消息"), "翻页按钮文案缺失");
   assert.ok(history.includes("加载中…"), "加载中文案缺失");
   assert.ok(history.includes("重试"), "失败重试缺失");
-  const sharedMessage = readFileSync(new URL("../src/components/MarkdownMessage.tsx", import.meta.url), "utf8");
-  assert.ok(history.includes("<HistoryMessageView message={message} agent={agent}"), "应复用用户/助手消息视图");
-  assert.ok(sharedMessage.includes("messageRoleLabel(message.role, agent)") && sharedMessage.includes('message.role === "user"'), "共用视图应只有用户/助手两态");
+  const sharedMessage = readFileSync(new URL("../src/components/HistoryTimeline.tsx", import.meta.url), "utf8");
+  assert.ok(history.includes("<HistoryTimeline messages={state.messages} agent={agent}"), "应复用用户/助手消息视图");
+  assert.ok(sharedMessage.includes("<UserBlockView") && sharedMessage.includes("<ToolCard") && sharedMessage.includes("<MarkdownMessage"), "历史三态应复用实时组件");
   const { messageRoleLabel } = await import("../src/format.ts");
   assert.equal(messageRoleLabel("user", "claude"), "我");
   assert.equal(messageRoleLabel("assistant", "claude"), "Claude Code");
   assert.equal(messageRoleLabel("assistant", "codex"), "Codex");
   assert.equal(messageRoleLabel("assistant", "kimi"), "Kimi");
   assert.equal(messageRoleLabel("assistant", undefined), "助手");
-  assert.ok(!/tool_call|thought/i.test(history), "历史区不应渲染工具调用/思考块");
   assert.ok(!/display:\s*"?none/.test(history), "历史区不应默认折叠隐藏");
+});
+
+// --- 验收（M26 追加）：initialCursor 用于首页请求；cursor 失效退回最新一页 ---
+await t("fetchInitialHistoryPage：有 initialCursor 时首页请求带上它（截止导入时刻）", async () => {
+  const calls = [];
+  const fetcher = async (opts) => {
+    calls.push(opts);
+    return page([msg("user", "导入前最后一轮")]);
+  };
+  const result = await fetchInitialHistoryPage(fetcher, "CUR_IMPORT_END", HISTORY_PAGE_SIZE);
+  assert.deepEqual(calls, [{ limit: HISTORY_PAGE_SIZE, cursor: "CUR_IMPORT_END" }], "首页请求应带 initialCursor");
+  assert.equal(result.messages[0].text, "导入前最后一轮");
+});
+
+await t("fetchInitialHistoryPage：无 initialCursor（旧会话）首页不带 cursor，行为不变", async () => {
+  const calls = [];
+  const fetcher = async (opts) => {
+    calls.push(opts);
+    return page([]);
+  };
+  await fetchInitialHistoryPage(fetcher, undefined, HISTORY_PAGE_SIZE);
+  assert.deepEqual(calls, [{ limit: HISTORY_PAGE_SIZE }], "无 initialCursor 应只发一次不带 cursor 的请求");
+});
+
+await t("fetchInitialHistoryPage：cursor 失效退回最新一页；其余错误原样抛出", async () => {
+  const calls = [];
+  const fetcher = async (opts) => {
+    calls.push(opts);
+    if (opts.cursor) throw new Error("消息 cursor 已失效，请从最新一页重新加载");
+    return page([msg("assistant", "最新一页")]);
+  };
+  const result = await fetchInitialHistoryPage(fetcher, "CUR_STALE", HISTORY_PAGE_SIZE);
+  assert.deepEqual(
+    calls,
+    [{ limit: HISTORY_PAGE_SIZE, cursor: "CUR_STALE" }, { limit: HISTORY_PAGE_SIZE }],
+    "cursor 失效后应退回不带 cursor 的最新一页",
+  );
+  assert.equal(result.messages[0].text, "最新一页");
+
+  const failing = async () => { throw new Error("请求超时（10 秒）"); };
+  await assert.rejects(
+    () => fetchInitialHistoryPage(failing, "CUR_STALE", HISTORY_PAGE_SIZE),
+    /请求超时/,
+    "非 cursor 错误不应被吞",
+  );
+  assert.equal(isStaleCursorError(new Error("消息 cursor 已失效，请从最新一页重新加载")), true);
+  assert.equal(isStaleCursorError(new Error("消息 cursor 与当前历史会话不匹配")), true);
+  assert.equal(isStaleCursorError(new Error("历史会话不存在或无法读取")), false);
+});
+
+await t("源码接线：resumedFrom.historyCursor 作为 initialCursor 传给 PagedHistory；历史页预览不传", async () => {
+  const history = readFileSync(new URL("../src/components/ResumedHistory.tsx", import.meta.url), "utf8");
+  assert.ok(
+    history.includes("initialCursor={session.resumedFrom.historyCursor}"),
+    "ResumedHistory 未把 resumedFrom.historyCursor 传给 PagedHistory",
+  );
+  assert.ok(
+    /fetchInitialHistoryPage\([\s\S]*?initialCursor,[\s\S]*?HISTORY_PAGE_SIZE/.test(history),
+    "loadLatest 首页加载未使用 initialCursor",
+  );
+  const historyView = readFileSync(new URL("../src/components/HistoryView.tsx", import.meta.url), "utf8");
+  assert.ok(!/initialCursor/.test(historyView), "历史页预览不应传 initialCursor（仍从最新一页开始）");
 });
 
 // --- P1-6：prependHistoryPage 空页拦截（空页是补偿滞留的触发源） ---
