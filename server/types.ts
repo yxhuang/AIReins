@@ -18,6 +18,7 @@ export const EVENT_TYPES = [
   "commands_updated",
   "config_updated",
   "remote_control_updated",
+  "background_tasks_updated",
   "usage_updated",
   "turn_completed",
   "session_error",
@@ -32,6 +33,12 @@ export interface RemoteControlState {
   status: "disconnected" | "connecting" | "connected" | "reconnecting" | "disconnecting" | "error";
   sessionUrl?: string;
   reason?: string;
+}
+/** Claude 的后台任务（后台 Bash、后台子代理等），来自 CLI 的 system/background_tasks_changed 全量清单。 */
+export interface BackgroundTask {
+  id: string;
+  type: string;
+  description: string;
 }
 export type PermissionDecision = "allow" | "deny" | "always";
 export type QuestionAnswers = Record<string, string>;
@@ -153,6 +160,8 @@ export interface SessionRecord {
   config: SessionConfig;
   riskyMode: boolean;
   remoteControl?: RemoteControlState;
+  /** 仅 Claude：worker 当前的后台任务；非空时会话虽 idle 仍在干活。不跨 worker 保留。 */
+  backgroundTasks?: BackgroundTask[];
 }
 
 export interface DriverCapabilities {
@@ -170,6 +179,7 @@ export interface DriverCallbacks {
     config?: SessionConfig;
     effectiveConfig?: EffectiveConfigUpdate;
     remoteControl?: RemoteControlState;
+    backgroundTasks?: BackgroundTask[];
   }): void;
   commands(commands: UnifiedCommand[]): void;
   status(status: SessionStatus): void;

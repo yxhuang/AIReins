@@ -13,7 +13,10 @@
    终端配色裁决（2026-09-26 用户拍板，docs/terminal-panel-design.md §4/§9）：
      1) 终端内容区豁免配色不变量，视同外来内容（先例：PageView iframe 渲染用户自己的页面）；
      2) 终端 chrome（标题条、按钮、分隔条、左栏入口）一律中性或冷色，禁暖色；
-     3) ANSI yellow / bright-yellow 往橄榄/赭石偏（--term-yellow 系），与琥珀金 --gate 系明显拉开。 */
+     3) ANSI yellow / bright-yellow 往橄榄/赭石偏（--term-yellow 系），与琥珀金 --gate 系明显拉开。
+   会话列表状态点裁决（2026-09-30 用户拍板，ROADMAP P1-12）：红绿灯。
+     绿 --ok = 空闲；黄 --dot-working = 正在工作（例外：允许暖黄，色相约 48° 往黄偏，与琥珀金 --gate 约 36°/41° 拉开，且不得复用 --gate 系）；
+     红 --danger = 出错或有闸门/提问等用户处理；dead 灰不变。 */
 :root {
   color-scheme: light dark;
   --bg:               light-dark(#FAF9F5, #1F1E1D);
@@ -38,6 +41,7 @@
   --dead:    light-dark(#8B95A6, #78829A);
   --busy:    light-dark(#276C8D, #4FA8D0);
   --danger:  light-dark(#B3234A, #EE7093);
+  --dot-working: light-dark(#C9A000, #F0C419);   /* 仅会话列表「正在工作」状态点，见顶部裁决 */
   /* diff 行：新增用 --ok 同色相，删除用冷调红；都不是暖色，也不复用 --danger */
   --diff-add:    light-dark(#126B59, #2BA88C);
   --diff-add-bg: light-dark(#E2F1EC, #14251F);
@@ -325,6 +329,10 @@ body.resizing {
 }
 
 .app.sidebar-collapsed .brand { display: none; }
+
+/* 刷新按钮紧跟「workbench」，收起按钮仍靠右 */
+.sidebar-reload { margin-right: auto; margin-left: 6px; }
+.app.sidebar-collapsed .sidebar-reload { margin: 0; }
 
 /* 收起态头部纵向排列，给总未决徽标留位置 */
 .app.sidebar-collapsed .sidebar-head {
@@ -683,9 +691,9 @@ body.resizing {
   flex: 0 0 auto;
 }
 .status-starting, .status-idle { background: var(--ok); }
-.status-running { background: var(--busy); }
+.status-running { background: var(--dot-working); }
 .status-dead { background: var(--dead); }
-.status-error { background: var(--danger); }
+.status-error, .status-needs-user { background: var(--danger); }
 
 /* 未决闸门徽标：全站除闸门外唯一的暖色元素 */
 .gate-badge {

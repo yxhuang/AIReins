@@ -20,6 +20,7 @@ import {
 import { createSnapshotIfNeeded } from "./snapshot.js";
 import { IMAGE_MENTION_MIME_TYPES, MAX_IMAGE_MENTION_BYTES } from "./uploads.js";
 import type {
+  BackgroundTask,
   CreateSessionInput,
   Driver,
   DriverCallbacks,
@@ -77,6 +78,7 @@ export class SessionManager {
         status: "dead",
         // 重启后所有会话都是 dead，已释放标记随之失效（否则前端会误显示「下次发送自动续接」）
         released: undefined,
+        backgroundTasks: undefined,
         seq,
         processId: undefined,
         ...(stored.agent === "claude" ? { remoteControl: { status: "disconnected" as const } } : {}),
@@ -364,6 +366,7 @@ export class SessionManager {
     record.released = true;
     record.processId = undefined;
     await worker.stop();
+    this.setBackgroundTasks(id, []);
     if (record.agent === "claude") {
       record.remoteControl = { status: "disconnected" };
       this.emit(id, "remote_control_updated", { status: "disconnected" });
@@ -384,6 +387,8 @@ export class SessionManager {
     if (this.checkingSessions.has(id)) return "会话正在检查原生会话，请稍候";
     if (record.status !== "idle") return `会话当前状态为 ${record.status}，空闲时才能释放`;
     if ((this.pendingGates.get(id)?.size ?? 0) > 0) return "会话有待处理的审批闸门，处理后才能释放";
+    // 释放会停掉 worker，连带杀掉它的后台任务（委派的 codex 等）
+    if (record.backgroundTasks?.length) return `会话还有 ${record.backgroundTasks.length} 个后台任务在运行，结束后才能释放`;
     if (!record.nativeSessionId) return "会话还没有原生会话 id（首轮完成前），无法释放";
     if (!this.workers.has(id)) return "会话没有活动 worker";
     return null;
@@ -459,9 +464,18 @@ export class SessionManager {
     return event;
   }
 
+  /** 后台任务清单变化时广播；worker 起停时清空（新 worker 不继承旧进程的后台任务）。 */
+  private setBackgroundTasks(id: string, tasks: BackgroundTask[]): void {
+    const session = this.sessions.get(id);
+    if (!session || (!session.backgroundTasks?.length && !tasks.length)) return;
+    session.backgroundTasks = tasks;
+    this.emit(id, "background_tasks_updated", { tasks });
+  }
+
   private setStatus(id: string, status: SessionStatus): void {
     const session = this.sessions.get(id);
     if (!session) return;
+    if (status === "starting" || status === "dead") this.setBackgroundTasks(id, []);
     session.status = status;
     session.lastActivityAt = new Date().toISOString();
     const pid = this.workers.get(id)?.child?.pid;
@@ -762,6 +776,7 @@ export class SessionManager {
           session.remoteControl = metadata.remoteControl;
           this.emit(id, "remote_control_updated", { ...metadata.remoteControl });
         }
+        if (metadata.backgroundTasks) this.setBackgroundTasks(id, metadata.backgroundTasks);
         const pid = worker().child?.pid;
         if (pid) session.processId = pid;
         this.persistRegistry();

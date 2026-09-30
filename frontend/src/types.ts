@@ -8,6 +8,12 @@ export interface RemoteControlState {
   sessionUrl?: string;
   reason?: string;
 }
+/** Claude 的后台任务（后台 Bash、后台子代理等），来自 CLI 的 system/background_tasks_changed 全量清单。 */
+export interface BackgroundTask {
+  id: string;
+  type: string;
+  description: string;
+}
 export type PermissionDecision = "allow" | "deny" | "always";
 
 export type ConfigOptionId = "model" | "effort" | "permissionMode";
@@ -109,6 +115,8 @@ export interface SessionRecord {
   /** true = 该会话已关闭 agent 主动询问（claude bypass/dontAsk、codex never、kimi yolo） */
   riskyMode: boolean;
   remoteControl?: RemoteControlState;
+  /** 仅 Claude：后台任务清单；非空时虽 idle 仍在干活（列表状态点显示黄色） */
+  backgroundTasks?: BackgroundTask[];
 }
 
 /** GET /api/sessions/:id/commands 与 commands_updated 的命令项；name 不含开头的 /。 */

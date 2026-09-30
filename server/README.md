@@ -24,6 +24,8 @@ npm run server
 
 Claude 会话的列表、详情和 snapshot `session` 额外包含 `remoteControl:{status,sessionUrl?,reason?}`；状态为 `disconnected / connecting / connected / reconnecting / disconnecting / error`。`sessionUrl` 仅在已连接或重连中保留，`reason` 用于 title 提示。Codex、Kimi 没有此字段。状态变化写入统一 transcript、snapshot，并通过 WS `remote_control_updated` 广播同一状态对象；进程退出变为 `disconnected`。刷新和断线重连以 session/snapshot 对齐。
 
+Claude 会话另有 `backgroundTasks:[{id,type,description}]`：来自 CLI 的 `system/background_tasks_changed`（每次增减发全量清单，任务结束清单变空；2026-09-30 用 2.1.284 实测），经 WS `background_tasks_updated`（payload `{tasks}`）广播；worker 启动、退出、释放时清空。非空时会话仍为 `idle`（可以照常发消息），但前端列表状态点显示为「正在工作」，且空闲自动释放与手动释放都拒绝（释放会杀掉后台任务）。
+
 WS 上行 `{"type":"set_remote_control","sessionId":"...","enabled":true|false}`，成功收到常规 `ack`，失败收到带 `action:"set_remote_control"` 的常规 `error`；仅 Claude 活 worker 可用。driver 发送 `remote_control` 控制请求，15 秒未回复进入错误态。用户 `~/.claude/settings.json` 明确设 `remoteControlAtStartup:true` 时，新 worker 自动开启；project/local 设置明确 `false` 时禁止自动开启，读不到按关闭。已开启的会话因外部续聊或配置切换替换 worker 时自动恢复 RC，`session_url` 可变化。此功能不修改用户的 Claude 设置。
 
 Claude stdout 的 `bridge_state`、控制应答驱动胶囊状态；未知 state 安全显示中间态。`--replay-user-messages` 的 user 文本只在 RC 为 `connecting / connected / reconnecting`、且不是本机回显、子代理、合成记录或 CLI 注入包装时，才由 driver 发 `user_message`；RC 关闭时沿用原有行为，只处理其中的工具结果。本机回显以最多 20 条的先进先出列表匹配，`result` 不清空它。这样远端消息进入统一 transcript 和现有用户气泡，回合结束更新原生会话指纹，避免下次发送被误判为别处续聊。**手机发送消息的 stdout 形状及上述去重仍待真机验证**；本次无对话消息冒烟未覆盖它。`remote_control_work_secret` 重挂接不支持，收到会回复控制错误。
@@ -271,7 +273,7 @@ Codex 与 Kimi 的元数据探针失败时，对应 driver 返回 `options:[]` �
 
 Claude 的模型或推理强度不显式覆盖时，schema 默认值、`config` 和兼容字段 `model / effort` 的初始值均为 `null`，标签为“跟随 Claude 配置”。创建每个 worker 时，服务端只读并依次合并 `~/.claude/settings.json`、`<cwd>/.claude/settings.json`、`<cwd>/.claude/settings.local.json`，后层同名字符串覆盖前层；模型读取 `model`，推理强度读取 `effortLevel`。每个文件独立容错：缺失、无权限、坏 JSON、非对象或该项不是非空字符串时忽略该层的该项并保留上一层；三层都没有可用值才报告 `null`。合并 settings 时不启动 Claude 查询配置，不要求预热，也不在 `~/.claude`、`~/.codex` 或 `~/.kimi-code` 写缓存文件。
 
-Claude 在首轮 `system/init` 报出实际模型后，兼容字段 `model` 和 `effectiveModel` 都更新为完整模型名，`effectiveModelSource` 变为 `init`，并广播一条 `config_updated`。若未来 init 回报 effort，同样提升 effort；当前 Claude Code 2.1.238 的 init 不回报有效 effort，因此兼容字段 `effort` 保持 `null`，`effectiveEffort` 则继续使用 settings 合并值及 `settings` 来源，不会猜测精确模型侧 effort。审批模式由 driver 明确传 `manual`，init 回报的协议值 `default` 会归一为 `manual`。
+Claude 在首轮 `system/init` 报出实际模型后，兼容字段 `model` 和 `effectiveModel` 都更新为完整模型名，`effectiveModelSource` 变为 `init`，并广播一条 `config_updated`。若未来 init 回报 effort，同样提升 effort；当前 Claude Code 2.1.238 的 init 不回报有效 effort，因此兼容字段 `effort` 保持 `null`，`effectiveEffort` 则继续使用 settings 合并值及 `settings` 来源，不会猜测精确模型侧 effort。审批模式缺省由 driver 明确传 `auto`（2026-09-30 起，此前为 `manual`；ROADMAP P1-10），用户选 `manual` 时 init 回报的协议值 `default` 会归一为 `manual`。
 
 Codex 0.148.0 的 `approvalPolicy` 实测只接受 `untrusted / on-request / never`（另支持结构化 `granular`，不属于当前三档 UI）。`on-failure` 请求会被 app-server 以 `unknown variant` 拒绝，因此 schema 不暴露该值。
 

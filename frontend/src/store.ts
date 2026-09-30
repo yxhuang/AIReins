@@ -522,6 +522,9 @@ export class Store {
         } else if (event.type === "remote_control_updated") {
           const current = this.sessions.find((item) => item.id === event.sessionId);
           if (current) current.remoteControl = event.payload as unknown as SessionRecord["remoteControl"];
+        } else if (event.type === "background_tasks_updated") {
+          const current = this.sessions.find((item) => item.id === event.sessionId);
+          if (current) current.backgroundTasks = event.payload.tasks as SessionRecord["backgroundTasks"];
         } else if (event.type === "session_error") {
           // 切换中途失败（续接 worker 初始化失败等）：解除过渡态，错误就地显示在控件旁，
           // 不渲染成全局故障。
@@ -559,6 +562,9 @@ export class Store {
       if (event.type === "config_updated") this.applyConfigUpdated(event, session);
       if (event.type === "remote_control_updated") {
         session.remoteControl = event.payload as unknown as SessionRecord["remoteControl"];
+      }
+      if (event.type === "background_tasks_updated") {
+        session.backgroundTasks = event.payload.tasks as SessionRecord["backgroundTasks"];
       }
       if (event.type === "worker_released") {
         // 空闲自动释放没有客户端动作，靠这条事件把列表项对齐成已释放

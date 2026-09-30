@@ -188,6 +188,11 @@ async function pendingMarks(manager: InstanceType<typeof SessionManager>, id: st
   await assert.rejects(() => manager.release(session.id, "manual"), /闸门/);
   await manager.resolvePermission(session.id, "gate-1", "allow");
   await pendingMarks(manager, session.id);
+  // 后台任务（委派的 codex 等）在跑时不许释放：释放会连带杀掉它
+  instances.at(-1)!.options.callbacks.metadata({ backgroundTasks: [{ id: "b1", type: "local_bash", description: "delegate codex" }] });
+  assert.equal(manager.get(session.id)!.backgroundTasks?.length, 1);
+  await assert.rejects(() => manager.release(session.id, "manual"), /后台任务/);
+  instances.at(-1)!.options.callbacks.metadata({ backgroundTasks: [] });
   await manager.release(session.id, "manual");
   assert.equal(manager.get(session.id)!.released, true);
   const fresh = await manager.create({ agent: "claude", cwd: fixture, snapshot: "skip" });

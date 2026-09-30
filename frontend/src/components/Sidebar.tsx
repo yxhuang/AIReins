@@ -1,15 +1,13 @@
 import { useEffect, useRef, useState, type Dispatch, type SetStateAction } from "react";
-import type { AgentKind, ConfigOptionId, DriverConfigOption, SessionRecord, SnapshotPreflight } from "../types";
+import type { AgentKind, ConfigOptionId, DriverConfigOption, SessionRecord } from "../types";
 import { relativeTime, sessionTitle } from "../format";
 import { isInlineSvg } from "../pages";
-import { fetchSnapshotPreflight, type CreateSessionInput } from "../api";
-import { createWithSnapshotPreflight, type SnapshotChoice } from "../snapshot";
+import type { CreateSessionInput } from "../api";
 import { store, type Store } from "../store";
 import { useStore } from "../useStore";
 import { SettingsMenu } from "./SettingsMenu";
 import { ConfigPills, type MenuGroup } from "./ConfigMenu";
 import { pillText } from "../config-view";
-import { SnapshotConfirm } from "./SnapshotConfirm";
 import { DirectoryBrowser } from "./DirectoryBrowser";
 
 const AGENT_LABELS: Record<AgentKind, string> = {
@@ -83,9 +81,9 @@ export function Sidebar({ collapsed, onToggle, newOpen, onNewOpenChange, termina
   // pendingGates 是可变 Map；用可比较的原始字符串捕获“总数相同但分布换了会话”的变化。
   useStore(selectPendingSignature);
   const [deadExpanded, setDeadExpanded] = useState(false);
-  // 稳定排序：默认按 createdAt，行序不随事件流抖动（此前按 lastActivityAt，正要点的那行会被挤走）。
+  // 稳定排序：按 createdAt 倒序（最新建的在最上），行序不随事件流抖动（此前按 lastActivityAt，正要点的那行会被挤走）。
   const byCreated = (a: SessionRecord, b: SessionRecord) =>
-    Date.parse(a.createdAt) - Date.parse(b.createdAt);
+    Date.parse(b.createdAt) - Date.parse(a.createdAt);
   // 有未决闸门的会话抽到顶部「等待处理」区（天然总览）；dead 会话沉底折叠。
   // 防御性兜底：万一 dead 会话仍带未决计数，也只进等待处理区——未决闸门绝不许被折叠藏起。
   const waiting = sessionRecords.filter((s) => store.pendingCount(s.id) > 0).sort(byCreated);
@@ -117,6 +115,16 @@ export function Sidebar({ collapsed, onToggle, newOpen, onNewOpenChange, termina
     <aside className="sidebar">
       <div className="sidebar-head">
         <span className="brand">workbench</span>
+        {/* Chrome --app 窗口和主屏幕 PWA 没有地址栏和刷新键 */}
+        <button
+          type="button"
+          className="icon-btn sidebar-reload"
+          title="刷新页面"
+          aria-label="刷新页面"
+          onClick={() => location.reload()}
+        >
+          ↻
+        </button>
         {collapsed && totalPending > 0 && (
           <button
             type="button"
@@ -322,6 +330,8 @@ function SessionRow({
 }) {
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
+  // 主回合已结束但还有后台任务（委派的 codex 等）在跑：仍算「正在工作」
+  const backgroundBusy = session.status === "idle" && (session.backgroundTasks?.length ?? 0) > 0;
   const [error, setError] = useState<string | null>(null);
   const deleteBtnRef = useRef<HTMLButtonElement>(null);
   const cancelBtnRef = useRef<HTMLButtonElement>(null);
@@ -413,14 +423,19 @@ function SessionRow({
           )}
         </span>
         <span className="row-meta">
-          <span className={`status-dot status-${session.status}`} />
+          <span className={`status-dot status-${pending > 0 ? "needs-user" : backgroundBusy ? "running" : session.status}`} />
           {session.riskyMode && (
             <span className="risky-mark" title="该会话已关闭 agent 主动询问">
               !
             </span>
           )}
-          <span className="row-meta-text" title={STATUS_HINTS[session.status] ?? session.status}>
-            {AGENT_LABELS[session.agent]} · {STATUS_LABELS[session.status] ?? session.status} · {relativeTime(session.lastActivityAt, now)}
+          <span
+            className="row-meta-text"
+            title={backgroundBusy
+              ? `后台任务：${session.backgroundTasks!.map((task) => task.description || task.type).join("；")}`
+              : STATUS_HINTS[session.status] ?? session.status}
+          >
+            {AGENT_LABELS[session.agent]} · {backgroundBusy ? `后台 ${session.backgroundTasks!.length} 个任务` : STATUS_LABELS[session.status] ?? session.status} · {relativeTime(session.lastActivityAt, now)}
           </span>
         </span>
       </button>
@@ -459,9 +474,6 @@ function NewSessionForm({ onDone }: { onDone: () => void }) {
   const [error, setError] = useState<string | null>(null);
   const [browseOpen, setBrowseOpen] = useState(false);
   const browseButtonRef = useRef<HTMLButtonElement>(null);
-  // 快照确认框：非 null 时弹出，等用户拍板（auto/skip/cancel）后 resolve
-  const [confirmPreflight, setConfirmPreflight] = useState<SnapshotPreflight | null>(null);
-  const confirmResolver = useRef<((choice: SnapshotChoice) => void) | null>(null);
   const submitBtnRef = useRef<HTMLButtonElement>(null);
   // 三个配置下拉的已选值；"" = 跟随配置（不传该字段）。切 agent 时整体重置。
   const [configSel, setConfigSel] = useState<Partial<Record<ConfigOptionId, string>>>({});
@@ -474,25 +486,6 @@ function NewSessionForm({ onDone }: { onDone: () => void }) {
     if (next) setCwdState(next);
   });
 
-  // 表单被收起/卸载时若确认框还挂着，按取消了结，别让 submit 的承诺永远挂起
-  useEffect(
-    () => () => {
-      confirmResolver.current?.("cancel");
-      confirmResolver.current = null;
-    },
-    [],
-  );
-
-  const resolveConfirm = (choice: SnapshotChoice) => {
-    setConfirmPreflight(null);
-    confirmResolver.current?.(choice);
-    confirmResolver.current = null;
-    if (choice === "cancel") {
-      // 取消 = 不建会话、回到表单原状态；焦点还给「创建并进入」（等弹窗卸载后）
-      requestAnimationFrame(() => submitBtnRef.current?.focus());
-    }
-  };
-
   const submit = async () => {
     if (!cwd.trim() || busy) return;
     setBusy(true);
@@ -501,15 +494,16 @@ function NewSessionForm({ onDone }: { onDone: () => void }) {
     const config = Object.fromEntries(
       Object.entries(configSel).filter(([, value]) => value),
     );
-    const base: Omit<CreateSessionInput, "snapshot"> = {
+    // 不做建会话前快照（2026-09-30 用户定，ROADMAP P1-8）：显式 skip，后端默认值仍是 auto
+    const input: CreateSessionInput = {
+      snapshot: "skip",
       agent,
       cwd: cwd.trim(),
       ...(Object.keys(config).length > 0 ? { config } : {}),
       ...(message.trim() ? { initialMessage: message.trim() } : {}),
     };
-    // 实际建会话：snapshot 只在用户在确认框做出选择后显式携带，其余情况省略（后端默认 auto）
-    const doCreate = async (snapshot?: "auto" | "skip") => {
-      const session = await store.create(snapshot ? { ...base, snapshot } : base);
+    try {
+      const session = await store.create(input);
       // 记忆本次 cwd，下次新建直接预填（localStorage 不可用就跳过）
       try {
         localStorage.setItem(CWD_STORAGE_KEY, session.cwd);
@@ -518,21 +512,6 @@ function NewSessionForm({ onDone }: { onDone: () => void }) {
       }
       store.navigate(session.id);
       onDone();
-    };
-    try {
-      // 建会话前快照预检：分支规则在 snapshot.ts（git 直连 / 静默快照 / 弹确认框）；
-      // preflight 自身失败不阻断建会话（保护措施不能反过来卡住用户）。
-      const created = await createWithSnapshotPreflight(base.cwd, {
-        preflight: fetchSnapshotPreflight,
-        create: doCreate,
-        confirm: (preflight) =>
-          new Promise<SnapshotChoice>((resolve) => {
-            confirmResolver.current = resolve;
-            setConfirmPreflight(preflight);
-          }),
-        log: (msg) => console.warn(`[snapshot] ${msg}`),
-      });
-      if (!created) return; // 用户在确认框取消：回到表单
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -604,10 +583,6 @@ function NewSessionForm({ onDone }: { onDone: () => void }) {
       </button>
       {/* 禁用原因不只靠 title tooltip：直接写在按钮下方 */}
       {!cwd.trim() && <p className="new-hint">请先填写工作目录</p>}
-      {/* 快照预检判定需要用户拍板时弹暖色确认框（Esc 取消，焦点回「创建并进入」） */}
-      {confirmPreflight && (
-        <SnapshotConfirm preflight={confirmPreflight} onResolve={resolveConfirm} />
-      )}
       {browseOpen && (
         <DirectoryBrowser
           initialPath={cwd}

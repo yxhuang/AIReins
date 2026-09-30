@@ -184,7 +184,7 @@ export const CLAUDE_CONFIG_SCHEMA: DriverConfigSchema = {
         { value: "dontAsk", label: "Don't Ask" },
         { value: "bypassPermissions", label: "Bypass Permissions" },
       ],
-      default: "manual",
+      default: "auto",
       mutable: true,
     },
   ],
@@ -198,7 +198,7 @@ export function claudeLaunchArgs(config: SessionConfig, resumeSessionId?: string
     "--verbose",
     "--include-partial-messages",
     "--replay-user-messages",
-    "--permission-mode", config.permissionMode ?? "manual",
+    "--permission-mode", config.permissionMode ?? "auto",
     "--permission-prompt-tool", "stdio",
   ];
   if (resumeSessionId) args.push("--resume", resumeSessionId);
@@ -223,7 +223,7 @@ export class ClaudeDriver extends BaseDriver {
     this.config = {
       model: this.config.model ?? null,
       effort: this.config.effort ?? null,
-      permissionMode: this.config.permissionMode ?? "manual",
+      permissionMode: this.config.permissionMode ?? "auto",
     };
     this.validateConfig(this.config);
     const args = claudeLaunchArgs(this.config, this.resumeSessionId);
@@ -460,6 +460,18 @@ export class ClaudeDriver extends BaseDriver {
         source: "claude",
         warning: `Claude 命令表刷新失败：${error instanceof Error ? error.message : String(error)}`,
       }));
+      return;
+    }
+
+    if (message.type === "system" && message.subtype === "background_tasks_changed") {
+      const tasks: Array<Record<string, unknown>> = Array.isArray(message.tasks) ? message.tasks : [];
+      this.callbacks.metadata({
+        backgroundTasks: tasks.map((task) => ({
+          id: String(task.task_id ?? ""),
+          type: String(task.task_type ?? ""),
+          description: String(task.description ?? ""),
+        })),
+      });
       return;
     }
 
