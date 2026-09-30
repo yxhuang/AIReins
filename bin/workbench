@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# workbench —— 个人 Agent 工作台的启动器。
-# 用法：workbench [start|stop|status|restart|logs]   （不带参数 = start）
+# wb（workbench）—— 个人 Agent 工作台的启动器。
+# 用法：wb [start|stop|status|restart|logs]   （不带参数 = start）
 # 启动后自动在 Windows 侧默认浏览器打开；置 WORKBENCH_NO_OPEN=1 可跳过。
 set -uo pipefail
 
@@ -73,7 +73,7 @@ remote_status() {
   elif [[ -n "$rpid" ]]; then
     echo "  远程：127.0.0.1:$port 被别的程序占用（PID $rpid），远程入口没起来"
   else
-    echo "  远程：$origin → 127.0.0.1:$port 未监听（workbench logs 里搜 remote 看原因）"
+    echo "  远程：$origin → 127.0.0.1:$port 未监听（wb logs 里搜 remote 看原因）"
   fi
 }
 
@@ -95,5 +95,5 @@ case "${1:-start}" in
   restart) stop; start ;;
   status)  status ;;
   logs)    tail -f "$LOG" ;;
-  *) echo "用法：workbench [start|stop|restart|status|logs]" >&2; exit 2 ;;
+  *) echo "用法：wb [start|stop|restart|status|logs]" >&2; exit 2 ;;
 esac
