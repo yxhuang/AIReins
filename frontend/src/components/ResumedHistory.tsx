@@ -12,12 +12,13 @@ import {
 
 type Phase = "loading" | "ready" | "error";
 
-/** Imported history and preview share the same latest-first reader. */
+/** Imported history and preview share the same latest-first reader.
+ * 历史区异步加载、插在实时流上方，载入后同样滚到底，进会话停在最新消息。 */
 export function ResumedHistory({ session, streamRef }: { session: SessionRecord; streamRef: RefObject<HTMLDivElement | null> }) {
   if (!session.resumedFrom) return null;
   return <PagedHistory key={`${session.resumedFrom.agent}:${session.resumedFrom.nativeSessionId}`}
     agent={session.resumedFrom.agent} nativeSessionId={session.resumedFrom.nativeSessionId}
-    cwd={session.cwd} streamRef={streamRef} imported initialCursor={session.resumedFrom.historyCursor} />;
+    cwd={session.cwd} streamRef={streamRef} imported startAtEnd initialCursor={session.resumedFrom.historyCursor} />;
 }
 
 export function PagedHistory({ agent, nativeSessionId, cwd, streamRef, imported = false, startAtEnd = false, initialCursor }: {

@@ -1,6 +1,8 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { basename } from "node:path";
+import { basename, join } from "node:path";
+import { lstat, readdir, readFile, realpath, rm, unlink } from "node:fs/promises";
+import { kimiHistoryRoot } from "../history.js";
 import { pathToFileURL } from "node:url";
 import type {
   ConfigOptionId,
@@ -173,6 +175,51 @@ export function kimiConfigFromOptions(configOptions: AcpConfigOption[]): Session
   return config;
 }
 
+/** Delete only the returned probe session after proving identity and absence of conversation. */
+export async function cleanupKimiProbeSession(sessionId: string, root = kimiHistoryRoot()): Promise<boolean> {
+  const warn = (reason: unknown) => console.warn(`[kimi probe] 保留 ${sessionId}：${String(reason)}`);
+  if (!/^session_[\w-]+$/u.test(sessionId)) { warn("无效 sessionId"); return false; }
+  try {
+    const canonicalRoot = await realpath(root);
+    const matches: string[] = [];
+    for (const workspace of await readdir(canonicalRoot, { withFileTypes: true })) {
+      if (!workspace.isDirectory()) continue;
+      const directory = join(canonicalRoot, workspace.name, sessionId);
+      try {
+        if ((await lstat(directory)).isDirectory() && await realpath(directory) === directory) matches.push(directory);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      }
+    }
+    if (matches.length !== 1) { warn(`匹配目录数量 ${matches.length}`); return false; }
+    const directory = matches[0]!;
+    const statePath = join(directory, "state.json");
+    const wirePath = join(directory, "agents", "main", "wire.jsonl");
+    if (await realpath(statePath) !== statePath || await realpath(wirePath) !== wirePath) {
+      warn("状态或 wire 路径含软链"); return false;
+    }
+    const state = JSON.parse(await readFile(statePath, "utf8"));
+    if (state?.id !== sessionId) { warn("state.id 不匹配"); return false; }
+    const allowed = new Set(["metadata", "permission.set_mode", "profile.bind", "runtime.set_binding"]);
+    const wire = await readFile(wirePath, "utf8");
+    for (const line of wire.split(/\r?\n/u)) {
+      if (!line.trim()) continue;
+      if (!allowed.has(JSON.parse(line)?.type)) { warn("wire 含对话或非探测记录"); return false; }
+    }
+    await rm(directory, { recursive: true });
+    const dirty = join(canonicalRoot, ".index-dirty");
+    try {
+      if (await realpath(dirty) !== dirty) throw new Error("index-dirty 含软链");
+      for (const marker of await readdir(dirty, { withFileTypes: true })) {
+        if (marker.isFile() && marker.name.startsWith(sessionId)) await unlink(join(dirty, marker.name));
+      }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") warn(error);
+    }
+    return true;
+  } catch (error) { warn(error); return false; }
+}
+
 export async function probeKimiConfigSchema(cwd: string): Promise<DriverConfigSchema> {
   const probe = new StdioRpcProbe("kimi", ["acp"], cwd);
   let sessionId = "";
@@ -189,7 +236,8 @@ export async function probeKimiConfigSchema(cwd: string): Promise<DriverConfigSc
     if (sessionId) {
       try { await probe.request("session/close", { sessionId }, 1_000); } catch { /* probe shutdown remains authoritative */ }
     }
-    await probe.close();
+    try { await probe.close(); }
+    finally { if (sessionId) await cleanupKimiProbeSession(sessionId); }
   }
 }
 

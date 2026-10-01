@@ -8,7 +8,8 @@ import {
   SOURCE_LABELS,
   type SourceFilter,
 } from "../history";
-import { relativeTime } from "../format";
+import { relativeTime, relativeTimeShort } from "../format";
+import { AgentIcon } from "./AgentIcon";
 import { PagedHistory } from "./ResumedHistory";
 import { store, type Store } from "../store";
 import { shallowEqual, useStore } from "../useStore";
@@ -37,13 +38,14 @@ interface ListState {
   nextCursor?: string;
   truncated: boolean;
   skipped: number;
+  empty: number;
   discovered: number;
 }
 
 type ListPhase = "loading" | "ready" | "error";
 
 /**
- * 历史会话浏览视图（#/history）：只读列出三家 CLI 自己保存的历史会话，
+ * 侧栏历史列表（#/history）：只读列出三家 CLI 自己保存的所有来源会话，
  * 预览确认后「导入并续接」（就地续接，不是分叉——代价写在按钮上方）。
  * 分页用 nextCursor +「加载更多」；truncated/skipped 都渲染成中性小字说明，不当错误。
  */
@@ -58,12 +60,14 @@ export function HistoryView() {
     items: [],
     truncated: false,
     skipped: 0,
+    empty: 0,
     discovered: 0,
   });
   const [phase, setPhase] = useState<ListPhase>("loading");
   const [loadingMore, setLoadingMore] = useState(false);
   const [listError, setListError] = useState<string | null>(null);
-  const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  const selectedKey = useStore((value) => value.historySelection
+    ? `${value.historySelection.agent}:${value.historySelection.nativeSessionId}` : null);
   /** 请求代次：agent/q 变化时自增，过期响应（含旧查询的「加载更多」）直接丢弃 */
   const reqGen = useRef(0);
 
@@ -94,6 +98,7 @@ export function HistoryView() {
           ...(data.nextCursor ? { nextCursor: data.nextCursor } : {}),
           truncated: data.truncated,
           skipped: data.skipped,
+          empty: cursor ? prev.empty + data.empty : data.empty,
           discovered: data.discovered,
         }));
         setPhase("ready");
@@ -118,13 +123,6 @@ export function HistoryView() {
     void load();
   }, [load]);
 
-  const selected = useMemo(
-    () =>
-      list.items.find(
-        (item) => `${item.agent}:${item.nativeSessionId}` === selectedKey,
-      ),
-    [list.items, selectedKey],
-  );
   const importedKeys = useMemo(
     () => new Set(importedSessionKeys),
     [importedSessionKeys],
@@ -134,18 +132,14 @@ export function HistoryView() {
     () => filterBySource(list.items, sourceFilter),
     [list.items, sourceFilter],
   );
-  const selectRow = useCallback((key: string) => setSelectedKey(key), []);
+  const selectRow = useCallback((key: string) => {
+    const item = list.items.find((row) => `${row.agent}:${row.nativeSessionId}` === key);
+    if (item) store.selectHistory(item);
+  }, [list.items]);
 
   return (
-    // has-selection：窄屏下选中后只显示预览栏（见 styles.css），靠「‹ 历史会话列表」回来
-    <div className={`history-view${selected ? " has-selection" : ""}`}>
-      <section className="history-list-pane" aria-label="历史会话列表">
-        <header className="history-head">
-          <h1 className="history-title">历史会话</h1>
-          <p className="history-sub">
-            三家 CLI 自己保存的历史会话（只读）。选一个预览，确认后可以导入并续接。
-          </p>
-        </header>
+    <div className="history-view history-sidebar-list">
+      <section className="history-list-pane" aria-label="所有来源会话">
         <div className="history-filters">
           <div className="history-filter-group" role="group" aria-label="按 agent 筛选">
             <button
@@ -187,12 +181,13 @@ export function HistoryView() {
             value={qInput}
             onChange={(e) => setQInput(e.target.value)}
             placeholder="搜索标题或目录…"
-            aria-label="搜索历史会话"
+            aria-label="搜索所有来源会话"
           />
         </div>
         <p className="history-meta">
           已加载 {list.items.length} 条 · 共发现 {list.discovered} 个候选
           {list.skipped > 0 && ` · ${list.skipped} 个损坏或不可读的候选已跳过`}
+          {list.empty > 0 && ` · ${list.empty} 个空会话已隐藏`}
           {list.truncated && " · 扫描达到时间/数量上限，结果可能不完整，可用关键词缩小范围"}
           {sourceFilter !== "all" && " · 来源筛选只作用于已加载的条目"}
         </p>
@@ -221,7 +216,7 @@ export function HistoryView() {
               ))}
               {phase === "ready" && visible.length === 0 && (
                 <li className="history-list-empty">
-                  {list.items.length === 0 ? "没有匹配的历史会话" : "已加载条目里没有该来源的会话"}
+                  {list.items.length === 0 ? "没有匹配的所有来源会话" : "已加载条目里没有该来源的会话"}
                 </li>
               )}
               {phase === "loading" && <li className="history-list-empty">加载中…</li>}
@@ -249,12 +244,11 @@ export function HistoryView() {
           </>
         )}
       </section>
-      <HistoryPreviewPane item={selected} onBack={() => setSelectedKey(null)} />
     </div>
   );
 }
 
-const HistoryRow = memo(function HistoryRow({
+export const HistoryRow = memo(function HistoryRow({
   item,
   active,
   imported,
@@ -276,25 +270,29 @@ const HistoryRow = memo(function HistoryRow({
       onClick={() => onSelect(key)}
     >
       <span className="history-row-line1">
+        <AgentIcon agent={item.agent} label={item.agent} />
         <span className="history-row-title" title={item.title}>
           {item.title}
         </span>
+        {item.dispatch && <span className="dispatch-badge" title={`${item.dispatch.name} · ${item.dispatch.runId}`}>工单</span>}
         <span className={`source-badge source-${item.source}`}>
           {SOURCE_LABELS[item.source]}
         </span>
+        <span className="history-row-time" title={new Date(item.lastActivityAt).toLocaleString()}>
+          {relativeTimeShort(item.lastActivityAt, now)}
+        </span>
       </span>
-      <span className="history-row-cwd mono" title={item.cwd}>
-        {item.cwd}
-      </span>
-      <span className="history-row-meta">
-        {item.agent} · {relativeTime(item.lastActivityAt, now)}
+      <span className="history-row-line2">
+        <span className="history-row-cwd mono" title={item.cwd}>
+          {item.cwd}
+        </span>
         {imported && <span className="imported-badge">已在工作台中</span>}
       </span>
     </button>
   );
 });
 
-function HistoryPreviewPane({ item, onBack }: { item: HistorySession | undefined; onBack: () => void }) {
+export function HistoryPreviewPane({ item, onBack }: { item: HistorySession | undefined; onBack: () => void }) {
   const now = useStore(selectHistoryNow);
   const selectImportedId = useCallback(
     (value: Store) => (item ? findImportedSession(value.sessions, item)?.id : undefined),
@@ -338,7 +336,7 @@ function HistoryPreviewPane({ item, onBack }: { item: HistorySession | undefined
   return (
     <aside className="history-preview-pane" aria-label="会话预览" aria-live="polite">
       <button type="button" className="btn history-back" onClick={onBack}>
-        ‹ 历史会话列表
+        ‹ 所有来源会话
       </button>
       <div className="history-preview-head">
         <h2 className="history-preview-title">{item.title}</h2>

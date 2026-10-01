@@ -533,7 +533,7 @@ export class ClaudeDriver extends BaseDriver {
         if (message.response?.subtype === "success") {
           pendingCommands.resolve(message.response?.response);
         } else {
-          pendingCommands.reject(new Error(message.response?.error ?? "Claude initialize control_request 失败"));
+          pendingCommands.reject(new Error(message.response?.error ?? "Claude control_request 失败"));
         }
         return;
       }
@@ -679,6 +679,29 @@ export class ClaudeDriver extends BaseDriver {
         throw new Error(`Claude ${id} 不合法：${value}`);
       }
     }
+  }
+
+  /** 「/」菜单的只读查看：与 VSCode 扩展同一批 control_request（2.1.285 实测，见 PROTOCOL-NOTES §10）。 */
+  async queryInfo(subtype: string): Promise<unknown> {
+    const requestId = randomUUID();
+    const result = new Promise<unknown>((resolve, reject) => {
+      this.pendingCommandRequests.set(requestId, { resolve, reject });
+      this.send({ type: "control_request", request_id: requestId, request: { subtype } });
+    });
+    try {
+      return await withTimeout(result, subtype === "reload_plugins" ? 30_000 : 15_000, `Claude ${subtype}`);
+    } finally {
+      this.pendingCommandRequests.delete(requestId);
+    }
+  }
+
+  async reloadPlugins(): Promise<void> {
+    // 与 VSCode 扩展 reloadPluginsAfterFreshSettings 顺序一致：先清设置缓存。
+    await this.queryInfo("get_settings");
+    const response = await this.queryInfo("reload_plugins") as Record<string, unknown> | undefined;
+    if (Array.isArray(response?.commands)) this.updateCommands(response.commands);
+    if (response?.held === true) throw new Error("插件重载被暂缓，新会话或重新续接后生效");
+    if (Number(response?.error_count) > 0) throw new Error(`插件重载报告 ${response!.error_count} 个错误`);
   }
 
   private async refreshCommands(): Promise<void> {

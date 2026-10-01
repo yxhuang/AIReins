@@ -13,6 +13,16 @@ export function relativeTime(iso: string, now: number): string {
   return `${Math.floor(hours / 24)} 天前`;
 }
 
+// 会话列表行尾用的紧凑版：去掉「前」，单位压短（完整说法放 title）。
+export function relativeTimeShort(iso: string, now: number): string {
+  const minutes = Math.floor(Math.max(0, now - Date.parse(iso)) / 60000);
+  if (minutes < 1) return "刚刚";
+  if (minutes < 60) return `${minutes}分钟`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}小时`;
+  return `${Math.floor(hours / 24)}天`;
+}
+
 // 历史 / 外部续聊消息的角色名：用户显示「我」，助手显示所属 CLI。
 const AGENT_NAMES: Record<AgentKind, string> = { claude: "Claude Code", codex: "Codex", kimi: "Kimi" };
 export function messageRoleLabel(role: string, agent: AgentKind | undefined): string {

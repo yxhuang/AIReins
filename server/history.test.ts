@@ -151,7 +151,8 @@ await Promise.all([
 const history = new HistoryIndex({ roots, timeoutMs: 3_000 });
 const all = await history.list({ limit: 20 });
 assert.equal(all.discovered, 7);
-assert.equal(all.sessions.length, 5);
+assert.equal(all.sessions.length, 4);
+assert.equal(all.empty, 1, "有标题但没有 wire 用户消息的旧 Kimi 会话隐藏");
 assert.equal(all.skipped, 2);
 assert.equal(all.truncated, false);
 assert.deepEqual(all.sessions.map((session) => session.title), [
@@ -159,7 +160,6 @@ assert.deepEqual(all.sessions.map((session) => session.title), [
   "工作台标题",
   "Codex 真实标题",
   "Kimi 真实标题",
-  "Kimi 旧版标题",
 ]);
 assert.equal(findSession(all, "claude", interactiveClaudeId).source, "interactive");
 assert.equal(findSession(all, "claude", workbenchClaudeId).source, "workbench");
@@ -203,8 +203,8 @@ const firstPage = await history.list({ limit: 2 });
 assert.equal(firstPage.sessions.length, 2);
 assert.ok(firstPage.nextCursor);
 const secondPage = await history.list({ limit: 20, cursor: firstPage.nextCursor });
-assert.equal(secondPage.sessions.length, 6);
-assert.equal(new Set([...firstPage.sessions, ...secondPage.sessions].map((session) => session.nativeSessionId)).size, 8);
+assert.equal(secondPage.sessions.length, 5);
+assert.equal(new Set([...firstPage.sessions, ...secondPage.sessions].map((session) => session.nativeSessionId)).size, 7);
 
 const claudePages = await readAllMessages(history, "claude", interactiveClaudeId, 2);
 assert.deepEqual(claudePages.map((message) => `${message.role}:${"text" in message ? message.text : message.tool.name}`), [
@@ -407,3 +407,73 @@ const kimiLatest = await history.messages("kimi", kimiId, { limit: 50 });
 assert.ok(claudeLatest?.messages.some(appended), "claude：不带 cursor 应含追加消息");
 assert.ok(kimiLatest?.messages.some(appended), "kimi：不带 cursor 应含追加消息");
 console.log("history endCursor cutoff passed");
+
+// 思考块：Claude thinking（空的不推）、Codex reasoning 摘要（空 summary 不推）、Kimi think part；相邻同类合并
+const { mergeHistoryMessages } = await import("./history.js");
+const claudeThought = parse("claude", [{ type: "assistant", message: { role: "assistant", content: [
+  { type: "thinking", thinking: "", signature: "s" }, { type: "thinking", thinking: "想一想" }, { type: "text", text: "答" },
+] } }]);
+assert.deepEqual(claudeThought.map((m) => [m.role, "text" in m ? m.text : ""]), [["thought", "想一想"], ["assistant", "答"]]);
+const codexThought = parse("codex", [
+  { type: "response_item", payload: { type: "reasoning", summary: [], encrypted_content: "x" } },
+  { type: "response_item", payload: { type: "reasoning", summary: [{ type: "summary_text", text: "甲" }, { type: "summary_text", text: "乙" }] } },
+]);
+assert.deepEqual(codexThought.map((m) => [m.role, "text" in m ? m.text : ""]), [["thought", "甲\n\n乙"]]);
+const kimiThought = mergeHistoryMessages(parse("kimi", [
+  { type: "context.append_loop_event", event: { type: "content.part", part: { type: "think", think: "先" } } },
+  { type: "context.append_loop_event", event: { type: "content.part", part: { type: "think", think: "后" } } },
+  { type: "context.append_loop_event", event: { type: "content.part", part: { type: "text", text: "答" } } },
+]));
+assert.deepEqual(kimiThought.map((m) => [m.role, "text" in m ? m.text : ""]), [["thought", "先后"], ["assistant", "答"]]);
+console.log("history thoughts passed");
+
+// 三家共用空会话过滤；现有目录原样保留。标题和消息的存在性分开判断。
+const emptyCodexId = "88888888-8888-4888-8888-888888888888";
+const emptyClaudeId = "99999999-9999-4999-8999-999999999999";
+const emptyKimiId = "session_metadata_only";
+const emptyClaude = join(roots.claude, "project", `${emptyClaudeId}.jsonl`);
+const emptyCodex = join(roots.codex, "2026", "08", "22", `rollout-empty-${emptyCodexId}.jsonl`);
+const emptyKimi = join(roots.kimi, "workspace", emptyKimiId);
+await writeJsonl(emptyClaude, [{ type: "assistant", cwd: "/empty", message: { role: "assistant", content: "只有助手" } }]);
+await writeJsonl(emptyCodex, [{ type: "session_meta", payload: { id: emptyCodexId, cwd: "/empty" } }]);
+await mkdir(join(emptyKimi, "agents", "main"), { recursive: true });
+await writeFile(join(emptyKimi, "state.json"), JSON.stringify({ id: emptyKimiId, cwd: "/empty", title: "已有标题仍为空" }));
+await writeJsonl(join(emptyKimi, "agents", "main", "wire.jsonl"), [
+  { type: "metadata" }, { type: "permission.set_mode" }, { type: "profile.bind" }, { type: "runtime.set_binding" },
+]);
+const hidden = await history.list({ limit: 100 });
+assert.equal(hidden.empty, 4, "Claude/Codex/Kimi 加旧版无 wire 会话分别计数");
+assert.ok(!hidden.sessions.some((session) => [emptyClaudeId, emptyCodexId, emptyKimiId].includes(session.nativeSessionId)));
+const { readFile } = await import("node:fs/promises");
+assert.equal(JSON.parse(await readFile(join(emptyKimi, "state.json"), "utf8")).id, emptyKimiId);
+await appendFile(emptyClaude, JSON.stringify({ type: "user", message: { role: "user", content: [{ type: "image", source: {} }] } }) + "\n");
+assert.ok((await history.list({ limit: 100 })).sessions.some((session) => session.nativeSessionId === emptyClaudeId), "只有图片的用户消息也保留，缓存随文件变化刷新");
+
+const delegateRoot = join(fixture, "delegate");
+const oldDelegateRoot = process.env.WB_DELEGATE_DIR;
+process.env.WB_DELEGATE_DIR = delegateRoot;
+try {
+  for (const [sessionId, runId, name] of [
+    [codexId, "20261001-230000-codex-history", "Codex 历史工单"],
+    [kimiId, "20261001-230001-kimi-history", "Kimi 历史工单"],
+  ]) {
+    await mkdir(join(delegateRoot, runId!), { recursive: true });
+    await writeFile(join(delegateRoot, runId!, "run.json"), JSON.stringify({ schema: 1, session: sessionId, name }));
+  }
+  const decorated = await history.list({ limit: 100 });
+  assert.equal(decorated.sessions.find((session) => session.nativeSessionId === codexId)?.dispatch?.name, "Codex 历史工单");
+  assert.equal(decorated.sessions.find((session) => session.nativeSessionId === kimiId)?.dispatch?.runId, "20261001-230001-kimi-history");
+  assert.equal(decorated.sessions.find((session) => session.nativeSessionId === interactiveClaudeId)?.dispatch, undefined);
+} finally {
+  if (oldDelegateRoot === undefined) delete process.env.WB_DELEGATE_DIR;
+  else process.env.WB_DELEGATE_DIR = oldDelegateRoot;
+}
+console.log("history empty filtering / dispatch decoration passed");
+
+await writeJsonl(emptyCodex, [
+  { type: "session_meta", payload: { id: emptyCodexId, cwd: "/empty" } },
+  { type: "event_msg", payload: { type: "agent_message", message: "x".repeat(2000) } },
+  { type: "response_item", payload: { type: "message", role: "user", content: [{ type: "input_text", text: "标题窗口之后的用户消息" }] } },
+]);
+const shortHead = await new HistoryIndex({ roots, headBytes: 256 }).list({ agent: "codex", limit: 100 });
+assert.ok(shortHead.sessions.some((session) => session.nativeSessionId === emptyCodexId), "用户消息超出标题读取窗口仍不能当作空会话");

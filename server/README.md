@@ -128,14 +128,19 @@ webhook 地址就是密钥：文件权限设为 600，也不要写进日志或�
 - `GET /api/sessions/:id/snapshot`
 - `GET /api/sessions/:id/commands`：当前活动会话的实时归一命令表
 - `POST /api/sessions/:id/release`：释放会话 worker（见「三家 CLI 原生历史」末尾「释放」小节）
+- `GET /api/sessions/:id/info/:kind`：输入框「/」菜单的只读查看，仅 Claude 会话。kind 为 `mcp` / `hooks` / `permissions` / `context`，分别转发 control_request `mcp_status` / `get_hooks_listing` / `list_permission_rules` / `get_context_usage`；`plugins` 没有对应 control_request，与 VSCode 扩展同样在会话 cwd 下跑 `claude plugin list --json`，`data` 为 `{plugins:[{id,version,scope,enabled,projectEnabled,installPath,…}]}`，不需要 worker（dead 会话也可查）；其余`data` 是 CLI 的 response 原样（`context` 只保留 categories、totalTokens、maxTokens、percentage、model、autoCompactThreshold、isAutoCompactEnabled，原样约 50KB）。已释放会话按 `ensureWorker` 先拉起；dead、非 Claude、未知 kind 或 CLI 报错返回 400 / 40063，15 秒超时。返回结构见 `spikes/PROTOCOL-NOTES.md` §10。
 - `GET /api/prefs` / `PUT /api/prefs`：服务端偏好，当前只有 `idleReleaseMinutes`（整数 0–1440 分钟，0 = 关闭空闲自动释放；校验失败 400）
+- `GET /api/claude/settings` / `PUT /api/claude/settings`：读取或保存用户级 `{remoteControlAtStartup:boolean}`（400 / 40064）。只改 `~/.claude/settings.json` 的这一键，关闭写 `false`，按 2 空格缩进保留其他键与顺序；直接写文件跟随软链接，不替换链接。仅影响之后新启动的 worker（新建、续接、释放后发送），项目级 `false` 仍可覆盖关闭，不改变当前连接的 RC。
+- `PUT /api/sessions/:id/plugins`：请求 `{id,enabled,scope?}`，仅 Claude；id 和 scope 必须匹配该 cwd 最近一次插件列表，scope 从列表取（缺失则不传）。通过 `execFile` 参数数组在会话 cwd 执行 `claude plugin enable|disable <id> --json [-s scope]`；返回 `{plugins,reloaded,reloadError?}`，重新运行列表刷新状态。已有 worker 依次发 `get_settings`、`reload_plugins` 并刷新斜杠命令；重载失败仍返回已保存状态及 `reloadError`。dead/released 会话不拉起 worker，`reloaded:false` 提示新会话或重新续接后生效。CLI 失败或参数非法为 400 / 40065，会话不存在为 404 / 40401；CLI 单次 15 秒、重载 30 秒，前端总请求上限 80 秒。协议证据见 §10。
 - `GET /api/sessions/:id/files?q=<关键词>&limit=<默认50>`：在会话 `cwd` 内检索可引用的普通文件
 - `DELETE /api/sessions/:id`：停止 worker 并移除注册表条目；不删除 Workbench 或原生 CLI transcript
-- `GET /api/history`：只读列出三家 CLI 自己保存的历史会话
+- `GET /api/history`：只读列出三家 CLI 自己保存的所有来源会话；没有用户消息的会话隐藏，`empty` 单独计数（分页为本页扫描计数），`skipped` 记录损坏/不可读候选。命中 delegate 元数据的条目附带 `dispatch:{runId,name}`，UUID 和 `session_...` 原样匹配；派单映射只读全部目录的 `run.json`/旧 `meta.json`，缓存 30 秒。
 - `GET /api/history/:agent/:nativeSessionId/messages`：从最新消息向前分页读取完整原生历史
 - `GET /api/meta`：server/CLI 实测版本、按请求入口计算的终端能力位、三 driver 能力位与配置 schema
 - `GET /api/pages`：启动时已注册的扩展页面列表
 - `GET /api/pages/:id/health`：限时探测一个扩展页面的目标服务
+
+Kimi 配置探测仍通过 `session/new` 读取 configOptions。探测进程关闭后，仅定位本次返回的 sessionId：历史根取 `WORKBENCH_KIMI_HISTORY_DIR` 或 `~/.kimi-code/sessions`；只有一个匹配目录、`state.json.id` 相同且完整 `agents/main/wire.jsonl` 仅含 `metadata / permission.set_mode / profile.bind / runtime.set_binding` 时才删除，并清除 `.index-dirty` 中以该 ID 开头的普通标记文件。异常、身份不符、对话或未知记录均保留并记日志；既有空会话只隐藏，不批量删除。
 
 `GET /api/fs/dirs` 的 `data` 为 `{path,parent,dirs:[{name,path}],truncated}`；带 `files=1` 时追加 `files:[{name,path}]`（同层普通文件，含指向文件的有效符号链接，同样最多 1000 项，目录或文件任一达到上限都会置 `truncated:true`）；`files` 只接受 `1`/`0`，其他值返回 HTTP 400、错误码 `40036`。路径先规范化；根目录 `/` 的 `parent` 为 `null`。不限制浏览根目录，包括 `/mnt/c/...`；隐藏目录不列出，指向目录的有效符号链接会列出，断链和无权限条目跳过。子目录按名称排序，最多返回 1000 项，更多时 `truncated:true`。路径无效、不存在、不是目录或无权限读取时返回 HTTP 400、错误码 `40035`。
 
@@ -159,7 +164,7 @@ webhook 地址就是密钥：文件权限设为 600，也不要写进日志或�
 }
 ```
 
-`CreateSessionInput.snapshot` 可省略，取值为 `"auto" | "skip"`，默认 `"auto"`。`auto` 会在
+`CreateSessionInput.snapshot` 可省略，取值为 `"auto" | "skip"`，默认 `"skip"`（2026-10-01 起；此前默认 `"auto"`，续接入口未传该字段会对大目录误报快照失败）。`auto` 会在
 driver 启动前检查 cwd：位于 Git 仓库（包括仓库子目录）时跳过；非 Git 目录在阈值和空间
 检查通过后先刷新全量快照。快照成功时，创建响应、会话列表、会话详情和会话 snapshot 中的
 `session` 都可包含 `snapshotPath: string`。快照失败不会阻断会话创建；server 记录 warn 日志，
@@ -205,6 +210,65 @@ Claude 额外固定返回四个字段；未显式覆盖时的初始形状如下�
 `config.model / config.effort` 只表示会话级覆盖，`null` 不改写；前端据此区分“覆盖”与“继承”。`effectiveModel / effectiveEffort` 是当前能确认的实际值，拿不到就是 `null`。对应 source 为：`session`（会话显式覆盖）、`settings`（分层 settings 合并）或 `init`（Claude `system/init` 的运行时回报）；值为 `null` 时 source 也为 `null`。兼容字段 `model / effort` 保留既有语义：首轮前是覆盖值或 `null`，init 报出某项后更新为该项的运行时精确值。显式覆盖始终保留在 `config` 中，不会被 settings 或 init 改写。
 
 `riskyMode` 在 Claude 的 `bypassPermissions / dontAsk`、Codex 的 `never`、Kimi 的 `yolo` 下为 `true`。这是每会话标记，不存在全局 yolo 开关。
+
+### 派单只读接口（ROADMAP P1-14 数据层）
+
+实现在 `server/dispatches.ts`，路由在 `server/index.ts`。默认读取 `~/.cache/delegate`，可用
+`WB_DELEGATE_DIR` 覆盖；每次请求重新读取，不启动或控制派单进程，不写入数据源。
+三个接口均走现有 `/api` 访问控制和 `{code,msg,data,request_id}` 信封：
+
+- `GET /api/dispatches?limit=50` → `data: {dispatches: Dispatch[]}`。有效目录名按字符串倒序；
+  默认 50 条，上限 200，正数小数向下取整，非法值或小于 1 回退到 50。根目录不存在或不可读取时返回空列表。
+- `GET /api/dispatches/<runId>` → `data: DispatchDetail`。
+- `GET /api/dispatches/<runId>/log?stream=stdout&offset=0` → `data: DispatchLog`。
+  `stream` 缺省为 `stdout`，仅允许 `stdout` / `stderr`；`offset` 为非负安全整数，单位为字节。
+  参数无效返回 HTTP 400 / `40000`；派单不存在、ID 非法或路径逃逸返回 HTTP 404 / `40400`。
+
+```ts
+interface Dispatch {
+  runId: string; tool: string; name: string;
+  cwd: string | null; model: string | null; effort: string | null;
+  status: "running" | "lost" | "OK" | "TOOL_FAIL" | "ACCEPT_FAIL" | "TIMEOUT" | "unknown";
+  startedAt: string | null; endedAt: string | null;
+  elapsedS: number | null; exit: number | null; files: number | null;
+  session: string | null;
+  parent: {agent: string; sessionId: string | null; entrypoint: string | null; runId?: string} | null;
+  promptHead: string | null;
+}
+interface DispatchDetail extends Dispatch {
+  prompt: string | null; promptTruncated: boolean;
+  summary: string | null; final: string | null; accept: string | null;
+}
+interface DispatchLog {
+  text: string; nextOffset: number; size: number; eof: boolean; reset?: true;
+}
+```
+
+`runId` / `tool` 从目录名取，`name` 优先用元数据中的原始名称（目录后缀可能经过清洗）。
+新目录优先读取 schema 1 的 `run.json`；缺失时兼容旧 `meta.json`。`elapsed_s` 映射为
+`elapsedS`，其他缺失字段为 `null`。`startedAt` 缺失时按服务端本地时区解释目录中的日期与时间，
+返回 ISO 时间。运行中尚未记录的 `elapsedS` 为 `null`，客户端可由 `startedAt` 计算已跑时长。
+`running` 且无 `endedAt` 时用 `process.kill(pid, 0)` 判活，`ESRCH` 转为 `lost`，
+`EPERM` 仍视为存活；PID 无效或其他判活错误为 `unknown`。空目录、损坏 JSON、不支持的 schema、
+超过 64KB 的元数据或不可读取的文件只让该条状态变成 `unknown`，不会中断列表。
+Codex 的 `session` 缺失时，从 `stderr.log` 前 8KB 的 `session id: <uuid>` 行补齐。
+
+`promptHead` 取 `prompt.txt` 首个非空行，去掉首尾空白，按 Unicode 字符截到 160 字符。
+详情的 `prompt` 最多读取 64KB，超限置 `promptTruncated:true`，不输出边界上残缺的 UTF-8 字符；
+`summary` 是 `summary.txt` 全文，`final` 是 `last.txt` 尾部最多 8KB，`accept` 是
+`accept.log` 尾部最多 4KB，缺失或不可读取时为 `null`。
+
+日志显式指定 `offset` 时，从该字节起最多读取 64KB，仅返回截至最后一个 `\n` 的内容，
+末尾半行保留到下次。客户端使用返回的 `nextOffset` 续读；手工偏移若落在 UTF-8 字符内部，
+跳过开头的残缺字符。省略 `offset` 时读取尾部最多 16KB，丢弃开头的残行，从完整行首返回。
+`size` 是本次打开文件后的大小快照，`eof` 表示 `nextOffset >= size`，因此尾部有半行时为
+`false`，即使派单已经结束。`offset > size` 时从 0 重读并追加 `reset:true`；日志尚未生成时
+返回空文本、零大小和 `eof:true`。没有换行的末行不会被返回；单行超过 64KB 时，遵守本次
+读取上限会使显式偏移无法推进，客户端可改用尾读查看后续完整行。
+
+仅接受匹配 `^\d{8}-\d{6}-(codex|kimi|copilot)-` 且不含 `/`、`\`、`..` 的 ID。
+目录经 `realpath` 校验必须是根目录的直接子目录，逃逸的符号链接拒绝；固定数据文件也拒绝
+符号链接和非普通文件。客户端不能指定文件路径。这里只提供 GET，不提供停单、重派或续接接口。
 
 ## 终端
 
@@ -331,7 +395,7 @@ interface HistoryListData {
 interface HistoryMessagesPage {
   session: HistorySession;
   messages: Array<
-    | { role: "user" | "assistant"; text: string; timestamp: string | null }
+    | { role: "user" | "assistant" | "thought"; text: string; timestamp: string | null }
     | { role: "tool"; timestamp: string | null; tool: {
         id: string; name: string; input: unknown; result?: string; rawResult?: unknown;
         status: "ok" | "error" | "unknown";
@@ -344,7 +408,9 @@ interface HistoryMessagesPage {
 }
 ```
 
-Claude 跳过 meta/sidechain，按 assistant 内容块顺序输出文字与 `tool_use`，按 `tool_use_id` 回填 `tool_result` 和有界 `toolUseResult`；Task/Agent 工具本身保留。Codex 保留 event_msg 文字优先、response_item.message 回退，另按 `call_id` 配对 function/custom tool call 与 output：exec_command/shell_command/shell 映射 commandExecution，标准 apply_patch 映射 fileChange，其余保留原名和原始输入。Kimi 的 main wire 使用 `tool.call/tool.result` 的 toolCallId 配对，保留原名、args 与 output；思考不进入数组。
+Claude 跳过 meta/sidechain，按 assistant 内容块顺序输出文字与 `tool_use`，按 `tool_use_id` 回填 `tool_result` 和有界 `toolUseResult`；Task/Agent 工具本身保留。Codex 保留 event_msg 文字优先、response_item.message 回退，另按 `call_id` 配对 function/custom tool call 与 output：exec_command/shell_command/shell 映射 commandExecution，标准 apply_patch 映射 fileChange，其余保留原名和原始输入。Kimi 的 main wire 使用 `tool.call/tool.result` 的 toolCallId 配对，保留原名、args 与 output。
+
+思考以 `role:"thought"` 进入数组（2026-10-01）：Claude 取 `thinking` 块（Opus 等多数块只存签名、正文为空，空的跳过），Codex 取 `response_item.reasoning` 的 `summary[].text`（段间 `\n\n`；实测近期文件 summary 全空、只有加密正文，所以 Codex 历史通常没有思考），Kimi 取 `content.part` 的 `think`。相邻思考与相邻助手文字一样按同一规则合并；`external_messages_added` 的 messages 同样可能含 thought。
 
 工具 input、result、rawResult 各自序列化后最多约 4000 字符，超出带 `[truncated]`；超长结构化对象回落成有截断标记的文本。缺结果或无法确认状态时为 unknown，前端不伪造成功或失败。limit 计入工具；不透明 cursor 支持同一 JSONL 行内的多个块，不漏块。只在当前读取窗口配对，较早页的调用若结果落在更新页，返回 unknown，不扩大窗口。历史页预览和导入历史共用 `/messages`，默认最新 50 条，向前翻页可一直到开头；旧文件头 preview 路由已移除。ID 校验和事实源候选查找保持不变。
 
@@ -366,11 +432,13 @@ Claude 跳过 meta/sidechain，按 assistant 内容块顺序输出文字与 `too
 
 ### 释放（release）worker
 
-`POST /api/sessions/:id/release` 把会话的 worker 停掉但保留会话：状态保持 `idle`，记录新增持久化字段 `released:true`，`processId` 置空，广播 `worker_released`（payload `{reason:"manual"|"idle", resumeCommand, idleMinutes?}`，写进统一 transcript）。成功响应的 `data` 为 `{session, resumeCommand}`。释放前提：会话 `idle`、没有进行中的回合或待处理闸门、不在重启/检查中、已有 `nativeSessionId`；不满足时手动释放返回 400 可读错误，自动释放直接跳过。worker 先从内存表删除再停止，因此 `exited` 回调不会把会话标成 `dead`；Claude 会话同时把 `remoteControl` 置为 `disconnected` 并广播 `remote_control_updated`。
+`POST /api/sessions/:id/release` 把会话的 worker 停掉但保留会话：状态保持 `idle`，记录新增持久化字段 `released:true`，`processId` 置空，广播 `worker_released`（payload `{reason:"manual"|"idle"|"shutdown", resumeCommand, idleMinutes?}`，写进统一 transcript）。成功响应的 `data` 为 `{session, resumeCommand}`。释放前提：会话 `idle`、没有进行中的回合或待处理闸门、不在重启/检查中、已有 `nativeSessionId`；不满足时手动释放返回 400 可读错误，自动释放直接跳过。worker 先从内存表删除再停止，因此 `exited` 回调不会把会话标成 `dead`；Claude 会话同时把 `remoteControl` 置为 `disconnected` 并广播 `remote_control_updated`。
 
 `resumeCommand` 是带 cwd 的原生续接命令，cwd 做 shell 单引号转义：Claude `cd '<cwd>' && claude --resume <id>`，Codex `cd '<cwd>' && codex resume <id>`，Kimi `cd '<cwd>' && kimi -S <id>`。
 
 已释放会话再发消息时走与「别处续聊」完全相同的续接路径（`refreshBeforeSend`）：比对原生指纹、起新进程以同一原生 ID 续接、有外部新增时先广播 `external_messages_added`，成功后清除 `released`；区别只是没有旧 worker 可停。`set_config`、`set_remote_control` 等需要 worker 的 WS 操作经 `ensureWorker` 先按同一路径拉起再执行；`interrupt` / `permission_resolved` 对已释放会话直接报「worker 已释放」。续接失败广播 `session_error`（`source:"external_resume"`），保持 `released` 与 `idle`，不标 `dead`，下次发送可重试。
+
+退出释放：server 收到 SIGTERM/SIGINT（`wb stop`/`wb restart`、托盘退出）时，先停掉全部 worker（停服期间不再起新 worker），再把停止成功、有 `nativeSessionId`、没有待处理闸门、且原生存档已落盘（Claude 须发过消息或是导入续接）的会话按释放处理（`reason:"shutdown"`，不检查 idle，进行中的回合随进程中断），其余标 `dead`；已释放会话的原生对话指纹以 `releasedMark` 写进注册表，重启后还原，停服期间在 VSCode/CLI 的续聊会在首次发送时照常补成 `external_messages_added`。重启载入时 `released:true` 且有 `nativeSessionId` 的记录恢复为 `idle`+`released`，下次发送即原地续接；崩溃、`kill -9` 等没走 shutdown 的会话仍载入为 `dead`，只能新建续接。
 
 空闲自动释放：服务端每分钟扫一次，对 `idle`、未释放、`now - lastActivityAt ≥ idleReleaseMinutes` 且满足上述前提的会话执行释放；**开着 Remote Control（connected/connecting/reconnecting）的 Claude 会话跳过**（开 RC 就是要手机能随时找到它，释放会断开）。阈值存 `~/.workbench/prefs.json`（`{"idleReleaseMinutes":30}`，缺省 30，0 = 关闭，文件缺失或无效按默认值），经 `GET/PUT /api/prefs` 读写，PUT 立即生效无需重启。
 

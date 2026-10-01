@@ -598,3 +598,32 @@ Kimi 这里不是 input/output 分项，而是上下文已用量 `used` 与总�
 - 另有 `{type:"image", url}` 与 `{type:"image", fileId}`（远程/已上传图片），以及 `localAudio`、`skill`、`mention`、`text` 变体。
 - Workbench 只发 `localImage`（不带 `detail`）；文件引用仍走 `{type:"mention", name, path}` + `text_elements`，图片不占 `text_elements` 占位。
 - Codex 本周期额度用尽，未做真机 turn 冒烟；以上仅为 schema 核对结论。
+
+## 10. Claude 查看与插件重载 control_request（CLI 2.1.285，2026-10-01）
+
+VSCode 扩展「/」菜单的 MCP servers / Hooks / Permissions / Context 数据来自以下 control_request（从扩展 `extension.js` 的 `mcpServerStatus / getHooksListing / listPermissionRules / getContextUsage` 找到，`-p --input-format stream-json` 下无需发消息、不耗模型额度）。请求均为 `{type:"control_request", request_id, request:{subtype}}`，成功回 `control_response.response.subtype:"success"`：
+
+- `mcp_status` → `{mcpServers:[{name, status:"connected"|"pending"|"failed"|…, serverInfo?, config:{type:"http"|"stdio"|"claudeai-proxy", url? | command?+args?}, scope, source, tools?:[{name, annotations}]}]}`；刚起进程时 stdio 服务器可能还是 `pending`、没有 tools。
+- `get_hooks_listing` → `{events:[{name, summary, supportsMatcher, hookCount}], hooks:[{event, matcher, source, sourceLabel, pluginName?, type, displayText, commandText, contentLabel, timeout, statusMessage?, editable?}], eventCatalog, policy}`。
+- `list_permission_rules` → `{state:{rules:[{behavior:"allow"|"ask"|"deny", source, rule, description:{prefix, emphasis}, editability}], workspaceDirectories, originalCwd, managedOnly}}`。
+- `get_context_usage` → `{categories:[{name, tokens, color, kind:"used"|"deferred"|"buffer"|"free", isDeferred?}], totalTokens, maxTokens, rawMaxTokens, percentage, gridRows, model, memoryFiles, mcpTools, agents, slashCommands, skills, autoCompactThreshold, isAutoCompactEnabled, messageBreakdown, apiUsage}`（约 50KB，大头是 gridRows 与 mcpTools）。
+
+扩展还有 `mcp_toggle` / `mcp_reconnect` / `update_settings` 等写操作，wb 暂未接；`get_settings` 的设置缓存刷新用途见下文。扩展「/」菜单全量 action（commandRegistry.registerAction，分组 Context / Model / Customize / Slash Commands / Settings / Support）可用 `webview/index.js` 里 grep `registerAction` 列出；Focus view 是扩展自己的前端开关（`focusViewEnabled`），不走 CLI。
+
+### 插件启停后的刷新（2026-10-01 本机源码核对，未启动会话实测）
+
+本机扩展 `/home/user/.vscode-server/extensions/anthropic.claude-code-2.1.285-linux-x64/` 含可靠的 `reload_plugins` 协议实现，不必要求用户重启正在使用的会话。以下 minified JS 偏移为从 0 开始的字符位置；`resources/native-binary/claude` 为 ELF，只定向提取其嵌入 JavaScript 的相关片段，所列为从 0 开始的字节位置。
+
+- `extension.js` 的 `setPluginEnabled`（字符 2721647）用数组参数执行 `plugin enable|disable`，成功返回 `needsRestart:true`。这只是需要刷新组件的信号：`webview/index.js` 的 `A1`（字符 5349395）随后调用 `reloadPlugins()` 并刷新插件列表，再查询 MCP servers；不直接重启进程。重载失败才通过 `pluginReloadFailed` 提供后续重启入口。
+- 宿主 `reloadPluginsInChannels`（`extension.js` 字符 2928661）对已有 channels / pending channels 调用 `reloadPluginsAfterFreshSettings`，先 `await query.getSettings()`，再 `await query.reloadPlugins()`，单通道等待上限 30000ms。宿主还向同扩展的 peers 广播刷新；wb 本次只对目标会话已有 worker 刷新，不扩大到其他会话，不为已结束/已释放会话启动 worker。
+- 先发 `{type:"control_request",request_id,request:{subtype:"get_settings"}}`。CLI handler（binary 字节 221517192）调用 `jYn()`；`jYn`（字节 196723760）首先 `jo()`，而 `jo`（字节 195780271）执行 `da().invalidateAll()`，再读取 `effective` / `sources`。这是启停 CLI 改完磁盘设置后刷新运行进程设置缓存的必要前置，不能只沿用内存中的旧插件启用值。此请求在不支持的连接上返回 `get_settings is not available on this connection`；wb 的本地 stdio worker 使用已确认的请求通道。
+- 再发 `{type:"control_request",request_id,request:{subtype:"reload_plugins"}}`。SDK 包装在 `extension.js` 字符 2510958；CLI schema 在 binary 字节 197801135，处理分支在字节 221496390。成功 payload（位于 `control_response.response.response`）为 `{commands,agents,plugins,mcpServers,error_count}`；`plugins` 项包含 `{name,path,source?,version?}`。CLI 的 `refreshActivePlugins`（字节 214942521）清插件缓存、刷新 commands / skills / agents / hooks / MCP / LSP；请求不耗模型轮次。宿主用返回的 `commands` 更新命令缓存、用 `error_count` 汇总组件错误；前端插件列表仍应重新执行 list 获取落盘后的状态。
+- 可选 `hold_on_cache_impact:true` 会在影响工具列表的 prompt cache 时返回 `held:true` 和 `cache_impact:{mcp_servers_added,mcp_servers_removed,lsp_tool_change}`，保持当前进程插件不变；默认不传则无条件应用，与扩展默认行为一致。这里未实测在途模型轮次的切换效果；本机 handler 未给 `reload_plugins` 设置独立的 busy 拒绝条件。异常按现有 `control_response` error 回传；`error_count>0` 表示已返回成功但仍有组件错误，不能称为完全重载成功。部分 MCP diff / plugin load 异常会被 CLI 捕获并写日志（字节 221497650），因此成功回包也不能证明每个组件都正常。
+
+wb 在 enable / disable 成功后只对当前已有 worker 顺序发送上述两次请求，并刷新菜单。无 worker 时显示「新会话或重新续接后生效」；请求失败或组件错误时应保留已保存的启停状态并显示刷新失败，不能把它误报成 CLI 写入失败。调查未运行真实 `plugin enable/disable`、未改用户插件状态、未启动 Claude 会话。
+
+插件开关以 list 的 `enabled === true` 为准，不能与 `projectEnabled` 做 OR。CLI 字段构造（binary 约字节 231301800）以 `editableScopeOf(getPluginEditableScopes(),id)!==undefined` 生成 `enabled`；`getPluginEditableScopes`（字节 212617353）按 managed / user / project / local / flag 叠加 true 加入、false 删除。`projectEnabled:H_t(id)`（字节 212629696）仅检查项目文件显式 true；因此 `enabled:false,projectEnabled:true` 可能是被更高优先级 local 设置关闭，仍应显示关闭。扩展 webview（字符 5355079）也以 `plugin.enabled===true` 判断实际启用。
+
+### Remote Control 默认开关的落盘语义
+
+CLI `/config` 的 `Te(e)`（binary 字节 215603696）在选 `"false"` 时执行 `V("remoteControlAtStartup",false)`，只有选 `"default"` 才写 `undefined` 并删除旧全局键。`V` 的闭包（字节 215601200）调用 `S1`，`S1`（字节 199005860）写 `fn("userSettings",{[n]:i})`。因此 wb 二态开关关闭应显式保存 `remoteControlAtStartup:false`，与 CLI 关闭语义一致。扩展 `setRemoteControlAtStartup`（`webview/index.js` 字符 3480628）也保存 `{remoteControlAtStartup:<boolean>}`。wb 只改用户设置文件这一个键，保留软链接；新值仅供之后启动的 worker 读取，不向当前会话发送 RC 开关请求。

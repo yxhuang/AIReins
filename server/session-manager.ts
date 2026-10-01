@@ -1,6 +1,7 @@
 import { statSync } from "node:fs";
 import { isAbsolute, resolve } from "node:path";
 import { readClaudeEffectiveSettings, type ClaudeEffectiveSettings } from "./claude-settings.js";
+import { ClaudePlugins, type ClaudePlugin } from "./claude-plugins.js";
 import { createDriver, DRIVER_CAPABILITIES } from "./drivers/index.js";
 import { log } from "./logger.js";
 import { NativeConversationReader, type NativeConversationChange, type NativeConversationMark } from "./native-conversation.js";
@@ -43,6 +44,14 @@ export type DriverFactory = typeof createDriver;
 export type ClaudeSettingsResolver = (cwd: string) => ClaudeEffectiveSettings;
 export type SnapshotCreator = (cwd: string) => Promise<string | null>;
 
+/** GET /api/sessions/:id/info/:kind 的 kind → Claude control_request subtype */
+const SESSION_INFO_SUBTYPES: Record<string, string> = {
+  mcp: "mcp_status",
+  hooks: "get_hooks_listing",
+  permissions: "list_permission_rules",
+  context: "get_context_usage",
+};
+
 export class SessionManager {
   private readonly sessions = new Map<string, SessionRecord>();
   private readonly workers = new Map<string, Driver>();
@@ -57,12 +66,15 @@ export class SessionManager {
   private readonly pendingMarkReads = new Map<string, Promise<void>>();
   /** 未决审批闸门（requestId 集合）：释放 worker 的前提是没有待处理闸门 */
   private readonly pendingGates = new Map<string, Set<string>>();
+  /** shutdown 开始后不再起新 worker（否则停服期间的发送会拉起一个 shutdown 管不到的进程） */
+  private stopping = false;
 
   constructor(
     private readonly driverFactory: DriverFactory = createDriver,
     private readonly claudeSettingsResolver: ClaudeSettingsResolver = readClaudeEffectiveSettings,
     private readonly snapshotCreator: SnapshotCreator = createSnapshotIfNeeded,
     private readonly nativeReader: NativeConversationReader = new NativeConversationReader(),
+    private readonly claudePlugins: ClaudePlugins = new ClaudePlugins(),
   ) {
     const loaded = loadRegistry();
     for (const stored of loaded) {
@@ -73,11 +85,19 @@ export class SessionManager {
         effort: stored.effort,
         permissionMode: stored.permissionMode,
       });
+      // 正常退出时被释放的会话（见 shutdown）载入为 idle+released，下次发送原地续接；
+      // 其余（崩溃、kill -9、没有原生 id）一律 dead，只能新建续接
+      const revivable = stored.released === true && Boolean(stored.nativeSessionId);
+      if (revivable) {
+        if (stored.releasedMark) this.nativeMarks.set(stored.id, stored.releasedMark);
+        // 能被释放的 Claude 会话都已有原生存档（见 shutdown），切换配置时要按续接重启
+        this.promptedSessions.add(stored.id);
+      }
       this.sessions.set(stored.id, {
         ...stored,
-        status: "dead",
-        // 重启后所有会话都是 dead，已释放标记随之失效（否则前端会误显示「下次发送自动续接」）
-        released: undefined,
+        status: revivable ? "idle" : "dead",
+        released: revivable ? true : undefined,
+        releasedMark: undefined,
         backgroundTasks: undefined,
         seq,
         processId: undefined,
@@ -137,6 +157,7 @@ export class SessionManager {
   }
 
   async create(input: CreateSessionInput): Promise<SessionRecord> {
+    if (this.stopping) throw new Error("Workbench 正在退出");
     this.validateCwd(input.cwd);
     const id = ulid();
     const now = new Date().toISOString();
@@ -186,7 +207,8 @@ export class SessionManager {
       riskyMode: record.riskyMode,
     });
 
-    if ((input.snapshot ?? "auto") === "auto") {
+    // 默认不快照（P1-8）：只有显式传 "auto" 才做；续接等未传该字段的入口一并跳过
+    if (input.snapshot === "auto") {
       try {
         const snapshotPath = await this.snapshotCreator(record.cwd);
         if (snapshotPath) {
@@ -266,6 +288,52 @@ export class SessionManager {
     const worker = await this.ensureWorker(id);
     if (!worker.setRemoteControl) throw new Error("Claude driver 不支持 Remote Control");
     return worker.setRemoteControl(enabled);
+  }
+
+  /** 「/」菜单只读查看：kind 映射到 Claude control_request；已释放会话按 ensureWorker 拉起。 */
+  async queryInfo(id: string, kind: string): Promise<unknown> {
+    const session = this.sessions.get(id);
+    if (!session || session.agent !== "claude") throw new Error("仅 Claude 会话支持该查看");
+    // 插件列表没有 control_request，与 VSCode 扩展一样跑 CLI；不需要 worker，已结束的会话也能看
+    if (kind === "plugins") return { plugins: await this.claudePlugins.list(session.cwd) };
+    const subtype = SESSION_INFO_SUBTYPES[kind];
+    if (!subtype) throw new Error(`未知查看项：${kind}`);
+    if (this.restartingSessions.has(id)) throw new Error("Claude worker 正在重启");
+    const worker = await this.ensureWorker(id);
+    if (!worker.queryInfo) throw new Error("Claude driver 不支持该查看");
+    const result = await worker.queryInfo(subtype);
+    // 上下文用量原样约 50KB（终端方格 gridRows、逐个 MCP 工具等），前端只用分类与总数
+    if (kind === "context" && result && typeof result === "object") {
+      const r = result as Record<string, unknown>;
+      return { categories: r.categories, totalTokens: r.totalTokens, maxTokens: r.maxTokens,
+        percentage: r.percentage, model: r.model, autoCompactThreshold: r.autoCompactThreshold,
+        isAutoCompactEnabled: r.isAutoCompactEnabled };
+    }
+    return result;
+  }
+
+  async setPluginEnabled(id: string, pluginId: string, enabled: boolean, scope?: unknown): Promise<{
+    plugins: ClaudePlugin[];
+    reloaded: boolean;
+    reloadError?: string;
+  }> {
+    const session = this.sessions.get(id);
+    if (!session || session.agent !== "claude") throw new Error("仅 Claude 会话支持插件切换");
+    await this.claudePlugins.setEnabled(session.cwd, pluginId, enabled, scope);
+    // 只通知当前 worker；dead/released 会话不为插件操作拉起进程。
+    const worker = this.workers.get(id);
+    let reloaded = false;
+    let reloadError: string | undefined;
+    if (worker?.reloadPlugins && !this.restartingSessions.has(id)) {
+      try {
+        await worker.reloadPlugins();
+        reloaded = true;
+      } catch (error) {
+        // 设置已经成功落盘，重载失败不能伪装成 CLI 切换失败。
+        reloadError = error instanceof Error ? error.message : String(error);
+      }
+    }
+    return { plugins: await this.claudePlugins.list(session.cwd), reloaded, ...(reloadError ? { reloadError } : {}) };
   }
 
   async resolvePermission(
@@ -419,17 +487,36 @@ export class SessionManager {
     }
   }
 
+  /**
+   * 退出 wb：有原生 id、没有待处理闸门的会话按「释放」处理（idle+released 持久化，重启后发送即原地续接），
+   * 其余标 dead。先清 workers 再 stop，stop 触发的 exited 回调因 current() 为假直接返回。
+   */
   async shutdown(): Promise<void> {
+    this.stopping = true;
+    await Promise.allSettled(this.pendingMarkReads.values());
     const running = [...this.workers.entries()];
-    await Promise.allSettled(running.map(([, worker]) => worker.stop()));
-    for (const [id] of running) {
-      const record = this.sessions.get(id);
-      if (record) {
-        record.status = "dead";
-        record.processId = undefined;
-      }
-    }
     this.workers.clear();
+    // 先停进程再写释放状态：停不下来的标 dead，免得重启后与旧进程同时续接同一原生会话
+    const stopped = await Promise.allSettled(running.map(([, worker]) => worker.stop()));
+    running.forEach(([id], index) => {
+      const record = this.sessions.get(id);
+      if (!record) return;
+      record.processId = undefined;
+      // Claude 首条消息前就报 session_id，但原生存档还没落盘，续接必然失败（同 restartClaudeWorker）
+      const hasArchive = record.agent !== "claude" || Boolean(record.resumedFrom) || this.promptedSessions.has(id);
+      if (stopped[index]!.status === "fulfilled" && record.nativeSessionId && hasArchive
+        && (this.pendingGates.get(id)?.size ?? 0) === 0) {
+        record.status = "idle";
+        record.released = true;
+        record.backgroundTasks = undefined;
+        this.emit(id, "worker_released", { reason: "shutdown", resumeCommand: buildResumeCommand(record) });
+      } else {
+        record.status = "dead";
+      }
+    });
+    for (const record of this.sessions.values()) {
+      if (record.released) record.releasedMark = this.nativeMarks.get(record.id);
+    }
     this.persistRegistry();
   }
 
@@ -656,6 +743,7 @@ export class SessionManager {
     config: SessionConfig,
     nativeSessionId?: string,
   ): Promise<Driver> {
+    if (this.stopping) throw new Error("Workbench 正在退出");
     await oldWorker?.stop();
     const record = this.sessions.get(id)!;
     let replacement!: Driver;

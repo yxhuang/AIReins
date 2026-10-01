@@ -1,23 +1,24 @@
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
-import type { CommandInfo, DriverConfigOption, MetaInfo, SessionRecord } from "../types";
-import { compactTokens, duration, asRecord, truncateDisplayWidth } from "../format";
-import { buildRenderItems, promptCacheExpiry } from "../render-items";
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import type { CommandInfo, DriverConfigOption, SessionRecord } from "../types";
+import { truncateDisplayWidth } from "../format";
+import { buildRenderItems, focusVisible, groupReadOnlyTools, promptCacheExpiry } from "../render-items";
 import { filterCommands, noteCommandUsed, readRecentCommands, recentInTable } from "../commands";
 import { extractMentionTokens, mentionQueryAt, mentionTokenEnd } from "../mentions";
-import { needsRestartNote, effectiveFor, pillText, EFFECTIVE_SOURCE_LABELS, ALIAS_NOTE, RESTART_NOTE } from "../config-view";
+import { needsRestartNote, effectiveFor, modelShortName, pillText, EFFECTIVE_SOURCE_LABELS, ALIAS_NOTE, RESTART_NOTE } from "../config-view";
 import { fetchFiles, uploadAttachment } from "../api";
 import { attachmentMention, localImageMimeType, prepareImageForUpload, type Attachment } from "../attachments";
 import { MAX_MENTIONS, store, type Store } from "../store";
 import { shallowEqual, useStore } from "../useStore";
-import { GateBlock, QuestionBlock, RawLine, SystemLine, TextBlockView, ThoughtBlockView, ToolCard, UserBlockView } from "./StreamItems";
+import { GateBlock, QuestionBlock, RawLine, ReadOnlyToolGroup, SystemLine, TextBlockView, ThoughtBlockView, ToolCard, UserBlockView } from "./StreamItems";
 import { ExternalHistoryView } from "./HistoryTimeline";
 import { ResumedHistory } from "./ResumedHistory";
-import { ClockIcon, ConfigPills, SendIcon, type MenuGroup, type MenuItem } from "./ConfigMenu";
-import { STATUS_HINTS, STATUS_LABELS } from "./Sidebar";
+import { ClockIcon, ConfigPills, SendIcon, StopIcon, type MenuGroup, type MenuItem } from "./ConfigMenu";
 import { DirectoryBrowser } from "./DirectoryBrowser";
+import { SlashMenu } from "./SlashMenu";
 
 const selectMeta = (value: Store) => value.meta;
 const selectWsState = (value: Store) => value.wsState;
+const selectFocusView = (value: Store) => value.focusView;
 const selectNow = (value: Store) => value.now;
 
 /** 触屏设备（手机、平板）：软键盘的回车只换行，发送靠按钮或 Ctrl/⌘+Enter。 */
@@ -28,14 +29,18 @@ export function SessionView({ session }: { session: SessionRecord }) {
   const dead = session.status === "dead";
   const selectData = useCallback((value: Store) => value.data.get(session.id), [session.id]);
   const data = useStore(selectData);
-  const meta = useStore(selectMeta);
   const wsState = useStore(selectWsState);
-  const caps = meta?.drivers[session.agent];
   const items = useMemo(
     () => (data ? buildRenderItems(data.events, session.agent) : []),
     // resync 可以用相同 seq 原子替换事件窗口，所以 events 引用也是必要失效键。
     [data?.seq, data?.dropped, data?.events, session.agent],
   );
+
+  const focusView = useStore(selectFocusView);
+  const shown = useMemo(() => {
+    const grouped = groupReadOnlyTools(items, session.agent, session.cwd);
+    return focusView ? grouped.filter(focusVisible) : grouped;
+  }, [items, focusView, session.agent, session.cwd]);
 
   const streamRef = useRef<HTMLDivElement>(null);
   const gateRefs = useRef(new Map<string, HTMLElement>());
@@ -75,15 +80,21 @@ export function SessionView({ session }: { session: SessionRecord }) {
     updateHiddenPending();
   }, [updateHiddenPending, items.length]);
 
-  // 新事件到达时，若用户本就在底部附近则跟随滚动。
-  const lastSeq = data?.seq ?? 0;
-  useEffect(() => {
+  // 贴底跟随：是否贴底按用户最后一次滚动时的位置记，初始为贴底。
+  // 不能在更新后再量——进会话、刷新、重连补齐时整批事件一次撑高，更新后量永远不在底部。
+  const stickToBottom = useRef(true);
+  const onStreamScroll = useCallback(() => {
     const container = streamRef.current;
-    if (!container) return;
-    const nearBottom =
-      container.scrollHeight - container.scrollTop - container.clientHeight < 120;
-    if (nearBottom) container.scrollTop = container.scrollHeight;
-  }, [lastSeq]);
+    if (container) {
+      stickToBottom.current =
+        container.scrollHeight - container.scrollTop - container.clientHeight < 120;
+    }
+    updateHiddenPending();
+  }, [updateHiddenPending]);
+  useLayoutEffect(() => {
+    const container = streamRef.current;
+    if (container && stickToBottom.current) container.scrollTop = container.scrollHeight;
+  }, [items]);
 
   const scrollToFirstPending = () => {
     const firstRequestId = pendingGateIds[0];
@@ -96,8 +107,6 @@ export function SessionView({ session }: { session: SessionRecord }) {
     void store.recoverMissingPendingGate(session.id);
   };
 
-  const canInterrupt = Boolean(caps?.interrupt && session.processId && !dead);
-
   return (
     <div className={`session agent-${session.agent}`}>
       <header className="session-head">
@@ -107,36 +116,12 @@ export function SessionView({ session }: { session: SessionRecord }) {
             <span className="session-cwd mono">{session.cwd}</span>
           </div>
           <div className="session-sub mono">
-            <UsageView agent={session.agent} usage={data?.latestUsage} meta={meta} />
-            <ElapsedTime session={session} running={running} />
-            <span title={STATUS_HINTS[session.status] ?? session.status}>
-              {" · "}{STATUS_LABELS[session.status] ?? session.status}
-            </span>
             <ConfigSummary session={session} />
-            {/* 建会话时的自动快照位置；git 目录/跳过快照/旧会话该字段缺省，不显示 */}
-            {session.snapshotPath && (
-              <span
-                className="session-snapshot"
-                title="本次会话开始前对工作目录做的完整备份，改坏文件后可从这里找回"
-              >
-                {" · 快照 "}
-                {session.snapshotPath}
-              </span>
-            )}
           </div>
         </div>
         <div className="session-head-actions">
           <span className={`ws-dot ws-${wsState}`} title={`连接：${wsState}`} />
           <ReleaseButton session={session} />
-          <button
-            type="button"
-            className="btn"
-            disabled={!canInterrupt}
-            title={canInterrupt ? "打断当前执行" : "当前没有可中断的执行"}
-            onClick={() => store.interrupt(session.id)}
-          >
-            中断
-          </button>
         </div>
       </header>
 
@@ -146,18 +131,22 @@ export function SessionView({ session }: { session: SessionRecord }) {
         </div>
       )}
 
-      <div className="stream" ref={streamRef} onScroll={updateHiddenPending}>
+      <div className="stream" ref={streamRef} onScroll={onStreamScroll}>
         {/* 续接会话：历史消息区在实时事件流上方，向上翻即可见（不默认折叠） */}
         {session.resumedFrom && <ResumedHistory session={session} streamRef={streamRef} />}
         {!data && <p className="system-line">载入会话…</p>}
         {data && data.dropped > 0 && (
           <p className="system-line">有 {data.dropped} 条较早事件已省略（内存上限）；快照仍保留全量。</p>
         )}
-        {items.map((item, index) => {
-          const isLast = index === items.length - 1;
-          const next = items[index + 1];
+        {shown.map((item, index) => {
+          const isLast = index === shown.length - 1;
+          const next = shown[index + 1];
+          if (item.kind === "tool-group") {
+            const continues = (next?.kind === "text" || next?.kind === "thought" || next?.kind === "tool" || next?.kind === "tool-group") && next.turn === item.turn;
+            return <ReadOnlyToolGroup key={item.key} item={item} agent={session.agent} cwd={session.cwd} continues={continues} />;
+          }
           if (item.kind === "text" || item.kind === "thought" || item.kind === "tool") {
-            const continues = (next?.kind === "text" || next?.kind === "thought" || next?.kind === "tool") && next.turn === item.turn;
+            const continues = (next?.kind === "text" || next?.kind === "thought" || next?.kind === "tool" || next?.kind === "tool-group") && next.turn === item.turn;
             const dot = item.kind === "tool" ? ` timeline-${item.status}` : "";
             const view = item.kind === "text"
               ? <TextBlockView item={item} streaming={isLast && running} />
@@ -263,25 +252,7 @@ function ReleaseButton({ session }: { session: SessionRecord }) {
   );
 }
 
-/** running 时只有这一个小组件订阅秒级 now，避免时钟击穿整个 SessionView 子树。 */
-function ElapsedTime({ session, running }: { session: SessionRecord; running: boolean }) {
-  const selectNow = useCallback(
-    (value: Store) => (running ? value.now : 0),
-    [running],
-  );
-  const now = useStore(selectNow);
-  return (
-    <span>
-      {" · 用时 "}
-      {duration(
-        session.createdAt,
-        running ? new Date(now).toISOString() : session.lastActivityAt,
-      )}
-    </span>
-  );
-}
-
-// 会话头的只读配置摘要（如「opus · xhigh · manual」，未覆盖项显示实际生效值或「跟随配置」）；
+// 会话头的只读配置摘要，也是会话头第二行的全部内容（如「opus-5.5 · high · auto」，未覆盖项显示实际生效值或「跟随配置」）；
 // 可交互控件只在输入框上方一处，会话头不再放可点的，避免两处不一致。
 function ConfigSummary({ session }: { session: SessionRecord }) {
   const meta = useStore(selectMeta);
@@ -289,13 +260,13 @@ function ConfigSummary({ session }: { session: SessionRecord }) {
   if (options.length === 0) return null;
   const parts = options.map((option) => {
     const current = session.config?.[option.id];
-    if (current) return current;
+    if (current) return option.id === "model" ? modelShortName(current) : current;
     // claude 跟随配置时并入实际生效值（首轮前是设置别名，init 后是精确 id；精度差异见控件旁标注）
     const effective = effectiveFor(session, option.id);
-    if (effective) return effective.value;
+    if (effective) return option.id === "model" ? modelShortName(effective.value) : effective.value;
     return "跟随配置";
   });
-  return <span title="当前配置摘要；可更改的项在输入框上方"> · {parts.join(" · ")}</span>;
+  return <span title="当前配置摘要；可更改的项在输入框上方">{parts.join(" · ")}</span>;
 }
 
 // 模型/推理强度/审批模式控件：选项全部来自 /api/meta 的 options，
@@ -447,22 +418,60 @@ function CacheTimer({ session }: { session: SessionRecord }) {
 }
 
 function RemoteControlPill({ session }: { session: SessionRecord }) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLSpanElement>(null);
   const state = session.remoteControl ?? { status: "disconnected" as const };
   const busy = state.status === "connecting" || state.status === "reconnecting" || state.status === "disconnecting";
   const connected = state.status === "connected";
   const label = state.status === "connecting" ? "连接中" : state.status === "reconnecting" ? "重连中"
     : state.status === "disconnecting" ? "关闭中" : state.status === "error" ? "连接失败" : "Remote Control";
-  const title = connected ? `Remote Control 已连接：${state.sessionUrl ?? "会话链接暂不可用"}；点击关闭`
-    : state.status === "error" ? `Remote Control 失败：${state.reason ?? "未知原因"}；点击重试`
+  const title = connected ? `Remote Control 已连接：${state.sessionUrl ?? "会话链接暂不可用"}`
+    : state.status === "error" ? `Remote Control 失败：${state.reason ?? "未知原因"}`
     : busy ? `Remote Control ${label}${state.reason ? `：${state.reason}` : ""}`
-    : "Remote Control 未开启；点击开启";
+    : "Remote Control 未开启";
+  const link = connected ? state.sessionUrl : undefined;
+
+  // Esc 或点外部关闭（与「+」菜单同一纪律）
+  useEffect(() => {
+    if (!open) return;
+    const onKeyDown = (e: globalThis.KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    const onPointerDown = (e: PointerEvent) => {
+      if (rootRef.current && !rootRef.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("keydown", onKeyDown);
+    document.addEventListener("pointerdown", onPointerDown);
+    return () => {
+      document.removeEventListener("keydown", onKeyDown);
+      document.removeEventListener("pointerdown", onPointerDown);
+    };
+  }, [open]);
+
   return (
-    <span className="rc-control">
+    <span className="attach-menu-wrap" ref={rootRef}>
       <button type="button" className={`rc-pill rc-${state.status}`} title={title}
-        aria-label={`Remote Control：${label}`} disabled={busy || session.status === "dead" || (!session.processId && !session.released)}
-        onClick={() => store.setRemoteControl(session.id, !connected)}>{label}</button>
-      {connected && state.sessionUrl && <a className="rc-open" href={state.sessionUrl} target="_blank" rel="noopener noreferrer"
-        title="在 claude.ai 打开此 Remote Control 会话" aria-label="打开 Remote Control 会话">↗</a>}
+        aria-label={`Remote Control：${label}`} aria-haspopup="menu" aria-expanded={open}
+        disabled={session.status === "dead" || (!session.processId && !session.released)}
+        onClick={() => setOpen((v) => !v)}>
+        {/* 手机宽度缩成 RC（styles.css 的 720px 断点） */}
+        {label === "Remote Control" ? <><span className="rc-long">Remote Control</span><span className="rc-short">RC</span></> : label}
+      </button>
+      {open && (
+        <div className="attach-menu rc-menu" role="menu" aria-label="Remote Control">
+          <button type="button" className="attach-item" role="menuitem" disabled={busy}
+            onClick={() => { setOpen(false); store.setRemoteControl(session.id, !connected); }}>
+            {connected ? "关闭 Remote Control" : state.status === "error" ? "重试开启 Remote Control" : "开启 Remote Control"}
+          </button>
+          {link ? (
+            <a className="attach-item" role="menuitem" href={link} target="_blank" rel="noopener noreferrer"
+              title={link} onClick={() => setOpen(false)}>在 claude.ai 打开此会话</a>
+          ) : (
+            <button type="button" className="attach-item" role="menuitem" disabled
+              title="Remote Control 连接后才有会话链接">在 claude.ai 打开此会话</button>
+          )}
+        </div>
+      )}
     </span>
   );
 }
@@ -495,58 +504,6 @@ function ConfigStatus({ session }: { session: SessionRecord }) {
 }
 
 // usage 按 driver 能力位分家渲染，不强行归一。
-function UsageView({
-  agent,
-  usage,
-  meta,
-}: {
-  agent: SessionRecord["agent"];
-  usage: Record<string, unknown> | undefined;
-  meta: MetaInfo | null;
-}) {
-  const mode = meta?.drivers[agent]?.usage;
-  if (!mode) return <span>用量 —</span>;
-  if (!usage) return <span>{mode === "context" ? "上下文 —" : "用量 —"}</span>;
-
-  if (mode === "context") {
-    // kimi：{used, size} 上下文占用。
-    const used = Number(usage.used ?? 0);
-    const size = Number(usage.size ?? 0);
-    return (
-      <span>
-        上下文 {compactTokens(used)}
-        {size > 0 ? ` / ${compactTokens(size)}` : ""}
-      </span>
-    );
-  }
-
-  // detailed：claude {usage:{input_tokens,output_tokens}, costUsd}；
-  // codex {usage:{total:{totalTokens,inputTokens,outputTokens,...}, last:{...}, modelContextWindow}}。
-  const detail = asRecord(usage.usage ?? usage);
-  const total = asRecord(detail.total);
-  const pickFrom = (source: Record<string, unknown>, ...keys: string[]): number => {
-    for (const key of keys) {
-      const value = Number(source[key]);
-      if (Number.isFinite(value) && value > 0) return value;
-    }
-    return 0;
-  };
-  const input = pickFrom(detail, "input_tokens", "inputTokens") || pickFrom(total, "inputTokens");
-  const output = pickFrom(detail, "output_tokens", "outputTokens") || pickFrom(total, "outputTokens");
-  const totalTokens = pickFrom(total, "totalTokens");
-  const contextWindow = Number(detail.modelContextWindow ?? 0);
-  const cost = Number(usage.costUsd ?? 0);
-  const parts: string[] = [];
-  if (contextWindow > 0 && totalTokens > 0) {
-    parts.push(`上下文 ${compactTokens(totalTokens)} / ${compactTokens(contextWindow)}`);
-  }
-  if (input) parts.push(`输入 ${compactTokens(input)}`);
-  if (output) parts.push(`输出 ${compactTokens(output)}`);
-  if (cost > 0) parts.push(`$${cost.toFixed(4)}`);
-  if (parts.length === 0) return <span>用量 —</span>;
-  return <span>{parts.join(" · ")}</span>;
-}
-
 function Composer({ session, dead, errored }: { session: SessionRecord; dead: boolean; errored: boolean }) {
   const meta = useStore(selectMeta);
   const selectCommands = useCallback(
@@ -1170,19 +1127,40 @@ function Composer({ session, dead, errored }: { session: SessionRecord; dead: bo
               </div>
             )}
           </span>
-          {session.agent === "claude" && <CacheTimer session={session} />}
-          <ConfigControls session={session} />
+          <SlashMenu session={session} commandsSupported={commandsSupported && !dead && !text}
+            onBrowseCommands={() => {
+              setText("/");
+              setCursor(1);
+              setDismissed(false);
+              textareaRef.current?.focus();
+            }} />
           {session.agent === "claude" && <RemoteControlPill session={session} />}
-          <button
-            type="button"
-            className="send-btn"
-            aria-label="发送"
-            title="发送"
-            disabled={dead || (!text.trim() && readyMentions.length === 0)}
-            onClick={send}
-          >
-            <SendIcon />
-          </button>
+          <ConfigControls session={session} />
+          {session.agent === "claude" && <CacheTimer session={session} />}
+          {/* 运行中且输入框为空：发送键变中断键；有内容时仍是发送（运行中可追加消息） */}
+          {session.status === "running" && caps?.interrupt && session.processId
+            && !text.trim() && readyMentions.length === 0 ? (
+            <button
+              type="button"
+              className="send-btn"
+              aria-label="中断"
+              title="打断当前执行"
+              onClick={() => store.interrupt(session.id)}
+            >
+              <StopIcon />
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="send-btn"
+              aria-label="发送"
+              title="发送"
+              disabled={dead || (!text.trim() && readyMentions.length === 0)}
+              onClick={send}
+            >
+              <SendIcon />
+            </button>
+          )}
         </div>
       </div>
       {/* 隐藏的文件选择器：照片/文件入口；再次选择同名文件也要触发 change */}

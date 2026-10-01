@@ -2,6 +2,7 @@ import type {
   CommandInfo,
   ConfigOptionId,
   EffectiveSource,
+  HistorySession,
   Mention,
   MetaInfo,
   PageManifest,
@@ -55,6 +56,11 @@ interface SessionData {
   latestUsage?: Record<string, unknown>;
 }
 
+const FOCUS_VIEW_STORAGE_KEY = "workbench-focus-view";
+function readFocusView(): boolean {
+  try { return typeof localStorage !== "undefined" && localStorage.getItem(FOCUS_VIEW_STORAGE_KEY) === "1"; } catch { return false; }
+}
+
 export class Store {
   sessions: SessionRecord[] = [];
   meta: MetaInfo | null = null;
@@ -63,10 +69,13 @@ export class Store {
   pages: PageManifest[] = [];
   skippedPages: SkippedPage[] = [];
   currentPageId: string | null = null;
-  /** hash 路由 #/history：历史会话浏览视图（与 session/page 两路互斥） */
+  /** 侧栏面板：historyOpen 与 currentPageId 互斥，保留右侧当前会话。 */
   historyOpen = false;
+  historySelection: HistorySession | null = null;
   data = new Map<string, SessionData>();
   wsState: WsState = "closed";
+  /** Focus view：只显示用户输入与助手回复（闸门/提问照常），按浏览器记忆 */
+  focusView: boolean = readFocusView();
   lastError: LastError | null = null;
   /** 删除成功后的一次性提示（原生记录仍在 + 可选 transcript 路径），用户手动关闭 */
   removalNotice: { message: string; path?: string } | null = null;
@@ -122,6 +131,12 @@ export class Store {
   private mentionPathInflight = new Map<string, Promise<string | null>>();
   /** 已移除会话：DELETE 后残留 WS 事件/快照直接忽略，不再重取（会 404 污染全局错误条） */
   private removed = new Set<string>();
+
+  setFocusView(on: boolean): void {
+    this.focusView = on;
+    try { localStorage.setItem(FOCUS_VIEW_STORAGE_KEY, on ? "1" : "0"); } catch { /* 仅本页生效 */ }
+    this.notify();
+  }
 
   subscribe = (listener: () => void): (() => void) => {
     this.listeners.add(listener);
@@ -194,19 +209,19 @@ export class Store {
   }
 
   private onHashChange = (): void => {
-    // 三类路由互斥：#/history、#/page/<id>、#/session/<id>；其余 hash 回空态。
+    // 旧 history/page 链接打开侧栏面板；当前会话留在主区。
     if (window.location.hash === "#/history") {
+      if (!this.historyOpen) this.historySelection = null;
       this.historyOpen = true;
       this.currentPageId = null;
-      this.currentId = null;
       this.notify();
       return;
     }
     this.historyOpen = false;
+    this.historySelection = null;
     const pageId = window.location.hash.match(/^#\/page\/([^/]+)$/)?.[1];
     if (pageId) {
       this.currentPageId = decodeURIComponent(pageId);
-      this.currentId = null;
       this.notify();
       return;
     }
@@ -219,14 +234,32 @@ export class Store {
 
   navigate(id: string | null): void {
     window.location.hash = id ? `#/session/${encodeURIComponent(id)}` : "#/";
+    this.onHashChange();
   }
 
   navigatePage(id: string): void {
     window.location.hash = `#/page/${encodeURIComponent(id)}`;
+    this.onHashChange();
   }
 
   navigateHistory(): void {
     window.location.hash = "#/history";
+    this.onHashChange();
+  }
+
+  closeSidebarPanel(returnToList = false): void {
+    this.navigate(returnToList ? null : this.currentId);
+  }
+
+  selectHistory(item: HistorySession): void {
+    if (!this.historyOpen) return;
+    this.historySelection = item;
+    this.notify();
+  }
+
+  backToHistoryList(): void {
+    this.historySelection = null;
+    this.notify();
   }
 
   /** 扩展页面列表：只在启动时取一次（server 也只在启动时扫描 pages/，增删要重启才生效）。 */

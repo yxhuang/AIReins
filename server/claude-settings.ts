@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -6,6 +6,39 @@ export interface ClaudeEffectiveSettings {
   model: string | null;
   effort: string | null;
   remoteControlAtStartup?: boolean;
+}
+
+export interface ClaudeStartupSettings {
+  remoteControlAtStartup: boolean;
+}
+
+function readUserSettings(userHome: string): Record<string, unknown> {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(readFileSync(join(userHome, ".claude", "settings.json"), "utf8"));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return {};
+    throw error;
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("Claude settings.json 必须是 JSON 对象");
+  }
+  return parsed as Record<string, unknown>;
+}
+
+/** 用户级开关；项目层的 false 仍由 worker 启动时单独处理。 */
+export function readClaudeStartupSettings(userHome = homedir()): ClaudeStartupSettings {
+  return { remoteControlAtStartup: readUserSettings(userHome).remoteControlAtStartup === true };
+}
+
+export function writeClaudeStartupSettings(enabled: boolean, userHome = homedir()): ClaudeStartupSettings {
+  if (typeof enabled !== "boolean") throw new Error("remoteControlAtStartup 必须是布尔值");
+  const settings = readUserSettings(userHome);
+  settings.remoteControlAtStartup = enabled;
+  mkdirSync(join(userHome, ".claude"), { recursive: true });
+  // writeFileSync 跟随软链接写入目标；禁止用 rename 覆盖 settings.json 链接。
+  writeFileSync(join(userHome, ".claude", "settings.json"), `${JSON.stringify(settings, null, 2)}\n`, "utf8");
+  return readClaudeStartupSettings(userHome);
 }
 
 /** Resolve one Claude session's layered settings without launching Claude. */

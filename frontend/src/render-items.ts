@@ -1,7 +1,7 @@
 import type { AgentKind, AskQuestion, HistoryMessage, Mention, PermissionDecision, UnifiedEvent } from "./types";
 import { asRecord, stringifyBlock } from "./format";
 import { normalizeQuestions } from "./ask";
-import type { ToolLocation, ToolTerminalOutput } from "./tool-summary";
+import { summarizeTool, type ToolLocation, type ToolTerminalOutput } from "./tool-summary";
 
 // 把统一事件折叠成渲染条目：同一 turn 内的文本增量、思考增量合并成块；
 // 工具调用按 toolCallId 聚合三阶段；闸门按 requestId 聚合请求与结果。
@@ -89,6 +89,12 @@ export interface GateView {
   questionAnswers?: Record<string, string>;
 }
 
+/** Focus view 隐藏的项：工具、思考、调试行与中性系统行；闸门/提问、出错行照常显示。 */
+export function focusVisible(item: StreamRenderItem): boolean {
+  if (item.kind === "tool" || item.kind === "tool-group" || item.kind === "thought" || item.kind === "raw") return false;
+  return item.kind !== "system" || item.tone === "error";
+}
+
 export interface SystemBlock {
   kind: "system";
   key: string;
@@ -121,6 +127,102 @@ export type RenderItem =
   | SystemBlock
   | ExternalHistoryBlock
   | RawBlock;
+
+export interface ToolGroupView {
+  kind: "tool-group";
+  key: string;
+  seq: number;
+  turn: number;
+  tools: ToolView[];
+  summary: string;
+  summaryParts: { verb: string; count: string }[];
+}
+
+export type StreamRenderItem = RenderItem | ToolGroupView;
+
+/** 摘要器的分类是私有实现：复用公开展示结果，不另建名字/ACP kind 分类表。
+ * read 有专属 body；glob 独占「列出」；grep 与 websearch 共用「搜索」，需排除后者。
+ * 未知工具会把原名当 verb，不能把名叫「搜索/列出」的未知工具误折叠。
+ */
+function foldableTool(tool: ToolView, agent: AgentKind, cwd: string) {
+  if (tool.status !== "ok") return null;
+  const summary = summarizeTool(agent, tool, cwd);
+  const name = tool.baseToolName || tool.toolName || "tool";
+  if (summary.body.type === "read") return { cls: "read" as const, path: summary.body.path };
+  if (summary.verb === "列出" && name !== summary.verb) return { cls: "glob" as const, path: "" };
+  if (summary.verb === "搜索" && (tool.toolKind === "search" ||
+      (name.toLowerCase() !== "websearch" && name !== summary.verb))) {
+    return { cls: "grep" as const, path: "" };
+  }
+  return null;
+}
+
+/** 在过滤之前分组，保留所有非工具项作为连续性边界；不改变输入或原 ToolView。 */
+export function groupReadOnlyTools(items: readonly RenderItem[], agent: AgentKind, cwd: string): StreamRenderItem[] {
+  const grouped: StreamRenderItem[] = [];
+  let tools: ToolView[] = [];
+  const paths = new Set<string>();
+  let reads = 0;
+  let unlocatedReads = 0;
+  let greps = 0;
+  let globs = 0;
+  const flush = () => {
+    if (tools.length < 3) grouped.push(...tools);
+    else {
+      const summaryParts: ToolGroupView["summaryParts"] = [];
+      const files = paths.size + unlocatedReads;
+      if (reads) summaryParts.push({ verb: "读取", count: `${files} 个文件${files < reads ? `（${reads} 次）` : ""}` });
+      if (greps) summaryParts.push({ verb: "搜索", count: `${greps} 次` });
+      if (globs) summaryParts.push({ verb: "列出", count: `${globs} 次` });
+      const first = tools[0]!;
+      grouped.push({ kind: "tool-group", key: `tool-group:${first.key}`, seq: first.seq,
+        turn: first.turn, tools, summaryParts,
+        summary: summaryParts.map(({ verb, count }) => `${verb} ${count}`).join(" · ") });
+    }
+    tools = [];
+    paths.clear();
+    reads = unlocatedReads = greps = globs = 0;
+  };
+  for (const item of items) {
+    const classified = item.kind === "tool" ? foldableTool(item, agent, cwd) : null;
+    if (item.kind !== "tool" || !classified) {
+      flush();
+      grouped.push(item);
+      continue;
+    }
+    if (tools.length && tools[0]!.turn !== item.turn) flush();
+    tools.push(item);
+    if (classified.cls === "read") {
+      reads++;
+      // 缺路径的旧记录各算一次，不能把所有空路径误当作同一个文件去重。
+      if (classified.path) paths.add(classified.path);
+      else unlocatedReads++;
+    } else if (classified.cls === "grep") greps++;
+    else globs++;
+  }
+  flush();
+  return grouped;
+}
+
+/** 历史消息没有 turn id，以用户消息分回合；文字/思考仍作为工具组边界。 */
+export function buildHistoryRenderItems(messages: readonly HistoryMessage[]): RenderItem[] {
+  let turn = 0;
+  return messages.map((message, index): RenderItem => {
+    const key = message.role === "tool" ? `tool:${message.tool.id}` : `${message.role}:${message.timestamp}:${index}`;
+    if (message.role === "user") {
+      turn++;
+      return { kind: "user", key, seq: index, text: message.text };
+    }
+    if (message.role === "tool") return {
+      kind: "tool", key, seq: index, turn, toolCallId: message.tool.id,
+      toolName: message.tool.name, baseToolName: message.tool.name,
+      input: typeof message.tool.input === "string" ? message.tool.input : JSON.stringify(message.tool.input ?? null),
+      rawInput: message.tool.input, result: message.tool.result ?? "",
+      rawResult: message.tool.rawResult, status: message.tool.status,
+    };
+    return { kind: message.role === "thought" ? "thought" : "text", key, seq: index, turn, text: message.text };
+  });
+}
 
 // 从 permission_request payload 提取闸门视图；三家 payload 形状不同，宽容处理。
 export function gateFromEvent(event: UnifiedEvent, agent: AgentKind): GateView {
@@ -285,7 +387,7 @@ export function buildRenderItems(events: UnifiedEvent[], agent: AgentKind): Rend
                     result: typeof tool.result === "string" ? tool.result : undefined, rawResult: tool.rawResult,
                     status: tool.status === "ok" || tool.status === "error" ? tool.status : "unknown" } }];
               }
-              if ((item.role !== "user" && item.role !== "assistant") || typeof item.text !== "string") return [];
+              if ((item.role !== "user" && item.role !== "assistant" && item.role !== "thought") || typeof item.text !== "string") return [];
               return [{ role: item.role, text: item.text, timestamp: typeof item.timestamp === "string" ? item.timestamp : null }];
             })
           : [];
@@ -507,6 +609,7 @@ function toolResultText(result: unknown): string {
 
 // worker_released 的弱化系统行文案：空闲自动释放带分钟数，手动释放不带来源细节。
 function workerReleasedText(p: Record<string, unknown>): string {
+  if (p.reason === "shutdown") return "Workbench 退出时已释放；下次发送时从磁盘续接";
   if (p.reason === "idle") {
     const minutes = Number(p.idleMinutes);
     const why = Number.isFinite(minutes) && minutes > 0 ? `空闲 ${minutes} 分钟` : "空闲超时";

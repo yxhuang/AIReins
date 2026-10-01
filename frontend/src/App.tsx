@@ -2,8 +2,7 @@ import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { isTerminalToggleKey } from "./terminal";
 import { Sidebar } from "./components/Sidebar";
 import { SessionView } from "./components/SessionView";
-import { PageView } from "./components/PageView";
-import { HistoryView } from "./components/HistoryView";
+import { HistoryPreviewPane } from "./components/HistoryView";
 // xterm 体积大（~300KB），第一次打开终端才按需加载，别拖慢手机首屏
 const TerminalPanel = lazy(() => import("./components/TerminalPanel").then((m) => ({ default: m.TerminalPanel })));
 import { sessionTitle } from "./format";
@@ -12,10 +11,6 @@ import { shallowEqual, useStore } from "./useStore";
 
 const selectCurrentSession = (value: Store) =>
   value.currentId ? value.session(value.currentId) : undefined;
-const selectCurrentPage = (value: Store) =>
-  value.currentPageId
-    ? value.pages.find((page) => page.id === value.currentPageId)
-    : undefined;
 // 带 sessionId 的错误解析出「agent · 会话标题」上下文（纯字符串，selector 比较友好）；
 // 会话已不存在时返回 undefined，toast 退化为不可点击的纯文本。
 const selectErrorContext = (value: Store) => {
@@ -29,6 +24,7 @@ const selectAppUi = (value: Store) =>
   [
     value.historyOpen,
     value.currentPageId,
+    value.historySelection,
     value.lastError,
     selectErrorContext(value),
     value.removalNotice,
@@ -68,14 +64,16 @@ export function App() {
     return () => cancelAnimationFrame(raf);
   }, [termOpen]);
   const current = useStore(selectCurrentSession);
-  const currentPage = useStore(selectCurrentPage);
-  const [historyOpen, currentPageId, lastError, errorContext, removalNotice] = useStore(
+  const [historyOpen, currentPageId, historySelection, lastError, errorContext, removalNotice] = useStore(
     selectAppUi,
     shallowEqual,
   );
   const pendingTotal = useStore(selectPendingTotal);
-  // 手机窄屏下，列表和主区二选一：有内容要看（会话 / 页面 / 历史）时只显示主区。
-  const hasMain = Boolean(historyOpen || currentPageId || current);
+  // 手机窄屏下，面板就是主页；只有历史预览或会话进入主区。
+  const hasMain = Boolean(historySelection || (current && !historyOpen && !currentPageId));
+  useEffect(() => {
+    if (historyOpen || currentPageId) setCollapsed(false);
+  }, [historyOpen, currentPageId]);
 
   // 标签页标题带上全局未决闸门总数：切走也能看到「有闸门在等你」。
   // 必须写在组件里而不是 store.notify()——store.ts 会被纯 node 测试 import，没有 document。
@@ -89,7 +87,10 @@ export function App() {
     >
       <Sidebar
         collapsed={collapsed}
-        onToggle={() => setCollapsed((v) => !v)}
+        onToggle={() => {
+          if (!collapsed && (historyOpen || currentPageId)) store.closeSidebarPanel();
+          setCollapsed((v) => !v);
+        }}
         newOpen={newOpen}
         onNewOpenChange={setNewOpen}
         terminalCapable={terminalCapable}
@@ -101,8 +102,9 @@ export function App() {
         <main className="main">
           {hasMain && (
             <div className="mobile-topbar">
-              <button type="button" className="btn" onClick={() => store.navigate(null)}>
-                ‹ 会话列表
+              <button type="button" className="btn" onClick={() => historySelection
+                ? store.backToHistoryList() : store.navigate(null)}>
+                {historySelection ? "‹ 所有来源会话" : "‹ 会话列表"}
               </button>
               {pendingTotal > 0 && (
                 <span className="gate-badge" title={`${pendingTotal} 个闸门等待处理`}>
@@ -111,18 +113,8 @@ export function App() {
               )}
             </div>
           )}
-          {historyOpen ? (
-            <HistoryView />
-          ) : currentPage ? (
-            <PageView key={currentPage.id} page={currentPage} />
-          ) : currentPageId ? (
-            <div className="empty-state">
-              <h1>页面不存在</h1>
-              <p>
-                该页面可能已从 pages/ 移除或 manifest 失效——server 只在启动时扫描一次，
-                改动需重启后生效。
-              </p>
-            </div>
+          {historySelection ? (
+            <HistoryPreviewPane item={historySelection} onBack={() => store.backToHistoryList()} />
           ) : current ? (
             <SessionView key={current.id} session={current} />
           ) : (
@@ -139,6 +131,7 @@ export function App() {
                 type="button"
                 className="btn btn-primary"
                 onClick={() => {
+                  if (historyOpen || currentPageId) store.closeSidebarPanel();
                   setCollapsed(false);
                   setNewOpen(true);
                 }}

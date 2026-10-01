@@ -150,6 +150,8 @@ export interface SessionRecord {
   processId?: number;
   /** true = worker 已释放（手动或空闲超时）；下次发送时按原生会话 id 从磁盘续接 */
   released?: boolean;
+  /** 仅退出时写盘：released 会话的原生对话指纹，重启载入后还原进内存（发现停服期间的外部续聊），不对外 */
+  releasedMark?: { path: string; identity: string; offset: number; size: number };
   model?: string | null;
   effort?: string | null;
   effectiveModel?: string | null;
@@ -201,6 +203,10 @@ export interface Driver {
   getConfigSchema(): DriverConfigSchema;
   setConfig(config: SessionConfig): Promise<SessionConfig>;
   setRemoteControl?(enabled: boolean): Promise<RemoteControlState>;
+  /** 只读查询（Claude control_request，如 mcp_status），返回 CLI 的 response 原样 */
+  queryInfo?(subtype: string): Promise<unknown>;
+  /** 从磁盘刷新设置并重载插件，不重启 worker。 */
+  reloadPlugins?(): Promise<void>;
   sendUserMessage(message: UserMessageInput): Promise<void>;
   resolvePermission(
     requestId: string,

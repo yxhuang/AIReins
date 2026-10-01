@@ -5,6 +5,7 @@ import type {
   SystemBlock,
   TextBlock,
   ThoughtBlock,
+  ToolGroupView,
   ToolView,
   UserBlock,
 } from "../render-items";
@@ -135,6 +136,36 @@ export const ToolCard = memo(function ToolCard({ item, agent, cwd }: { item: Too
 );
 
 const COMMAND_OUTPUT_PREVIEW_LINES = 20;
+
+/** 同组持续追加完成工具时 key 不变，展开状态留在本组件；隐藏子行保留各行自己的状态。 */
+export function ReadOnlyToolGroup({ item, agent, cwd, continues }: {
+  item: ToolGroupView; agent: AgentKind; cwd: string; continues: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="tool-group">
+      <div className={`timeline-item timeline-ok${open || continues ? " timeline-continues" : ""}`}>
+        <div className="tool-card">
+          <button type="button" className="tool-head tool-group-head" aria-expanded={open} onClick={() => setOpen((value) => !value)} title={item.summary}>
+            <span className="chevron" aria-hidden="true">{open ? "▾" : "▸"}</span>
+            <span className="tool-group-summary">
+              {item.summaryParts.map(({ verb, count }, index) => (
+                <span key={verb}>{index > 0 && " · "}{verb} <span className="tool-group-count">{count}</span></span>
+              ))}
+            </span>
+          </button>
+        </div>
+      </div>
+      <div className="tool-group-items" hidden={!open}>
+        {item.tools.map((tool, index) => (
+          <div key={tool.key} className={`timeline-item timeline-${tool.status}${index < item.tools.length - 1 || continues ? " timeline-continues" : ""}`}>
+            <ToolCard item={tool} agent={agent} cwd={cwd} />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 function ToolBodyView({ body, status, showAll, onShowAll }: {
   body: ToolSummary["body"];

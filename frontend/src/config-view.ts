@@ -64,3 +64,11 @@ export function pillText(
   const value = current || effective || option.default;
   return value ? labelOf(value) : "默认";
 }
+
+/** 会话头的模型短名：去掉 claude- 前缀与日期后缀，版本号连字符改点（claude-opus-5-5 → opus-5.5）。 */
+export function modelShortName(model: string): string {
+  return model
+    .replace(/^claude-/, "")
+    .replace(/-\d{8}$/, "")
+    .replace(/-(\d+)-(\d+)(?=$|\[)/, "-$1.$2");
+}

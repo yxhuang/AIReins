@@ -1,24 +1,26 @@
 import type { AgentKind, HistoryMessage } from "../types";
-import type { ExternalHistoryBlock, ToolView } from "../render-items";
+import { buildHistoryRenderItems, focusVisible, groupReadOnlyTools, type ExternalHistoryBlock } from "../render-items";
 import { MarkdownMessage } from "./MarkdownMessage";
-import { ToolCard, UserBlockView } from "./StreamItems";
+import { ReadOnlyToolGroup, ThoughtBlockView, ToolCard, UserBlockView } from "./StreamItems";
+import type { Store } from "../store";
+import { useStore } from "../useStore";
 
-const display = (value: unknown) => typeof value === "string" ? value : JSON.stringify(value ?? null);
+const selectFocusView = (value: Store) => value.focusView;
 
-export function HistoryTimeline({ messages, agent, cwd }: { messages: HistoryMessage[]; agent: AgentKind; cwd: string }) {
-  return <div className="history-timeline">{messages.map((message, index) => {
-    const key = message.role === "tool" ? `tool:${message.tool.id}` : `${message.role}:${message.timestamp}:${index}`;
-    if (message.role === "user") return <UserBlockView key={key} item={{ kind: "user", key, seq: index, text: message.text }} />;
-    const continues = messages[index + 1] && messages[index + 1]!.role !== "user";
-    let tool: ToolView | undefined;
-    if (message.role === "tool") tool = {
-      kind: "tool", key, seq: index, turn: 0, toolCallId: message.tool.id,
-      toolName: message.tool.name, baseToolName: message.tool.name,
-      input: display(message.tool.input), rawInput: message.tool.input,
-      result: message.tool.result ?? "", rawResult: message.tool.rawResult, status: message.tool.status,
-    };
-    return <div key={key} className={`timeline-item${continues ? " timeline-continues" : ""}${tool ? ` timeline-${tool.status}` : ""}`}>
-      {tool ? <ToolCard item={tool} agent={agent} cwd={cwd} /> : message.role === "assistant" && <div className="text-block"><MarkdownMessage text={message.text} /></div>}
+export function HistoryTimeline({ messages: all, agent, cwd }: { messages: HistoryMessage[]; agent: AgentKind; cwd: string }) {
+  // Focus view：历史区同样只留用户与助手文字
+  const focusView = useStore(selectFocusView);
+  const grouped = groupReadOnlyTools(buildHistoryRenderItems(all), agent, cwd);
+  const items = focusView ? grouped.filter(focusVisible) : grouped;
+  return <div className="history-timeline">{items.map((item, index) => {
+    if (item.kind === "user") return <UserBlockView key={item.key} item={item} />;
+    const next = items[index + 1];
+    const continues = Boolean(next && next.kind !== "user");
+    if (item.kind === "tool-group") return <ReadOnlyToolGroup key={item.key} item={item} agent={agent} cwd={cwd} continues={continues} />;
+    return <div key={item.key} className={`timeline-item${continues ? " timeline-continues" : ""}${item.kind === "tool" ? ` timeline-${item.status}` : ""}`}>
+      {item.kind === "tool" ? <ToolCard item={item} agent={agent} cwd={cwd} />
+        : item.kind === "thought" ? <ThoughtBlockView item={item} />
+        : item.kind === "text" && <div className="text-block"><MarkdownMessage text={item.text} /></div>}
     </div>;
   })}</div>;
 }

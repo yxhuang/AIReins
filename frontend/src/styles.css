@@ -123,7 +123,7 @@ body {
 }
 
 .sidebar {
-  width: 264px;
+  width: 288px;
   flex: 0 0 auto;
   display: flex;
   flex-direction: column;
@@ -131,8 +131,28 @@ body {
   border-right: 1px solid var(--border);
   padding: 10px;
   gap: 10px;
+  overflow: hidden;
+}
+
+.sidebar-head, .sidebar > .btn-new { flex-shrink: 0; }
+
+/* 正常列表与覆盖层共享这一块：起点始终在新建会话按钮下方。 */
+.sidebar-body {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.sidebar-session-area {
+  flex: 1 1 auto;
+  min-height: 0;
   overflow-y: auto;
 }
+
+.sidebar-session-area[inert] { visibility: hidden; }
 
 .app.sidebar-collapsed .sidebar {
   width: 52px;
@@ -514,6 +534,12 @@ body.resizing {
   display: flex;
   flex-direction: column;
   gap: 4px;
+  min-height: 0; /* 让左栏高度不够时由下面的已结束分组收缩滚动 */
+}
+
+.session-dead-group {
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .session-list-empty {
@@ -540,7 +566,7 @@ body.resizing {
   color: var(--text-muted);
 }
 
-/* 会话行 + 删除入口：× 在行外右侧，永不挤占/遮挡行内右侧的闸门徽标（徽标优先级更高） */
+/* 会话行容器：确认态时整行就地替换成 .session-confirm */
 .session-item {
   display: flex;
   align-items: stretch;
@@ -552,32 +578,10 @@ body.resizing {
   min-width: 0;
 }
 
-/* 删除入口用 --danger 冷调洋红（语义是「销毁」，与「拒绝/错误」同类，不是审批不用暖色）。
-   hover/focus 显现但始终在 Tab 序里：opacity 0 不影响聚焦，行 hover 或行内任意元素聚焦时显现。 */
-.row-delete {
-  flex: 0 0 auto;
-  align-self: center;
-  width: 22px;
-  height: 22px;
-  border: 1px solid transparent;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--danger);
-  font-size: 14px;
-  line-height: 1;
-  cursor: pointer;
-  opacity: 0;
-}
-
-.session-item:hover .row-delete,
-.session-item:focus-within .row-delete {
-  opacity: 1;
-}
-
-.row-delete:hover {
-  border-color: var(--danger);
-  background: var(--surface);
-}
+/* 行菜单（右键 / 长按）：复用 .attach-menu 外观，fixed 定位到指针处 */
+.attach-menu.row-menu { position: fixed; bottom: auto; min-width: 180px; z-index: 50; }
+/* 「移除」用 --danger 冷调洋红（语义是「销毁」，与「拒绝/错误」同类，不是审批不用暖色） */
+.row-menu-danger { color: var(--danger); }
 
 /* 行内二次确认：整行就地替换（非模态），全冷色 */
 .session-confirm {
@@ -613,18 +617,24 @@ body.resizing {
 }
 
 .session-row {
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: 8px;
   width: 100%;
   text-align: left;
   border: none;
   background: transparent;
   border-radius: var(--radius);
-  /* 两行 ≤44px：4 + 18(标题行) + 2(行距) + 16(元信息行) + 4 = 44 */
-  padding: 4px 8px 4px 10px;
+  /* 单行 36px：8 + 20(图标/标题行) + 8 */
+  min-height: 36px;
+  padding: 8px 8px 8px 9px;
   cursor: pointer;
   color: var(--text);
-  /* 左侧 3px 身份色脊：辨识 agent 的主要手段 */
+  /* 左侧 3px 身份色脊 + 左侧品牌图标，一起辨识 agent */
   border-left: 3px solid var(--border);
+  /* 长按出菜单：别让 iOS 弹系统的文字选择/链接预览 */
+  -webkit-touch-callout: none;
+  user-select: none;
 }
 
 .session-row.agent-claude { border-left-color: var(--agent-claude); }
@@ -634,43 +644,40 @@ body.resizing {
 .session-row:hover { background: var(--surface-sunk); }
 .session-row.active { background: var(--surface-sunk); }
 /* dead 行不整体压 opacity（12px 小字会被压到 AA 以下，而找旧会话续接正要看这行），
-   只把标题/元信息降为 --text-faint；状态点保留 --dead 灰 */
+   只把标题/元信息降为 --text-faint、图标减淡；状态点保留 --dead 灰 */
 .session-row.dead .row-title,
 .session-row.dead .row-meta { color: var(--text-faint); }
+.session-row.dead .agent-icon { opacity: 0.45; }
 
-.row-title-line {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
+/* 品牌图标用品牌原色（写在 AgentIcon.tsx 里），Kimi 的「K」随文字色 */
+.agent-icon { flex: 0 0 auto; width: 16px; height: 16px; color: var(--text); }
 
 .row-title {
+  flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 14px;
-  line-height: 18px;
+  line-height: 20px;
   color: var(--text);
 }
 
-/* 待审批徽标钉在标题行最右侧，不随标题缩 */
-.row-title-line .gate-badge { margin-left: auto; flex: 0 0 auto; }
-
+/* 行尾：闸门徽标 · ! · 状态灯 · 时间，不随标题缩 */
 .row-meta {
+  flex: 0 0 auto;
   display: flex;
   align-items: center;
   gap: 6px;
-  margin-top: 2px;
   font-size: 12px;
   line-height: 16px;
   color: var(--text-muted);
 }
 
-.row-meta-text {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
+.row-time {
+  min-width: 4em; /* 容下「23小时」，让各行状态灯竖向对齐 */
+  text-align: right;
+  font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
 
@@ -1097,6 +1104,13 @@ body.resizing {
 }
 
 .tool-read-summary { font-size: 12.5px; color: var(--text-muted); padding: 2px 0; }
+
+/* 连续成功的只读工具：复用工具行密度和中性色，展开后保留原逐行卡片。 */
+.tool-group { min-width: 0; }
+.tool-group-head { gap: 8px; }
+.tool-group-summary { color: var(--text); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tool-group-count { color: var(--text-faint); }
+.tool-group-items:not([hidden]) { display: flex; flex-direction: column; gap: 10px; margin-top: 10px; }
 
 .tool-status { margin-left: auto; flex: 0 0 auto; font-size: 12px; }
 .tool-status-running { color: var(--busy); }
@@ -1592,8 +1606,7 @@ body.resizing {
 
 .cache-timer.expired { color: var(--text-faint); }
 
-.rc-control { display: inline-flex; align-items: center; gap: 2px; flex: 0 0 auto; }
-.rc-pill, .rc-open {
+.rc-pill {
   border: 1px solid var(--border-strong); border-radius: 6px; background: var(--surface-sunk);
   color: var(--text-muted); padding: 3px 7px; font: inherit; font-size: 12px;
   white-space: nowrap; text-decoration: none;
@@ -1603,8 +1616,16 @@ body.resizing {
 .rc-connected { background: #2563b8; border-color: #2563b8; color: #fff; }
 .rc-connecting, .rc-reconnecting, .rc-disconnecting { border-color: var(--busy); color: var(--busy); }
 .rc-error { border-color: #c64c4c; color: #c64c4c; }
-.rc-open { color: var(--text); }
-.rc-pill:focus-visible, .rc-open:focus-visible { outline: 2px solid var(--busy); outline-offset: 2px; }
+.rc-pill:focus-visible { outline: 2px solid var(--busy); outline-offset: 2px; }
+/* RC 胶囊在底栏靠右，菜单右对齐往左展开；链接项与按钮项同款 */
+.attach-menu.rc-menu { left: auto; right: 0; min-width: 170px; }
+.rc-short { display: none; }
+@media (max-width: 720px) {
+  .rc-long { display: none; }
+  .rc-short { display: inline; }
+}
+.rc-menu a.attach-item { text-decoration: none; box-sizing: border-box; }
+.attach-item:disabled { color: var(--text-muted); opacity: 0.6; cursor: default; }
 
 .send-btn {
   flex: 0 0 auto;
@@ -1673,11 +1694,39 @@ body.resizing {
 }
 
 /* 焦点/悬停同命令面板选中项的纪律：冷色 --busy 竖条 */
-.attach-item:hover, .attach-item:focus-visible {
+.attach-item:not(:disabled):hover, .attach-item:focus-visible {
   outline: none;
   background: var(--surface-sunk);
   box-shadow: inset 2px 0 0 var(--busy);
 }
+
+/* 「/」菜单：分组小标题、Focus view 开关；查看弹窗复用 .dir-overlay / .dir-dialog */
+.slash-menu { min-width: 190px; }
+.slash-group { padding: 6px 8px 2px; font-size: 11px; color: var(--text-muted); }
+.slash-toggle { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.slash-switch {
+  position: relative; flex: 0 0 auto; width: 28px; height: 16px; border-radius: 8px;
+  background: var(--border-strong); transition: background 0.15s;
+}
+.slash-switch::after {
+  content: ""; position: absolute; top: 2px; left: 2px; width: 12px; height: 12px;
+  border-radius: 50%; background: #fff; transition: transform 0.15s;
+}
+.slash-switch.on { background: var(--busy); }
+.slash-switch.on::after { transform: translateX(12px); }
+.info-body { padding: 4px 0; }
+.info-group { padding: 6px 0; border-bottom: 1px solid var(--border); }
+.info-group:last-child { border-bottom: 0; }
+.info-group-head { padding: 2px 10px; }
+.info-row { padding: 6px 10px; min-width: 0; }
+.info-row-inline { display: flex; justify-content: space-between; gap: 12px; padding-block: 3px; }
+.info-row-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.info-name { font-weight: 600; overflow-wrap: anywhere; }
+.info-meta { font-size: 12px; color: var(--text-muted); overflow-wrap: anywhere; }
+.info-code { font-size: 12px; overflow-wrap: anywhere; white-space: pre-wrap; }
+.info-status { font-size: 12px; color: var(--text-muted); }
+.info-status-connected { color: var(--ok); }
+.info-status-failed { color: var(--danger); }
 
 /* 输入框上方的附件条：横排可换行，不产生页面横滚 */
 .attach-bar {
@@ -1995,6 +2044,9 @@ body.resizing {
 }
 
 .settings-options { display: flex; gap: 6px; }
+.settings-option.settings-toggle { display: flex; align-items: center; justify-content: space-between; padding: 5px 8px; }
+.settings-hint { font-size: 12px; color: var(--text-faint); line-height: 1.5; }
+.settings-option:disabled { cursor: default; opacity: 0.6; }
 
 .settings-option {
   flex: 1;
@@ -2191,6 +2243,74 @@ body.resizing {
   margin-top: 14px;
 }
 
+/* 底部展开项盖住会话列表；其标题在顶部，其余入口保持在底部。 */
+.sidebar-foot.has-panel {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  margin-top: 0;
+  background: var(--surface);
+  min-height: 0;
+}
+
+.sidebar-panel-slot { flex: 0 0 auto; min-width: 0; }
+.sidebar-panel-head { display: flex; align-items: center; flex: 0 0 auto; }
+.sidebar-panel-head > .page-nav-item { flex: 1 1 auto; min-width: 0; }
+.sidebar-panel-head > .icon-btn { flex: 0 0 auto; }
+
+.sidebar-panel-expanded {
+  order: -1;
+  flex: 1 1 auto;
+  min-height: 0;
+  border-top: none;
+  padding-top: 0;
+  gap: 6px;
+  overflow: hidden;
+  animation: sidebar-panel-rise 180ms ease-out;
+}
+
+@keyframes sidebar-panel-rise {
+  from { clip-path: inset(100% 0 0 0); transform: translateY(12px); opacity: 0; }
+  to { clip-path: inset(0); transform: translateY(0); opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sidebar-panel-expanded { animation: none; }
+}
+
+@media (min-width: 721px) {
+  .sidebar { transition: width 160ms ease; }
+  .app:not(.sidebar-collapsed) .sidebar.sidebar-page-open { width: min(440px, 45vw); }
+}
+
+@media (min-width: 721px) and (prefers-reduced-motion: reduce) {
+  .sidebar { transition: none; }
+}
+
+.sidebar-panel-content {
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.sidebar-panel-missing { overflow-y: auto; padding: 12px; color: var(--text-muted); font-size: 13px; }
+.history-sidebar-list .history-list-pane { min-height: 0; }
+.history-sidebar-list .history-filters { flex-direction: column; align-items: stretch; padding: 8px 4px; gap: 8px; }
+.history-sidebar-list .history-filter-group { flex-wrap: wrap; }
+.history-sidebar-list .history-search { flex: none; width: 100%; min-width: 0; max-width: none; } /* 竖排时 flex-basis 会变成高度 */
+.history-sidebar-list .history-meta { padding: 6px 4px 0; }
+.history-sidebar-list .history-list { padding: 4px 0; }
+.history-sidebar-list .history-more { padding: 6px 4px; flex-wrap: wrap; }
+.history-sidebar-list .history-row-meta { flex-wrap: wrap; }
+.page-view-sidebar { width: 100%; min-width: 0; }
+.page-view-sidebar .page-toolbar { flex-wrap: wrap; padding: 8px; gap: 6px; }
+.page-view-sidebar .page-toolbar-title { display: none; }
+.page-view-sidebar .page-toolbar-hint { margin-left: 0; }
+.page-view-sidebar .page-fallback { overflow-y: auto; padding: 12px; overflow-wrap: anywhere; }
+.page-view-sidebar .page-fallback-actions { flex-wrap: wrap; gap: 8px; }
+.main > .history-preview-pane { flex: 1 1 auto; border-left: none; }
+
 /* ── 历史会话浏览（#/history）：全部冷色/中性，暖色仍是闸门专用 ── */
 .history-view {
   display: flex;
@@ -2330,6 +2450,7 @@ body.resizing {
 }
 
 .history-row-title {
+  flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2343,7 +2464,6 @@ body.resizing {
    「对话」中性描边；「未知」虚线 + 更浅文字（如实显示，不猜） */
 .source-badge {
   flex: 0 0 auto;
-  margin-left: auto;
   font-size: 11px;
   line-height: 1;
   padding: 2px 6px;
@@ -2367,7 +2487,8 @@ body.resizing {
 }
 
 .history-row-cwd {
-  display: block;
+  flex: 1 1 auto;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2376,12 +2497,29 @@ body.resizing {
   color: var(--text-faint);
 }
 
-.history-row-meta {
+.history-row-line2 {
   display: flex;
   align-items: center;
   gap: 6px;
   font-size: 12px;
   line-height: 16px;
+  color: var(--text-muted);
+}
+
+.history-row-time {
+  flex: 0 0 auto;
+  font-size: 11px;
+  color: var(--text-faint);
+  white-space: nowrap;
+}
+
+.dispatch-badge {
+  flex: 0 0 auto;
+  font-size: 11px;
+  line-height: 1;
+  padding: 2px 6px;
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
   color: var(--text-muted);
 }
 
@@ -2602,16 +2740,11 @@ body.resizing {
 
 .history-actions .history-note { margin: 0; }
 
-/* 「‹ 历史会话列表」只在窄窗口出现 */
+/* 「‹ 所有来源会话」只在窄窗口出现 */
 .history-back { display: none; }
 
-/* 窄窗口：列表与预览二选一铺满。原先把预览压到列表下方，手机上点了行看起来像没反应 */
-@media (max-width: 900px) {
-  .history-preview-pane { flex: 1 1 auto; border-left: none; }
-  .history-view:not(.has-selection) .history-preview-pane,
-  .history-view.has-selection .history-list-pane { display: none; }
-  .history-back { display: inline-flex; align-self: flex-start; margin: 10px 14px 0; }
-}
+/* 桌面也可退回当前会话；手机返回统一由 mobile-topbar 提供。 */
+.main > .history-preview-pane > .history-back { display: inline-flex; align-self: flex-start; margin: 10px 14px 0; }
 
 /* ── 建会话前快照确认弹窗 ─────────────────────
    风险确认 = 在等用户拍板，复用闸门暖色（--gate*）与闸门块的 2px 硬边直角语言；
@@ -2681,8 +2814,8 @@ body.resizing {
 }
 
 /* ── 手机与触屏（ROADMAP §4 Task 3）─────────────────────
-   ≤720px 单栏：没打开会话 / 页面 / 历史时只显示列表（铺满），打开后只显示主区，
-   主区顶栏「‹ 会话列表」返回。顶栏徽标沿用 .gate-badge——暖色仍只用于闸门计数。 */
+   ≤720px 单栏：侧栏面板就是主页；会话 / 历史预览单独进入主区。
+   历史预览返回时保留面板与筛选。顶栏徽标沿用 .gate-badge——暖色仍只用于闸门计数。 */
 .mobile-topbar { display: none; }
 
 @media (max-width: 720px) {
@@ -2698,14 +2831,15 @@ body.resizing {
     .app { padding-top: calc(env(safe-area-inset-top) + 8px); }
   }
   /* 顶部让出安全区后，把「workbench」并进「+ 新建会话」那一行，列表起点基本不下移 */
-  .app:not(.sidebar-collapsed) .sidebar { flex-flow: row wrap; align-content: flex-start; }
-  .app:not(.sidebar-collapsed) .sidebar > * { flex: 0 0 100%; min-width: 0; }
-  .app:not(.sidebar-collapsed) .sidebar > .sidebar-head { flex: 0 0 auto; }
-  .app:not(.sidebar-collapsed) .sidebar > .btn-new { flex: 1 1 0; width: auto; }
+  .app:not(.sidebar-collapsed) .sidebar { display: grid; grid-template-columns: auto minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
+  .app:not(.sidebar-collapsed) .sidebar > .sidebar-head { grid-area: 1 / 1; }
+  .app:not(.sidebar-collapsed) .sidebar > .btn-new { grid-area: 1 / 2; width: auto; }
+  .app:not(.sidebar-collapsed) .sidebar > .sidebar-body { grid-area: 2 / 1 / 3 / 3; min-width: 0; }
   .sidebar,
   .app.sidebar-collapsed .sidebar { width: calc(100% / var(--font-scale)); border-right: none; }
   .app.has-main .sidebar { display: none; }
   .app:not(.has-main) .main { display: none; }
+  .main > .history-preview-pane > .history-back { display: none; }
   /* manifest 的 maxWidth（如 ai-usage 的 33%）是给宽屏的，单栏下铺满；!important 压过内联样式 */
   .page-view { max-width: none !important; }
   /* 单栏下「收起」没有意义；只在已收起时保留按钮，作为展开的唯一出口 */
@@ -2752,12 +2886,10 @@ body.resizing {
 
 @media (pointer: coarse) {
   /* 触屏点按目标至少 44px */
-  .btn, .icon-btn, .row-delete, .cfg-pill, .cfg-item, .attach-item { min-height: 44px; }
+  .btn, .icon-btn, .cfg-pill, .cfg-item, .attach-item, .session-row, .history-row { min-height: 44px; }
   .term-key, .term-shell { min-height: 44px; }
   .send-btn, .attach-btn { width: 44px; height: 44px; }
   .cfg-slider { width: 176px; height: 32px; }
-  /* 没有 hover：删除按钮常显（点了还有确认步骤，不会误删） */
-  .row-delete { opacity: 1; min-width: 44px; }
   /* iOS 聚焦字号小于 16px 的输入框会自动放大页面；!important 用来压过各处更具体的字号规则 */
   textarea, input, select { font-size: 16px !important; }
 }

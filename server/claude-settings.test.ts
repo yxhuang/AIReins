@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
-import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { chmod, lstat, mkdir, mkdtemp, readFile, readlink, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { readClaudeEffectiveSettings } from "./claude-settings.js";
+import { readClaudeEffectiveSettings, readClaudeStartupSettings, writeClaudeStartupSettings } from "./claude-settings.js";
 
 const root = await mkdtemp(join(tmpdir(), "workbench-claude-settings-test-"));
 const userHome = join(root, "home");
@@ -65,6 +65,27 @@ try {
     effort: null,
     remoteControlAtStartup: false,
   });
+
+  const linkedHome = join(root, "linked-home");
+  await mkdir(join(linkedHome, ".claude"), { recursive: true });
+  const target = join(root, "managed-settings.json");
+  const link = join(linkedHome, ".claude", "settings.json");
+  const before = { model: "opus", remoteControlAtStartup: true, env: { KEEP: "yes" }, effortLevel: "high" };
+  await writeFile(target, `${JSON.stringify(before, null, 2)}\n`);
+  await symlink(target, link);
+  const inode = (await lstat(link)).ino;
+  assert.deepEqual(writeClaudeStartupSettings(false, linkedHome), { remoteControlAtStartup: false });
+  assert.equal((await lstat(link)).isSymbolicLink(), true);
+  assert.equal((await lstat(link)).ino, inode);
+  assert.equal(await readlink(link), target);
+  const saved = await readFile(target, "utf8");
+  assert.equal(saved, `${JSON.stringify({ ...before, remoteControlAtStartup: false }, null, 2)}\n`);
+  assert.deepEqual(Object.keys(JSON.parse(saved)), Object.keys(before));
+  assert.deepEqual(writeClaudeStartupSettings(true, linkedHome), { remoteControlAtStartup: true });
+  assert.deepEqual(readClaudeStartupSettings(linkedHome), { remoteControlAtStartup: true });
+  await writeFile(target, "{ invalid");
+  assert.throws(() => writeClaudeStartupSettings(false, linkedHome));
+  assert.equal(await readFile(target, "utf8"), "{ invalid");
 } finally {
   await chmod(unreadablePath, 0o600).catch(() => undefined);
   await rm(root, { recursive: true, force: true });

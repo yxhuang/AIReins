@@ -185,7 +185,7 @@ await t("createSession：snapshot 显式传入才出现在请求体", async () =
 });
 
 // --- 11. 组件接线源码断言（无头环境不起浏览器，UI 渲染见 README 复核记录） ---
-await t("接线：新建表单不做快照（P1-8），弹窗/会话头组件仍在", async () => {
+await t("接线：新建表单不做快照（P1-8），弹窗组件仍在、会话头不显示快照", async () => {
   const sidebar = readSrc("src/components/Sidebar.tsx");
   assert.match(sidebar, /snapshot:\s*"skip"/, "新建表单必须显式跳过快照");
   assert.doesNotMatch(sidebar, /createWithSnapshotPreflight|fetchSnapshotPreflight|<SnapshotConfirm/, "新建表单不得再走预检或弹确认框");
@@ -199,8 +199,9 @@ await t("接线：新建表单不做快照（P1-8），弹窗/会话头组件仍
   assert.match(dialog, /onResolve\("auto"\)[\s\S]*?onResolve\("skip"\)[\s\S]*?onResolve\("cancel"\)/, "三个出口齐全");
   assert.match(dialog, /preflight\.existing &&/, "已有旧快照必须告知覆盖刷新");
 
+  // 2026-09-30 会话头精简：第二行只留配置摘要，不再显示快照路径
   const sessionView = readSrc("src/components/SessionView.tsx");
-  assert.match(sessionView, /session\.snapshotPath &&/, "快照路径缺失时不得渲染");
+  assert.doesNotMatch(sessionView, /snapshotPath/, "会话头不再显示快照路径");
 });
 
 const total = 11;

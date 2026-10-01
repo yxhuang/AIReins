@@ -5,7 +5,7 @@
 import { strict as assert } from "node:assert";
 
 // 用 tsx 把 TS 模块加载进来
-const { buildRenderItems, gateFromEvent, promptCacheExpiry } = await import("../src/render-items.ts");
+const { buildRenderItems, buildHistoryRenderItems, focusVisible, groupReadOnlyTools, gateFromEvent, promptCacheExpiry } = await import("../src/render-items.ts");
 const {
   filterCommands,
   isSubsequence,
@@ -28,6 +28,154 @@ const ev = (seq, type, payload = {}) => ({
 });
 const cmd = (name, description = "") => ({ name, description, source: "claude" });
 const names = (list) => list.map((c) => c.name);
+
+// ══ 连续成功只读工具分组（实时流与历史共用） ══
+const readTool = (id, extra = {}) => ({
+  kind: "tool", key: `tool:${id}`, seq: id, toolCallId: String(id),
+  toolName: "Read", baseToolName: "Read", input: "", result: "content",
+  status: "ok", turn: 1, rawInput: { file_path: `/work/file-${id}.ts` }, ...extra,
+});
+const reads = (start, count) => Array.from({ length: count }, (_, i) => readTool(start + i));
+const fold = (items, agent = "claude") => groupReadOnlyTools(items, agent, "/work");
+const kinds = (items) => items.map((item) => item.kind);
+
+t("3 个连续成功 read 合为一组，原工具引用/顺序与输入保持不变", () => {
+  const input = reads(1, 3);
+  input.forEach(Object.freeze);
+  Object.freeze(input);
+  const grouped = fold(input);
+  assert.deepEqual(kinds(grouped), ["tool-group"]);
+  assert.equal(grouped[0].summary, "读取 3 个文件");
+  assert.deepEqual(grouped[0].tools, input);
+  grouped[0].tools.forEach((tool, index) => assert.equal(tool, input[index]));
+  assert.equal(grouped[0].turn, 1);
+});
+
+t("2 个连续成功 read 保持原逐行显示", () => {
+  const input = reads(1, 2);
+  assert.deepEqual(fold(input), input);
+  assert.deepEqual(fold([]), []);
+});
+
+t("文本将连续工具断成两段，分别判断是否达到 3 个", () => {
+  const text = { kind: "text", key: "text:4", seq: 4, text: "说明", turn: 1 };
+  assert.deepEqual(kinds(fold([...reads(1, 3), text, ...reads(5, 2)])), ["tool-group", "text", "tool", "tool"]);
+  assert.deepEqual(kinds(fold([...reads(1, 3), text, ...reads(5, 3)])), ["tool-group", "text", "tool-group"]);
+});
+
+t("中间 error 不入组且单独可见，前后成功段各自判断", () => {
+  const error = readTool(4, { status: "error" });
+  const grouped = fold([...reads(1, 3), error, ...reads(5, 3)]);
+  assert.deepEqual(kinds(grouped), ["tool-group", "tool", "tool-group"]);
+  assert.equal(grouped[1], error);
+  assert.deepEqual(kinds(fold([readTool(1), error, ...reads(5, 2)])), ["tool", "tool", "tool", "tool"]);
+});
+
+t("末尾 running 始终单独显示，前面已成功的工具照常判断", () => {
+  const running = readTool(4, { status: "running" });
+  const grouped = fold([...reads(1, 3), running]);
+  assert.deepEqual(kinds(grouped), ["tool-group", "tool"]);
+  assert.equal(grouped[1], running);
+  assert.deepEqual(kinds(fold([...reads(1, 2), running])), ["tool", "tool", "tool"]);
+  const completed = fold([...reads(1, 3), { ...running, status: "ok" }]);
+  assert.equal(completed[0].tools.length, 4);
+  assert.equal(completed[0].key, grouped[0].key, "同组追加成功项不重置组件展开状态");
+});
+
+t("unknown 状态单独显示并断开，不能当作已成功", () => {
+  const unknown = readTool(4, { status: "unknown" });
+  const grouped = fold([...reads(1, 3), unknown, ...reads(5, 3)]);
+  assert.deepEqual(kinds(grouped), ["tool-group", "tool", "tool-group"]);
+  assert.equal(grouped[1], unknown);
+});
+
+t("跨 turn 的工具不能合并（包括没有可见系统行的正常 turn_completed）", () => {
+  const nextTurn = reads(4, 3).map((tool) => ({ ...tool, turn: 2 }));
+  assert.deepEqual(kinds(fold([...reads(1, 3), ...nextTurn])), ["tool-group", "tool-group"]);
+  assert.deepEqual(kinds(fold([...reads(1, 2), ...nextTurn.slice(0, 2)])), ["tool", "tool", "tool", "tool"]);
+  const events = [];
+  let seq = 0;
+  for (let id = 1; id <= 6; id++) {
+    if (id === 4) events.push(ev(++seq, "turn_completed", { subtype: "success" }));
+    events.push(ev(++seq, "tool_call_started", { toolCallId: String(id), toolName: "Read", input: { file_path: `/work/${id}` } }));
+    events.push(ev(++seq, "tool_call_completed", { toolCallId: String(id), result: "ok" }));
+  }
+  assert.deepEqual(kinds(fold(buildRenderItems(events, "claude"))), ["tool-group", "tool-group"]);
+});
+
+t("读取同一文件多次：按去重路径计文件数，括号补总次数", () => {
+  const input = [...reads(1, 3), readTool(4, { rawInput: { path: "/work/file-1.ts" } }),
+    readTool(5, { rawInput: { file_path: "file-2.ts" } })];
+  assert.equal(fold(input)[0].summary, "读取 3 个文件（5 次）");
+  assert.equal(fold([input[0], { ...input[0], key: "copy:1" }, { ...input[0], key: "copy:2" }])[0].summary, "读取 1 个文件（3 次）");
+});
+
+t("read/grep/glob 混合按类计数，摘要只列出现的类且顺序固定", () => {
+  const grep = (id) => readTool(id, { toolName: "Grep", baseToolName: "Grep", rawInput: { pattern: "TODO" } });
+  const glob = (id) => readTool(id, { toolName: "Glob", baseToolName: "Glob", rawInput: { pattern: "*.ts" } });
+  assert.equal(fold([glob(1), grep(2), readTool(3), grep(4), glob(5)])[0].summary, "读取 1 个文件 · 搜索 2 次 · 列出 2 次");
+  assert.equal(fold([grep(1), glob(2), glob(3)])[0].summary, "搜索 1 次 · 列出 2 次");
+});
+
+t("edit/command 及抓取、网页搜索、写入、删除、移动、未知工具均不入组", () => {
+  const excluded = ["Edit", "MultiEdit", "Write", "Bash", "commandExecution", "fileChange", "WebFetch", "FetchURL", "webSearch", "TodoWrite", "Task", "mcpToolCall", "custom", "搜索", "列出"];
+  for (const name of excluded) {
+    const tool = readTool(4, { toolName: name, baseToolName: name });
+    const grouped = fold([...reads(1, 3), tool, ...reads(5, 3)]);
+    assert.deepEqual(kinds(grouped), ["tool-group", "tool", "tool-group"], name);
+    assert.equal(grouped[1], tool, name);
+  }
+  for (const toolKind of ["execute", "fetch", "edit", "delete", "move"]) {
+    const tool = readTool(4, { toolKind, baseToolName: "custom", toolName: "custom" });
+    assert.equal(fold([...reads(1, 3), tool])[1], tool, toolKind);
+  }
+});
+
+t("复用摘要器的 ACP kind、Kimi 人话标题和旧 JSON 入参分类", () => {
+  const tools = [
+    readTool(1, { baseToolName: "custom", toolName: "Reading /work/a.ts", rawInput: undefined }),
+    readTool(2, { baseToolName: "custom", toolName: "Searching for 'TODO'", toolKind: "read" }),
+    readTool(3, { baseToolName: "custom", toolName: "Searching *.ts", toolKind: "read" }),
+  ];
+  assert.equal(fold(tools, "kimi")[0].summary, "读取 1 个文件 · 搜索 1 次 · 列出 1 次");
+  const old = readTool(1, { rawInput: undefined, input: '{"file_path":"/work/old.ts"}' });
+  assert.equal(fold([old, { ...old, key: "old:2" }, { ...old, key: "old:3" }])[0].summary, "读取 1 个文件（3 次）");
+  const search = readTool(1, { baseToolName: "webSearch", toolName: "webSearch", toolKind: "search" });
+  assert.equal(fold([search, { ...search, key: "search:2" }, { ...search, key: "search:3" }])[0].summary, "搜索 3 次", "kind 优先的分类与摘要器一致");
+});
+
+t("所有非工具条目都断开，Focus 过滤不会让工具跨隐藏项合并", () => {
+  const boundaries = [
+    { kind: "thought", key: "thought:4", seq: 4, turn: 1, text: "思考" },
+    { kind: "user", key: "user:4", seq: 4, text: "用户" },
+    gateFromEvent(ev(4, "permission_request", { requestId: "r" }), "claude"),
+    { kind: "system", key: "sys:4", seq: 4, text: "系统", tone: "muted" },
+    { kind: "raw", key: "raw:4", seq: 4, text: "原始行" },
+    { kind: "external-history", key: "history:4", seq: 4, messages: [], truncated: false },
+  ];
+  for (const boundary of boundaries) {
+    const grouped = fold([...reads(1, 2), boundary, ...reads(5, 2)]);
+    assert.deepEqual(kinds(grouped), ["tool", "tool", boundary.kind, "tool", "tool"], boundary.kind);
+  }
+  assert.deepEqual(fold(reads(1, 3)).filter(focusVisible), []);
+  const text = { kind: "text", key: "text:4", seq: 4, turn: 1, text: "回复" };
+  const error = { kind: "system", key: "sys:8", seq: 8, text: "错误", tone: "error" };
+  assert.deepEqual(fold([...reads(1, 3), text, ...reads(5, 3), error]).filter(focusVisible), [text, error]);
+});
+
+t("历史与续聊消息归一后使用同一分组函数，保留文字/用户/unknown 边界", () => {
+  const historyRead = (id, status = "ok") => ({ role: "tool", timestamp: null,
+    tool: { id: String(id), name: "Read", input: { file_path: `/work/${id}` }, result: "ok", status } });
+  const input = [historyRead(1), historyRead(2), historyRead(3),
+    { role: "user", text: "下一回合", timestamp: null }, historyRead(4), historyRead(5), historyRead(6),
+    { role: "assistant", text: "回复", timestamp: null }, historyRead(7), historyRead(8, "unknown"), historyRead(9)];
+  const items = buildHistoryRenderItems(input);
+  assert.notEqual(items[0].turn, items[4].turn);
+  const grouped = fold(items);
+  assert.deepEqual(kinds(grouped), ["tool-group", "user", "tool-group", "text", "tool", "tool", "tool"]);
+  assert.equal(grouped[5].status, "unknown");
+  assert.deepEqual(kinds(grouped.filter(focusVisible)), ["user", "text"]);
+});
 
 // ══ render-items：文本/思考合并 ══
 t("连续 agent_text_delta 合并成一块", () => {

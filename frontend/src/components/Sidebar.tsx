@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState, type Dispatch, type SetStateAction } from "react";
+import { useCallback, useEffect, useRef, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
 import type { AgentKind, ConfigOptionId, DriverConfigOption, SessionRecord } from "../types";
-import { relativeTime, sessionTitle } from "../format";
+import { relativeTime, relativeTimeShort, sessionTitle } from "../format";
+import { AgentIcon } from "./AgentIcon";
 import { isInlineSvg } from "../pages";
 import type { CreateSessionInput } from "../api";
 import { store, type Store } from "../store";
@@ -9,6 +10,8 @@ import { SettingsMenu } from "./SettingsMenu";
 import { ConfigPills, type MenuGroup } from "./ConfigMenu";
 import { pillText } from "../config-view";
 import { DirectoryBrowser } from "./DirectoryBrowser";
+import { HistoryView } from "./HistoryView";
+import { PageView } from "./PageView";
 
 const AGENT_LABELS: Record<AgentKind, string> = {
   claude: "claude",
@@ -24,13 +27,13 @@ export const STATUS_LABELS: Record<string, string> = {
   error: "出错",
 };
 
-/** 五状态一句「你现在可以……」说明：左栏状态文字与会话头的 hover title 共用（SessionView 也导入）。 */
+/** 五状态一句「你现在可以……」说明：左栏状态文字的 hover title 用。 */
 export const STATUS_HINTS: Record<string, string> = {
   starting: "启动中：会话正在拉起 agent 进程。你现在可以等它就绪，或切去别的会话。",
   idle: "空闲：agent 就绪。你现在可以发消息、用 / 命令或 @ 引用文件。",
   running: "忙：agent 正在执行。你现在可以继续发消息，或点「中断」停掉当前执行。",
   error: "出错：会话遇到错误。你现在可以看错误条里的原因，或「新建会话并续接」恢复上下文。",
-  dead: "已结束：进程已退出。你现在可以「新建会话并续接」，或点行右 × 从工作台移除（原生记录保留）。",
+  dead: "已结束：进程已退出。你现在可以「新建会话并续接」，或右键 / 长按这一行从工作台移除（原生记录保留）。",
 };
 
 const CWD_STORAGE_KEY = "workbench-last-cwd";
@@ -78,6 +81,27 @@ export function Sidebar({ collapsed, onToggle, newOpen, onNewOpenChange, termina
   const sessionRecords = useStore(selectSessions);
   const now = useStore(selectNow);
   const currentId = useStore(selectCurrentId);
+  const panelOpen = useStore((value) => value.historyOpen || value.currentPageId !== null);
+  const pageOpen = useStore((value) => value.currentPageId !== null);
+  const sidebarRef = useRef<HTMLElement>(null);
+  const closePanel = useCallback(() => {
+    const trigger = sidebarRef.current?.querySelector<HTMLButtonElement>('.sidebar-panel-expanded .page-nav-item');
+    store.closeSidebarPanel(window.matchMedia("(max-width: 720px)").matches);
+    trigger?.focus();
+  }, []);
+  useEffect(() => {
+    if (!panelOpen) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || event.defaultPrevented) return;
+      event.preventDefault();
+      closePanel();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [panelOpen, closePanel]);
+  const preparePanel = () => {
+    if (collapsed) onToggle();
+  };
   // pendingGates 是可变 Map；用可比较的原始字符串捕获“总数相同但分布换了会话”的变化。
   useStore(selectPendingSignature);
   const [deadExpanded, setDeadExpanded] = useState(false);
@@ -112,7 +136,7 @@ export function Sidebar({ collapsed, onToggle, newOpen, onNewOpenChange, termina
   );
 
   return (
-    <aside className="sidebar">
+    <aside className={`sidebar${pageOpen && !collapsed ? " sidebar-page-open" : ""}`} ref={sidebarRef}>
       <div className="sidebar-head">
         <span className="brand">workbench</span>
         {/* Chrome --app 窗口和主屏幕 PWA 没有地址栏和刷新键 */}
@@ -150,46 +174,60 @@ export function Sidebar({ collapsed, onToggle, newOpen, onNewOpenChange, termina
             type="button"
             className="btn btn-new"
             aria-expanded={newOpen}
-            onClick={() => onNewOpenChange(!newOpen)}
+            onClick={() => {
+              if (panelOpen) store.closeSidebarPanel(window.matchMedia("(max-width: 720px)").matches);
+              onNewOpenChange(!newOpen);
+            }}
           >
             {/* 收起即卸载表单、丢掉未提交的输入，所以叫「取消」而不是「收起」 */}
             {newOpen ? "× 取消新建" : "+ 新建会话"}
           </button>
-          {newOpen && <NewSessionForm onDone={() => onNewOpenChange(false)} />}
-          <ul className="session-list">
-            {waiting.length > 0 && (
-              // 分区标题复用 .page-nav-title 的中性小字语言；暖色仍只出现在行内闸门徽标上
-              <li className="page-nav-title" role="presentation">
-                等待处理（{waiting.length}）
-              </li>
-            )}
-            {waiting.map(renderRow)}
-            {active.map(renderRow)}
-            {dead.length > 0 && (
-              <li>
-                <button
-                  type="button"
-                  className="session-dead-toggle"
-                  aria-expanded={deadExpanded}
-                  title={deadExpanded ? "收起已结束会话" : "展开已结束会话"}
-                  onClick={() => setDeadExpanded((v) => !v)}
-                >
-                  {deadExpanded ? "▾" : "▸"} {dead.length} 个已结束会话
-                </button>
-              </li>
-            )}
-            {deadExpanded && dead.map(renderRow)}
-            {totalSessions === 0 && <li className="session-list-empty">还没有会话</li>}
-          </ul>
         </>
       )}
-      <div className="sidebar-foot">
-        <HistoryNav collapsed={collapsed} />
-        <PageNav collapsed={collapsed} />
-        {terminalCapable && (
-          <TerminalNav collapsed={collapsed} open={termOpen} onToggle={onToggleTerm} />
+      <div className="sidebar-body">
+        {!collapsed && (
+          <div className="sidebar-session-area" inert={panelOpen} aria-hidden={panelOpen || undefined}>
+            {newOpen && <NewSessionForm onDone={() => onNewOpenChange(false)} />}
+            <ul className="session-list">
+              {waiting.length > 0 && (
+                // 分区标题复用 .page-nav-title 的中性小字语言；暖色仍只出现在行内闸门徽标上
+                <li className="page-nav-title" role="presentation">
+                  等待处理（{waiting.length}）
+                </li>
+              )}
+              {waiting.map(renderRow)}
+              {active.map(renderRow)}
+              {dead.length > 0 && (
+                <li>
+                  <button
+                    type="button"
+                    className="session-dead-toggle"
+                    aria-expanded={deadExpanded}
+                    title={deadExpanded ? "收起已结束会话" : "展开已结束会话"}
+                    onClick={() => setDeadExpanded((v) => !v)}
+                  >
+                    {deadExpanded ? "▾" : "▸"} {dead.length} 个已结束会话
+                  </button>
+                </li>
+              )}
+              {/* 已结束会话单独滚动：展开很多条时不把底部的历史/终端/设置挤出画面 */}
+              {deadExpanded && dead.length > 0 && (
+                <li className="session-dead-group">
+                  <ul className="session-list">{dead.map(renderRow)}</ul>
+                </li>
+              )}
+              {totalSessions === 0 && <li className="session-list-empty">还没有会话</li>}
+            </ul>
+          </div>
         )}
-        <SettingsMenu />
+        <div className={`sidebar-foot${panelOpen && !collapsed ? " has-panel" : ""}`}>
+          <HistoryNav collapsed={collapsed} onPrepare={preparePanel} onClose={closePanel} />
+          <PageNav collapsed={collapsed} onPrepare={preparePanel} onClose={closePanel} />
+          {terminalCapable && (
+            <TerminalNav collapsed={collapsed} open={termOpen} onToggle={onToggleTerm} />
+          )}
+          <SettingsMenu />
+        </div>
       </div>
     </aside>
   );
@@ -237,17 +275,23 @@ function TerminalNav({
   );
 }
 
-/** 左栏底部「历史会话」入口（页面分区上方，同一套分区语言；收起态只显图标）。 */
-function HistoryNav({ collapsed }: { collapsed: boolean }) {
+/** 左栏底部「所有来源会话」入口（页面分区上方，同一套分区语言；收起态只显图标）。 */
+function HistoryNav({ collapsed, onPrepare, onClose }: PanelNavProps) {
   const historyOpen = useStore(selectHistoryOpen);
   return (
-    <nav className="page-nav" aria-label="历史会话">
+    <SidebarPanel name="所有来源会话" open={historyOpen} collapsed={collapsed} onClose={onClose} header={
       <button
         type="button"
         className={`page-nav-item${historyOpen ? " active" : ""}`}
-        title="历史会话：浏览三家 CLI 自己保存的历史会话并导入续接"
-        aria-label="历史会话"
-        onClick={() => store.navigateHistory()}
+        title="所有来源会话：浏览三家 CLI 自己保存的所有来源会话并导入续接"
+        aria-label="所有来源会话"
+        aria-expanded={historyOpen}
+        aria-controls="sidebar-history-panel"
+        onClick={() => {
+          onPrepare();
+          if (historyOpen) onClose();
+          else store.navigateHistory();
+        }}
       >
         <span className="page-icon" aria-hidden="true">
           <svg
@@ -265,9 +309,11 @@ function HistoryNav({ collapsed }: { collapsed: boolean }) {
             <polyline points="12 7 12 12 15.5 14" />
           </svg>
         </span>
-        {!collapsed && <span className="page-nav-name">历史会话</span>}
+        {!collapsed && <span className="page-nav-name">所有来源会话</span>}
       </button>
-    </nav>
+    }>
+      {historyOpen && !collapsed && <div id="sidebar-history-panel" className="sidebar-panel-content"><HistoryView /></div>}
+    </SidebarPanel>
   );
 }
 
@@ -285,35 +331,79 @@ export function PageIcon({ icon }: { icon: string }) {
   );
 }
 
-/** 左栏底部「页面」分区（齿轮上方）：来自 /api/pages，未知类型跳过并给小字提示。 */
-function PageNav({ collapsed }: { collapsed: boolean }) {
+/** 左栏底部扩展页面入口：来自 /api/pages，未知类型跳过并给小字提示。 */
+function PageNav({ collapsed, onPrepare, onClose }: PanelNavProps) {
   const pages = useStore((value) => value.pages);
   const skippedPages = useStore((value) => value.skippedPages);
   const currentPageId = useStore((value) => value.currentPageId);
-  if (pages.length === 0 && skippedPages.length === 0) return null;
   return (
-    <nav className="page-nav" aria-label="扩展页面">
-      {!collapsed && <div className="page-nav-title">页面</div>}
+    <>
       {pages.map((page) => (
+        <SidebarPanel key={page.id} name={page.name} open={currentPageId === page.id} collapsed={collapsed} onClose={onClose} header={
         <button
-          key={page.id}
           type="button"
           className={`page-nav-item${currentPageId === page.id ? " active" : ""}`}
           title={collapsed ? page.name : page.description || page.name}
           aria-label={page.name}
-          onClick={() => store.navigatePage(page.id)}
+          aria-expanded={currentPageId === page.id}
+          aria-controls={`sidebar-page-${page.id}`}
+          onClick={() => {
+            onPrepare();
+            if (currentPageId === page.id) onClose();
+            else store.navigatePage(page.id);
+          }}
         >
           <PageIcon icon={page.icon} />
           {!collapsed && <span className="page-nav-name">{page.name}</span>}
         </button>
+        }>
+        {currentPageId === page.id && !collapsed && (
+          <div id={`sidebar-page-${page.id}`} className="sidebar-panel-content">
+            <PageView page={page} sidebar onCollapse={onClose} />
+          </div>
+        )}
+        </SidebarPanel>
       ))}
+      {currentPageId && !pages.some((page) => page.id === currentPageId) && !collapsed && (
+        <SidebarPanel name="页面不存在" open collapsed={false} onClose={onClose} header={
+          <button type="button" className="page-nav-item active" aria-expanded="true" onClick={onClose}>页面不存在</button>
+        }>
+          <div className="sidebar-panel-content sidebar-panel-missing">该页面可能已从 pages/ 移除或 manifest 失效。页面列表在启动时扫描，改动需重启后生效。</div>
+        </SidebarPanel>
+      )}
       {!collapsed && skippedPages.length > 0 && (
         <p className="page-nav-skipped">
           已跳过 {skippedPages.length} 个暂不支持的页面类型（
           {[...new Set(skippedPages.map((p) => p.type))].join("、")}）
         </p>
       )}
-    </nav>
+    </>
+  );
+}
+
+interface PanelNavProps {
+  collapsed: boolean;
+  onPrepare: () => void;
+  onClose: () => void;
+}
+
+/** 入口原地变成标题行；展开项排在覆盖层顶部，其余入口仍在底部。 */
+function SidebarPanel({ name, open, collapsed, onClose, header, children }: {
+  name: string;
+  open: boolean;
+  collapsed: boolean;
+  onClose: () => void;
+  header: ReactNode;
+  children: ReactNode;
+}) {
+  return (
+    <section className={`page-nav sidebar-panel-slot${open && !collapsed ? " sidebar-panel-expanded" : ""}`} aria-label={name}>
+      <div className="sidebar-panel-head">
+        {header}
+        {open && !collapsed && <button type="button" className="icon-btn" aria-label={`收起${name}`} title={`收起${name}`} onClick={onClose}>⌄</button>}
+      </div>
+      {children}
+    </section>
   );
 }
 
@@ -333,8 +423,14 @@ function SessionRow({
   // 主回合已结束但还有后台任务（委派的 codex 等）在跑：仍算「正在工作」
   const backgroundBusy = session.status === "idle" && (session.backgroundTasks?.length ?? 0) > 0;
   const [error, setError] = useState<string | null>(null);
-  const deleteBtnRef = useRef<HTMLButtonElement>(null);
+  const rowRef = useRef<HTMLButtonElement>(null);
   const cancelBtnRef = useRef<HTMLButtonElement>(null);
+  // 行菜单（右键 / 长按 / 键盘菜单键）：fixed 定位在指针处；长按触发后吞掉随后那次 click
+  const [menuAt, setMenuAt] = useState<{ x: number; y: number } | null>(null);
+  const longPressTimer = useRef<number | undefined>(undefined);
+  const longPressStart = useRef<{ x: number; y: number } | null>(null);
+  const suppressClick = useRef(false);
+  const menuRef = useRef<HTMLDivElement>(null);
   const data = store.data.get(session.id);
   const title = sessionTitle(session, data?.events);
 
@@ -342,6 +438,40 @@ function SessionRow({
   useEffect(() => {
     if (confirming) cancelBtnRef.current?.focus();
   }, [confirming]);
+
+  // 菜单打开后：点外面、滚动、Esc 都关；焦点进第一项
+  useEffect(() => {
+    if (!menuAt) return;
+    menuRef.current?.querySelector("button")?.focus();
+    const close = (e: Event) => {
+      if (e.type === "pointerdown" && menuRef.current?.contains(e.target as Node)) return;
+      setMenuAt(null);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      setMenuAt(null);
+      rowRef.current?.focus();
+    };
+    document.addEventListener("pointerdown", close, true);
+    window.addEventListener("scroll", close, true);
+    window.addEventListener("resize", close);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("pointerdown", close, true);
+      window.removeEventListener("scroll", close, true);
+      window.removeEventListener("resize", close);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [menuAt]);
+
+  const openMenu = (x: number, y: number) => {
+    // 别贴出视口：菜单约 180×44
+    setMenuAt({ x: Math.min(x, window.innerWidth - 188), y: Math.min(y, window.innerHeight - 52) });
+  };
+  const clearLongPress = () => {
+    window.clearTimeout(longPressTimer.current);
+    longPressStart.current = null;
+  };
 
   const confirm = async () => {
     if (busy) return;
@@ -359,8 +489,8 @@ function SessionRow({
 
   const cancelConfirm = () => {
     setConfirming(false);
-    // 焦点还给 ×（等下一轮渲染后按钮重新挂载）
-    requestAnimationFrame(() => deleteBtnRef.current?.focus());
+    // 焦点还给这一行（等下一轮渲染后按钮重新挂载）
+    requestAnimationFrame(() => rowRef.current?.focus());
   };
 
   if (confirming) {
@@ -409,50 +539,95 @@ function SessionRow({
     <div className="session-item">
       <button
         type="button"
+        ref={rowRef}
+        aria-haspopup="menu"
+        onContextMenu={(e) => {
+          // 鼠标右键、Android 长按、键盘菜单键 / Shift+F10 都走这里
+          e.preventDefault();
+          clearLongPress();
+          if (e.clientX === 0 && e.clientY === 0) {
+            const r = e.currentTarget.getBoundingClientRect();
+            openMenu(r.left + 24, r.bottom);
+          } else {
+            openMenu(e.clientX, e.clientY);
+          }
+        }}
+        onPointerDown={(e) => {
+          // iOS Safari 长按不发 contextmenu：触屏自己计时 500ms
+          if (e.pointerType !== "touch") return;
+          longPressStart.current = { x: e.clientX, y: e.clientY };
+          const { clientX, clientY } = e;
+          longPressTimer.current = window.setTimeout(() => {
+            suppressClick.current = true;
+            openMenu(clientX, clientY);
+          }, 500);
+        }}
+        onPointerMove={(e) => {
+          const start = longPressStart.current;
+          if (start && Math.hypot(e.clientX - start.x, e.clientY - start.y) > 10) clearLongPress();
+        }}
+        onPointerUp={clearLongPress}
+        onPointerCancel={clearLongPress}
         className={`session-row agent-${session.agent}${
           active ? " active" : ""
         }${session.status === "dead" ? " dead" : ""}`}
-        onClick={() => store.navigate(session.id)}
+        onClick={() => {
+          if (suppressClick.current) {
+            suppressClick.current = false;
+            return;
+          }
+          store.navigate(session.id);
+        }}
       >
-        <span className="row-title-line">
-          <span className="row-title">{title}</span>
+        {/* 单行：身份图标 · 标题 ……… 闸门徽标 · ! · 状态灯 · 时间。状态文字不再常显，放进状态灯的 title */}
+        <AgentIcon agent={session.agent} label={AGENT_LABELS[session.agent]} />
+        <span className="row-title">{title}</span>
+        <span className="row-meta">
           {pending > 0 && (
             <span className="gate-badge" title={`${pending} 个闸门等待处理`}>
               {pending}
             </span>
           )}
-        </span>
-        <span className="row-meta">
-          <span className={`status-dot status-${pending > 0 ? "needs-user" : backgroundBusy ? "running" : session.status}`} />
           {session.riskyMode && (
             <span className="risky-mark" title="该会话已关闭 agent 主动询问">
               !
             </span>
           )}
           <span
-            className="row-meta-text"
+            className={`status-dot status-${pending > 0 ? "needs-user" : backgroundBusy ? "running" : session.status}`}
+            role="img"
+            aria-label={backgroundBusy ? `后台 ${session.backgroundTasks!.length} 个任务` : STATUS_LABELS[session.status] ?? session.status}
             title={backgroundBusy
-              ? `后台任务：${session.backgroundTasks!.map((task) => task.description || task.type).join("；")}`
+              ? `后台 ${session.backgroundTasks!.length} 个任务：${session.backgroundTasks!.map((task) => task.description || task.type).join("；")}`
               : STATUS_HINTS[session.status] ?? session.status}
-          >
-            {AGENT_LABELS[session.agent]} · {backgroundBusy ? `后台 ${session.backgroundTasks!.length} 个任务` : STATUS_LABELS[session.status] ?? session.status} · {relativeTime(session.lastActivityAt, now)}
+          />
+          <span className="row-time" title={relativeTime(session.lastActivityAt, now)}>
+            {relativeTimeShort(session.lastActivityAt, now)}
           </span>
         </span>
       </button>
-      {/* 删除入口在行外右侧：永不挤占/遮挡行内右侧的闸门徽标（徽标优先级更高） */}
-      <button
-        type="button"
-        className="row-delete"
-        ref={deleteBtnRef}
-        title={`从工作台移除（${AGENT_LABELS[session.agent]} 的对话记录不会被删除）`}
-        aria-label={`移除会话 ${title}`}
-        onClick={() => {
-          setError(null);
-          setConfirming(true);
-        }}
-      >
-        ×
-      </button>
+      {menuAt && (
+        <div
+          ref={menuRef}
+          className="attach-menu row-menu"
+          role="menu"
+          aria-label={`会话 ${title} 的操作`}
+          style={{ left: menuAt.x, top: menuAt.y }}
+        >
+          <button
+            type="button"
+            role="menuitem"
+            className="attach-item row-menu-danger"
+            onClick={() => {
+              setMenuAt(null);
+              setError(null);
+              setConfirming(true);
+            }}
+          >
+            从工作台移除…
+          </button>
+        </div>
+      )}
     </div>
   );
 }

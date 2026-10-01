@@ -361,7 +361,9 @@ const snapshotManager = new SessionManager(
     return "/tmp/workbench-test-snapshot";
   },
 );
-const snapshotted = await snapshotManager.create({ agent: "codex", cwd: process.cwd() });
+await snapshotManager.create({ agent: "codex", cwd: process.cwd() });
+assert.equal(snapshotCalls, 0, "默认不快照");
+const snapshotted = await snapshotManager.create({ agent: "codex", cwd: process.cwd(), snapshot: "auto" });
 assert.equal(driverStartedAfterSnapshot, true);
 assert.equal(snapshotted.snapshotPath, "/tmp/workbench-test-snapshot");
 assert.equal(snapshotCalls, 1);
@@ -387,7 +389,7 @@ const snapshotFailureManager = new SessionManager(
   },
 );
 snapshotFailureManager.onEvent((event) => snapshotWarningEvents.push(event));
-const createdDespiteSnapshotFailure = await snapshotFailureManager.create({ agent: "codex", cwd: process.cwd() });
+const createdDespiteSnapshotFailure = await snapshotFailureManager.create({ agent: "codex", cwd: process.cwd(), snapshot: "auto" });
 assert.equal(warningDriverStarted, true);
 assert.equal(createdDespiteSnapshotFailure.status, "idle");
 const snapshotWarning = snapshotWarningEvents.find((event) => (

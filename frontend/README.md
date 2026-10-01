@@ -41,20 +41,20 @@ frontend/
     mentions.ts         @ 引用纯文本 token 提取 / 光标处触发判定 / 尾部标点剥离候选（无 DOM 依赖，可单测）
     store.ts            全局状态 + WS 连接恢复（见下）
     useStore.ts         useSyncExternalStore 订阅 hook
-    App.tsx             布局骨架、hash 路由（#/session/<id>、#/page/<id>、#/history）、错误提示条
+    App.tsx             布局骨架、历史预览主区与手机返回、hash 路由（#/session/<id>、#/page/<id>、#/history）、错误提示条
     pages.ts            扩展页面纯逻辑：icon 形态判定 / 未知 type 跳过 / 健康结论→渲染模式（无 DOM 依赖，可单测）
-    history.ts          历史会话纯逻辑：/api/history 查询串构造 / 来源筛选 / 已导入对照（无 DOM 依赖，可单测）
+    history.ts          所有来源会话纯逻辑：/api/history 查询串构造 / 来源筛选 / 已导入对照（无 DOM 依赖，可单测）
     config-view.ts      配置控件纯逻辑：mutableVia:"restart" 代价旁注判定与文案（无 DOM 依赖，可单测）
     resumed-history.ts  续接会话历史区纯逻辑：最新一页打底 / nextCursor 翻页 prepend / DOM 上限（无 DOM 依赖，可单测）
     snapshot.ts         建会话前快照编排纯逻辑：preflight 分支决策（git 直连 / 小而够静默快照 / 超阈值或空间不足弹确认框）/ 确认框原因文案 / 三出口 → snapshot 入参（无 DOM 依赖，可单测）
     terminal.ts         终端面板纯逻辑：宽度 clamp / 快捷键栏按键→控制序列 / /ws/terminal 下行帧归约 / WS URL 构造（无 DOM 依赖，可单测）
     components/
-      Sidebar.tsx       会话列表（身份色脊 / 状态点 / 闸门徽标 / 危险模式「!」标记 / 行右删除入口 ×：hover/focus 显现、Tab 可达，点击后就地变行内二次确认）+ 新建会话表单（首条消息框底栏带配置胶囊；cwd 三级预填回退 + 空 cwd 可见禁用原因；提交前快照预检 preflight，需要时弹 SnapshotConfirm）+ 底部「历史会话」入口、「页面」分区与设置入口
+      Sidebar.tsx       会话列表（单行：品牌图标 / 标题 / 闸门徽标 / 状态点 / 紧凑时间；状态文字收进状态点 title / 危险模式「!」标记 / 行右删除入口 ×：hover/focus 显现、Tab 可达，点击后就地变行内二次确认）+ 新建会话表单（首条消息框底栏带配置胶囊；cwd 三级预填回退 + 空 cwd 可见禁用原因；提交前快照预检 preflight，需要时弹 SnapshotConfirm）+ 底部历史/扩展页面入口及向上展开面板（覆盖会话列表，无「页面」小标题）；终端与设置入口保持原行为
       SettingsMenu.tsx  设置齿轮 + 锚定浮层（分组/条目结构，60vh 限高滚动 + focus trap）；主题三选一写 <html data-theme>、localStorage 持久化（读写均 try/catch）
       SnapshotConfirm.tsx 建会话前快照确认弹窗（暖色闸门样式 + 2px 硬边直角，模态遮罩居中；Esc/点遮罩取消、focus trap、aria-modal；写明弹框原因/快照路径/旧快照覆盖刷新；空间不足时「仍然快照」禁用并给出可见原因）
-      PageView.tsx      扩展页面视图：进入先查健康，按 embeddable 三态渲染——不可达降级面板（reason + 重试）；embeddable:false 完全不渲染 iframe 改降级面板（服务正常但目标拒绝嵌入 + 主按钮新标签页打开）；embeddable:true 正常 iframe；null/缺省 iframe + 空白提示与常驻新标签页出口
-      HistoryView.tsx   历史会话浏览（#/history）：筛选（agent / 来源 / 关键词 250ms 防抖）+ nextCursor「加载更多」分页 + 预览面板（≤8 条消息）+「导入并续接」（就地续接代价写在按钮上方）+「已在工作台中」标记与跳转
-      SessionView.tsx   会话头（usage 分家渲染 / 配置只读摘要（跟随配置时并入有效值）/ 快照路径（会话记录带 snapshotPath 时）/ 中断）+ 危险模式警示条 + 历史消息区（resumedFrom 时）+ 事件流（AskUserQuestion 走提问选择卡片）+ 输入框（配置控件行在输入框正上方，跟随配置时显示实际生效值与来源小字；行首 / 命令面板、@ 文件引用面板与待附加预览条、结构化 command 上行、codex 降级说明；草稿按会话内存缓存，切走切回不丢；dead 会话「新建会话并续接」出口）+ 未决闸门贴条
+      PageView.tsx      扩展页面侧栏 iframe：忽略主区 maxWidth、适配窄工具条；进入先查健康，按 embeddable 三态渲染——不可达降级面板（reason + 重试）；embeddable:false 完全不渲染 iframe 改降级面板（服务正常但目标拒绝嵌入 + 主按钮新标签页打开）；embeddable:true 正常 iframe；null/缺省 iframe + 空白提示与常驻新标签页出口
+      HistoryView.tsx   侧栏历史列表（#/history）：筛选（agent / 来源 / 关键词 250ms 防抖）+ nextCursor「加载更多」分页；导出的 HistoryPreviewPane 在主区显示分页消息预览+「导入并续接」（就地续接代价写在按钮上方）+「已在工作台中」标记与跳转
+      SessionView.tsx   会话头（配置只读摘要（跟随配置时并入有效值）；2026-09-30 精简为只留配置摘要，中断并入输入框发送键）+ 危险模式警示条 + 历史消息区（resumedFrom 时）+ 事件流（AskUserQuestion 走提问选择卡片）+ 输入框（配置控件行在输入框正上方，跟随配置时显示实际生效值与来源小字；行首 / 命令面板、@ 文件引用面板与待附加预览条、结构化 command 上行、codex 降级说明；草稿按会话内存缓存，切走切回不丢；dead 会话「新建会话并续接」出口）+ 未决闸门贴条
       ResumedHistory.tsx 续接会话的历史消息区：实时流上方、默认加载最近一页、「加载更早的消息」nextCursor 翻页 prepend、弱化底色 + 分隔线与实时区区分、用户/助手两态（不伪造工具/思考块）
       StreamItems.tsx   用户消息 / 文本块 / 思考折叠块 / 工具卡片 / 闸门块 / 提问选择卡片（AskUserQuestion）/ 系统行
       TerminalPanel.tsx 终端面板：xterm + 专用 WS /ws/terminal（重连后重新 attach 回放）、可拖分隔条、标题条（cwd + 结束/隐藏/新建）、手机快捷键栏；隐藏只是 CSS 隐藏，实例与连接保留
@@ -81,6 +81,16 @@ frontend/
 ### 闸门块（签名元素）
 
 流内块级元素，暖色边框 + 暖色浅底 + 直角（其余卡片 8px 圆角）。三家 payload 在 `render-items.ts` 的 `gateFromEvent` 统一提取：命令（kimi terminal/create、claude Bash、codex params.command）等宽全文默认展开；文件写入内容可折叠；兜底「完整入参」JSON。决策按钮只有「允许」「拒绝」；点击后进入提交中态（按钮禁用），直到 `permission_resolved` 广播到达、闸门降级为中性样式（显示「已允许 / 已拒绝」）。dead 会话里的未决闸门渲染为中性「会话已结束，此审批已失效」态，无暖色、不可点击。未决闸门滚出视口时，输入框上方贴暖色细条「N 个闸门等待处理 ↑」，点击滚动定位到第一个；左栏收起时收起按钮旁显示全部会话未决总数的暖色小徽标（为 0 不显示），点击展开左栏。
+
+## 侧栏内面板（2026-10-01）
+
+「所有来源会话」「AI 用量」与其他 `pages/` 页面点击后，标题和内容在侧栏内向上占据新建会话按钮下方、剩余底部入口上方的区域，覆盖会话列表。同一时刻只展开一个；再点标题、收起按钮或 Esc 收起。覆盖期间会话列表保持挂载但不可聚焦，收起后恢复滚动位置。图标态点击先展开侧栏再打开面板；打开旧 `#/history`、`#/page/<id>` 链接也会展开侧栏。终端和设置仍走原入口。
+
+历史列表按 288px 侧栏适配；点行只在主区显示预览和导入续接。桌面打开面板保留当前会话，收起后恢复它的路由；手机收起面板回到侧栏会话列表，侧栏面板就是主页，点历史行进入全屏预览，顶部返回只清除预览，保留历史面板及其筛选、搜索、分页状态。关闭历史面板或切换页面后再次打开会重新加载列表。
+
+扩展页复用 `PageView` 的健康检查、可嵌性判断、加载/失败/拒绝嵌入态和新标签页出口；侧栏模式忽略 manifest 为主区设置的 `maxWidth`，iframe 宽度填满面板，内部布局由目标页负责。只在打开或重试时检查，收起即卸载 iframe。同源 iframe（含代理页面）内支持 Esc；跨源 iframe 内的键盘事件受同源策略限制，需用父页面标题/收起按钮或回到父页面按 Esc。展开动画从下往上，`prefers-reduced-motion: reduce` 下关闭。
+
+回归测试：`npm run test:history`、`npm run test:pages`、`npm run test:sidebar-panels`，均接入 `npm test`。测试脚本统一使用 `node --import tsx`，避免 `tsx` CLI 在受限环境创建 IPC 管道。静态渲染测试覆盖侧栏/主区分工和手机状态类；动画、真实 iframe 网络与触屏交互只做代码复核，未在浏览器实测。
 
 ## 验收自查
 以下按当时版本记录实施与检查；旧 check:theme 校验脚本已在 2026-09-29 随深色令牌合并移除。当前验收以根目录的 npm test、两项 typecheck 和 build 为准。
@@ -247,11 +257,11 @@ frontend/
 
 ### M11 `pages/` 扩展页面（2026-08-22）
 
-仓库根 `pages/` 的扩展页面接入前端：左栏底部「页面」分区（齿轮上方，小字分区标题 + 分隔线；收起态只显示图标，title 带名称）+ hash 路由 `#/page/<id>`（与 `#/session/<id>` 互斥，前进后退由浏览器 hash 历史天然支持）。
+仓库根 `pages/` 的扩展页面接入前端：左栏底部各页面入口（齿轮上方，分隔线；没有「页面」小标题，收起态只显示图标，title 带名称）。自 2026-10-01 起 `#/page/<id>` 打开侧栏覆盖面板，保留主区当前会话；前进后退仍由浏览器 hash 历史支持。
 
 - **列表来源**：`store.refreshPages()` 在 init 时取一次 `GET /api/pages`（server 也只在启动时扫描，不热插拔，前端同样不轮询）；`pages.ts` 的 `partitionPages` 只放行 `type:"iframe"` 且字段完整的条目，未知类型/残缺条目进 `skippedPages`，左栏分区底部给一行小字「已跳过 N 个暂不支持的页面类型（widget）」，绝不崩掉列表。
 - **icon 两种形态**：emoji 直接文本渲染；内联 SVG 字符串（`<svg...>...</svg>`）用 `dangerouslySetInnerHTML` 渲染（server 已校验 manifest 形状）。`Sidebar.tsx` 导出 `PageIcon`，侧边栏与 PageView 工具条/降级面板共用。
-- **页面视图（`PageView.tsx`）**：进入页面先查一次 `GET /api/pages/:id/health`。`reachable:false` → 降级面板：manifest `description`（ai-usage 的 description 已写明「此面板按需启动，未启动时整页不可达」）+ `reason`（冷调 `--danger` 错误语义）+ 「重试」按钮 + 「在新标签页打开」链接，**不渲染空白 iframe**；健康接口本身失败（server 不可达）走同一面板。`reachable:true` → iframe 撑满内容区 + 顶部常驻工具条：右侧「在新标签页打开」（`target="_blank" rel="noreferrer"`）与小字提示「若下方空白，说明目标站点拒绝被嵌入，请用新标签页打开」。**已渲染的 iframe 不定时不轮询**，只在进入页面与点「重试」时查。
+- **页面视图（`PageView.tsx`）**：进入页面先查一次 `GET /api/pages/:id/health`。`reachable:false` → 降级面板：manifest `description`（ai-usage 的 description 已写明「此面板按需启动，未启动时整页不可达」）+ `reason`（冷调 `--danger` 错误语义）+ 「重试」按钮 + 「在新标签页打开」链接，**不渲染空白 iframe**；健康接口本身失败（server 不可达）走同一面板。`reachable:true` → iframe 撑满侧栏面板 + 顶部常驻工具条：右侧「在新标签页打开」（`target="_blank" rel="noreferrer"`）与小字提示「若下方空白，说明目标站点拒绝被嵌入，请用新标签页打开」。**已渲染的 iframe 不定时不轮询**，只在进入页面与点「重试」时查。
 - **为什么不探测可嵌性**：已实测 `curl -I http://127.0.0.1:8788/` 响应头带 `x-frame-options: DENY` 与 `content-security-policy: frame-ancestors 'none'`——ai-usage 拒绝被 iframe 嵌入，而浏览器端无法可靠探测（跨域 fetch 拿不到头，iframe onerror 不触发）。因此工具条常驻新标签页出口是设计的一部分，不是兜底。
 - **配色**：分区标题/提示用 `--text-faint`，选中态用冷色 `--busy` 内嵌脊（与设置面板选中态同一纪律），不可达 reason 用冷调 `--danger`；未新增令牌，暖色仍是闸门专用。「重试」是真实 `<button>`、新标签页是真实 `<a>`，均走全局 `:focus-visible` 描边。
 - **打桩测试** `frontend/scripts/pages-flow.test.mjs`（根 package.json 本轮不动，直接 `npx tsx frontend/scripts/pages-flow.test.mjs` 跑）：覆盖未知 type 跳过、icon 判定、reachable 两分支、health 信封解析与错误信封、store 集成（refreshPages 分区 + 两类 hash 路由互斥）。
@@ -293,18 +303,20 @@ frontend/
 - [x] **77. 「在新标签页打开」带 `rel="noopener noreferrer"`。** **代码复核**：blocked 面板主按钮 `<a className="btn btn-primary" href={page.url} target="_blank" rel="noopener noreferrer">`（PageView.tsx）。
 - [x] **78. 四条命令全绿。** **实测**：`npm test`（check:theme「✅ 深色令牌两份一致（26 项）」+ mentions 29 例 + store 13 例 + pages 6 例）退出码 0；`npm run build`（vite 8.2.2，28 modules，退出码 0）；`npm run typecheck` 与 `npm run typecheck:frontend` 退出码均 0。
 
-### M14 历史会话浏览与导入（2026-08-22）
+### M14 所有来源会话浏览与导入（2026-08-22）
 
-后端 `/api/history` 的前端落地：左栏底部新增「历史会话」入口（页面分区上方，同一套分区语言，收起态只显图标），hash 路由 `#/history`（与 `#/session/<id>`、`#/page/<id>` 互斥，前进后退由浏览器 hash 历史天然支持）。
+2026-10-01：入口、标题与手机返回按钮统一称「所有来源会话」，路由仍为 `#/history`。列表行使用两行：品牌图标、单行标题、可选中性色「工单」、来源与紧凑时间在第一行（悬停看完整时间/派单名与 runId）；路径与可选「已在工作台中」在第二行，触屏点击高度至少 44px。没有用户消息的会话隐藏，meta 行累计显示「N 个空会话已隐藏」。页面类面板（如 AI 用量）打开时，桌面侧栏暂宽至 `min(440px, 45vw)`，关闭恢复 288px；历史面板、手机与收起态沿用原宽度，减少动态偏好关闭宽度过渡。
+
+后端 `/api/history` 的前端落地：左栏底部「所有来源会话」入口（扩展页面上方，收起态只显图标）。自 2026-10-01 起 `#/history` 打开侧栏历史列表，与页面面板互斥，主区当前会话保留；点历史行后主区显示 `HistoryPreviewPane`，导入续接行为不变。
 
 - **列表**：每行复用 session-row 视觉语言（3px agent 身份色脊 + hover/active 背景），标题单行截断 + 来源徽标（「对话」中性描边 /「工作台」`--busy` 描边加粗一眼可辨 /「未知」虚线浅字如实显示，不猜）+ cwd 等宽小字 + `agent · 相对时间`。
 - **筛选**：agent 三个身份色 chip + 全部；来源筛选（全部来源/对话/工作台）默认「全部」**不过滤任何东西**，且是前端侧过滤（接口没有 source 参数），开启时元信息行明示「来源筛选只作用于已加载的条目」；关键词搜索 250ms 防抖后打到 `q`，请求带代次戳，过期响应丢弃。
 - **分页**：`nextCursor` +「加载更多」（每页 150 条，本机 467 候选约 4 页），不做无限滚动、不引虚拟滚动库；`truncated`（扫描预算触发）与 `skipped`（坏/空/不可读候选数，正常也可能非零）都渲染成 `--text-faint` 中性小字，不当错误；真正的失败（列表/预览/导入）才用冷调 `--danger`。
-- **预览**：点行 → 右侧面板 `GET /api/history/:agent/:id`（≤8 条消息，用户/助手分块）；`truncated:true` 是常态，中性说明「仅显示开头若干条消息（预览只读取会话文件头部），完整内容在原生会话文件中」；消息为空（kimi wire 缺失）同样中性说明。
+- **预览**：点侧栏历史行 → 主区 `HistoryPreviewPane`，复用 `PagedHistory` 从最新一页开始按需加载更早消息；窄屏（≤720px）全屏显示预览，返回恢复仍展开的历史面板，筛选、搜索与已加载列表不丢。
 - **导入并续接**：`POST /api/sessions` 带 `{agent, cwd, resumeSessionId: nativeSessionId}`（复用 `store.create`，成功后 navigate 进新会话）。按钮上方说明就地续接会追写原生文件，并说明 Claude 工作台回合以 VSCode 扩展身份落盘、工作台新建会话可在 VSCode/CLI 的 resume 列表找到。失败错误就地显示。
 - **已导入标记**：`history.ts` 的 `findImportedSession` 对照 `store.sessions` 的 `agent + nativeSessionId`，命中则行内标「已在工作台中」（`--ok` 冷色小徽标），预览面板给「跳转过去」，不再显示导入按钮。
 - **配色**：全部复用既有令牌（`--busy`/`--ok`/`--danger`/`--text-faint` 等），未新增令牌，暖色仍是闸门专用；筛选 chip 选中态复用 new-agent 的身份色纪律。行是真实 `<button>`，全部走全局 `:focus-visible` 描边。
-- **打桩测试** `frontend/scripts/history-flow.test.mjs`（根 package.json 本轮不动，直接 `npx tsx` 跑；`npm test` 聚合脚本不含它）：6 例覆盖查询串构造（空值省略/cursor 原样带回/中文编码）、来源筛选、已导入对照（agent 不匹配不算）、fetch URL 组装与 truncated/skipped 透传、错误信封抛中文 msg、`#/history` 与既有两类路由互斥。
+- **打桩测试** `frontend/scripts/history-flow.test.mjs`（现已接入 `npm test`，用 `npm run test:history` 单独跑）：覆盖查询串构造（空值省略/cursor 原样带回/中文编码）、来源筛选、已导入对照（agent 不匹配不算）、fetch URL 组装与 truncated/skipped 透传、错误信封抛中文 msg、旧历史链接、面板互斥、预览返回、会话保留与路由重放。
 
 接口侧实测（2026-08-22，本机 8790 实例）：
 
@@ -337,7 +349,7 @@ frontend/
 
 - [x] **85. 下拉可用 + 旁注存在。** **打桩实测**（用例 1）：`needsRestartNote` 仅对 `mutableVia:"restart"` 为真，`RESTART_NOTE` 逐字为「切换会重启底层进程并续接当前会话」；源码断言 ConfigControls 禁用条件只认 `!option.mutable`（restart 项不再被禁）。UI 实际渲染为**代码复核**（无头环境未启浏览器）。
 - [x] **86. 过渡态置位/恢复 + 两种拒绝就地显示。** **打桩实测**（用例 2/3/4/5）：`config_update_started`（payload.message「正在切换模型…」）→ `configSwitching` 置位；`config_updated` → 解除 + 应用新配置；「当前回合尚未结束，请等待或中断后再切换」与「Claude 首轮完成前尚无 nativeSessionId，无法通过续接切换模型或推理强度」两条 error 帧原样落 `configErrors` 且 `lastError` 保持 null；`session_error` 解除过渡态并就地显示失败原因；含未完成切换的快照能重建过渡态、已完成的快照不残留。
-- [x] **87. 导入历史会话后能看到之前的消息（接口侧实测）。** **实测**（隔离实例 `WORKBENCH_PORT=8796`）：从 `GET /api/history?agent=claude&limit=200` 挑 `source:"workbench"`、cwd 在仓库内的旧测试会话「只回复 OK」（`00000000-0000-…`）；`GET /api/history/claude/00000000-…/messages?limit=5` 返回 4 条真实消息（`[user] 2026-08-22T17:04:58.066Z :: 只回复 OK` / `[assistant] … :: OK` / `[user] :: 用 Write 工具在 server/test-sandbox/…` / `[assistant] :: 已写入。`），`hasMore:false`。POST `/api/sessions` 带 `resumeSessionId` 导入 → 新会话 `01J00000000000000000000005` 的 `resumedFrom` 实测为 `{"agent":"claude","nativeSessionId":"00000000-0000-4000-8000-000000000006"}`、`status:idle`。完事只 DELETE 该自建会话（`code=0, transcriptsDeleted:false, workbenchTranscriptPreserved:true`），列表确认消失；未动任何既有会话。前端渲染链路（resumedFrom → 拉一页 → prepend → 分隔线存在）为**打桩实测**（用例 6/7/9）。
+- [x] **87. 导入所有来源会话后能看到之前的消息（接口侧实测）。** **实测**（隔离实例 `WORKBENCH_PORT=8796`）：从 `GET /api/history?agent=claude&limit=200` 挑 `source:"workbench"`、cwd 在仓库内的旧测试会话「只回复 OK」（`00000000-0000-…`）；`GET /api/history/claude/00000000-…/messages?limit=5` 返回 4 条真实消息（`[user] 2026-08-22T17:04:58.066Z :: 只回复 OK` / `[assistant] … :: OK` / `[user] :: 用 Write 工具在 server/test-sandbox/…` / `[assistant] :: 已写入。`），`hasMore:false`。POST `/api/sessions` 带 `resumeSessionId` 导入 → 新会话 `01J00000000000000000000005` 的 `resumedFrom` 实测为 `{"agent":"claude","nativeSessionId":"00000000-0000-4000-8000-000000000006"}`、`status:idle`。完事只 DELETE 该自建会话（`code=0, transcriptsDeleted:false, workbenchTranscriptPreserved:true`），列表确认消失；未动任何既有会话。前端渲染链路（resumedFrom → 拉一页 → prepend → 分隔线存在）为**打桩实测**（用例 6/7/9）。
 - [x] **88. 「加载更早的消息」cursor 翻页。** **打桩实测**（用例 7）：更早一页整页 prepend、页内顺序不动、翻完 nextCursor 消失。另做**接口侧只读实测**：对 interactive 会话「opus」（不导入）连取两页，第 2 页末条 `14:12:52` ≤ 第 1 页首条 `14:13:19`，两页无重复，`hasMore` 仍为 true。
 - [x] **89. 历史区/实时区视觉区分 + 默认可见。** **代码复核**：`.session-history` 弱化底色 `--surface-sunk` + 边框；`.session-history-divider` 居中分隔线「以上为导入前的历史对话」；组件无任何折叠/隐藏逻辑（打桩源码断言 `display:none` 不存在）。视觉效果未在浏览器人工确认。
 - [x] **90. 四条命令全绿。** **实测**：`npm test`（check:theme「✅ 深色令牌两份一致（26 项）」+ mentions 29 例 + store 13 例 + pages 6 例 + resume 9 例）退出码 0；`npm run build`（vite 8.2.2，退出码 0）；`npm run typecheck` 与 `npm run typecheck:frontend` 退出码均 0。
@@ -383,7 +395,7 @@ frontend/
 - [x] **98. 键盘可达与配色纪律。** **代码复核**：Esc/点遮罩取消、focus trap 与 SettingsMenu 同一实现、`aria-modal`；未新增颜色令牌、radius/shadow 引用现有令牌。视觉效果与键盘流未在浏览器人工确认。
 - [x] **99. 构建与检查全绿。** **实测**：`npm test`（check:theme「✅ 深色令牌两份一致（26 项）」+ mentions 40 例 + store 17 例 + pages 6 例 + resume 11 例 + effective-ask 12 例 + history 6 例 + render-items 26 例 + snapshot 11 例）退出码 0；`npm run build`（vite 8.2.2，37 modules，退出码 0）；`npx tsc --noEmit`（根）与 `npm run typecheck:frontend` 退出码均 0。
 
-**这版快照接入的边界**（如实记录）：① 只有新建会话表单走 preflight；「新建会话并续接」（dead/error 出口）与历史会话「导入并续接」两条 `store.create` 路径未接预检（续接语义下同 cwd 通常已有快照，且本轮需求只点新建流程）；② preflight 返回 400（cwd 无效）按失败处理照常建——建会话请求会带后端自己的错误消息，用户不会静默丢信息；③ 弹窗出现期间表单保持 busy（防重复提交），用户取消后需重新点「创建并进入」（会重新 preflight，结果可能已变）；④ 后端联调未做（并行业层开发中），`snapshotPath` 字段名按约定实现，缺失即不显示。
+**这版快照接入的边界**（如实记录）：① 只有新建会话表单走 preflight；「新建会话并续接」（dead/error 出口）与所有来源会话「导入并续接」两条 `store.create` 路径未接预检（续接语义下同 cwd 通常已有快照，且本轮需求只点新建流程）；② preflight 返回 400（cwd 无效）按失败处理照常建——建会话请求会带后端自己的错误消息，用户不会静默丢信息；③ 弹窗出现期间表单保持 busy（防重复提交），用户取消后需重新点「创建并进入」（会重新 preflight，结果可能已变）；④ 后端联调未做（并行业层开发中），`snapshotPath` 字段名按约定实现，缺失即不显示。
 
 ### M18 配置控件改为输入框底栏胶囊（2026-09-26）
 
@@ -465,6 +477,7 @@ frontend/
   - 认不出的工具一律回落成「原名 + 原始入参与结果」，不再按入参形状猜类型。
   - 失败时折叠行显示错误首行，展开后能看到完整错误；读取失败时不显示行数。
 - **ToolCard**：折叠态是一行「动词 + 对象 + 附注 + 状态」。
+  - 同回合连续至少 3 个成功结束的 Read/Grep/Glob 默认合成摘要行，读取按文件路径去重并补总次数；点开恢复原逐行工具，实时流、历史及续聊回放共用此行为，展开状态仅留在组件内。
   - 附注和工具名都可以收缩、显示省略号，状态文字始终可见；工具全名放在 `title` 里。
   - 展开后：命令显示前 20 行输出，可点「显示全部」，附退出码和截断标记；编辑显示 `DiffView`；读取只给路径和行数；其他工具显示原始文本。
   - `ToolView` 新增 `baseToolName`、`rawInput`、`rawResult`、`toolKind`、`locations`、`terminalOutput` 等字段。kimi 完成事件不再用结果覆盖入参。

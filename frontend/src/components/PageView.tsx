@@ -18,10 +18,16 @@ type CheckState =
  * - "iframe"（embeddable:true）：正常渲染 iframe，不再挂空白提示。
  * 已渲染的 iframe 不定时不轮询健康检查，只在进入页面和点「重试」时查。
  */
-export function PageView({ page }: { page: PageManifest }) {
+export function PageView({ page, sidebar = false, onCollapse }: {
+  page: PageManifest;
+  sidebar?: boolean;
+  onCollapse?: () => void;
+}) {
+  const viewClass = `page-view${sidebar ? " page-view-sidebar" : ""}`;
   const [state, setState] = useState<CheckState>({ phase: "checking" });
   /** 健康检查序号：连点「重新检查」时晚到的旧响应丢弃（同 Composer @ 检索的 searchSeq 模式） */
   const checkSeq = useRef(0);
+  const frameRef = useRef<HTMLIFrameElement>(null);
 
   const check = useCallback(async () => {
     const seq = ++checkSeq.current;
@@ -42,16 +48,46 @@ export function PageView({ page }: { page: PageManifest }) {
 
   useEffect(() => {
     void check();
+    return () => { checkSeq.current++; };
   }, [check]);
 
   // 检查进行中禁用「重新检查」/「重试」（检查中视图切到下方降级面板，这里是兜底表达）
   const checking = state.phase === "checking";
   const src = pageSrc(page);
 
+  // iframe 内的键盘事件不会冒泡到父窗口；同源页（含 pages 代理）单独接上 Esc。
+  // 跨源目标受浏览器同源策略限制，仍可用面板头收起按钮。
+  useEffect(() => {
+    const frame = frameRef.current;
+    if (!sidebar || !onCollapse || !frame) return;
+    let frameDocument: Document | null = null;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || event.defaultPrevented) return;
+      event.preventDefault();
+      onCollapse();
+    };
+    const detach = () => frameDocument?.removeEventListener("keydown", onKeyDown);
+    const attach = () => {
+      detach();
+      try {
+        frameDocument = frame.contentDocument;
+        frameDocument?.addEventListener("keydown", onKeyDown);
+      } catch {
+        frameDocument = null;
+      }
+    };
+    frame.addEventListener("load", attach);
+    attach();
+    return () => {
+      frame.removeEventListener("load", attach);
+      detach();
+    };
+  }, [sidebar, onCollapse, state, src]);
+
   // 手机经 Tailscale 打开时，127.0.0.1 指的是手机自己：这类页面只能在电脑上用。
   if (!page.proxy && !isLoopbackUrl(window.location.href) && isLoopbackUrl(page.url)) {
     return (
-      <div className="page-view">
+      <div className={viewClass}>
         <div className="page-fallback">
           <h2 className="page-fallback-title">
             <PageIcon icon={page.icon} />
@@ -69,7 +105,7 @@ export function PageView({ page }: { page: PageManifest }) {
 
     if (mode === "blocked") {
       return (
-        <div className="page-view">
+        <div className={viewClass}>
           <div className="page-fallback">
             <h2 className="page-fallback-title">
               <PageIcon icon={page.icon} />
@@ -108,7 +144,7 @@ export function PageView({ page }: { page: PageManifest }) {
     if (mode === "iframe" || mode === "uncertain") {
       return (
         // maxWidth 由后端按简单 CSS 长度校验过；窄面板拉满宽屏反而难看
-        <div className="page-view" style={page.maxWidth ? { maxWidth: page.maxWidth } : undefined}>
+        <div className={viewClass} style={!sidebar && page.maxWidth ? { maxWidth: page.maxWidth } : undefined}>
           <div className="page-toolbar">
             <span className="page-toolbar-title">
               <PageIcon icon={page.icon} />
@@ -124,7 +160,7 @@ export function PageView({ page }: { page: PageManifest }) {
             </a>
           </div>
           {/* 有意不加 sandbox：pages/ 里的页面（如 ai-usage）可能需要脚本/同源等完整能力，记录此决策 */}
-          <iframe className="page-frame" src={src} title={page.name} loading="lazy" />
+          <iframe ref={frameRef} className="page-frame" src={src} title={page.name} loading="lazy" />
         </div>
       );
     }
@@ -133,7 +169,7 @@ export function PageView({ page }: { page: PageManifest }) {
 
   // 降级面板：检查中 / 健康接口失败 / reachable:false
   return (
-    <div className="page-view">
+    <div className={viewClass}>
       <div className="page-fallback">
         <h2 className="page-fallback-title">
           <PageIcon icon={page.icon} />

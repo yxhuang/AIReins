@@ -330,6 +330,10 @@ export function SendIcon() {
   return <svg {...svgProps} width={16} height={16}><path d="M12 19V5M5 12l7-7 7 7" /></svg>;
 }
 
+export function StopIcon() {
+  return <svg {...svgProps} width={16} height={16}><rect x="7" y="7" width="10" height="10" rx="1.5" fill="currentColor" /></svg>;
+}
+
 /** 审批模式按「放权程度」配图标：盾=逐项审批，笔=放行编辑，清单=只规划，闪电=自动放行。 */
 function PermissionIcon({ mode }: { mode: string }) {
   if (mode === "plan") {

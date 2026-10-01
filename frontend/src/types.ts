@@ -251,6 +251,7 @@ export interface HistorySession {
   messageCount?: number;
   source: HistorySource;
   filePath: string;
+  dispatch?: { runId: string; name: string };
 }
 
 /** GET /api/history 的 data；truncated = 扫描触发时间/数量预算，分页看 nextCursor。 */
@@ -258,14 +259,15 @@ export interface HistoryListData {
   sessions: HistorySession[];
   nextCursor?: string;
   truncated: boolean;
-  /** 本页坏/空/不可读候选数：正常也可能非零，不是错误 */
+  /** 本页坏/不可读候选数：正常也可能非零，不是错误 */
   skipped: number;
+  empty: number;
   discovered: number;
   durationMs: number;
 }
 
 export type HistoryMessage =
-  | { role: "user" | "assistant"; text: string; timestamp: string | null }
+  | { role: "user" | "assistant" | "thought"; text: string; timestamp: string | null }
   | { role: "tool"; timestamp: string | null; tool: {
       id: string; name: string; input: unknown; result?: string; rawResult?: unknown;
       status: "ok" | "error" | "unknown";

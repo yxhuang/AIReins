@@ -3,7 +3,7 @@
 // - health 信封解析与「不可达 → 降级面板」渲染分支（不渲染空白 iframe）；
 // - embeddable 三态：true→iframe、false→blocked（完全不渲染 iframe）、null/缺省→uncertain（iframe+提示）；
 // - 未知 type（如 "widget"）跳过 + 记录提示，绝不崩掉整个列表；
-// - store 集成：refreshPages 分区结果、#/page/<id> 与 #/session/<id> 路由互斥。
+// - store 集成：refreshPages 分区结果、旧页面链接打开侧栏、会话导航关闭面板。
 // 浏览器依赖（window / WebSocket / fetch）全部打桩，不需要真实 server。
 // 运行：npx tsx frontend/scripts/pages-flow.test.mjs
 import { strict as assert } from "node:assert";
@@ -119,7 +119,7 @@ await t("fetchPageHealth：信封解析出 reachable/reason；code 非 0 抛 msg
 });
 
 // --- 用例 5：store 集成——refreshPages 分区 + 两类 hash 路由互斥 ---
-await t("store：refreshPages 分区进 pages/skippedPages；#/page 与 #/session 互斥", async () => {
+await t("store：refreshPages 分区进 pages/skippedPages；旧页面路由打开面板", async () => {
   globalThis.fetch = (path) => {
     if (path === "/api/pages") {
       return Promise.resolve(
@@ -136,11 +136,19 @@ await t("store：refreshPages 分区进 pages/skippedPages；#/page 与 #/sessio
   window.location.hash = "#/page/ai-usage";
   s.onHashChange();
   assert.equal(s.currentPageId, "ai-usage");
-  assert.equal(s.currentId, null, "页面路由下不应残留会话选中");
+  assert.equal(s.currentId, null, "启动直达页面链接时没有当前会话");
 
   window.location.hash = "#/session/s1";
   s.onHashChange();
   assert.equal(s.currentPageId, null, "会话路由下应清掉页面选中");
+  assert.equal(s.currentId, "s1");
+
+  s.navigatePage("ai-usage");
+  assert.equal(s.currentPageId, "ai-usage", "不等待 hashchange 即打开面板");
+  assert.equal(s.currentId, "s1", "打开面板保留主区会话");
+  s.closeSidebarPanel();
+  assert.equal(window.location.hash, "#/session/s1", "收起恢复会话路由");
+  assert.equal(s.currentPageId, null);
   assert.equal(s.currentId, "s1");
 
   window.location.hash = "#/";

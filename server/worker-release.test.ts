@@ -132,10 +132,51 @@ async function pendingMarks(manager: InstanceType<typeof SessionManager>, id: st
   await assert.rejects(() => manager.interrupt(session.id), /已释放/);
   await assert.rejects(() => manager.resolvePermission(session.id, "r1", "allow"), /已释放/);
   await manager.shutdown();
-  // 服务重启：所有会话载入为 dead，已释放标记不再保留
+  // 服务重启：已释放且有原生 id 的会话载入为 idle+released（下次发送原地续接）
   const reloaded = harness().manager.get(session.id)!;
-  assert.equal(reloaded.status, "dead");
-  assert.equal(reloaded.released, undefined);
+  assert.equal(reloaded.status, "idle");
+  assert.equal(reloaded.released, true);
+}
+
+// ── 1b. 退出 wb：活会话按释放处理，重启后发送以同一原生 ID 原地续接；没有原生 ID 的标 dead ──
+{
+  const { manager, instances, events } = harness();
+  const live = await manager.create({ agent: "claude", cwd: fixture, resumeSessionId: claudeId, snapshot: "skip" });
+  await manager.sendUserMessage(live.id, { text: "第一轮" });
+  instances[0]!.finish();
+  await pendingMarks(manager, live.id);
+  const fresh = await manager.create({ agent: "codex", cwd: fixture, snapshot: "skip" });
+  // Claude 首条消息前就报 session_id，但原生存档未落盘：不能按释放处理
+  const unprompted = await manager.create({ agent: "claude", cwd: fixture, snapshot: "skip" });
+  instances.at(-1)!.options.callbacks.metadata({ nativeSessionId: "bbbbbbbb-2222-4222-8222-222222222222" });
+  await manager.shutdown();
+  await assert.rejects(() => manager.create({ agent: "codex", cwd: fixture, snapshot: "skip" }), /正在退出/);
+  // 停服期间在 VSCode/CLI 续聊：重启后首次发送要补上这段
+  await appendFile(claudePath, `${[
+    JSON.stringify({ type: "user", uuid: "u9", message: { role: "user", content: "停服时问题" } }),
+    JSON.stringify({ type: "assistant", uuid: "a9", message: { role: "assistant", content: [{ type: "text", text: "停服时回答" }] } }),
+  ].join("\n")}\n`);
+  assert.equal(instances[0]!.stopped, true);
+  assert.equal(events.some((event) => event.type === "process_exited"), false, "退出触发的 exited 不得标 dead");
+  assert.equal(events.find((event) => event.type === "worker_released")?.payload.reason, "shutdown");
+
+  const next = harness();
+  const reloaded = next.manager.get(live.id)!;
+  assert.equal(reloaded.status, "idle");
+  assert.equal(reloaded.released, true);
+  assert.equal(next.manager.get(fresh.id)!.status, "dead");
+  assert.equal(next.manager.get(unprompted.id)!.status, "dead");
+  assert.equal(reloaded.releasedMark, undefined, "指纹只在注册表里，不对外");
+  assert.ok((next.manager as unknown as { promptedSessions: Set<string> }).promptedSessions.has(live.id),
+    "重载后切换配置要按续接重启");
+  await next.manager.sendUserMessage(live.id, { text: "重启后继续" });
+  const external = next.events.find((event) => event.type === "external_messages_added");
+  assert.deepEqual((external?.payload.messages as Array<{ role: string; text?: string }> | undefined)
+    ?.map((message) => `${message.role}:${message.text ?? ""}`), ["user:停服时问题", "assistant:停服时回答"]);
+  assert.equal(next.instances.at(-1)!.options.resumeSessionId, claudeId);
+  assert.equal(next.instances.at(-1)!.sent.at(-1)?.text, "重启后继续");
+  assert.equal(next.manager.get(live.id)!.released, undefined);
+  await next.manager.shutdown();
 }
 
 // ── 2. 释放后发送：以同一原生 ID 起新 worker 并发出消息，清掉 released ──

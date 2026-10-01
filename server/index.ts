@@ -5,6 +5,7 @@ import type { Duplex } from "node:stream";
 import { fileURLToPath } from "node:url";
 import { WebSocket, WebSocketServer } from "ws";
 import { checkAccess, loadRemoteConfig, localPolicy, remotePolicy, type AccessPolicy, type RemoteConfig } from "./access.js";
+import { DispatchQueryError, getDispatch, getDispatchLog, listDispatches } from "./dispatches.js";
 import { log } from "./logger.js";
 import { DirListError, listDirectories } from "./dir-list.js";
 import { normalizeFileQuery, searchFiles } from "./file-search.js";
@@ -14,6 +15,7 @@ import { feishuSender, GateNotifier, larkCliSender, loadNotifyConfig, type Notif
 import { checkPageHealth, proxyPage, scanPages } from "./pages.js";
 import { workbenchHome } from "./persistence.js";
 import { isValidIdleReleaseMinutes, loadPrefs, savePrefs, type WorkbenchPrefs } from "./prefs.js";
+import { readClaudeStartupSettings, writeClaudeStartupSettings } from "./claude-settings.js";
 import { SessionManager } from "./session-manager.js";
 import { preflightSnapshot, SnapshotCwdError } from "./snapshot.js";
 import { TerminalError, TerminalRegistry, terminalEnabled, type TerminalEvent } from "./terminals.js";
@@ -371,6 +373,24 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
         "content-security-policy": "sandbox",
       });
       createReadStream(file.path).pipe(response);
+    } else if (method === "GET" && url.pathname === "/api/dispatches") {
+      respond(response, 200, 0, "success", { dispatches: await listDispatches(url.searchParams.get("limit")) }, requestId);
+    } else if (method === "GET" && url.pathname.startsWith("/api/dispatches/")) {
+      const match = url.pathname.match(/^\/api\/dispatches\/([^/]+)(\/log)?$/);
+      if (!match) throw new ApiError(404, 40400, "派单不存在");
+      let runId: string;
+      try { runId = decodeURIComponent(match[1]!); }
+      catch { throw new ApiError(404, 40400, "派单不存在"); }
+      try {
+        const data = match[2]
+          ? await getDispatchLog(runId, url.searchParams.get("stream") ?? "stdout", url.searchParams.get("offset"))
+          : await getDispatch(runId);
+        if (!data) throw new ApiError(404, 40400, "派单或日志不可读取");
+        respond(response, 200, 0, "success", data, requestId);
+      } catch (error) {
+        if (error instanceof DispatchQueryError) throw new ApiError(400, 40000, error.message);
+        throw error;
+      }
     } else if (method === "GET" && url.pathname === "/api/pages") {
       respond(response, 200, 0, "success", { pages }, requestId);
     } else if (url.pathname === "/api/prefs" && method === "GET") {
@@ -385,6 +405,25 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       prefs = { idleReleaseMinutes };
       savePrefs(prefs);
       respond(response, 200, 0, "success", { ...prefs }, requestId);
+    } else if (url.pathname === "/api/claude/settings" && (method === "GET" || method === "PUT")) {
+      let enabled: boolean | undefined;
+      if (method === "PUT") {
+        const input = await readJson(request);
+        if (!input || typeof input !== "object" || Array.isArray(input)) {
+          throw new ApiError(400, 40064, "请求体必须是 JSON 对象");
+        }
+        const value = (input as Record<string, unknown>).remoteControlAtStartup;
+        if (typeof value !== "boolean") {
+          throw new ApiError(400, 40064, "remoteControlAtStartup 必须是布尔值");
+        }
+        enabled = value;
+      }
+      try {
+        const settings = enabled === undefined ? readClaudeStartupSettings() : writeClaudeStartupSettings(enabled);
+        respond(response, 200, 0, "success", settings, requestId);
+      } catch (error) {
+        throw new ApiError(400, 40064, error instanceof Error ? error.message : String(error));
+      }
     } else if (method === "GET" && url.pathname === "/api/sessions") {
       respond(response, 200, 0, "success", { sessions: manager.list() }, requestId);
     } else if (method === "GET" && url.pathname === "/api/history") {
@@ -425,6 +464,8 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       const commandsMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/commands$/);
       const filesMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/files$/);
       const releaseMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/release$/);
+      const infoMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/info\/([a-z]+)$/);
+      const pluginMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/plugins$/);
       const detailMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)$/);
       const historyMessagesMatch = url.pathname.match(/^\/api\/history\/([^/]+)\/([^/]+)\/messages$/);
       const pageHealthMatch = url.pathname.match(/^\/api\/pages\/([^/]+)\/health$/);
@@ -460,6 +501,30 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
           respond(response, 200, 0, "success", result, requestId);
         } catch (error) {
           throw new ApiError(400, 40060, error instanceof Error ? error.message : String(error));
+        }
+      } else if (method === "PUT" && pluginMatch) {
+        const id = decodeURIComponent(pluginMatch[1]);
+        if (!manager.get(id)) throw new ApiError(404, 40401, `会话不存在：${id}`);
+        const input = await readJson(request);
+        if (!input || typeof input !== "object" || Array.isArray(input)) {
+          throw new ApiError(400, 40065, "请求体必须是 JSON 对象");
+        }
+        const body = input as Record<string, unknown>;
+        if (typeof body.id !== "string" || typeof body.enabled !== "boolean") {
+          throw new ApiError(400, 40065, "id 必须是字符串，enabled 必须是布尔值");
+        }
+        try {
+          respond(response, 200, 0, "success", await manager.setPluginEnabled(id, body.id, body.enabled, body.scope), requestId);
+        } catch (error) {
+          throw new ApiError(400, 40065, error instanceof Error ? error.message : String(error));
+        }
+      } else if (method === "GET" && infoMatch) {
+        const id = decodeURIComponent(infoMatch[1]);
+        if (!manager.get(id)) throw new ApiError(404, 40401, `会话不存在：${id}`);
+        try {
+          respond(response, 200, 0, "success", await manager.queryInfo(id, infoMatch[2]), requestId);
+        } catch (error) {
+          throw new ApiError(400, 40063, error instanceof Error ? error.message : String(error));
         }
       } else if (method === "GET" && historyMessagesMatch) {
         const agent = validateHistoryAgent(decodeHistorySegment(historyMessagesMatch[1]));

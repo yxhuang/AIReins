@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { fetchPrefs, savePrefs } from "../api";
+import { fetchClaudeStartupSettings, fetchPrefs, saveClaudeStartupSettings, savePrefs } from "../api";
 import {
   FONT_SCALE_EVENT,
   FONT_SCALE_STORAGE_KEY,
@@ -62,6 +62,11 @@ const SETTING_GROUPS: SettingGroup[] = [
     label: "会话",
     items: [
       {
+        id: "remote-control-startup",
+        label: "Remote Control 默认开启",
+        options: [],
+      },
+      {
         id: "idle-release",
         label: "空闲自动释放",
         options: [
@@ -101,6 +106,11 @@ export function SettingsMenu() {
   const [theme, setTheme] = useState<ThemeChoice>(() => readTheme());
   const [scaleChoice, setScaleChoice] = useState<FontScaleChoice>(readFontScaleChoice);
   const [idleRelease, setIdleRelease] = useState("30");
+  const [rcStartup, setRcStartup] = useState<boolean | null>(null);
+  const [rcSaving, setRcSaving] = useState(false);
+  const [rcError, setRcError] = useState<string | null>(null);
+  const rcPending = useRef(false);
+  const rcVersion = useRef(0);
   const rootRef = useRef<HTMLDivElement>(null);
   const gearRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
@@ -109,6 +119,17 @@ export function SettingsMenu() {
   useEffect(() => {
     if (!open) return;
     let cancelled = false;
+    const version = ++rcVersion.current;
+    setRcStartup(null);
+    setRcError(null);
+    // 两个独立设置并行读取。
+    fetchClaudeStartupSettings()
+      .then((settings) => {
+        if (!cancelled && version === rcVersion.current) setRcStartup(settings.remoteControlAtStartup);
+      })
+      .catch((error: unknown) => {
+        if (!cancelled && version === rcVersion.current) setRcError(error instanceof Error ? error.message : String(error));
+      });
     fetchPrefs()
       .then((prefs) => {
         if (!cancelled) setIdleRelease(String(prefs.idleReleaseMinutes));
@@ -202,6 +223,23 @@ export function SettingsMenu() {
     savePrefs({ idleReleaseMinutes: Number(value) }).catch(() => setIdleRelease(previous));
   };
 
+  const toggleRcStartup = async () => {
+    if (rcStartup === null || rcPending.current) return;
+    rcPending.current = true;
+    ++rcVersion.current;
+    setRcSaving(true);
+    setRcError(null);
+    try {
+      const settings = await saveClaudeStartupSettings(!rcStartup);
+      setRcStartup(settings.remoteControlAtStartup);
+    } catch (error) {
+      setRcError(error instanceof Error ? error.message : String(error));
+    } finally {
+      rcPending.current = false;
+      setRcSaving(false);
+    }
+  };
+
   const choose = (id: string, value: string) => {
     if (id === "theme") chooseTheme(value);
     else if (id === "font-scale") chooseFontScale(value);
@@ -233,7 +271,17 @@ export function SettingsMenu() {
                   <span className="settings-item-label" id={`settings-item-${item.id}`}>
                     {item.label}
                   </span>
-                  <div
+                  {item.id === "remote-control-startup" ? <>
+                    <button type="button" role="switch" aria-checked={rcStartup === true}
+                      aria-labelledby={`settings-item-${item.id}`} aria-describedby="settings-rc-hint"
+                      className="settings-option settings-toggle" disabled={rcStartup === null || rcSaving}
+                      onClick={() => void toggleRcStartup()}>
+                      <span>{rcSaving ? "保存中…" : rcStartup === null ? (rcError ? "读取失败" : "读取中…") : rcStartup ? "开启" : "关闭"}</span>
+                      <span className={`slash-switch${rcStartup ? " on" : ""}`} aria-hidden="true" />
+                    </button>
+                    <span className="settings-hint" id="settings-rc-hint">仅对新建、续接或释放后再发送的会话生效。</span>
+                    {rcError && <span className="new-error" role="alert">{rcError}</span>}
+                  </> : <div
                     className="settings-options"
                     role="radiogroup"
                     aria-labelledby={`settings-item-${item.id}`}
@@ -274,7 +322,7 @@ export function SettingsMenu() {
                         {option.label}
                       </button>
                     ))}
-                  </div>
+                  </div>}
                 </div>
               ))}
             </section>

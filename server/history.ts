@@ -1,7 +1,14 @@
 import { open, readdir, readFile, stat } from "node:fs/promises";
+import { createReadStream } from "node:fs";
+import { createInterface } from "node:readline";
 import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import type { AgentKind } from "./types.js";
+import { dispatchSessionMap, type DispatchSession } from "./dispatches.js";
+
+export function kimiHistoryRoot(): string {
+  return process.env.WORKBENCH_KIMI_HISTORY_DIR || join(homedir(), ".kimi-code", "sessions");
+}
 
 export type HistorySource = "interactive" | "workbench" | "unknown";
 
@@ -14,6 +21,7 @@ export interface HistorySession {
   messageCount?: number;
   source: HistorySource;
   filePath: string;
+  dispatch?: DispatchSession;
 }
 
 export interface HistoryListInput {
@@ -28,12 +36,13 @@ export interface HistoryListResult {
   nextCursor?: string;
   truncated: boolean;
   skipped: number;
+  empty: number;
   discovered: number;
   durationMs: number;
 }
 
 export type HistoryMessage =
-  | { role: "user" | "assistant"; text: string; timestamp: string | null }
+  | { role: "user" | "assistant" | "thought"; text: string; timestamp: string | null }
   | { role: "tool"; timestamp: string | null; tool: {
       id: string; name: string; input: unknown; result?: string; rawResult?: unknown;
       status: "ok" | "error" | "unknown";
@@ -79,6 +88,7 @@ interface Candidate {
 interface CachedSession {
   fingerprint: string;
   session: HistorySession | null;
+  hasUserMessage?: boolean;
 }
 
 interface DiscoveryResult {
@@ -166,7 +176,7 @@ export class HistoryIndex {
     this.roots = {
       claude: process.env.WORKBENCH_CLAUDE_HISTORY_DIR || join(homedir(), ".claude", "projects"),
       codex: process.env.WORKBENCH_CODEX_HISTORY_DIR || join(homedir(), ".codex", "sessions"),
-      kimi: process.env.WORKBENCH_KIMI_HISTORY_DIR || join(homedir(), ".kimi-code", "sessions"),
+      kimi: kimiHistoryRoot(),
       workbenchRegistry: join(workbenchHome, "sessions.json"),
       ...options.roots,
     };
@@ -186,9 +196,11 @@ export class HistoryIndex {
       .sort(compareCandidates)
       .filter((candidate) => !cursor || candidateAfterCursor(candidate, cursor));
     const workbenchIds = await this.loadWorkbenchSessionIds();
+    const dispatches = await dispatchSessionMap();
     const q = (input.q ?? "").trim().toLocaleLowerCase();
     const sessions: HistorySession[] = [];
     let skipped = discovery.skipped;
+    let empty = 0;
     let truncated = discovery.truncated;
     let consumed = 0;
     let lastConsumed: Candidate | undefined;
@@ -199,13 +211,32 @@ export class HistoryIndex {
         break;
       }
       const session = await this.parseCandidate(candidate);
+      let hasUserMessage = false;
+      if (session) {
+        try {
+          const found = await this.hasUserMessage(candidate, deadline);
+          if (found === undefined) { truncated = true; break; }
+          hasUserMessage = found;
+        } catch {
+          consumed += 1;
+          lastConsumed = candidate;
+          skipped += 1;
+          continue;
+        }
+      }
       consumed += 1;
       lastConsumed = candidate;
       if (!session) {
         skipped += 1;
         continue;
       }
+      if (!hasUserMessage) {
+        empty += 1;
+        continue;
+      }
       const decorated = decorateSource(session, workbenchIds);
+      const dispatch = dispatches.get(session.nativeSessionId);
+      if (dispatch) decorated.dispatch = dispatch;
       if (q && !`${decorated.title}\n${decorated.cwd}`.toLocaleLowerCase().includes(q)) continue;
       sessions.push(decorated);
       if (sessions.length >= input.limit) break;
@@ -217,6 +248,7 @@ export class HistoryIndex {
       ...(hasMore && lastConsumed ? { nextCursor: encodeCursor(lastConsumed) } : {}),
       truncated,
       skipped,
+      empty,
       discovered: discovery.candidates.length,
       durationMs: Date.now() - started,
     };
@@ -384,6 +416,38 @@ export class HistoryIndex {
     }
     this.cache.set(candidate.path, { fingerprint, session });
     return session;
+  }
+
+  /** Scan beyond the title window, including image-only user messages. Cache with the file fingerprint. */
+  private async hasUserMessage(candidate: Candidate, deadline: number): Promise<boolean | undefined> {
+    const cached = this.cache.get(candidate.path)!;
+    if (cached.hasUserMessage !== undefined) return cached.hasUserMessage;
+    const path = candidate.agent === "kimi"
+      ? join(dirname(candidate.path), "agents", "main", "wire.jsonl") : candidate.path;
+    let hasUserMessage = false;
+    const stream = createReadStream(path, { encoding: "utf8" });
+    const lines = createInterface({ input: stream, crlfDelay: Infinity });
+    try {
+      for await (const line of lines) {
+        if (Date.now() >= deadline) return undefined;
+        const record = parseLine(line);
+        if (!record) continue;
+        hasUserMessage = candidate.agent === "claude"
+          ? record.type === "user" && record.message?.role === "user" && !record.isMeta && !record.isSidechain
+          : candidate.agent === "codex"
+            ? (record.type === "response_item" && record.payload?.type === "message" && record.payload.role === "user")
+              || (record.type === "event_msg" && record.payload?.type === "user_message")
+            : record.type === "turn.prompt";
+        if (hasUserMessage) break;
+      }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    } finally {
+      lines.close();
+      stream.destroy();
+    }
+    cached.hasUserMessage = hasUserMessage;
+    return hasUserMessage;
   }
 
   private async parseClaude(candidate: Candidate): Promise<HistorySession | null> {
@@ -702,6 +766,8 @@ export function parseHistoryMessages(agent: AgentKind, lines: OffsetLine[]): Off
         for (const block of Array.isArray(content) ? content : [{ type: "text", text: content }]) {
           if (!block || typeof block !== "object") continue;
           if (block.type === "text") pushHistoryMessage(messages, "assistant", stringValue(block.text), record.timestamp, line.startOffset);
+          // Opus 等多数思考块只存签名、thinking 为空，空的不推（实时流也不显示）
+          if (block.type === "thinking") pushHistoryMessage(messages, "thought", stringValue(block.thinking), record.timestamp, line.startOffset);
           if (block.type === "tool_use") addTool(block.id, block.name, block.input, record.timestamp, line.startOffset);
         }
       } else if (record.type === "user" && record.message?.role === "user") {
@@ -736,6 +802,17 @@ export function parseHistoryMessages(agent: AgentKind, lines: OffsetLine[]): Off
           call?.tool.name === "commandExecution" ? { aggregatedOutput: output, ...(code !== undefined ? { exitCode: Number(code) } : {}) } : undefined);
         continue;
       }
+      // 推理摘要只在 response_item 里（新旧格式都有）；多数只有加密正文、summary 为空
+      if (record.type === "response_item" && payload?.type === "reasoning") {
+        const summary = Array.isArray(payload.summary)
+          ? payload.summary.flatMap((part: unknown) => {
+            const text = (part as { text?: unknown } | null)?.text;
+            return typeof text === "string" && text ? [text] : [];
+          })
+          : [];
+        pushHistoryMessage(messages, "thought", summary.join("\n\n") || undefined, record.timestamp, line.startOffset);
+        continue;
+      }
       if (codexHasEventMessages) {
         if (record.type === "event_msg" && record.payload?.type === "user_message") {
           pushHistoryMessage(messages, "user", stringValue(record.payload.message), record.timestamp, line.startOffset);
@@ -761,6 +838,8 @@ export function parseHistoryMessages(agent: AgentKind, lines: OffsetLine[]): Off
       const part = record.event.part;
       if (part?.type === "text" && typeof part.text === "string") {
         pushHistoryMessage(messages, "assistant", part.text, record.time, line.startOffset);
+      } else if (part?.type === "think") {
+        pushHistoryMessage(messages, "thought", stringValue(part.think), record.time, line.startOffset);
       }
     }
   }
@@ -809,7 +888,7 @@ export function mergeHistoryMessages(messages: OffsetHistoryMessage[]): OffsetHi
   const toolLines = new Set(messages.filter((message) => message.role === "tool").map((message) => message.startOffset));
   for (const message of messages) {
     const previous = merged.at(-1);
-    if (previous?.role === "assistant" && message.role === "assistant"
+    if ((message.role === "assistant" || message.role === "thought") && previous?.role === message.role
       && (previous.startOffset === message.startOffset
         || (!toolLines.has(previous.startOffset) && !toolLines.has(message.startOffset)))) {
       previous.text += message.text;
@@ -872,7 +951,7 @@ function fullText(content: unknown, types: string[]): string | undefined {
 
 function pushHistoryMessage(
   messages: OffsetHistoryMessage[],
-  role: "user" | "assistant",
+  role: "user" | "assistant" | "thought",
   text: string | undefined,
   timestamp: unknown,
   startOffset: number,

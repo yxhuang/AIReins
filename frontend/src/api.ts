@@ -10,7 +10,7 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
     response = await fetch(path, { ...init, signal: init?.signal ?? AbortSignal.timeout(10_000) });
   } catch (error) {
     if (error instanceof DOMException && error.name === "TimeoutError") {
-      throw new Error("请求超时（10 秒）");
+      throw new Error(init?.signal ? "请求超时" : "请求超时（10 秒）");
     }
     throw error;
   }
@@ -151,6 +151,42 @@ export function killTerminal(id: string): Promise<{ ok: true }> {
 }
 
 /** 释放会话 worker（停进程、保留会话）；返回带 cwd 的原生续接命令。 */
+/** 「/」菜单的只读查看（仅 Claude）：已释放会话会先拉起 worker。 */
+export type SessionInfoKind = "mcp" | "hooks" | "permissions" | "context" | "plugins";
+export function fetchSessionInfo(id: string, kind: SessionInfoKind): Promise<unknown> {
+  return call<unknown>(`/api/sessions/${encodeURIComponent(id)}/info/${kind}`, { signal: AbortSignal.timeout(20_000) });
+}
+
+export interface PluginToggleResult {
+  plugins: unknown[];
+  reloaded: boolean;
+  reloadError?: string;
+}
+
+export function setSessionPlugin(id: string, pluginId: string, enabled: boolean, scope?: string): Promise<PluginToggleResult> {
+  return call<PluginToggleResult>(`/api/sessions/${encodeURIComponent(id)}/plugins`, {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ id: pluginId, enabled, ...(scope ? { scope } : {}) }),
+    // CLI 切换 + 刷新设置 + 重载 + CLI 列表各有独立超时。
+    signal: AbortSignal.timeout(80_000),
+  });
+}
+
+export interface ClaudeStartupSettings { remoteControlAtStartup: boolean }
+
+export function fetchClaudeStartupSettings(): Promise<ClaudeStartupSettings> {
+  return call<ClaudeStartupSettings>("/api/claude/settings");
+}
+
+export function saveClaudeStartupSettings(enabled: boolean): Promise<ClaudeStartupSettings> {
+  return call<ClaudeStartupSettings>("/api/claude/settings", {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ remoteControlAtStartup: enabled }),
+  });
+}
+
 export function releaseSession(id: string): Promise<{ session: SessionRecord; resumeCommand: string }> {
   return call<{ session: SessionRecord; resumeCommand: string }>(
     `/api/sessions/${encodeURIComponent(id)}/release`,

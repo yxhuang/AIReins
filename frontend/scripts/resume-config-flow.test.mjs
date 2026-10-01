@@ -16,7 +16,7 @@ import { readFileSync } from "node:fs";
 globalThis.WebSocket = { CONNECTING: 0, OPEN: 1, CLOSING: 2, CLOSED: 3 };
 
 const { Store } = await import("../src/store.ts");
-const { needsRestartNote, RESTART_NOTE, pillText } = await import("../src/config-view.ts");
+const { needsRestartNote, RESTART_NOTE, pillText, modelShortName } = await import("../src/config-view.ts");
 const {
   HISTORY_PAGE_SIZE,
   fetchInitialHistoryPage,
@@ -403,6 +403,14 @@ await t("源码接线：滚动补偿 useLayoutEffect；offsetTop 基线（非 sc
   assert.ok(/key=\{`/.test(history), "列表 key 应为 role+timestamp+index 形式的稳定 key");
   assert.ok(!/prevScrollHeight|scrollHeight\s*-\s*/.test(history), "不应再以 scrollHeight 差作补偿基线");
   assert.ok(/offsetTop/.test(history), "补偿基线应改为底部参照节点的 offsetTop 差");
+});
+
+await t("modelShortName：去 claude- 前缀与日期、版本号改点，别名与他家模型不动", async () => {
+  assert.equal(modelShortName("claude-opus-5-5"), "opus-5.5");
+  assert.equal(modelShortName("claude-haiku-4-5-20251001"), "haiku-4.5");
+  assert.equal(modelShortName("claude-opus-5-5[1m]"), "opus-5.5[1m]");
+  assert.equal(modelShortName("opus"), "opus");
+  assert.equal(modelShortName("gpt-6.1-sol"), "gpt-6.1-sol");
 });
 
 console.log(`✅ resume/config 前端逻辑回归全过（${pass} 例）`);
