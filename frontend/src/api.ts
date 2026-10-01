@@ -18,7 +18,11 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
   let envelope: ApiEnvelope<T> | undefined;
   try {
     envelope = (await response.json()) as ApiEnvelope<T>;
-  } catch {
+  } catch (error) {
+    // 超时信号同样作用于读响应体：大响应没读完就被掐断，不是格式错误
+    if (error instanceof DOMException && (error.name === "TimeoutError" || error.name === "AbortError")) {
+      throw new Error(init?.signal ? "请求超时（响应未传完）" : "请求超时（10 秒内响应未传完）");
+    }
     throw new Error("服务返回了无法解析的响应");
   }
   if (typeof envelope?.code !== "number") throw new Error("服务返回了无法解析的响应");
@@ -36,6 +40,26 @@ export function fetchMeta(): Promise<MetaInfo> {
 
 export function fetchDispatches(signal?: AbortSignal): Promise<{ dispatches: DispatchRun[] }> {
   return call("/api/dispatches?limit=50", { signal });
+}
+
+export function fetchParentDispatches(parent: string, signal?: AbortSignal): Promise<{ dispatches: DispatchRun[] }> {
+  return call(`/api/dispatches?parent=${encodeURIComponent(parent)}`, { signal });
+}
+
+export function fetchDispatchHistory(offset = 0, signal?: AbortSignal): Promise<{ dispatches: DispatchRun[]; total: number; nextOffset: number | null }> {
+  return call(`/api/dispatches/history?offset=${offset}`, { signal });
+}
+
+export function fetchDispatchDetail(id: string, signal?: AbortSignal): Promise<import("./types").DispatchDetail> {
+  return call(`/api/dispatches/${encodeURIComponent(id)}`, { signal });
+}
+
+export function fetchDispatchMessages(id: string, cursor: string | null, signal?: AbortSignal): Promise<import("./types").DispatchMessages> {
+  return call(`/api/dispatches/${encodeURIComponent(id)}/messages${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ""}`, { signal });
+}
+
+export function fetchDispatchLog(id: string, offset?: number, signal?: AbortSignal): Promise<{ text: string; nextOffset: number; reset?: boolean }> {
+  return call(`/api/dispatches/${encodeURIComponent(id)}/log${offset === undefined ? "" : `?offset=${offset}`}`, { signal });
 }
 
 /** 不传 path 时从服务端 $HOME 浏览；files=true 时同层普通文件一并返回（选文件模式）。 */
@@ -77,13 +101,34 @@ export function restartWorkbench(signal?: AbortSignal): Promise<{ restarting: bo
 }
 
 export function fetchSnapshot(id: string): Promise<Snapshot> {
-  return call<Snapshot>(`/api/sessions/${encodeURIComponent(id)}/snapshot`);
+  // 长会话快照很大，手机远程下载慢：放宽到 60 秒
+  return call<Snapshot>(`/api/sessions/${encodeURIComponent(id)}/snapshot`, { signal: AbortSignal.timeout(60_000) });
 }
 
 export function fetchCommands(id: string): Promise<CommandInfo[]> {
   return call<{ commands: CommandInfo[] }>(
     `/api/sessions/${encodeURIComponent(id)}/commands`,
   ).then((data) => data.commands);
+}
+
+export interface CodexSkillInfo {
+  name: string;
+  description: string;
+  path: string;
+  scope: string;
+  enabled: boolean;
+}
+
+export function fetchCodexSkills(id: string, signal?: AbortSignal): Promise<{ skills: CodexSkillInfo[]; errors: unknown[] }> {
+  return call(`/api/sessions/${encodeURIComponent(id)}/info/skills`, { signal: signal ?? AbortSignal.timeout(20_000) });
+}
+
+export function runCodexCommand(id: string, name: string, args?: string): Promise<Record<string, unknown>> {
+  return call(`/api/sessions/${encodeURIComponent(id)}/codex/command`, {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ name, ...(args ? { arguments: args } : {}) }),
+    signal: AbortSignal.timeout(name === "new" ? 90_000 : 60_000),
+  });
 }
 
 /** 会话 cwd 内的文件检索（@ 引用补全）：子串匹配、字典序；空 q 也返回列表。 */
@@ -161,9 +206,17 @@ export function killTerminal(id: string): Promise<{ ok: true }> {
 
 /** 释放会话 worker（停进程、保留会话）；返回带 cwd 的原生续接命令。 */
 /** 「/」菜单的只读查看（仅 Claude）：已释放会话会先拉起 worker。 */
-export type SessionInfoKind = "mcp" | "hooks" | "permissions" | "context" | "plugins";
+export type SessionInfoKind = "mcp" | "hooks" | "permissions" | "context" | "plugins" | "status" | "memory" | "instructions" | "skills" | "sandbox" | "usage" | "output" | "settings" | "export";
 export function fetchSessionInfo(id: string, kind: SessionInfoKind): Promise<unknown> {
-  return call<unknown>(`/api/sessions/${encodeURIComponent(id)}/info/${kind}`, { signal: AbortSignal.timeout(20_000) });
+  return call<unknown>(`/api/sessions/${encodeURIComponent(id)}/info/${kind}`, { signal: AbortSignal.timeout(kind === "output" ? 40_000 : 20_000) });
+}
+
+export function manageSessionMcp(id: string, action: "toggle" | "reconnect", serverName: string, enabled?: boolean): Promise<unknown> {
+  return call(`/api/sessions/${encodeURIComponent(id)}/mcp`, {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ action, serverName, ...(enabled === undefined ? {} : { enabled }) }),
+    signal: AbortSignal.timeout(80_000),
+  });
 }
 
 export interface PluginToggleResult {
@@ -196,8 +249,8 @@ export function saveClaudeStartupSettings(enabled: boolean): Promise<ClaudeStart
   });
 }
 
-export function releaseSession(id: string): Promise<{ session: SessionRecord; resumeCommand: string }> {
-  return call<{ session: SessionRecord; resumeCommand: string }>(
+export function releaseSession(id: string): Promise<{ session: SessionRecord; resumeCommand: string; vscodeUri: string | null }> {
+  return call<{ session: SessionRecord; resumeCommand: string; vscodeUri: string | null }>(
     `/api/sessions/${encodeURIComponent(id)}/release`,
     { method: "POST" },
   );

@@ -2,8 +2,10 @@ import {
   appendFileSync,
   existsSync,
   mkdirSync,
+  readdirSync,
   readFileSync,
   renameSync,
+  rmSync,
   writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
@@ -31,6 +33,57 @@ export function saveRegistry(sessions: SessionRecord[]): void {
   const temporary = `${registryPath}.tmp`;
   writeFileSync(temporary, `${JSON.stringify(sessions, null, 2)}\n`, { mode: 0o600 });
   renameSync(temporary, registryPath);
+}
+
+/**
+ * 启动时清理（对标 Claude 的 cleanupPeriodDays）：最后活动早于 retentionDays 天的会话移出登记表；
+ * 不在登记表里的 transcript 与 uploads/<id>（含 UI 里移除过的会话）一并删除。只删 wb 自己的副本，
+ * 不碰 CLI 的原生会话。retentionDays=0 只清残留、不过期。
+ */
+export function pruneStorage(retentionDays: number, now = Date.now()): { expired: number; removedFiles: number } {
+  const sessions = loadRegistry();
+  const cutoff = now - retentionDays * 86_400_000;
+  // 时间戳解析不了的一律保留，宁可少删
+  const kept = retentionDays > 0
+    ? sessions.filter((session) => !(Date.parse(session.lastActivityAt) < cutoff))
+    : sessions;
+  if (kept.length !== sessions.length) saveRegistry(kept);
+  const keep = new Set(kept.map((session) => session.id));
+  let removedFiles = 0;
+  for (const name of readdirSync(transcriptsDir)) {
+    if (!name.endsWith(".ndjson") || keep.has(name.slice(0, -".ndjson".length))) continue;
+    rmSync(join(transcriptsDir, name), { force: true });
+    removedFiles += 1;
+  }
+  const uploadsDir = join(workbenchHome, "uploads");
+  const orphanUploads = existsSync(uploadsDir) ? readdirSync(uploadsDir).filter((name) => !keep.has(name)) : [];
+  removedFiles += removeUploadDirs(orphanUploads, kept);
+  return { expired: sessions.length - kept.length, removedFiles };
+}
+
+/**
+ * 删除 uploads/<id> 目录。引用路径可以指向别的会话的附件，所以仍被 kept 中某会话 transcript
+ * 提到的目录保留。返回实际删除的目录数。
+ */
+function removeUploadDirs(ids: string[], kept: SessionRecord[]): number {
+  if (ids.length === 0) return 0;
+  const uploadsDir = join(workbenchHome, "uploads");
+  const referenced = kept.map((session) => {
+    try { return readFileSync(session.transcriptPath, "utf8"); } catch { return ""; }
+  }).join("\n");
+  let removed = 0;
+  for (const id of ids) {
+    if (referenced.includes(join(uploadsDir, id))) continue;
+    rmSync(join(uploadsDir, id), { recursive: true, force: true });
+    removed += 1;
+  }
+  return removed;
+}
+
+/** UI 移除会话时删掉 wb 自己的副本（transcript + 附件）；CLI 原生会话不受影响。 */
+export function deleteSessionFiles(record: SessionRecord, kept: SessionRecord[]): void {
+  rmSync(record.transcriptPath, { force: true });
+  if (existsSync(join(workbenchHome, "uploads", record.id))) removeUploadDirs([record.id], kept);
 }
 
 export function transcriptPathFor(sessionId: string): string {

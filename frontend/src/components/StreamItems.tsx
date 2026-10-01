@@ -79,7 +79,7 @@ function MentionImage({ mention }: { mention: ImageMention }) {
 export const TextBlockView = memo(function TextBlockView({ item, streaming }: { item: TextBlock; streaming: boolean }) {
   return (
     <div className="text-block">
-      <MarkdownMessage text={item.text} />
+      <MarkdownMessage text={item.text} streaming={streaming} />
       {streaming && <span className="cursor" aria-hidden="true">▍</span>}
     </div>
   );
@@ -463,7 +463,7 @@ export const QuestionBlock = forwardRef<HTMLDivElement, { item: GateView; sessio
                       borderRadius: 6,
                       background: "var(--surface)",
                       color: "var(--text)",
-                      fontSize: 12,
+                      fontSize: 16,
                       fontFamily: "inherit",
                       padding: "4px 8px",
                       minWidth: 260,

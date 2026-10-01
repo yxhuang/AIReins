@@ -3,6 +3,8 @@
 // 与 commands.ts（filterCommands 筛选 + 最近使用）的纯函数单测——两处都是「代码复核」热点，
 // 坏了不一定报错，只会静默渲染错/排序错。
 import { strict as assert } from "node:assert";
+// Included here so the existing npm test entry covers the Codex command/skill contract.
+await import("./codex-commands.test.mjs");
 
 // 用 tsx 把 TS 模块加载进来
 const { buildRenderItems, buildHistoryRenderItems, focusVisible, groupReadOnlyTools, gateFromEvent, promptCacheExpiry } = await import("../src/render-items.ts");

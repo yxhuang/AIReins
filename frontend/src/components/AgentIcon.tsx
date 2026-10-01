@@ -19,6 +19,15 @@ const PATHS: Record<AgentKind, string[]> = {
 const CLAUDE_ORANGE = "#D97757";
 const KIMI_BLUE = "#1783FF";
 
+export function VSCodeIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="16" height="16" role="img" aria-label="VSCode">
+      <title>VSCode</title>
+      <path fill="#007ACC" d="M17.5 1 24 4v16l-6.5 3L5 13.5l-3.5 3L0 15V9l1.5-1.5L5 10.5 17.5 1ZM17.5 6.5 8.5 12l9 5.5v-11ZM1.5 9.5v5L4 12 1.5 9.5Z" />
+    </svg>
+  );
+}
+
 export function AgentIcon({ agent, label }: { agent: AgentKind; label: string }) {
   const [kimiDot, kimiK] = PATHS.kimi;
   return (

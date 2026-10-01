@@ -608,7 +608,7 @@ VSCode 扩展「/」菜单的 MCP servers / Hooks / Permissions / Context 数据
 - `list_permission_rules` → `{state:{rules:[{behavior:"allow"|"ask"|"deny", source, rule, description:{prefix, emphasis}, editability}], workspaceDirectories, originalCwd, managedOnly}}`。
 - `get_context_usage` → `{categories:[{name, tokens, color, kind:"used"|"deferred"|"buffer"|"free", isDeferred?}], totalTokens, maxTokens, rawMaxTokens, percentage, gridRows, model, memoryFiles, mcpTools, agents, slashCommands, skills, autoCompactThreshold, isAutoCompactEnabled, messageBreakdown, apiUsage}`（约 50KB，大头是 gridRows 与 mcpTools）。
 
-扩展还有 `mcp_toggle` / `mcp_reconnect` / `update_settings` 等写操作，wb 暂未接；`get_settings` 的设置缓存刷新用途见下文。扩展「/」菜单全量 action（commandRegistry.registerAction，分组 Context / Model / Customize / Slash Commands / Settings / Support）可用 `webview/index.js` 里 grep `registerAction` 列出；Focus view 是扩展自己的前端开关（`focusViewEnabled`），不走 CLI。
+扩展还有 `mcp_toggle` / `mcp_reconnect` / `update_settings` 等写操作；wb 已接前两项（见 §11），未开放任意 `update_settings`。`get_settings` 的设置缓存刷新用途见下文。扩展「/」菜单全量 action（commandRegistry.registerAction，分组 Context / Model / Customize / Slash Commands / Settings / Support）可用 `webview/index.js` 里 grep `registerAction` 列出；Focus view 是扩展自己的前端开关（`focusViewEnabled`），不走 CLI。
 
 ### 插件启停后的刷新（2026-10-01 本机源码核对，未启动会话实测）
 
@@ -627,3 +627,52 @@ wb 在 enable / disable 成功后只对当前已有 worker 顺序发送上述两
 ### Remote Control 默认开关的落盘语义
 
 CLI `/config` 的 `Te(e)`（binary 字节 215603696）在选 `"false"` 时执行 `V("remoteControlAtStartup",false)`，只有选 `"default"` 才写 `undefined` 并删除旧全局键。`V` 的闭包（字节 215601200）调用 `S1`，`S1`（字节 199005860）写 `fn("userSettings",{[n]:i})`。因此 wb 二态开关关闭应显式保存 `remoteControlAtStartup:false`，与 CLI 关闭语义一致。扩展 `setRemoteControlAtStartup`（`webview/index.js` 字符 3480628）也保存 `{remoteControlAtStartup:<boolean>}`。wb 只改用户设置文件这一个键，保留软链接；新值仅供之后启动的 worker 读取，不向当前会话发送 RC 开关请求。
+
+
+## 11. 扩展菜单补齐：MCP 管理与只读面板（2026-10-01）
+
+调查源为 `~/.vscode-server/extensions/anthropic.claude-code-2.1.286-linux-x64/{webview/index.js,extension.js}`；本机 CLI `2.1.285`。`scratch/slash-ext/extension-actions.txt` 保存菜单注册片段，`extension-protocol.txt` / `extension-related.txt` 保存 SDK/宿主实现片段。完整条目判定表在 `.work-orders/2026-10-01-slash-ext-report.md`。以下均走本地无头 stream-json，无新增 npm 依赖。
+
+请求公共封套为 `{type:"control_request",request_id:"<uuid>",request:{subtype,…}}`。成功回应公共封套为 `{type:"control_response",response:{subtype:"success",request_id:"<uuid>",response?:<payload>}}`；MCP 开关/重连成功实测没有 `response` 字段，不能把空 payload 判为失败。
+
+| subtype / 字段 | 成功 payload 与 wb 用途 |
+| --- | --- |
+| `mcp_toggle`, `serverName:"slash-smoke"`, `enabled:false/true` | 无 payload；随后 `mcp_status` 返回 disabled / connected。仅当前 worker 生效，不落盘 settings。 |
+| `mcp_reconnect`, `serverName:"slash-smoke"` | 无 payload；随后 `mcp_status` 返回 connected（也可能先 connecting/pending，前端允许手动刷新）。 |
+| `get_status` | `{sections:[{title,rows:[{label,value}]}]}`，版本/原生 ID/cwd/账户/模型/MCP/设置来源等。 |
+| `get_usage` | `{session:{total_cost_usd,total_api_duration_ms,total_duration_ms,total_lines_added,total_lines_removed,model_usage},subscription_type,rate_limits_available,rate_limits,behaviors}`；前端显示会话费用与 `rate_limits.limits[{kind,percent,resets_at,…}]`。 |
+| `get_memory_dialog` | `{files:[{kind,path,label,description,exists}],folders:[{kind,path,label,description}],memories,auto_memory:{enabled,toggleable,status},auto_dream:{shown,enabled,toggleable,status,detail?}}`；wb 生成 VSCode 文件/目录协议链接，不在服务端打开文件。 |
+| `get_skills_dialog` | `{skills:[{name,display_name,description,source,tokens,state,advertised,handles,…}]}`；state 为 on / name-only / user-invocable-only / off。管理入口为 settings 文件编辑。 |
+| `get_sandbox_dialog` | `{supported,locked,overrides_locked,enabled,enabled_in_settings,mode,auto_allow_available,no_sandbox_allowed,unsandboxed_fallback,dependencies:{errors,warnings},excluded_commands,restrictions}`；本机返回关闭，依赖错误 socat not installed；不安装依赖。 |
+| `export_conversation` | `{text,default_filename}`；扩展也调用这一请求，随后 `open_export_document` 由 VSCode 打开 untitled 文档。wb 改为浏览器复制/下载 `.txt`，以 CLI 返回内容为准。 |
+| `initialize` + `get_settings` | 前者 `available_output_styles` 给样式列表，后者 `effective.outputStyle` 给当前样式；只返回必要字段到浏览器。 |
+| `rewind_files`, `user_message_id:"<uuid>"`, `dry_run:true` | wb 当前启动方式返回 `{canRewind:false,error:"File rewinding is not enabled."}`；本单不接 Rewind。 |
+
+扩展 Rewind 的文件预览是 `rewindFiles(userMessageId,{dryRun:true})`，界面使用 `canRewind/filesChanged/insertions/deletions/skippedLinks` 再二次选择恢复代码/会话/两者；会话恢复走宿主 fork + resumeSessionAt。扩展启动 SDK 配置 `enableFileCheckpointing:true`，wb 没有这项且统一事件没有原生用户 UUID。不能仅凭 dry_run 字段存在就开放修改文件或截断会话。
+
+Hooks 编辑在扩展实际通过 `claude edit-hook`（JSON stdin）后刷新 `get_hooks_listing`；权限/Memory/Sandbox/Skills 分别通过 `edit-permission-rules` / `edit-memory-settings` / `edit-sandbox-settings` / `edit-skill-overrides` 子命令，输出样式经宿主 apply_settings 转 `update_settings {source,settings}` 或 `apply_flag_settings {settings}`。wb 本单用 settings 文件协议链接提供编辑等价物，不新增配置写 API。可编辑配置源为 userSettings/projectSettings/localSettings；插件与 managed 来源按原样显示，不能假装能在用户配置中编辑其原件。
+
+真机证据：`scratch/slash-ext/smoke-protocol.ndjson` 为隔离服务器 driver 实际 stdin/stdout（48 行、24 对请求回应）；`smoke-http.json` 为 HTTP 与链接点击记录。18791，Haiku 4.5，真实回复 SLASH_SMOKE_OK；MCP 停用/启用/重连 success，停用后 disabled、启用/重连后 connected；本地 mock MCP 仅提供 initialize/tools/list，不访问第三方服务。10 个新/增强面板及复制/下载均用 Playwright 真点，字体检查 >=16px。负例：非法 enabled、不存在服务器、缺失会话分别 40066/40066/40401。隔离实例按监听端口反查进程组并 trap 结束，18791 已释放；没有 wb restart，没有修改 ~/.claude 设置，fixture 的配置原值保持不变。前期只读协议探针会因原有 SessionStart hooks 试写沙箱外路径而报 EROFS，独立冒烟 fixture 用 disableAllHooks 避免该旁支，模型与新功能均成功。
+
+
+## 12. Codex 客户端命令与 skills（2026-10-01，0.159.3）
+
+本机 `codex --version` = codex-cli 0.159.3。生成 JSON schema 于 `scratch/codex-commands/schema/`，关键依据为 v2/SkillsListParams、SkillsListResponse、TurnStartParams.definitions.UserInput、ThreadCompactStartParams、ReviewStartParams、ThreadReadParams、ListMcpServerStatusParams。官方 [app-server](https://learn.chatgpt.com/docs/app-server) 亦明确建议显式 skill input；只有 `$name` 文本也可触发模型查找，但可能增加延迟。本机 schema 不提供文档较新版本的 perCwdExtraUserRoots，本实现不发送该字段。
+
+探针：`skills/list {cwds:["/home/user/dev/workbench"],forceReload:true}` → `{data:[{cwd,skills:[{name,description,path,enabled,scope,interface?,dependencies?,shortDescription?,pluginId?}],errors:[{path,message}]}]}`。本机隔离 CODEX_HOME（仅状态目录迁移，读取原配置/skills）发现 62 项、25 项 enabled、0 errors，路径落在 ~/.codex/skills、~/.agents/skills 和 agent-env 的共享源。结果留存 `scratch/codex-commands/skills-list.json`；不将禁用项暴露给 picker。
+
+```json
+{"id":30,"method":"skills/list","params":{"cwds":["/project"],"forceReload":true}}
+{"id":31,"method":"turn/start","params":{"threadId":"thr","input":[{"type":"text","text":"$skill-name 请使用该 skill","text_elements":[]},{"type":"skill","name":"skill-name","path":"/absolute/skill/SKILL.md"}]}}
+{"id":32,"method":"thread/compact/start","params":{"threadId":"thr"}}
+{"id":33,"method":"review/start","params":{"threadId":"thr","delivery":"inline","target":{"type":"custom","instructions":"只读审查"}}}
+{"id":34,"method":"review/start","params":{"threadId":"thr","delivery":"inline","target":{"type":"uncommittedChanges"}}}
+{"id":35,"method":"thread/read","params":{"threadId":"thr","includeTurns":false}}
+{"id":36,"method":"model/list","params":{"limit":100,"includeHidden":false}}
+{"id":37,"method":"mcpServerStatus/list","params":{"threadId":"thr","limit":100}}
+{"id":38,"method":"turn/interrupt","params":{"threadId":"thr","turnId":"turn"}}
+```
+
+以上为 schema 对齐的字段示例，非真机成功声明。skills input 的 name/path/type 均 required，无 byte-range 字段；text_elements 仍只用于已有文件 @mention。`compact` 返回 `{}`，进度为 turn/started、contextCompaction item/started/completed、turn/completed；review 返回 turn 与 reviewThreadId，通过当前线程事件流呈现。model/list 与 mcpServerStatus/list 的 data/nextCursor 按 cursor 读完；MCP 含 authStatus、tools、resources、resourceTemplates 及可选 runtimeStatus/toolsError。new 沿用新 wb session 的 thread/start，模型/effort 不添加新的默认覆盖。
+
+实测脚本：`scratch/codex-commands/run-smoke.sh`；限 18794、setsid、端口反查 PGID、trap，仅终止自身启动的进程组。wrapper 只记录本单 RPC 与 turn/item 通知，不记录 config/read 或 account/auth。原 ~/.codex 状态库在沙箱只读启动失败，脚本以 scratch 下独立 CODEX_HOME（配置/auth 0600）运行。结果、真实 RPC 路径及截图验收状态以工单报告为准，失败不伪造成功。

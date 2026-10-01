@@ -146,13 +146,12 @@ await t("缺失闸门 ref 的恢复：先提示并 resync，快照窗口额外�
   assert.equal(data.events.length, 2001, "常规 2000 条窗口外只额外保留未决闸门保护项");
 });
 
-// --- P2-9：启动首连复用成功快照；真正重连仍对全部会话重取 ---
-await t("WS open 对齐：启动已加载会话跳过快照，断线重连仍强制重取", async () => {
+await t("WS open 对齐：已加载会话 afterSeq 补发，未加载会话只刷新列表", async () => {
   const session = makeSession("s-open-align");
   let snapshotCalls = 0;
   globalThis.fetch = (path) => {
     path = String(path);
-    if (path === "/api/sessions") return Promise.resolve(envelope({ sessions: [session] }));
+    if (path === "/api/sessions") return Promise.resolve(envelope({ sessions: [session, { ...makeSession("other"), pendingGateCount: 1, title: "未加载" }] }));
     if (path.endsWith("/snapshot")) {
       snapshotCalls++;
       return Promise.resolve(envelope({ session, seq: 0, events: [] }));
@@ -161,19 +160,91 @@ await t("WS open 对齐：启动已加载会话跳过快照，断线重连仍强
     return Promise.reject(new Error(`未打桩的请求：${path}`));
   };
   const s = new Store();
+  const sent = [];
+  s.socket = fakeSocket(sent);
   s.sessions = [session];
-  s.data.set(session.id, { events: [], seq: 0, dropped: 0, pendingGates: new Map() });
-
-  await s["alignAfterSocketOpen"](false);
-  assert.equal(snapshotCalls, 0, "启动 ensureLoaded 已成功的会话不应重复取快照");
-
-  await s["alignAfterSocketOpen"](true);
-  assert.equal(snapshotCalls, 1, "断线重连必须重取全部会话快照，不能静默漏事件");
-
+  s.data.set(session.id, { events: [], seq: 7, dropped: 0, pendingGates: new Map() });
+  await s.alignAfterSocketOpen(false);
+  await s.alignAfterSocketOpen(true);
+  assert.equal(snapshotCalls, 0);
+  assert.deepEqual(sent, Array(2).fill({ type: "replay", sessionId: session.id, afterSeq: 7 }));
+  assert.equal(s.pendingCount("other"), 1, "断线期间未加载会话新增审批由列表恢复");
+  assert.equal(s.data.has("other"), false);
   const missing = new Store();
-  missing.sessions = [session];
-  await missing["alignAfterSocketOpen"](false);
-  assert.equal(snapshotCalls, 2, "启动首取失败、data 不存在的会话仍必须在首次 open 补取");
+  missing.currentId = session.id;
+  await missing.alignAfterSocketOpen(false);
+  assert.equal(snapshotCalls, 1, "只为当前会话补快照");
+});
+
+await t("快照在途期间持续来事件：一次请求、完整且无重复", async () => {
+  const session = makeSession("stream-snapshot");
+  const gates = [];
+  stubFetch(session, gates);
+  const s = new Store();
+  s.sessions = [session];
+  s.data.set(session.id, { events: [makeEvent(session.id, 1)], seq: 1, dropped: 0, pendingGates: new Map() });
+  for (const seq of [3, 4, 5, 5, 6, 7, 8]) s.handleEvent(makeEvent(session.id, seq));
+  assert.equal(gates.length, 1);
+  gates[0](envelope({ session, seq: 4, events: [1, 2, 3, 4].map((seq) => makeEvent(session.id, seq)) }));
+  await settle();
+  assert.equal(gates.length, 1);
+  assert.deepEqual(s.data.get(session.id).events.map((event) => event.seq), [1,2,3,4,5,6,7,8]);
+  assert.equal(s.data.get(session.id).seq, 8);
+});
+
+await t("临时事件不推进 seq、不 resync；最终参数取代临时参数", async () => {
+  const session = makeSession("ephemeral");
+  const s = new Store(); s.sessions = [session];
+  s.data.set(session.id, { events: [makeEvent(session.id, 1, "tool_call_started", { toolCallId: "t" })], seq: 1, dropped: 0, pendingGates: new Map() });
+  s.resync = () => { throw new Error("临时事件触发了 resync"); };
+  globalThis.fetch = () => { throw new Error("临时事件请求了快照"); };
+  for (const partialInput of ["{", '{"x":']) s.handleEvent({ ...makeEvent(session.id, 99, "tool_call_updated", { toolCallId: "t", partialInput }), ephemeral: true });
+  assert.equal(s.data.get(session.id).seq, 1);
+  assert.equal(s.data.get(session.id).events.filter((event) => event.ephemeral).length, 1);
+  s.handleEvent(makeEvent(session.id, 2, "tool_call_updated", { toolCallId: "t", input: { x: 1 }, inputComplete: true }));
+  assert.equal(s.data.get(session.id).events.some((event) => event.ephemeral), false);
+});
+
+await t("重连补发与实时帧交错：先缓存、后按序去重，审批不漏", async () => {
+  const session = makeSession("replay");
+  const s = new Store(); s.sessions = [session];
+  s.data.set(session.id, { events: [], seq: 2, dropped: 0, pendingGates: new Map() });
+  s.replayBuffers.set(session.id, []);
+  s.handleEvent(makeEvent(session.id, 4));
+  s.handleEvent(makeEvent(session.id, 3, "permission_request", { requestId: "gate" }));
+  s.handleEvent(makeEvent(session.id, 4));
+  s.handleFrame({ type: "replay_complete", sessionId: session.id, currentSeq: 4 });
+  assert.deepEqual(s.data.get(session.id).events.map((event) => event.seq), [3,4]);
+  assert.equal(s.pendingCount(session.id), 1);
+});
+
+await t("未加载会话标题采用 WS 权威值，空首条消息不被后续覆盖", async () => {
+  const session = { ...makeSession("title-summary"), title: "新会话" };
+  const s = new Store(); s.sessions = [session];
+  s.handleEvent({ ...makeEvent(session.id, 1, "user_message", { text: "later" }), title: "新会话" });
+  assert.equal(s.session(session.id).title, "新会话");
+  assert.equal(s.data.has(session.id), false);
+});
+
+await t("启动只加载当前会话的一份快照", async () => {
+  const sessions = [makeSession("active"), makeSession("unopened")];
+  globalThis.window = { location: { hash: "#/session/active" }, addEventListener() {} };
+  globalThis.document = { addEventListener() {} };
+  globalThis.localStorage = { getItem() { return null; }, setItem() {}, removeItem() {} };
+  const snapshots = [];
+  globalThis.fetch = async (path) => {
+    if (path === "/api/meta") return envelope({});
+    if (path === "/api/sessions") return envelope({ sessions });
+    if (path === "/api/pages") return envelope({ pages: [] });
+    if (path.endsWith("/snapshot")) { snapshots.push(path); return envelope({ session: sessions[0], seq: 0, events: [] }); }
+    if (path.endsWith("/commands")) return envelope({ commands: [] });
+    throw new Error(`未打桩 ${path}`);
+  };
+  const s = new Store(); s.connect = () => {};
+  await s.init();
+  assert.deepEqual(snapshots, ["/api/sessions/active/snapshot"]);
+  assert.equal(s.data.has("unopened"), false);
+  clearTimeout(s.tickTimer);
 });
 
 await t("新建会话后立即发送：data 建起、事件按 seq 累积、上行帧写出", async () => {

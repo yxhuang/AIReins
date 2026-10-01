@@ -1,8 +1,12 @@
 import { constants } from "node:fs";
 import { open, readdir, realpath, stat, type FileHandle } from "node:fs/promises";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { StringDecoder } from "node:string_decoder";
+import { createHash } from "node:crypto";
+import { mergeHistoryMessages, parseHistoryMessages, type HistoryMessage } from "./history.js";
+import { boundExternalMessages, NativeConversationReader } from "./native-conversation.js";
+import type { AgentKind, SessionRecord } from "./types.js";
 
 const RUN_ID = /^(\d{8})-(\d{6})-(codex|kimi|copilot)-(.*)$/u;
 const CHUNK_SIZE = 64 * 1024;
@@ -22,7 +26,7 @@ export interface Dispatch {
   exit: number | null;
   files: number | null;
   session: string | null;
-  parent: { agent: string; sessionId: string | null; entrypoint: string | null; runId?: string } | null;
+  parent: { agent: string; sessionId: string | null; entrypoint: string | null; model: string | null; runId?: string } | null;
   promptHead: string | null;
 }
 
@@ -32,6 +36,9 @@ export interface DispatchDetail extends Dispatch {
   summary: string | null;
   final: string | null;
   accept: string | null;
+  acceptResult: string | null;
+  resume: string | null;
+  credits: number | null;
 }
 
 export interface DispatchLog {
@@ -78,6 +85,48 @@ export async function dispatchSessionMap(root = rootDirectory()): Promise<Map<st
 
 function rootDirectory(): string {
   return process.env.WB_DELEGATE_DIR || join(homedir(), ".cache", "delegate");
+}
+
+const parentModelCache = new Map<string, { expiresAt: number; value: Promise<string | null> }>();
+
+/** 最多读末尾 1 MiB；最后一条 assistant 缺 model 时返回 null，不借更早的模型冒充。 */
+export async function readClaudeTranscriptModel(path: string): Promise<string | null> {
+  try {
+    const input = await readText(dirname(path), basename(path), 1024 * 1024, true);
+    if (!input) return null;
+    const lines = input.text.split("\n");
+    if (input.truncated) lines.shift(); // 窗口起点可能落在 JSON 行中间。
+    for (let index = lines.length - 1; index >= 0; index--) {
+      try {
+        const row = JSON.parse(lines[index]!);
+        if (row?.type === "assistant") return typeof row.message?.model === "string" && row.message.model ? row.message.model : null;
+      } catch { /* 跳过损坏行或尚未写完的尾行。 */ }
+    }
+  } catch { /* 不存在或不可读的原生 transcript 不影响派单列表。 */ }
+  return null;
+}
+
+/** 缓存命中和空结果 30 秒；同一会话的并发读取复用 Promise，最多保留 256 项。 */
+export async function readClaudeParentModel(sessionId: string | null, projectsRoot = join(homedir(), ".claude", "projects")): Promise<string | null> {
+  if (!sessionId || !/^[a-zA-Z0-9_-]+$/.test(sessionId)) return null;
+  const key = `${projectsRoot}/${sessionId}`;
+  const cached = parentModelCache.get(key);
+  if (cached && cached.expiresAt > Date.now()) return cached.value;
+  const value = (async () => {
+    try {
+      const entries = await readdir(projectsRoot, { withFileTypes: true });
+      for (const entry of entries) {
+        if (!entry.isDirectory()) continue;
+        const model = await readClaudeTranscriptModel(join(projectsRoot, entry.name, `${sessionId}.jsonl`));
+        if (model) return model;
+      }
+    } catch { /* 原生目录不存在。 */ }
+    return null;
+  })();
+  parentModelCache.delete(key);
+  if (parentModelCache.size >= 256) parentModelCache.delete(parentModelCache.keys().next().value!);
+  parentModelCache.set(key, { expiresAt: Date.now() + 30_000, value });
+  return value;
 }
 
 function validId(runId: string): boolean {
@@ -201,7 +250,7 @@ function startFromId(runId: string): string | null {
   return Number.isNaN(value.getTime()) ? null : value.toISOString();
 }
 
-async function readDispatch(runId: string, directory: string): Promise<Dispatch> {
+async function readDispatch(runId: string, directory: string, includePrompt = true): Promise<Dispatch> {
   const match = RUN_ID.exec(runId)!;
   const result: Dispatch = {
     runId, tool: match[3]!, name: match[4]!, cwd: null, model: null, effort: null,
@@ -230,6 +279,7 @@ async function readDispatch(runId: string, directory: string): Promise<Dispatch>
         const agent = stringValue(input.agent);
         if (agent) result.parent = {
           agent, sessionId: stringValue(input.sessionId), entrypoint: stringValue(input.entrypoint),
+          model: agent === "claude" ? await readClaudeParentModel(stringValue(input.sessionId)) : null,
           ...(typeof input.runId === "string" ? { runId: input.runId } : {}),
         };
       }
@@ -257,7 +307,7 @@ async function readDispatch(runId: string, directory: string): Promise<Dispatch>
   } catch {
     result.status = "unknown";
   }
-  try { result.promptHead = await promptHead(directory); }
+  try { if (includePrompt) result.promptHead = await promptHead(directory); }
   catch { result.status = "unknown"; }
   return result;
 }
@@ -292,10 +342,117 @@ export async function getDispatch(runId: string, root = rootDirectory()): Promis
   const summary = await readOptional("summary.txt");
   const final = await readOptional("last.txt", 8 * 1024, true);
   const accept = await readOptional("accept.log", 4 * 1024, true);
+  let usage: Record<string, unknown> | null = null;
+  let metadata: Record<string, unknown> | null = null;
+  try { usage = await readJson(directory, "usage.json"); } catch { /* Optional usage. */ }
+  try { metadata = await readJson(directory, "run.json"); } catch { /* Legacy directory. */ }
   return {
     ...dispatch, prompt: prompt?.text ?? null, promptTruncated: prompt?.truncated ?? false,
     summary: summary?.text ?? null, final: final?.text ?? null, accept: accept?.text ?? null,
+    acceptResult: summary?.text.match(/^ACCEPT\s+(.+)$/m)?.[1]?.trim() ?? null,
+    resume: summary?.text.match(/^RESUME\s+(.+)$/m)?.[1]?.trim() ?? stringValue(metadata?.resume),
+    credits: numberValue(usage?.totalNanoAiu) !== null ? numberValue(usage?.totalNanoAiu)! / 1e9
+      : numberValue(summary?.text.match(/^STATUS\b.*?\bcredits\s+([\d.]+)/m)?.[1] ? Number(summary.text.match(/\bcredits\s+([\d.]+)/)?.[1]) : null),
   };
+}
+
+/** No list cap: history and parent links must include older-started, still-running jobs. */
+async function allDispatches(root: string): Promise<Dispatch[]> {
+  let entries;
+  try { entries = await readdir(root, { withFileTypes: true }); } catch { return []; }
+  const result: Dispatch[] = [];
+  for (const entry of entries) {
+    if (!validId(entry.name)) continue;
+    const directory = await resolveRun(entry.name, root);
+    if (directory) result.push(await readDispatch(entry.name, directory, false));
+  }
+  return result;
+}
+
+export async function listParentDispatches(parent: string, root = rootDirectory()): Promise<Dispatch[]> {
+  if (!/^[A-Za-z0-9_-]{1,128}$/.test(parent)) throw new DispatchQueryError("parent 必须是原生会话 ID");
+  return (await allDispatches(root)).filter((run) => run.status === "running"
+    && run.parent?.agent === "claude" && run.parent.sessionId === parent);
+}
+
+function endedTime(run: Dispatch): number {
+  const explicit = Date.parse(run.endedAt ?? "");
+  if (Number.isFinite(explicit)) return explicit;
+  const start = Date.parse(run.startedAt ?? "");
+  return Number.isFinite(start) && run.elapsedS !== null ? start + run.elapsedS * 1000 : NaN;
+}
+
+export async function listDispatchHistory(offset: string | null, root = rootDirectory(), now = Date.now()) {
+  const position = offset === null ? 0 : Number(offset);
+  if (offset === "" || !Number.isSafeInteger(position) || position < 0) throw new DispatchQueryError("offset 必须是非负安全整数");
+  const runs = (await allDispatches(root)).filter((run) => run.status !== "running"
+    && Number.isFinite(endedTime(run)) && endedTime(run) <= now && endedTime(run) >= now - 7 * 86400_000)
+    .sort((a, b) => endedTime(b) - endedTime(a) || b.runId.localeCompare(a.runId));
+  const page = runs.slice(position, position + 20);
+  await Promise.all(page.map(async (run) => {
+    const directory = await resolveRun(run.runId, root);
+    try { if (directory) run.promptHead = await promptHead(directory); } catch { /* Optional title preview. */ }
+  }));
+  return { dispatches: page, total: runs.length,
+    nextOffset: position + 20 < runs.length ? position + 20 : null };
+}
+
+export interface DispatchMessages {
+  source: "native" | "stdout";
+  agent?: AgentKind;
+  messages: HistoryMessage[];
+  replaceFrom: number;
+  cursor: string | null;
+  truncated: boolean;
+}
+
+const messageSnapshots = new Map<string, { cursor: string; messages: HistoryMessage[] }>();
+let nativeReader: NativeConversationReader | undefined;
+
+/** Existing native path validation + history normalization; wire deltas also replace updated tool results. */
+export async function getDispatchMessages(runId: string, cursor: string | null, root = rootDirectory(), reader?: NativeConversationReader): Promise<DispatchMessages | null> {
+  const directory = await resolveRun(runId, root);
+  if (!directory) return null;
+  const run = await readDispatch(runId, directory, false);
+  const fallback: DispatchMessages = { source: "stdout", messages: [], replaceFrom: 0, cursor: null, truncated: false };
+  if (!run.session || !["codex", "kimi"].includes(run.tool)) return fallback;
+  const agent = run.tool as AgentKind;
+  try {
+    const mark = await (reader ?? (nativeReader ??= new NativeConversationReader())).capture({ agent, nativeSessionId: run.session } as SessionRecord);
+    if (!mark) return fallback;
+    const file = await open(mark.path, constants.O_RDONLY | constants.O_NOFOLLOW);
+    let text: string;
+    let start: number;
+    try {
+      const size = (await file.stat()).size;
+      start = Math.max(0, size - 4 * 1024 * 1024);
+      text = (await readBytes(file, start, size - start)).toString("utf8");
+    } finally { await file.close(); }
+    // I/O framing only: all native record interpretation stays in history.ts.
+    const lines: { text: string; startOffset: number }[] = [];
+    let position = start;
+    for (const [index, line] of text.split("\n").entries()) {
+      if (!(start > 0 && index === 0)) lines.push({ text: line, startOffset: position });
+      position += Buffer.byteLength(line) + 1;
+    }
+    const normalized = mergeHistoryMessages(parseHistoryMessages(agent, lines));
+    const bounded = boundExternalMessages(run.session, normalized.slice(-400).map(({ startOffset: _offset, ...message }) => message));
+    const messages = bounded.messages;
+    const nextCursor = createHash("sha256").update(JSON.stringify(messages)).digest("hex");
+    const key = `${directory}:${run.session}`;
+    const previous = messageSnapshots.get(key);
+    let replaceFrom = 0;
+    if (cursor === nextCursor) replaceFrom = messages.length;
+    else if (cursor && previous?.cursor === cursor) {
+      while (replaceFrom < messages.length && replaceFrom < previous.messages.length
+        && JSON.stringify(messages[replaceFrom]) === JSON.stringify(previous.messages[replaceFrom])) replaceFrom++;
+    }
+    messageSnapshots.delete(key);
+    if (messageSnapshots.size >= 32) messageSnapshots.delete(messageSnapshots.keys().next().value!);
+    messageSnapshots.set(key, { cursor: nextCursor, messages });
+    return { source: "native", agent, messages: messages.slice(replaceFrom), replaceFrom, cursor: nextCursor,
+      truncated: start > 0 || normalized.length > 400 || bounded.truncated };
+  } catch { return fallback; }
 }
 
 export async function getDispatchLog(

@@ -1,6 +1,7 @@
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { isTerminalToggleKey } from "./terminal";
-import { Sidebar } from "./components/Sidebar";
+import { PageIcon, Sidebar } from "./components/Sidebar";
+import { TerminalIcon } from "./components/TerminalIcon";
 import { SessionView } from "./components/SessionView";
 import { HistoryPreviewPane } from "./components/HistoryView";
 // xterm 体积大（~300KB），第一次打开终端才按需加载，别拖慢手机首屏
@@ -37,6 +38,8 @@ const selectPendingTotal = (value: Store) =>
 export function App() {
   const [collapsed, setCollapsed] = useState(false);
   const [newOpen, setNewOpen] = useState(false);
+  const [returnToSession, setReturnToSession] = useState(false);
+  const usagePage = useStore((value) => value.pages.find((page) => page.id === "ai-usage"));
   // 终端面板：隐藏 = CSS display:none，组件一旦挂载就常驻（xterm 实例与 WS 连接不丢）
   const [termOpen, setTermOpen] = useState(false);
   const [termMounted, setTermMounted] = useState(false);
@@ -76,6 +79,9 @@ export function App() {
   useEffect(() => {
     if (historyOpen || currentPageId) setCollapsed(false);
   }, [historyOpen, currentPageId]);
+  useEffect(() => {
+    if (!currentPageId) setReturnToSession(false);
+  }, [currentPageId]);
 
   // 标签页标题带上全局未决闸门总数：切走也能看到「有闸门在等你」。
   // 必须写在组件里而不是 store.notify()——store.ts 会被纯 node 测试 import，没有 document。
@@ -98,6 +104,7 @@ export function App() {
         terminalCapable={terminalCapable}
         termOpen={termOpen}
         onToggleTerm={() => setTermOpen((v) => !v)}
+        returnToSession={returnToSession}
       />
       {/* .workspace 只包一层：.main 内部规则不动；终端开启时右侧追加分隔条 + 面板 */}
       <div className={`workspace${termOpen ? " term-open" : ""}`}>
@@ -111,11 +118,23 @@ export function App() {
               }}>
                 {dispatchesOpen ? "‹ 返回侧栏" : historySelection ? "‹ 所有来源会话" : "‹ 会话列表"}
               </button>
+              <div className="mobile-topbar-actions">
               {pendingTotal > 0 && (
                 <span className="gate-badge" title={`${pendingTotal} 个闸门等待处理`}>
                   {pendingTotal}
                 </span>
               )}
+              {current && !dispatchesOpen && !historySelection && <>
+                {usagePage && <button type="button" className="btn mobile-shortcut" aria-label="AI 用量" title="AI 用量" onClick={() => {
+                  setReturnToSession(true);
+                  setCollapsed(false);
+                  store.navigatePage(usagePage.id);
+                }}><PageIcon icon={usagePage.icon} /><span>AI 用量</span></button>}
+                {terminalCapable && <button type="button" className="btn mobile-shortcut" aria-label="终端" title="终端" onClick={() => setTermOpen(true)}>
+                  <TerminalIcon /><span>终端</span>
+                </button>}
+              </>}
+              </div>
             </div>
           )}
           {dispatchesOpen ? (

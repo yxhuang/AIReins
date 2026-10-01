@@ -1,12 +1,13 @@
-import { createReadStream, existsSync, statSync } from "node:fs";
+import { createReadStream, statSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import { extname, join, resolve } from "node:path";
+import { join, resolve } from "node:path";
 import type { Duplex } from "node:stream";
 import { fileURLToPath } from "node:url";
+import { gzipSync } from "node:zlib";
 import { WebSocket, WebSocketServer } from "ws";
 import { checkAccess, loadRemoteConfig, localPolicy, remotePolicy, type AccessPolicy, type RemoteConfig } from "./access.js";
-import { DispatchQueryError, getDispatch, getDispatchLog, listDispatches } from "./dispatches.js";
+import { DispatchQueryError, getDispatch, getDispatchLog, getDispatchMessages, listDispatches, listDispatchHistory, listParentDispatches } from "./dispatches.js";
 import { log } from "./logger.js";
 import { DirListError, listDirectories } from "./dir-list.js";
 import { normalizeFileQuery, searchFiles } from "./file-search.js";
@@ -14,10 +15,11 @@ import { HistoryIndex, HistoryQueryError } from "./history.js";
 import { getMeta, SERVER_VERSION } from "./meta.js";
 import { feishuSender, GateNotifier, larkCliSender, loadNotifyConfig, type NotifyConfig } from "./notify.js";
 import { checkPageHealth, proxyPage, scanPages } from "./pages.js";
-import { workbenchHome } from "./persistence.js";
+import { pruneStorage, workbenchHome } from "./persistence.js";
 import { isValidIdleReleaseMinutes, loadPrefs, savePrefs, type WorkbenchPrefs } from "./prefs.js";
 import { readClaudeStartupSettings, writeClaudeStartupSettings } from "./claude-settings.js";
 import { SessionManager } from "./session-manager.js";
+import { parseMcpAction } from "./session-menu.js";
 import { preflightSnapshot, SnapshotCwdError } from "./snapshot.js";
 import { TerminalError, TerminalRegistry, terminalEnabled, type TerminalEvent } from "./terminals.js";
 import { IMAGE_MENTION_MIME_TYPES, resolveUploadFile, saveUpload, UploadError } from "./uploads.js";
@@ -32,6 +34,8 @@ import {
   type UserMessageInput,
 } from "./types.js";
 import { ulid } from "./ulid.js";
+import { serveStatic } from "./static.js";
+import { replaySession, sendEvent, sendWs } from "./event-stream.js";
 
 const HOST = "127.0.0.1";
 const PORT = listenPort(process.env.WORKBENCH_PORT);
@@ -74,17 +78,33 @@ interface WsClientState {
   alive: boolean;
 }
 
+let prefs: WorkbenchPrefs = loadPrefs();
+// 必须在 SessionManager 读登记表之前：过期会话直接不载入
+try {
+  const pruned = pruneStorage(prefs.retentionDays);
+  if (pruned.expired + pruned.removedFiles > 0) log("info", "storage pruned", { ...pruned, retentionDays: prefs.retentionDays });
+} catch (error) {
+  log("warn", "storage prune failed", { message: error instanceof Error ? error.message : String(error) });
+}
 const manager = new SessionManager();
 const terminals = new TerminalRegistry(process.cwd());
 const history = new HistoryIndex();
 const pages = scanPages();
 const pagesById = new Map(pages.map((page) => [page.id, page]));
-let prefs: WorkbenchPrefs = loadPrefs();
 void getMeta(); // 启动时探测一次并缓存，不让首个 /api/meta 承担延迟。
 const wss = new WebSocketServer({ noServer: true });
 const terminalWss = new WebSocketServer({ noServer: true, maxPayload: 1024 * 1024 });
 const clients = new Set<WsClientState>();
 const terminalClients = new Map<WebSocket, boolean>();
+// 包含未完成的 HTTP 请求和已升级连接，避免遗漏不在 WS 客户端表里的 socket。
+const connections = new Set<Duplex>();
+
+function trackConnections(listener: Server): void {
+  listener.on("connection", (socket) => {
+    connections.add(socket);
+    socket.once("close", () => connections.delete(socket));
+  });
+}
 
 // 没回 pong 的连接在 25–50 秒内被断开（terminate 会触发 close，从 clients 里移除）。
 const heartbeat = setInterval(() => {
@@ -144,10 +164,15 @@ function startNotifier(): void {
 const server = createServer((request, response) => {
   void handleRequest(request, response, LOCAL_POLICY);
 });
+trackConnections(server);
 
 server.on("upgrade", (request, socket, head) => handleUpgrade(request, socket, head, LOCAL_POLICY));
 
 function handleUpgrade(request: IncomingMessage, socket: Duplex, head: Buffer, policy: AccessPolicy): void {
+  if (shuttingDown) {
+    socket.destroy();
+    return;
+  }
   const denied = checkAccess(policy, request.method ?? "GET", request.headers, true);
   if (denied) {
     log("warn", "websocket rejected", { reason: denied, path: request.url });
@@ -276,6 +301,7 @@ function startRemoteListener(config: RemoteConfig): Server {
   const remote = createServer((request, response) => {
     void handleRequest(request, response, policy);
   });
+  trackConnections(remote);
   remote.on("upgrade", (request, socket, head) => handleUpgrade(request, socket, head, policy));
   remote.on("error", (error) => log("error", "remote listener error", { message: error.message, port: config.port }));
   remote.listen(config.port, HOST, () => {
@@ -289,15 +315,34 @@ let restartPending = false;
 async function shutdown(signal: string): Promise<void> {
   if (shuttingDown) return;
   shuttingDown = true;
+  const deadline = setTimeout(() => {
+    log("error", "workbench server shutdown timed out", { signal, timeoutMs: 10_000 });
+    process.exit(1);
+  }, 10_000);
   log("info", "workbench server stopping", { signal });
   clearInterval(heartbeat);
   clearInterval(idleReleaseSweep);
-  for (const client of clients) client.socket.close(1001, "server shutdown");
-  for (const socket of terminalClients.keys()) socket.close(1001, "server shutdown");
-  terminals.shutdown();
-  await manager.shutdown();
-  await new Promise<void>((resolveClose) => server.close(() => resolveClose()));
-  if (remoteServer) await new Promise<void>((resolveClose) => remoteServer.close(() => resolveClose()));
+  try {
+    for (const client of clients) client.socket.close(1001, "server shutdown");
+    for (const socket of terminalClients.keys()) socket.close(1001, "server shutdown");
+    terminals.shutdown();
+    // wb stop 以主监听空出作为 worker 已停完的标志；此前只拒绝请求，不关闭监听。
+    await manager.shutdown();
+    const listeners = remoteServer ? [server, remoteServer] : [server];
+    const closed = listeners.map((listener) => new Promise<void>((resolveClose, rejectClose) => {
+      listener.close((error) => error ? rejectClose(error) : resolveClose());
+    }));
+    for (const listener of listeners) listener.closeAllConnections();
+    for (const client of clients) client.socket.terminate();
+    for (const socket of terminalClients.keys()) socket.terminate();
+    for (const socket of connections) socket.destroy();
+    await Promise.all(closed);
+    clearTimeout(deadline);
+    process.exit(0);
+  } catch (error) {
+    log("error", "workbench server shutdown failed", { message: error instanceof Error ? error.message : String(error) });
+    process.exit(1);
+  }
 }
 
 process.on("SIGINT", () => void shutdown("SIGINT"));
@@ -305,6 +350,11 @@ process.on("SIGTERM", () => void shutdown("SIGTERM"));
 process.once("exit", () => terminals.shutdown());
 
 async function handleRequest(request: IncomingMessage, response: ServerResponse, policy: AccessPolicy): Promise<void> {
+  if (shuttingDown) {
+    response.writeHead(503, { "Connection": "close", "Content-Type": "text/plain; charset=utf-8" });
+    response.end("server shutting down");
+    return;
+  }
   const requestId = ulid();
   const started = Date.now();
   try {
@@ -406,15 +456,30 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       });
       createReadStream(file.path).pipe(response);
     } else if (method === "GET" && url.pathname === "/api/dispatches") {
-      respond(response, 200, 0, "success", { dispatches: await listDispatches(url.searchParams.get("limit")) }, requestId);
+      try {
+        const parent = url.searchParams.get("parent");
+        respond(response, 200, 0, "success", { dispatches: parent !== null ? await listParentDispatches(parent) : await listDispatches(url.searchParams.get("limit")) }, requestId);
+      } catch (error) {
+        if (error instanceof DispatchQueryError) throw new ApiError(400, 40000, error.message);
+        throw error;
+      }
+    } else if (method === "GET" && url.pathname === "/api/dispatches/history") {
+      try {
+        respond(response, 200, 0, "success", await listDispatchHistory(url.searchParams.get("offset")), requestId);
+      } catch (error) {
+        if (error instanceof DispatchQueryError) throw new ApiError(400, 40000, error.message);
+        throw error;
+      }
     } else if (method === "GET" && url.pathname.startsWith("/api/dispatches/")) {
-      const match = url.pathname.match(/^\/api\/dispatches\/([^/]+)(\/log)?$/);
+      const match = url.pathname.match(/^\/api\/dispatches\/([^/]+)(\/log|\/messages)?$/);
       if (!match) throw new ApiError(404, 40400, "派单不存在");
       let runId: string;
       try { runId = decodeURIComponent(match[1]!); }
       catch { throw new ApiError(404, 40400, "派单不存在"); }
       try {
-        const data = match[2]
+        const data = match[2] === "/messages"
+          ? await getDispatchMessages(runId, url.searchParams.get("cursor"))
+          : match[2]
           ? await getDispatchLog(runId, url.searchParams.get("stream") ?? "stdout", url.searchParams.get("offset"))
           : await getDispatch(runId);
         if (!data) throw new ApiError(404, 40400, "派单或日志不可读取");
@@ -434,7 +499,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       if (!isValidIdleReleaseMinutes(idleReleaseMinutes)) {
         throw new ApiError(400, 40062, "idleReleaseMinutes 必须是 0 到 1440 的整数");
       }
-      prefs = { idleReleaseMinutes };
+      prefs = { ...prefs, idleReleaseMinutes };
       savePrefs(prefs);
       respond(response, 200, 0, "success", { ...prefs }, requestId);
     } else if (url.pathname === "/api/claude/settings" && (method === "GET" || method === "PUT")) {
@@ -494,10 +559,12 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
     } else {
       const snapshotMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/snapshot$/);
       const commandsMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/commands$/);
+      const codexCommandMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/codex\/command$/);
       const filesMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/files$/);
       const releaseMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/release$/);
       const infoMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/info\/([a-z]+)$/);
       const pluginMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/plugins$/);
+      const mcpMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/mcp$/);
       const detailMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)$/);
       const historyMessagesMatch = url.pathname.match(/^\/api\/history\/([^/]+)\/([^/]+)\/messages$/);
       const pageHealthMatch = url.pathname.match(/^\/api\/pages\/([^/]+)\/health$/);
@@ -512,6 +579,15 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
         const snapshot = manager.getSnapshot(id);
         if (!snapshot) throw new ApiError(404, 40401, `会话不存在：${id}`);
         respond(response, 200, 0, "success", snapshot, requestId);
+      } else if (method === "POST" && codexCommandMatch) {
+        const id = decodeURIComponent(codexCommandMatch[1]);
+        if (!manager.get(id)) throw new ApiError(404, 40401, `会话不存在：${id}`);
+        const input = await readJson(request);
+        try {
+          respond(response, 200, 0, "success", await manager.executeCodexCommand(id, input), requestId);
+        } catch (error) {
+          throw new ApiError(400, 40067, error instanceof Error ? error.message : String(error));
+        }
       } else if (method === "GET" && commandsMatch) {
         const id = decodeURIComponent(commandsMatch[1]);
         const commands = manager.getCommands(id);
@@ -533,6 +609,15 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
           respond(response, 200, 0, "success", result, requestId);
         } catch (error) {
           throw new ApiError(400, 40060, error instanceof Error ? error.message : String(error));
+        }
+      } else if (method === "POST" && mcpMatch) {
+        const id = decodeURIComponent(mcpMatch[1]);
+        if (!manager.get(id)) throw new ApiError(404, 40401, `会话不存在：${id}`);
+        const input = await readJson(request);
+        try {
+          respond(response, 200, 0, "success", await manager.manageMcp(id, parseMcpAction(input)), requestId);
+        } catch (error) {
+          throw new ApiError(400, 40066, error instanceof Error ? error.message : String(error));
         }
       } else if (method === "PUT" && pluginMatch) {
         const id = decodeURIComponent(pluginMatch[1]);
@@ -599,7 +684,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
           }
         }
       } else if (!url.pathname.startsWith("/api/")) {
-        if (!serveStatic(url.pathname, response)) throw new ApiError(404, 40400, "静态前端尚未构建");
+        if (!serveStatic(STATIC_ROOT, url.pathname, response, request.headers["accept-encoding"])) throw new ApiError(404, 40400, "静态前端尚未构建");
       } else {
         throw new ApiError(404, 40400, "接口不存在");
       }
@@ -660,7 +745,10 @@ async function handleWsMessage(client: WsClientState, text: string): Promise<voi
     if (message.clientRequestId !== undefined && typeof message.clientRequestId !== "string") {
       throw new Error("clientRequestId 必须是字符串");
     }
-    if (message.type === "user_message") {
+    if (message.type === "replay") {
+      if (!Number.isSafeInteger(message.afterSeq) || message.afterSeq < 0) throw new Error("afterSeq 必须是非负整数");
+      replaySession(manager, client, sessionId, message.afterSeq);
+    } else if (message.type === "user_message") {
       await manager.sendUserMessage(sessionId, validateUserMessage(message));
     } else if (message.type === "permission_resolved") {
       const decisions = new Set(["allow", "deny", "always"]);
@@ -795,18 +883,6 @@ function decodeHistorySegment(value: string): string {
   }
 }
 
-function sendEvent(client: WsClientState, event: UnifiedEvent): void {
-  if (client.sessionId && client.sessionId !== event.sessionId) return;
-  const last = client.lastSeq.get(event.sessionId) ?? 0;
-  if (event.seq <= last) return;
-  sendWs(client, event);
-  client.lastSeq.set(event.sessionId, event.seq);
-}
-
-function sendWs(client: WsClientState, value: unknown): void {
-  if (client.socket.readyState === WebSocket.OPEN) client.socket.send(JSON.stringify(value));
-}
-
 function respond(
   response: ServerResponse,
   status: number,
@@ -815,11 +891,15 @@ function respond(
   data: unknown,
   requestId: string,
 ): void {
-  const body = JSON.stringify({ code, msg, data, request_id: requestId });
+  const json = JSON.stringify({ code, msg, data, request_id: requestId });
+  // 长会话快照可达十几 MB，手机走远程时 10 秒内下不完；大响应按 Accept-Encoding 用 gzip（level 1：约 1/5 体积、百毫秒内）
+  const gzip = json.length > 32 * 1024 && /\bgzip\b/.test(String(response.req?.headers["accept-encoding"] ?? ""));
+  const body = gzip ? gzipSync(json, { level: 1 }) : json;
   response.writeHead(status, {
     "content-type": "application/json; charset=utf-8",
     "content-length": Buffer.byteLength(body),
     "cache-control": "no-store",
+    ...(gzip ? { "content-encoding": "gzip", vary: "accept-encoding" } : {}),
   });
   response.end(body);
 }
@@ -953,34 +1033,4 @@ function validateUserMessage(value: Record<string, any>): UserMessageInput {
     ...(command ? { command } : {}),
     ...(mentions.length ? { mentions } : {}),
   };
-}
-
-function serveStatic(pathname: string, response: ServerResponse): boolean {
-  if (!existsSync(STATIC_ROOT)) return false;
-  const relative = pathname === "/" ? "/index.html" : pathname;
-  let path = resolve(STATIC_ROOT, `.${relative}`);
-  if (!path.startsWith(`${STATIC_ROOT}/`) && path !== STATIC_ROOT) return false;
-  if ((!existsSync(path) || statSync(path).isDirectory()) && existsSync(resolve(STATIC_ROOT, "index.html"))) {
-    path = resolve(STATIC_ROOT, "index.html");
-  }
-  if (!existsSync(path) || !statSync(path).isFile()) return false;
-  const contentTypes: Record<string, string> = {
-    ".html": "text/html; charset=utf-8",
-    ".js": "text/javascript; charset=utf-8",
-    ".css": "text/css; charset=utf-8",
-    ".json": "application/json; charset=utf-8",
-    ".svg": "image/svg+xml",
-    ".png": "image/png",
-    ".webmanifest": "application/manifest+json",
-  };
-  // 只有 assets/ 下的文件名带内容哈希，可以永久缓存；其余（index.html、图标、manifest）文件名固定，每次回源确认。
-  const immutable = path.startsWith(`${STATIC_ROOT}/assets/`);
-  response.writeHead(200, {
-    "content-type": contentTypes[extname(path)] ?? "application/octet-stream",
-    "cache-control": immutable ? "public, max-age=31536000, immutable" : "no-cache",
-    "x-frame-options": "DENY",
-    "content-security-policy": "frame-ancestors 'none'",
-  });
-  createReadStream(path).pipe(response);
-  return true;
 }

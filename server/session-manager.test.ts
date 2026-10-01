@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { existsSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -315,8 +316,11 @@ assert.equal(instances.at(-1)!.options.resumeSessionId, "existing-native-session
 
 const promptedSessions = (manager as unknown as { promptedSessions: Set<string> }).promptedSessions;
 assert.equal(promptedSessions.has(created.id), true);
+assert.equal(existsSync(created.transcriptPath), true);
 await manager.remove(created.id);
 assert.equal(promptedSessions.has(created.id), false);
+// 移除时删掉 wb 自己的 transcript 副本
+assert.equal(existsSync(created.transcriptPath), false);
 
 const codex = await manager.create({ agent: "codex", cwd: process.cwd() });
 assert.deepEqual({ model: codex.model, effort: codex.effort, permissionMode: codex.permissionMode }, {

@@ -1,3 +1,5 @@
+import { modelShortName } from "./config-view";
+
 /** 列表接口的显示字段；不引入服务端模块或详情/日志数据。 */
 export interface DispatchRun {
   runId: string;
@@ -10,7 +12,7 @@ export interface DispatchRun {
   endedAt: string | null;
   elapsedS: number | null;
   session: string | null;
-  parent: { agent: string; sessionId: string | null; entrypoint: string | null; runId?: string } | null;
+  parent: { agent: string; sessionId: string | null; entrypoint: string | null; model?: string | null; runId?: string } | null;
   promptHead?: string | null;
 }
 
@@ -81,7 +83,18 @@ export function dispatchStatus(status: string): { label: string; className: stri
   return { label: "未知", className: "" };
 }
 
-export interface DispatchSessionTitle { id: string; nativeSessionId?: string; title: string }
+export interface DispatchSessionTitle { id: string; nativeSessionId?: string; title: string; model?: string | null }
+
+export function dispatcherModel(runs: readonly DispatchRun[], sessions: readonly DispatchSessionTitle[]): string | null {
+  const models = new Set<string>();
+  for (const run of runs) {
+    if (run.parent?.agent !== "claude") continue;
+    const session = sessions.find((item) => item.nativeSessionId === run.parent!.sessionId);
+    const model = session ? session.model : run.parent.model;
+    if (model) models.add(modelShortName(model));
+  }
+  return models.size ? [...models].join(" · ") : null;
+}
 export function dispatcherTitle(runs: readonly DispatchRun[], sessions: readonly DispatchSessionTitle[]): string {
   // run.session 是执行端自己的会话；派单人在 parent（只认 Claude 派出的）
   const ids = [...new Set(runs.map((run) => run.parent?.agent === "claude" ? run.parent.sessionId?.trim() : null).filter((id): id is string => Boolean(id)))];

@@ -11,6 +11,7 @@ import { relative, sep } from "node:path";
 import { isRiskyConfig, mergeSessionConfig } from "../session-config.js";
 import { BaseDriver, errorMessage, parseJsonLine, userMessageText, withTimeout } from "./base.js";
 import { StdioRpcProbe } from "./rpc-probe.js";
+import { CODEX_COMMANDS, codexSkillInputs, codexSkillsForCwd, parseCodexCommand } from "../codex-commands.js";
 
 interface PendingRpc {
   resolve(value: any): void;
@@ -55,6 +56,48 @@ interface CodexModelInfo {
 interface CodexEffectiveConfig {
   model?: unknown;
   model_reasoning_effort?: unknown;
+}
+
+interface CodexPermissions {
+  approvalPolicy: unknown;
+  approvalsReviewer: "user" | "auto_review";
+  sandbox: "workspace-write" | "danger-full-access";
+  sandboxPolicy: Record<string, unknown>;
+}
+
+function codexPermissions(mode: string): CodexPermissions {
+  const sandbox = mode === "full-access" ? "danger-full-access" : "workspace-write";
+  return {
+    approvalPolicy: mode === "full-access" || mode === "never" ? "never"
+      : mode === "untrusted" ? "untrusted" : "on-request",
+    approvalsReviewer: mode === "auto-review" ? "auto_review" : "user",
+    sandbox,
+    sandboxPolicy: sandbox === "danger-full-access" ? { type: "dangerFullAccess" }
+      : {
+        type: "workspaceWrite",
+        writableRoots: [],
+        networkAccess: false,
+        excludeTmpdirEnvVar: false,
+        excludeSlashTmp: false,
+      },
+  };
+}
+
+function permissionModeFromResult(result: any, requested: string): string {
+  if (result?.approvalPolicy === "untrusted") return "untrusted";
+  const sandboxType = result?.sandbox?.type;
+  const reviewer = result?.approvalsReviewer;
+  if (result?.approvalPolicy === "never") {
+    return sandboxType === "dangerFullAccess" ? "full-access" : "never";
+  }
+  if (result?.approvalPolicy === "on-request") {
+    if (sandboxType && sandboxType !== "workspaceWrite") {
+      throw new Error("Codex 返回的沙盒与所选权限模式不一致");
+    }
+    return reviewer === "auto_review" || reviewer === "guardian_subagent" ? "auto-review"
+      : reviewer === "user" ? "on-request" : requested;
+  }
+  return requested;
 }
 
 export function codexConfigSchemaFromModels(
@@ -105,13 +148,13 @@ export function codexConfigSchemaFromModels(
       },
       {
         id: "permissionMode",
-        name: "审批模式",
+        name: "权限模式",
         values: [
-          { value: "untrusted", label: "Untrusted" },
-          { value: "on-request", label: "On Request" },
-          { value: "never", label: "Never" },
+          { value: "on-request", label: "Ask for approval", description: "在工作区内执行，额外权限由你审批" },
+          { value: "auto-review", label: "Approve for me", description: "保留工作区沙盒，额外权限由 Codex 自动审核" },
+          { value: "full-access", label: "Full access", description: "不使用沙盒，也不弹出执行审批" },
         ],
-        default: "untrusted",
+        default: "on-request",
         mutable: true,
       },
     ],
@@ -156,6 +199,8 @@ export class CodexDriver extends BaseDriver {
 
   constructor(options: DriverOptions) {
     super(options);
+    // 旧会话的 never 只关闭审批，不能因菜单升级而自动获得 Full access。
+    this.config.permissionMode ??= "on-request";
     this.sendModel = Boolean(options.config.model);
     this.sendEffort = Boolean(options.config.effort);
   }
@@ -196,11 +241,14 @@ export class CodexDriver extends BaseDriver {
     this.config = {
       model: this.config.model ?? modelOption?.default,
       effort: this.config.effort ?? effortOption?.default,
-      permissionMode: this.config.permissionMode ?? "untrusted",
+      permissionMode: this.config.permissionMode ?? "on-request",
     };
+    const permissions = codexPermissions(this.config.permissionMode!);
     const threadOverrides = {
       ...(this.sendModel && this.config.model ? { model: this.config.model } : {}),
-      approvalPolicy: this.config.permissionMode,
+      approvalPolicy: permissions.approvalPolicy,
+      approvalsReviewer: permissions.approvalsReviewer,
+      sandbox: permissions.sandbox,
       ...(this.sendEffort && this.config.effort
         ? { config: { model_reasoning_effort: this.config.effort } }
         : {}),
@@ -214,7 +262,6 @@ export class CodexDriver extends BaseDriver {
       : await withTimeout(this.request("thread/start", {
         cwd: this.cwd,
         ...threadOverrides,
-        sandbox: "workspace-write",
         ephemeral: false,
         serviceName: "workbench",
       }), 15_000, "Codex thread/start");
@@ -225,9 +272,7 @@ export class CodexDriver extends BaseDriver {
       effort: typeof result?.reasoningEffort === "string"
         ? result.reasoningEffort
         : result?.reasoningEffort === null ? null : this.config.effort ?? null,
-      permissionMode: typeof result?.approvalPolicy === "string"
-        ? result.approvalPolicy
-        : this.config.permissionMode ?? "untrusted",
+      permissionMode: permissionModeFromResult(result, this.config.permissionMode ?? "on-request"),
     };
     this.callbacks.metadata({
       nativeSessionId: this.threadId,
@@ -235,6 +280,62 @@ export class CodexDriver extends BaseDriver {
       config: { ...this.config },
     });
     this.callbacks.status("idle");
+    this.callbacks.commands(CODEX_COMMANDS.map(c => ({ ...c })));
+  }
+
+  async queryInfo(kind: string): Promise<unknown> {
+    if (kind === "skills") {
+      const result = await withTimeout(this.request("skills/list", { cwds: [this.cwd], forceReload: true }), 15_000, "Codex skills/list");
+      return codexSkillsForCwd(result, this.cwd);
+    }
+    if (kind === "status") {
+      const result = await withTimeout(this.request("thread/read", { threadId: this.threadId, includeTurns: false }), 15_000, "Codex thread/read");
+      return { ...result, config: { ...this.config } };
+    }
+    if (kind === "model" || kind === "mcp") {
+      const method = kind === "model" ? "model/list" : "mcpServerStatus/list";
+      const data: unknown[] = [];
+      const cursors = new Set<string>();
+      let cursor: string | undefined;
+      do {
+        const result = await withTimeout(this.request(method, {
+          limit: 100, ...(cursor ? { cursor } : {}),
+          ...(kind === "model" ? { includeHidden: false } : { threadId: this.threadId }),
+        }), 15_000, `Codex ${method}`);
+        if (Array.isArray(result?.data)) data.push(...result.data);
+        cursor = result?.nextCursor ?? undefined;
+        if (cursor && cursors.has(cursor)) throw new Error("Codex 分页 cursor 重复");
+        if (cursor) cursors.add(cursor);
+      } while (cursor);
+      return { data, nextCursor: null };
+    }
+    throw new Error(`未知 Codex 查看项：${kind}`);
+  }
+
+  async executeCommand(name: string, args?: string): Promise<unknown> {
+    const command = parseCodexCommand({ name, arguments: args });
+    if (["status", "model", "mcp", "skills"].includes(name)) return this.queryInfo(name);
+    if (name === "interrupt") {
+      if (!this.turnId) throw new Error("当前没有可中断的执行");
+      await withTimeout(this.interrupt(), 15_000, "Codex turn/interrupt");
+      return { message: "中断请求已接受；以执行结束事件为准" };
+    }
+    if (name !== "compact" && name !== "review") throw new Error("新会话必须通过 Workbench 会话管理器创建");
+    this.callbacks.status("running");
+    this.turnId = "";
+    try {
+      const result = await withTimeout(this.request(name === "compact" ? "thread/compact/start" : "review/start", {
+        threadId: this.threadId,
+        ...(name === "review" ? { delivery: "inline", target: command.arguments
+          ? { type: "custom", instructions: command.arguments }
+          : { type: "uncommittedChanges" } } : {}),
+      }), 15_000, `Codex ${name}`);
+      if (result?.turn?.id) this.turnId = result.turn.id;
+      return { ...result, message: name === "compact" ? "压缩请求已接受；进度显示在当前对话" : "审查已开始；结果显示在当前对话" };
+    } catch (error) {
+      this.callbacks.status("idle");
+      throw error;
+    }
   }
 
   getConfigSchema(): DriverConfigSchema {
@@ -244,6 +345,7 @@ export class CodexDriver extends BaseDriver {
   async setConfig(config: SessionConfig): Promise<SessionConfig> {
     this.validateConfig(config);
     this.config = mergeSessionConfig(this.config, config);
+    this.config.permissionMode ??= "on-request";
     if (config.model !== undefined) {
       this.sendModel = config.model !== null;
       this.clearModelNextTurn = config.model === null;
@@ -263,7 +365,7 @@ export class CodexDriver extends BaseDriver {
 
   async sendUserMessage(message: UserMessageInput): Promise<void> {
     if (!this.threadId) throw new Error("Codex thread 尚未就绪");
-    if (message.command) throw new Error("Codex app-server 不支持可枚举的斜杠命令");
+    if (message.command) throw new Error("Codex 命令必须通过会话命令接口执行");
     const input: Record<string, unknown>[] = [];
     let text = userMessageText(message);
     const textElements: Array<{ byteRange: { start: number; end: number }; placeholder: string }> = [];
@@ -301,20 +403,20 @@ export class CodexDriver extends BaseDriver {
         path: mention.path,
       });
     }
+    if (/\$[^\s]+/.test(text)) {
+      const listing = await this.queryInfo("skills") as ReturnType<typeof codexSkillsForCwd>;
+      input.push(...codexSkillInputs(text, listing.skills));
+    }
     this.callbacks.status("running");
     this.turnId = "";
     const applyingConfig = this.capturePendingConfig();
+    const permissions = codexPermissions(this.config.permissionMode ?? "on-request");
     void this.request("turn/start", {
       threadId: this.threadId,
       input,
-      approvalPolicy: this.config.permissionMode ?? "untrusted",
-      sandboxPolicy: {
-        type: "workspaceWrite",
-        writableRoots: [],
-        networkAccess: false,
-        excludeTmpdirEnvVar: false,
-        excludeSlashTmp: false,
-      },
+      approvalPolicy: permissions.approvalPolicy,
+      approvalsReviewer: permissions.approvalsReviewer,
+      sandboxPolicy: permissions.sandboxPolicy,
       ...(applyingConfig?.clearModel
         ? { model: null }
         : this.sendModel && this.config.model ? { model: this.config.model } : {}),
@@ -616,6 +718,9 @@ export class CodexDriver extends BaseDriver {
       if (value === undefined || value === null) continue;
       const option = this.configSchema.options.find((item) => item.id === id);
       if (!option) throw new Error(`Codex 不支持配置项：${id}`);
+      // 仅兼容当前旧会话；不再提供为新会话选择旧策略的入口。
+      if (id === "permissionMode" && ["never", "untrusted"].includes(value)
+        && this.resumeSessionId && value === this.config.permissionMode) continue;
       if (!option.values.some((item) => item.value === value)) {
         throw new Error(`Codex ${id} 不合法：${value}`);
       }

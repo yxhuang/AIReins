@@ -119,6 +119,10 @@ export interface UserMessageInput {
 }
 
 export interface UnifiedEvent {
+  /** user_message 携带服务端计算的会话标题。 */
+  title?: string;
+  /** 临时工具参数更新：seq 为当前值，不持久化、不推进游标。 */
+  ephemeral?: true;
   type: EventType;
   sessionId: string;
   agentId: string;
@@ -128,6 +132,8 @@ export interface UnifiedEvent {
 }
 
 export interface SessionRecord {
+  title?: string;
+  pendingGateCount?: number;
   id: string;
   agent: AgentKind;
   agentId: string;
@@ -205,6 +211,10 @@ export interface Driver {
   setRemoteControl?(enabled: boolean): Promise<RemoteControlState>;
   /** 只读查询（Claude control_request，如 mcp_status），返回 CLI 的 response 原样 */
   queryInfo?(subtype: string): Promise<unknown>;
+  /** Codex's curated app-server actions; never an arbitrary RPC proxy. */
+  executeCommand?(name: string, args?: string): Promise<unknown>;
+  /** MCP 会话开关/重连；只操作 CLI 实际枚举出的服务器。 */
+  manageMcp?(action: import("./session-menu.js").McpAction): Promise<unknown>;
   /** 从磁盘刷新设置并重载插件，不重启 worker。 */
   reloadPlugins?(): Promise<void>;
   sendUserMessage(message: UserMessageInput): Promise<void>;

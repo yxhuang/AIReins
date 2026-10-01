@@ -51,6 +51,10 @@ export interface DriverConfigOption {
 }
 
 export interface UnifiedEvent {
+  /** user_message 携带服务端计算的会话标题。 */
+  title?: string;
+  /** 临时工具参数更新：seq 为当前值，不持久化、不推进游标。 */
+  ephemeral?: true;
   type: string;
   sessionId: string;
   agentId: string;
@@ -79,6 +83,8 @@ export interface AskQuestion {
 }
 
 export interface SessionRecord {
+  title?: string;
+  pendingGateCount?: number;
   id: string;
   agent: AgentKind;
   agentId: string;
@@ -147,7 +153,7 @@ export type Mention = FileMention | ImageMention;
 export interface DriverCapabilities {
   usage: "detailed" | "context" | false;
   interrupt: boolean;
-  /** false = 无斜杠命令枚举协议（codex）：不弹命令面板，结构化 command 会被后端拒绝 */
+  /** Codex 使用 wb 按本机协议映射的命令表；Claude/Kimi 使用原生枚举。 */
   commands: boolean;
   /** @ 文件引用能力位：false = 不弹 @ 面板、不显示预览条、发送不解析引用（纯文本原样发） */
   mentions: boolean;
@@ -272,6 +278,27 @@ export type HistoryMessage =
       id: string; name: string; input: unknown; result?: string; rawResult?: unknown;
       status: "ok" | "error" | "unknown";
     } };
+
+export type DispatchDetail = import("./dispatch-flow").DispatchRun & {
+  cwd: string | null;
+  prompt: string | null;
+  promptTruncated: boolean;
+  summary: string | null;
+  final: string | null;
+  accept: string | null;
+  acceptResult: string | null;
+  resume: string | null;
+  credits: number | null;
+}
+
+export interface DispatchMessages {
+  source: "native" | "stdout";
+  agent?: AgentKind;
+  messages: HistoryMessage[];
+  replaceFrom: number;
+  cursor: string | null;
+  truncated: boolean;
+}
 
 /** GET /api/history/:agent/:nativeSessionId/messages 的 data：最新一页 + 向更早翻页。 */
 export interface HistoryMessagesPage {

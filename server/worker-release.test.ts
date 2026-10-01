@@ -26,11 +26,19 @@ await writeFile(claudePath, `${[
 const quoteCwd = join(fixture, "it's-here");
 await mkdir(quoteCwd);
 
-const [{ SessionManager }, { NativeConversationReader }, { loadRegistry }] = await Promise.all([
+const [{ SessionManager, buildVSCodeUri }, { NativeConversationReader }, { loadRegistry }] = await Promise.all([
   import("./session-manager.js"),
   import("./native-conversation.js"),
   import("./persistence.js"),
 ]);
+
+const uriCwd = "/home/user/dev/space dir";
+assert.equal(buildVSCodeUri({ agent: "claude", nativeSessionId: claudeId, cwd: uriCwd }, ""), `vscode://anthropic.claude-code/open?session=${claudeId}`);
+for (const agent of ["codex", "kimi"] as const) {
+  assert.equal(buildVSCodeUri({ agent, cwd: uriCwd }, "ubuntu"), "vscode://vscode-remote/wsl+ubuntu/home/user/dev/space%20dir");
+  assert.equal(buildVSCodeUri({ agent, cwd: uriCwd }, ""), null);
+}
+assert.equal(buildVSCodeUri({ agent: "claude", cwd: uriCwd }, "ubuntu"), null);
 
 const schema: DriverConfigSchema = {
   source: "fixture",
@@ -113,6 +121,7 @@ async function pendingMarks(manager: InstanceType<typeof SessionManager>, id: st
   await pendingMarks(manager, session.id);
   const result = await manager.release(session.id, "manual");
   assert.equal(result.resumeCommand, `cd '${fixture}' && claude --resume ${claudeId}`);
+  assert.equal(result.vscodeUri, `vscode://anthropic.claude-code/open?session=${claudeId}`);
   assert.equal(result.session.released, true);
   assert.equal(instances[0]!.stopped, true);
   const after = manager.get(session.id)!;

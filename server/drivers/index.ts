@@ -13,7 +13,7 @@ export const DRIVER_CAPABILITIES: Record<AgentKind, DriverCapabilities> = {
   codex: {
     usage: "detailed",
     interrupt: true,
-    commands: false,
+    commands: true,
     mentions: true,
   },
   kimi: {

@@ -1,18 +1,27 @@
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
-import { fetchDispatches } from "../api";
-import { dispatchName, dispatcherTitle, dispatchSeconds, dispatchStatus, dispatchTime, groupDispatches, type DispatchRun } from "../dispatch-flow";
+import { fetchDispatchDetail, fetchDispatches } from "../api";
+import { dispatchName, dispatcherTitle, dispatcherModel, dispatchSeconds, dispatchStatus, dispatchTime, groupDispatches, type DispatchRun } from "../dispatch-flow";
+import { effectiveFor, modelShortName } from "../config-view";
 import { startDispatchPolling } from "../dispatch-polling";
 import { sessionTitle } from "../format";
 import { useStore } from "../useStore";
 import { AgentIcon } from "./AgentIcon";
+import { store } from "../store";
+import { DispatchDetail } from "./DispatchDetail";
+import { DispatchHistory } from "./DispatchHistory";
 
 const LABELS = { codex: "Codex", kimi: "Kimi", copilot: "Copilot" };
 const selectTitles = (value: import("../store").Store) => value.sessions.map((session) => ({
   id: session.id, nativeSessionId: session.nativeSessionId,
+  model: session.config?.model || effectiveFor(session, "model")?.value || null,
   title: sessionTitle(session, value.data.get(session.id)?.events),
 }));
 
 export function DispatchView({ terminalOpen = false }: { terminalOpen?: boolean }) {
+  const route = useStore(() => window.location.hash);
+  const selected = route.match(/^#\/dispatches\/([^?]+)/)?.[1];
+  const selectedId = selected ? decodeURIComponent(selected) : null;
+  const highlighted = new Set(new URLSearchParams(route.split("?")[1]).get("runs")?.split(",").filter(Boolean) ?? []);
   const [runs, setRuns] = useState<DispatchRun[]>([]);
   const [now, setNow] = useState(Date.now);
   const [error, setError] = useState("");
@@ -20,7 +29,7 @@ export function DispatchView({ terminalOpen = false }: { terminalOpen?: boolean 
   const observedEnds = useRef(new Map<string, number>());
   const sessions = useStore(selectTitles, (a, b) => JSON.stringify(a) === JSON.stringify(b));
   useEffect(() => startDispatchPolling({
-    visible: () => document.visibilityState !== "hidden"
+    visible: () => !selectedId && document.visibilityState !== "hidden"
       && !(terminalOpen && window.matchMedia("(max-width: 720px)").matches),
     now: Date.now,
     every: (callback, ms) => window.setInterval(callback, ms),
@@ -34,19 +43,26 @@ export function DispatchView({ terminalOpen = false }: { terminalOpen?: boolean 
         mobile.removeEventListener("change", callback);
       };
     },
-  }, fetchDispatches, (items) => {
+  }, async (signal) => {
+    const data = await fetchDispatches(signal);
+    const missing = [...highlighted].filter((id) => !data.dispatches.some((run) => run.runId === id));
+    const extra = await Promise.allSettled(missing.map((id) => fetchDispatchDetail(id, signal)));
+    for (const result of extra) if (result.status === "fulfilled") data.dispatches.push(result.value);
+    return data;
+  }, (items) => {
     for (const run of items) {
       if (run.status === "running") observedEnds.current.delete(run.runId);
       else if (run.status === "lost" && !observedEnds.current.has(run.runId)) observedEnds.current.set(run.runId, Date.now());
     }
     setRuns(items);
     setLoaded(true);
-  }, setError, setNow), [terminalOpen]);
+  }, setError, setNow), [terminalOpen, route]);
 
   const groups = groupDispatches(runs, now, observedEnds.current);
   const visibleRuns = groups.flatMap((group) => group.runs);
   const running = visibleRuns.filter((run) => run.status === "running").length;
   const title = dispatcherTitle(visibleRuns, sessions);
+  const model = dispatcherModel(visibleRuns, sessions);
   const tree = useRef<HTMLDivElement>(null);
   const [geometry, setGeometry] = useState<{ width: number; height: number; paths: string[] }>({ width: 1, height: 1, paths: [] });
   useLayoutEffect(() => {
@@ -87,7 +103,9 @@ export function DispatchView({ terminalOpen = false }: { terminalOpen?: boolean 
     // 行数变化时即使树总高不变，也要重算各卡片的中点。
     element.querySelectorAll(".dispatch-node").forEach((node) => observer.observe(node));
     return () => observer.disconnect();
-  }, []);
+  }, [selectedId]);
+
+  if (selectedId) return <DispatchDetail key={selectedId} runId={selectedId} sessions={sessions} terminalOpen={terminalOpen} />;
 
   return (
     <section className="dispatch-view" aria-label="派单流程图">
@@ -103,6 +121,7 @@ export function DispatchView({ terminalOpen = false }: { terminalOpen?: boolean 
           <article className="dispatch-node dispatch-source">
             <div className="dispatch-source-head"><AgentIcon agent="claude" label="Claude Code" /><span>Claude Code</span><span className="dispatch-role">派单人</span></div>
             <p className="dispatch-session-title" title={title}>{title}</p>
+            {model && <p className="dispatch-model">{model}</p>}
           </article>
           <div className="dispatch-executors">
             {groups.map((group) => <article key={group.tool} className={`dispatch-node dispatch-executor${group.runs.length ? "" : " idle"}`} data-tool={group.tool}>
@@ -114,20 +133,22 @@ export function DispatchView({ terminalOpen = false }: { terminalOpen?: boolean 
                 {group.visible.map((run) => {
                   const status = dispatchStatus(run.status);
                   const name = dispatchName(run);
-                  return <div className="dispatch-job" key={run.runId}>
-                    <p className="dispatch-model">{run.model || "—"} / {run.effort || "—"}</p>
+                  return <button type="button" className={`dispatch-job dispatch-job-link${highlighted.has(run.runId) ? " highlighted" : ""}`} key={run.runId} onClick={() => store.navigateDispatches([run.runId])}>
+                    <p className="dispatch-model">{run.model ? modelShortName(run.model) : "—"} / {run.effort || "—"}</p>
                     <div className="dispatch-job-meta"><span className={`dispatch-status ${status.className}`}>{status.label}</span><span className="dispatch-elapsed" aria-label="已跑时长">{dispatchTime(dispatchSeconds(run, now))}</span></div>
                     <p className="dispatch-activity" title={name}>{name}</p>
-                  </div>;
+                  </button>;
                 })}
                 {!group.runs.length && <div className="dispatch-job"><p className="dispatch-model">— / —</p><div className="dispatch-job-meta"><span>空闲</span><span className="dispatch-elapsed">—</span></div><p className="dispatch-activity">等待派单</p></div>}
-                {group.more > 0 && <div className="dispatch-more">+{group.more}</div>}
+                {group.more > 0 && <details className="dispatch-more" open={group.runs.slice(3).some((run) => highlighted.has(run.runId)) || undefined}><summary>+{group.more} · 查看全部</summary>{group.runs.slice(3).map((run) => <button key={run.runId} className={`dispatch-job-link${highlighted.has(run.runId) ? " highlighted" : ""}`} onClick={() => store.navigateDispatches([run.runId])}>{dispatchName(run)} · {dispatchStatus(run.status).label}</button>)}</details>}
               </div>
             </article>)}
           </div>
         </div>
       </section>
       {loaded && !error && !visibleRuns.length && <p className="dispatch-empty">现在没有派单</p>}
+      {highlighted.size > 0 && <p className="dispatch-note dispatch-highlight-note">已标出从会话跳转的 {highlighted.size} 张派单。</p>}
+      <DispatchHistory />
     </section>
   );
 }

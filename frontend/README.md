@@ -130,7 +130,7 @@ frontend/
 
 ### M2 打磨（2026-08-21）
 
-- [x] **18. 主题换 Claude 网页版风格底色。** 浅色象牙白 `#FAF9F5` / 深色暖深灰 `#1F1E1D`（非纯黑），深浅两套令牌整体替换（`--ok/--dead/--busy/--danger/--diff-*` 与字体栈不动）；claude 珊瑚橙作文字一律用 `-ink` 变体（浅 `#A8471F` / 深 `#E08B6F`，原色在象牙白上对比度仅 2.96），命中 `.new-agent.agent-claude.selected` 与会话头/会话行的 `.agent-name`，身份脊与选中边框保留原色；未决 `.gate-block` 边框加粗为 `2px solid var(--gate-border)`（已处理/失效态维持 1px；相邻块各有 10px 间隔、不共边，无需补偿对齐）。证据：构建 + 双 tsc 通过；配色视觉效果未在浏览器人工确认。
+- [x] **18. 主题换 Claude 网页版风格底色。** 浅色现为三层暖纸：外框 `--chrome #F0EEE6` / 画布 `--bg #F5F4ED` / 浮起物 `--surface #FFFFFF`；深色暖深灰 `#1F1E1D`（非纯黑，令牌值保持不变），深浅两套令牌整体替换（`--ok/--dead/--busy/--danger/--diff-*` 与字体栈不动）；claude 珊瑚橙作文字一律用 `-ink` 变体（浅 `#A8471F` / 深 `#E08B6F`，原色在象牙白上对比度仅 2.96），命中 `.new-agent.agent-claude.selected` 与会话头/会话行的 `.agent-name`，身份脊与选中边框保留原色；未决 `.gate-block` 边框加粗为 `2px solid var(--gate-border)`（已处理/失效态维持 1px；相邻块各有 10px 间隔、不共边，无需补偿对齐）。证据：构建 + 双 tsc 通过；配色视觉效果未在浏览器人工确认。
 - [x] **19. 左栏会话行压成两行 ≤44px。** 第 1 行标题（14px / `--text` / 单行省略）+ 待审批徽标钉最右（`margin-left: auto`、`flex: 0 0 auto`）；第 2 行 `agent · 状态 · 相对时间`（12px / `--text-muted`），状态点保留行首；删除独立 row-status 行。盒模型：padding 4 + 标题行 line-height 18 + 行距 margin-top 2 + 元信息行 line-height 16 + padding 4 = **44px**（3px 身份脊是水平边，不占高度）。3px 身份脊、dead 行 opacity 0.55、active/hover 背景、收起态总徽标逻辑不变。证据：构建 + 双 tsc 通过；视觉未人工确认。
 - [x] **20. 会话标题派生规则收紧。** `sessionTitle`：`\s+` 压成单空格后 trim；按显示宽度截断（CJK/全角计 2、其余计 1，上限 30，超出加 `…`）；首条 user_message 未到时返回占位「新会话」，不再用 cwd + 短 id 兜底。证据：tsx 单测 8 例（无事件 / 空事件 / 纯空白 / 换行压缩 / 40 个 ASCII / 20 个汉字 / 短标题 / 中英混合）输出全部符合预期；构建 + 双 tsc 通过。
 
@@ -160,7 +160,7 @@ frontend/
 
 ### M5 斜杠命令补全（2026-08-21）
 
-输入框行首 `/` 弹出命令面板（行中间的 `/`，如路径 `server/index.ts`，是普通字符不弹）：按名称前缀 > 名称子序列模糊 > 描述子串筛选，↑↓ 选择、Enter 确认、Tab 只填充、Esc 关闭（到下一次输入变化前不再弹），键盘全程可操作且焦点留在输入框。面板锚定在输入框上方，与设置浮层同一套面板语言（`max-height: 45vh` + `overflow-y: auto`，复用 `settings-pop` 动画，reduced-motion 关闭），选中项 `scrollIntoView` 跟进可视区；每条显示 `/名称` + 按显示宽度截断的描述（复用 `format.ts` 的 `truncateDisplayWidth`，本轮导出共用）。选中态用冷色 `--busy` 系，不碰暖色。确认语义：无 `argHint` 的命令确认即直接结构化发送；有 `argHint` 的填入 `/name ` 并在输入框上方显示参数提示行，光标留在参数位等用户补完再 Enter 发。发送统一走 `store.sendComposerInput`：行首 `/名称` 且名称在命令表内 → 结构化 `command`（不拼 text）；能力位 `commands:false` 的 driver 一律按普通文本。命令表来源：快照内 `commands_updated` 打底 + REST 首取覆盖 + WS `commands_updated` 实时全量覆盖。codex（`commands:false`）不弹面板，输入框上方常驻克制说明「Codex 不支持斜杠命令」，title 带完整解释（app-server 无命令枚举协议），且绝不把 `/xxx` 拼成结构化 command。`types.ts` 顺带加了 `mentions` 能力位布尔，为下轮 @ 补全留位（UI 未做）。
+输入框行首 `/` 弹出命令面板（行中间的 `/`，如路径 `server/index.ts`，是普通字符不弹）：按名称前缀 > 名称子序列模糊 > 描述子串筛选，↑↓ 选择、Enter 确认、Tab 只填充、Esc 关闭（到下一次输入变化前不再弹），键盘全程可操作且焦点留在输入框。面板锚定在输入框上方，与设置浮层同一套面板语言（`max-height: 45vh` + `overflow-y: auto`，复用 `settings-pop` 动画，reduced-motion 关闭），选中项 `scrollIntoView` 跟进可视区；每条显示 `/名称` + 按显示宽度截断的描述（复用 `format.ts` 的 `truncateDisplayWidth`，本轮导出共用）。选中态用冷色 `--busy` 系，不碰暖色。确认语义：无 `argHint` 的命令确认即直接结构化发送；有 `argHint` 的填入 `/name ` 并在输入框上方显示参数提示行，光标留在参数位等用户补完再 Enter 发。发送统一走 `store.sendComposerInput`：行首 `/名称` 且名称在命令表内 → 结构化 `command`（不拼 text）；能力位 `commands:false` 的 driver 一律按普通文本。命令表来源：快照内 `commands_updated` 打底 + REST 首取覆盖 + WS `commands_updated` 实时全量覆盖。Codex 当前为 `commands:true`，由 wb 按 0.159.3 的独立 RPC 提供 8 项客户端命令；Composer 走 HTTP 命令接口并显示结果弹窗，详见文末 Codex 命令与 $skill 契约。`types.ts` 顺带加了 `mentions` 能力位布尔，为下轮 @ 补全留位（UI 未做）。
 
 接口侧实测（隔离实例 `WORKBENCH_PORT=8792`，三家真实会话，完事 DELETE + 按端口 kill）：
 
@@ -193,7 +193,7 @@ frontend/
 
 - **cwd 三级预填回退**（`Sidebar.tsx` 的 `pickInitialCwd`）：① localStorage `workbench-last-cwd`（上次成功建会话的 cwd，读写均 try/catch，与主题同一纪律）→ ② 列表里 `lastActivityAt` 最新会话的 cwd → ③ `GET /api/meta` 新增的 `defaultCwd`（= server 进程 cwd）。`useState(pickInitialCwd)` 惰性初始化；meta/会话列表可能晚于表单挂载到达，另有 effect 在「用户未碰过输入框且仍为空」时补一次预填（用户故意清空后不再回填）。建会话成功后把该 cwd 写回 localStorage。cwd 为空时按钮仍禁用，但按钮下方直接渲染可见文字「请先填写工作目录」（`.new-hint`，title 作补充）。
 - **dead 会话续接出口**（`SessionView.tsx` 的 `Composer`）：dead 时输入框上方渲染「会话已结束。 [新建会话并续接]」——同 agent + 同 cwd + `resumeSessionId: session.nativeSessionId` 调创建接口，成功后 navigate 进新会话；失败错误就地显示在按钮旁。`nativeSessionId` 不存在（没跑起来就死了）时按钮禁用，旁边直接写「该会话没有可续接的原生会话 id」，title 作补充。
-- **配置控件挪到 Composer 正上方**（`@` 预览条/参数提示同一区域）：`ConfigControls` 从会话头移入 `Composer` 顶部；发送中禁用、错误显示（可关）、codex `next_turn`「下一轮生效」提示、`mutable:false` 禁用全部随控件走。会话头改为 `ConfigSummary` 只读摘要（`opus · xhigh · manual`，未覆盖项显示「跟随配置」，model 跟随配置时并入 init 后报出的实际模型），不再放可交互控件。
+- **配置控件挪到 Composer 正上方**（`@` 预览条/参数提示同一区域）：`ConfigControls` 从会话头移入 `Composer` 顶部；发送中禁用、错误显示（可关）、codex `next_turn`「下一轮生效」提示、`mutable:false` 禁用全部随控件走。会话头改为 `ConfigSummary` 单行只读摘要（`opus · xhigh`，未覆盖项显示「跟随配置」，model 跟随配置时并入 init 后报出的实际模型），不再放可交互控件。
 - **禁用原因写在标签里**：`mutable:false`（claude 的模型/强度）渲染为「模型（建会话时定）」，不 hover 可见；title「此项需新建会话才能更改」保留作补充。
 - 新增样式 `.new-hint` / `.composer-dead` 全部冷色/中性（`--text-muted` / `--busy` / `--danger`），未新增令牌，暖色仍是闸门专用。
 
@@ -315,7 +315,7 @@ frontend/
 
 ### M14 所有来源会话浏览与导入（2026-08-22）
 
-2026-10-01：入口、标题与手机返回按钮统一称「所有来源会话」，路由仍为 `#/history`。列表行使用两行：品牌图标、单行标题、可选中性色「工单」、来源与紧凑时间在第一行（悬停看完整时间/派单名与 runId）；路径与可选「已在工作台中」在第二行，触屏点击高度至少 44px。没有用户消息的会话隐藏，meta 行累计显示「N 个空会话已隐藏」。页面类面板（如 AI 用量）打开时，桌面侧栏暂宽至 `min(440px, 45vw)`，关闭恢复 288px；历史面板、手机与收起态沿用原宽度，减少动态偏好关闭宽度过渡。
+2026-10-01：入口、标题与手机返回按钮统一称「所有来源会话」，路由仍为 `#/history`。列表行使用两行：品牌图标、单行标题、可选中性色「工单」、来源与紧凑时间在第一行（悬停看完整时间/派单名与 runId）；路径与可选「已在工作台中」在第二行，触屏点击高度至少 44px。没有用户消息的会话隐藏，meta 行累计显示「N 个空会话已隐藏」。页面类面板打开时，桌面侧栏暂宽至 `min(352px, 36vw)`；AI 用量单独按 iframe 实际内容宽 390px 计算侧栏宽，iframe 抵消字号 zoom、保留嵌入页原始字号，侧栏其余内容仍随字号档位缩放。关闭恢复 288px；历史面板与收起态沿用原宽度，手机（≤720px）全宽，减少动态偏好关闭宽度过渡。
 
 后端 `/api/history` 的前端落地：左栏底部「所有来源会话」入口（扩展页面上方，收起态只显图标）。自 2026-10-01 起 `#/history` 打开侧栏历史列表，与页面面板互斥，主区当前会话保留；点历史行后主区显示 `HistoryPreviewPane`，导入续接行为不变。
 
@@ -454,7 +454,7 @@ frontend/
 
 规划与裁决见 `docs/message-display-redesign.md` §3–§5（ROADMAP P1-5）。实现由 Codex 按工单完成（会话 `00000000-0000-4000-8000-000000000007`）。主会话验收时修了两处视觉问题：深色下代码块与页面底色几乎相同看不出边界，以及分隔线文字挪走后留下的缺口。
 
-- **Markdown**：助手文字经 `components/MarkdownMessage.tsx`（`react-markdown` 10.1.0 + `remark-gfm` 4.0.1）渲染。`skipHtml` 不渲染原始 HTML，也不走 `innerHTML`；链接用 react-markdown 默认的 URL 过滤，并加 `target="_blank" rel="noopener noreferrer"`。段落用 `white-space: pre-line` 保留单换行（agent 常用单换行分行，Markdown 默认会把它折成空格）。代码块用编辑器底色加细边框，右上角有「复制」按钮（Clipboard API 不可用或被拒时显示「复制失败」），块内横滚；表格外包横滚容器。没有语法高亮（shiki 在阶段 3）。
+- **Markdown**：助手文字经 `components/MarkdownMessage.tsx`（`react-markdown` 10.1.0 + `remark-gfm` 4.0.1）渲染。`skipHtml` 不渲染原始 HTML；代码高亮只插入转义过源码的着色标记（见下方四项工单条目）。链接用 react-markdown 默认的 URL 过滤，并加 `target="_blank" rel="noopener noreferrer"`。段落用 `white-space: pre-line` 保留单换行（agent 常用单换行分行，Markdown 默认会把它折成空格）。代码块用编辑器底色加细边框，右上角有「复制」按钮（Clipboard API 不可用或被拒时显示「复制失败」），块内横滚；表格外包横滚容器。
 - **用户消息**：描边圆角框，`@` 引用画成行内标签（`mentions.ts` 的 `mentionSegments`）。标签在第一个句读标点处截断并剥掉尾部标点，所以 `@a.ts，然后` 只画 `@a.ts`。这只影响显示，解析不受影响。
 - **时间线**：同一轮的 text / thought / tool 挂在一条细竖线上，每项一个 7px 圆点（`render-items.ts` 给这三类条目加了 `turn` 字段）。圆点默认次级灰，工具成功或失败换色，进行中闪烁（`prefers-reduced-motion` 下关闭）。闸门卡片和提问卡片不上时间线。
 - **降噪**：空思考只显示一行灰字「思考」，不可展开也不显示字数。「本轮结束」只在异常时出现，文案为「本轮异常结束：<原因>」，判定规则：claude 看 `subtype≠success` 或 `isError`；codex 看 `error` 非空或 `status≠completed`；kimi 看 `stopReason≠end_turn`。按现有 transcript 实测，正常轮次（claude 28、codex 7、kimi 20）都不显示，异常轮次（claude 3 个 `error_during_execution`、kimi 1 个 `cancelled`）都显示。「会话已创建」变淡。
@@ -527,7 +527,7 @@ frontend/
 - Claude 模型菜单优先读取 initialize 的 `displayName` 版本，兼容旧 `description`；Fable 按数字分段取最大版本，其他三档精确匹配别名，缺失时回退「（最新）」。跟随项保留会话有效配置展示，不用全局探测默认值替代。
 - 等宽 UI 优先使用本地 Maple Mono NF CN，正文 UI 字体不变。终端打开后显式请求本地字体，完成或 1.5 秒超时后重新度量并 fit；不下载 webfont，不阻塞终端连接。
 - 有终端能力时，Ctrl+` 开关终端；首次按需挂载，打开聚焦终端，收起尝试聚焦会话输入框。xterm 放行该组合，自动重复不反复切换。
-- 设置 → 外观新增小／默认／大／特大（0.9／1／1.15／1.3），保存到 `workbench-font-scale`，首屏内联恢复。只对 `.sidebar` 和 `.main` 使用 zoom；终端为兄弟节点，字号单独按 13px × 系数更新并 fit。手机在会话视图点「会话列表」、在终端点「返回」后可进入列表底部设置。
+- 设置 → 外观新增小／默认／大／特大（0.9／1／1.15／1.3），保存到 `workbench-font-scale`，首屏内联恢复。只对 `.sidebar` 和 `.main` 使用 zoom，侧栏 AI 用量 iframe 单独抵消 zoom；终端为兄弟节点，字号单独按 13px × 系数更新并 fit。手机在会话视图点「会话列表」、在终端点「返回」后可进入列表底部设置。
 - 字体竞态是防御性修复：源码此前没有字体就绪后的重新度量，但不能仅凭源码确认系统字体加载竞态或 Powerline 缺字的实际原因。浏览器字体选择、选区坐标、真机布局和焦点仍待实际验证；命令验收结果见 `.work-orders/2026-09-30-ui-prefs-report.md`。
 
 
@@ -542,9 +542,9 @@ frontend/
 - **实测（主会话）**：完整 `npm test` 通过；本机 >1MB 的 Claude 会话在 1280 与 390 两个宽度下预览首屏为最后一轮，可一直翻到第一条用户消息，无横滚。
 - **未做**：超长工具正文仍有截断，跨页工具结果不追加读取，思考块仍不显示；窄屏下 ToolCard 动词会被截成「运…」（改版前就有）。
 
-### M26 「到 VSCode/终端继续」+ 空闲自动释放 worker（2026-09-30）
+### M26 「VSCode / CLI 继续」+ 空闲自动释放 worker（2026-09-30）
 
-- **顶栏按钮**：会话头操作区新增「到 VSCode/终端继续」（三家都显示），点击调 `POST /api/sessions/:id/release`，成功后把 `resumeCommand` 复制到剪贴板（Clipboard API 失败退回 `window.prompt` 手动复制），结果在按钮旁短暂提示（成功灰字、失败错误色，复用现有令牌）。仅 `idle` 且有 `nativeSessionId` 的会话可点，其他状态的禁用原因写在 title。释放后输入框照常可用，发送时后端自动从磁盘续接。
+- **顶栏按钮**：会话头操作区新增「VSCode / CLI 继续」（三家都显示），点击调 `POST /api/sessions/:id/release`，成功后把 `resumeCommand` 复制到剪贴板（Clipboard API 失败退回 `window.prompt` 手动复制），桌面端再用返回的 `vscodeUri` 打开 VSCode；≤720px 或 `pointer: coarse` 时只复制、不打开，结果在按钮旁短暂提示（成功灰字、失败错误色，复用现有令牌）。仅 `idle` 且有 `nativeSessionId` 的会话可点，其他状态的禁用原因写在 title。释放后输入框照常可用，发送时后端自动从磁盘续接。
 - **事件渲染**：`worker_released` 归一成弱化系统行「已释放（空闲 N 分钟 / 手动）；下次发送时从磁盘续接」；空闲自动释放（无客户端动作）靠该事件把列表项对齐为已释放（`store.ts` 置 `released:true`、清 `processId`）。
 - **设置**：设置菜单新增「会话 → 空闲自动释放」（关闭 / 15 / 30 / 60 / 120 分钟），读写 `/api/prefs`；服务端存了非档位值时补一个如实显示的选项。乐观更新，写失败回滚。
 - **后端契约**：见 `server/README.md`「释放（release）worker」小节。释放后再发走与「别处续聊」同一条 `refreshBeforeSend` 路径（比对指纹 → 起新 worker 续接 → 需要时广播 `external_messages_added`），released 会话没有旧 worker 可停。
@@ -578,3 +578,50 @@ frontend/
 - 新增可复用 `Segmented`，仅接入主题（跟随系统／浅色／深色）与终端 bash／PowerShell。凹槽和浮起块使用现有中性令牌；单一绝对定位滑块按按钮 `offsetLeft`、宽高移动，180ms 平滑切换，减少动态偏好下关闭动画。布局变化会重新度量，触屏按钮至少 44px。
 - 保留主题单选语义与方向键操作、终端 `aria-pressed` 与禁用条件；共用组件支持 Tab 和方向键。字号及其他设置组保持原有控件。
 - **验证**：两项类型检查、构建与全部前端测试通过；完整 `npm test` 在后端通知测试绑定 loopback 端口时遇到沙箱 `EPERM`，未全过。指定 Chromium 启动亦被沙箱阻止，深浅色截图和浏览器交互检查未完成。详情及可重跑的浏览器检查脚本见 `.work-orders/2026-10-01-brand-segmented-report.md`。
+
+### 2026-10-01 浅色层级与结构打磨
+
+外框（侧栏、会话/手机标题栏、侧栏展开面板、页面工具栏）使用 `--chrome`；其悬停/选中态使用 `--chrome-sunk`，弹层与输入框内部仍用 `--surface-sunk`。新建表单浅色改白底并保留细边框；代码块保留下沉底色。
+
+输入区落在画布上，白色输入框带轻阴影，与时间线共用一条 820px 上限规则；手机同列全宽。新建按钮为实线白按钮，底部入口只保留整组顶部分隔线；外框小按钮透明、悬停下沉，设置组三个标题统一样式、取消全大写。
+
+检查：`node scratch/ui-polish/dark-parity.mjs baseline` 在修改前保存深色五状态与 before 截图，`compare` 用同一只读 API 数据比较计算样式（阶段 1 要求零差异），`shots` 保存 after 深浅色/手机/AI 用量截图与尺寸。`node scratch/ui-polish/contrast.mjs` 检查全部浅色文字组合 ≥4.5；深色同值既有问题按主会话裁决用显式表豁免并打印 WARN：`--text-faint #8C8981` / `--surface #262624`，以及与其同值的 `--chrome #262624`。其他低对比度组合仍失败。
+
+### 会话头单行与派单模型（2026-10-01）
+
+会话标题栏显示品牌图标、模型短名与推理强度、完整路径 title；模型不截断，路径按剩余宽度省略，审批模式仍由输入框控件管理。续接按钮显示 VSCode 品牌图标与「/ CLI 继续」，可访问名为「VSCode / CLI 继续」。桌面端释放成功后复制命令并尝试浏览器协议导航，不保证客户端一定打开。派单人模型优先用 `parent.sessionId` 匹配工作台 `nativeSessionId` 的覆盖值/实际生效值，否则用后端 `parent.model`；共用 `modelShortName`，无值不加占位。
+
+派单第二版：`#/dispatches/<runId>` 打开只读详情，手机全屏并可返回派单列表。
+派单原文默认显示前 5 行，可展开；过程复用 `HistoryTimeline` / `StreamItems`，原生记录不可读时显示 stdout 尾部。
+结束后显示 summary、STATUS / ACCEPT、可用的 Copilot credits 和可复制续接命令（仅复制，不执行）。
+流程图下方是近 7 天结束历史，每页 20 单。Claude 会话「后台 N 个任务」旁可跳转到其运行中的派单；多单高亮卡片。
+轮询与字段契约见 `server/README.md`「派单详情与近 7 天历史」。
+
+### 正文字号、手机会话入口与左滑、代码高亮（2026-10-01）
+
+- **正文字号**：设置 → 外观 →「正文字号」，复用整行 `Segmented`，16 / 17 / 18 / 19 / 20 / 22px，默认 16。`body-font.ts` 使用设备 localStorage `workbench-body-font`；不可访问或无效值回退 16。只调整 `.stream` 内助手 Markdown（含代码）、用户文字与思考正文，续接历史同样生效；工具展开内容、角色/工具标题、输入框及侧栏保持各自字号。与现有四档整体 zoom 叠加。Markdown 四至六级标题明确不小于正文。
+- **手机入口**：≤720px 会话顶栏右侧提供「AI 用量」「终端」，图标复用侧栏 `PageIcon` / `TerminalIcon`；桌面顶栏仍隐藏。AI 用量使用已有 `ai-usage` manifest 和侧栏面板；从快捷入口打开时，收起或 Esc 返回原会话，普通侧栏入口保留原导航规则。终端沿用既有能力位、全屏与返回逻辑。
+- **左滑移除**：窄屏触屏会话行左滑露出 80px 冷红「移除」，移动超过 10px 后锁定方向；竖向不阻止默认滚动，横向采用非 passive `touchmove`。展开状态由侧栏统一管理，最多一行；点外部、滚动或调整窗口收起。点移除复用原行内确认和 `store.remove`，取消不移除；右键、长按、键盘菜单入口保留，桌面行样式不变。
+- **代码高亮**：未引入第三方库/依赖；尝试安装 Highlight.js 时 npm 代理连接被沙箱 `EPERM` 拦截，本地无缓存，因此采用 `highlight-languages.ts` 的轻量词法着色器。支持 ts/js/tsx/jsx/json/bash/sh/python/css/html/diff/yaml/toml/markdown/sql/go/rust 及常见别名；这是词法着色，不是 Shiki/TextMate 完整语法解析，复杂模板插值和 JSX 内部可能只有基础着色。无语言标注、未知语言或超过 2000 行保持纯文本；流式消息整轮结束后才着色，异步过期结果丢弃，复制始终使用原文。着色器首次需要时动态 import；源码先 HTML 转义，深浅色使用 `--syntax-*` 的蓝/紫/青绿/冷红，避开琥珀金。
+- **体积实测**：`npm run build` 主 JS gzip 159.05KB，开工前 154.53KB，工作区总增量 4.52KB（包含其他执行端的并行改动，非单独高亮增量）；高亮懒加载块 2.13KB，主 CSS 12.31KB。终端拆包及配色未改。
+- **验证与缺口**：前端 typecheck、构建和全部前端 npm 子测试通过；`node --import tsx frontend/scripts/fe-batch.test.mjs` 覆盖字号回退、语言着色/原文保真、XSS 转义及 2000/2001 行边界。完整 `npm test` 被未改动的 `server/notify.test.ts` 监听端口 `EPERM` 阻断。Chromium 启动也被沙箱禁止；`font16.mjs` 连接 8790 被 `EPERM` 阻断，尚无全量字号通过结论，也未截图/逐张自查。浏览器交互与八张截图脚本：`node frontend/scripts/fe-batch.browser.mjs`（触屏 `hasTouch:true`，派发 touch 事件；不确认移除，阻断终端进程接口）。日志和交付状态见 `scratch/fe-batch/` 与 `.work-orders/2026-10-01-fe-batch-report.md`。
+
+
+### Claude 输入框「/」菜单扩展功能（2026-10-01）
+
+`SlashMenu.tsx` 保留 MCP/Hooks/权限/上下文/插件、斜杠命令与 Focus view，新增状态、账户与用量、Memory、Instructions、Skills、Sandbox、输出样式、编辑 Hooks、Claude 设置、帮助与导出对话。长菜单在 390px/桌面均可滚动，所有新增文字 >=16px，使用中性/冷色面板。
+
+MCP 面板可停用/启用、重连与刷新状态，操作只影响当前 Claude worker；回复与审批结束后才可操作。后端操作完读回状态，连接中的服务器可稍后手动刷新。Hooks/权限/Memory/Skills/Sandbox/输出样式设置通过 `vscode://` 链接打开对应配置文件（用户、项目、项目本地）；服务端只提供路径，不启动 VSCode、不写 settings。新建配置文件或编辑后，部分设置需重新续接才生效。VSCode 协议链接应在安装了 VSCode 的电脑上使用。
+
+导出面板展示 `export_conversation` 的原生纯文本，可复制或下载 `.txt`；不会把前端有限事件窗口误当完整存档。`ClaudeMenuPanels.tsx` 独立渲染这些只读面板。Rewind 本单不接：没有可信文件检查点和原生消息截点预览。Codex/Kimi 沿用已有命令与 Focus view。
+
+验证与调查见 `.work-orders/2026-10-01-slash-ext-report.md`；18791 的真实 HTTP/控制报文、导出文件、390/1280 截图均保存在 `scratch/slash-ext/`。用户实例加载新增后端接口须自行重启，前端 dist 已构建。本单没有执行 wb restart。
+
+
+### Codex 命令与 $skill（2026-10-01）
+
+Codex 的 `commands:true` 表示 wb 客户端按本机 app-server 协议提供命令表；并非 TUI 枚举。输入 `/` 或底栏「/」菜单可用 status/model/mcp/skills/compact/review/new/interrupt，查看结果复用原查看弹窗。`/model` 查看列表，选择模型沿用底栏控件；review 可在 `/review ` 后输入要求。未知命令不会伪装成 prompt 执行。compact/review/new 在空闲无审批时操作；interrupt 只在运行中可用。后端错误就地展示，异步完成由事件流报告。
+
+`$` 打开 Codex skill 面板：真实名称+描述、名称/描述过滤、上下键、Enter/Tab 插入、Esc 关闭、IME 组合保护。选择后保留 `$name` 文本；后端从真实 skills/list 获取路径并附结构化 skill input，完整契约见 server/README.md。不展示禁用项、不写全局配置、不在 Claude/Kimi 输入中触发该面板。正文与输入框 16px，菜单项 14px，分组/描述 13px，其余新增文字不小于 16px；中性/冷色样式，--gate 系仅闸门。
+
+验证入口：`node --import tsx frontend/scripts/codex-commands.test.mjs`（由现有 render-items 测试入口纳入 npm test）。真机脚本 `bash scratch/codex-commands/run-smoke.sh` 仅监听 127.0.0.1:18794，独立 WORKBENCH_HOME/CODEX_HOME，按端口反查进程组并 trap 收尾，保存 skills/slash 面板截图和协议报文。

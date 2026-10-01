@@ -1,0 +1,63 @@
+import assert from "node:assert/strict";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from "node:fs";
+import { once } from "node:events";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { Writable } from "node:stream";
+import type { ServerResponse } from "node:http";
+import { gzipSync, gunzipSync } from "node:zlib";
+import { serveStatic } from "./static.js";
+import { replaySession, sendEvent, type EventClient } from "./event-stream.js";
+import type { UnifiedEvent } from "./types.js";
+
+const root = mkdtempSync(join(tmpdir(), "wb-performance-wire-"));
+process.env.WORKBENCH_HOME = root;
+mkdirSync(join(root, "assets"));
+const source = Buffer.from("console.log('test');");
+writeFileSync(join(root, "assets", "test.js"), source);
+writeFileSync(join(root, "assets", "test.js.gz"), gzipSync(source));
+writeFileSync(join(root, "assets", "plain.css"), "body{}");
+const receiveStatic = async (path: string, encoding: string) => {
+  const chunks: Buffer[] = []; let headers: Record<string, string> = {};
+  const response = new Writable({ write(chunk, _encoding, callback) { chunks.push(Buffer.from(chunk)); callback(); } });
+  Object.assign(response, { writeHead(status: number, value: Record<string, string>) { assert.equal(status, 200); headers = value; } });
+  const finished = once(response, "finish");
+  assert.equal(serveStatic(root, path, response as unknown as ServerResponse, encoding), true);
+  await finished;
+  return { data: Buffer.concat(chunks), headers };
+};
+const compressed = await receiveStatic("/assets/test.js", "br, gzip");
+assert.equal(compressed.headers["content-encoding"], "gzip");
+assert.equal(compressed.headers.vary, "accept-encoding");
+assert.match(compressed.headers["cache-control"]!, /immutable/);
+assert.match(compressed.headers["content-type"]!, /javascript/);
+assert.deepEqual(gunzipSync(compressed.data), source);
+for (const encoding of ["", "gzip;q=0", "gzip;q=0.00"]) {
+  const plain = await receiveStatic("/assets/test.js", encoding);
+  assert.equal(plain.headers["content-encoding"], undefined); assert.deepEqual(plain.data, source);
+}
+const fallback = await receiveStatic("/assets/plain.css", "gzip");
+assert.equal(fallback.headers["content-encoding"], undefined); assert.equal(fallback.data.toString(), "body{}");
+writeFileSync(join(root, "index.html"), "index");
+assert.equal((await receiveStatic("/", "gzip")).headers["cache-control"], "no-cache");
+const frames: Record<string, any>[] = [];
+const client: EventClient = { socket: { readyState: 1, send(data) { frames.push(JSON.parse(String(data))); } }, lastSeq: new Map([["s", 5]]) };
+const event = (seq: number, ephemeral?: true): UnifiedEvent => ({ type: "tool_call_updated", sessionId: "s", agentId: "main", seq, timestamp: "now", payload: {}, ...(ephemeral ? { ephemeral } : {}) });
+sendEvent(client, event(5, true)); sendEvent(client, event(5)); sendEvent(client, event(6));
+assert.deepEqual(frames.map((frame) => [frame.seq, frame.ephemeral]), [[5,true],[6,undefined]], "当前 seq 的临时帧仍透传，持久帧去重");
+assert.equal(client.lastSeq.get("s"), 6);
+const start = frames.length;
+replaySession({ getEventsAfter: (_id, afterSeq) => { assert.equal(afterSeq, 3); return { events: [event(4), event(5), event(6)], currentSeq: 6, requiresSnapshot: false }; } }, client, "s", 3);
+assert.deepEqual(frames.slice(start).map((frame) => frame.seq ?? frame.type), [4,5,6,"replay_complete"], "实时帧先到也必须补齐缺失历史");
+replaySession({ getEventsAfter: () => ({ events: [], currentSeq: 6, requiresSnapshot: true }) }, client, "s", 0);
+assert.equal(frames.at(-1)!.type, "resync_required");
+assert.equal(frames.at(-1)!.currentSeq, 6);
+assert.throws(() => replaySession({ getEventsAfter: () => undefined }, client, "missing", 0));
+console.log("✅ performance wire: gzip/fallback/cache, ephemeral WS delivery, replay/order/ring fallback");
+
+const launcher = readFileSync("bin/workbench", "utf8");
+assert.match(launcher, /exec setsid env WORKBENCH_PORT="\$PORT" node --import tsx server\/index\.ts >>"\$LOG" 2>&1 < \/dev\/null/);
+assert.match(launcher, /\[\[ "\$cmd" == \*"server\/index\.ts"\* \]\]/);
+const serverSource = readFileSync("server/index.ts", "utf8");
+assert.match(serverSource, /spawn\("bash", \[fileURLToPath\(new URL\("\.\.\/bin\/workbench", import\.meta\.url\)\), "restart"\]/);
+assert.match(serverSource, /process\.on\("SIGTERM", \(\) => void shutdown\("SIGTERM"\)\)/);

@@ -3,7 +3,7 @@ import { spawn } from "node:child_process";
 import { appendFile, chmod, mkdir, mkdtemp, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { DispatchQueryError, dispatchSessionMap, getDispatch, getDispatchLog, listDispatches } from "./dispatches.js";
+import { DispatchQueryError, dispatchSessionMap, getDispatch, getDispatchLog, listDispatches, readClaudeTranscriptModel, readClaudeParentModel } from "./dispatches.js";
 
 const root = await mkdtemp(join(tmpdir(), "wb-dispatches-"));
 const outside = await mkdtemp(join(tmpdir(), "wb-dispatches-outside-"));
@@ -20,8 +20,27 @@ async function fixture(id: string, files: Record<string, unknown> = {}): Promise
 }
 
 try {
+  const projects = join(root, "claude-projects");
+  const project = join(projects, "project");
+  await mkdir(project, { recursive: true });
+  const transcript = join(project, "parent-test.jsonl");
+  await writeFile(transcript, `${JSON.stringify({ type: "user", message: { content: "x".repeat(1100000) } })}\n${[
+    { type: "assistant", message: { model: "claude-sonnet-4-5" } },
+    { type: "user", message: { model: "user-model" } },
+    { type: "assistant", message: { model: "claude-opus-5-5" } },
+    { type: "system", message: { model: "system-model" } },
+  ].map((row) => JSON.stringify(row)).join("\n")}\n`);
+  assert.equal(await readClaudeTranscriptModel(transcript), "claude-opus-5-5", "只取末尾最后一条 assistant.model");
+  assert.equal(await readClaudeTranscriptModel(join(project, "missing.jsonl")), null);
+  assert.equal(await readClaudeParentModel("parent-test", projects), "claude-opus-5-5");
+  await appendFile(transcript, `${JSON.stringify({ type: "assistant", message: { model: "new-model" } })}\n`);
+  assert.equal(await readClaudeParentModel("parent-test", projects), "claude-opus-5-5", "缓存 30 秒内复用");
+  assert.equal(await readClaudeTranscriptModel(transcript), "new-model");
+  await appendFile(transcript, `${JSON.stringify({ type: "assistant", message: {} })}\n`);
+  assert.equal(await readClaudeTranscriptModel(transcript), null, "最后 assistant 无模型不回退旧模型");
+  assert.equal(await readClaudeParentModel("../escape", projects), null);
   const doneId = "20261001-120000-codex-finished";
-  const parent = { agent: "claude", sessionId: "parent-session", entrypoint: "cli" };
+  const parent = { agent: "claude", sessionId: "parent-session", entrypoint: "cli", model: null };
   const done = await fixture(doneId, {
     "run.json": {
       schema: 1, runId: doneId, tool: "codex", name: "human readable name", cwd: "/project", model: "test-model", effort: "high",
@@ -38,6 +57,7 @@ try {
     status: "OK", startedAt: "2026-10-01T12:00:00+08:00", endedAt: "2026-10-01T12:01:00+08:00",
     elapsedS: 60, exit: 0, files: 2, session: "session", parent, promptHead: "第一行",
     prompt: "\n  \n第一行\n第二行", promptTruncated: false, summary: "完成摘要\n", final: "最终结果\n", accept: "通过\n",
+    acceptResult: null, resume: null, credits: null,
   });
 
   const runningId = "20261001-120001-codex-running";
@@ -64,7 +84,7 @@ try {
     "run.json": { schema: 1, status: "running", pid: deadPid, parent: { agent: "codex", runId: runningId, sessionId: null, entrypoint: null } },
   });
   assert.equal((await getDispatch(lostId))?.status, "lost", "已退出子进程标 lost");
-  assert.deepEqual((await getDispatch(lostId))?.parent, { agent: "codex", runId: runningId, sessionId: null, entrypoint: null });
+  assert.deepEqual((await getDispatch(lostId))?.parent, { agent: "codex", runId: runningId, sessionId: null, entrypoint: null, model: null });
 
   const legacyId = "20260930-120003-copilot-legacy";
   await fixture(legacyId, {

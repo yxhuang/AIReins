@@ -132,6 +132,12 @@ webhook 地址就是密钥：文件权限设为 600，也不要写进日志或�
 - `GET /api/prefs` / `PUT /api/prefs`：服务端偏好，当前只有 `idleReleaseMinutes`（整数 0–1440 分钟，0 = 关闭空闲自动释放；校验失败 400）
 - `GET /api/claude/settings` / `PUT /api/claude/settings`：读取或保存用户级 `{remoteControlAtStartup:boolean}`（400 / 40064）。只改 `~/.claude/settings.json` 的这一键，关闭写 `false`，按 2 空格缩进保留其他键与顺序；直接写文件跟随软链接，不替换链接。仅影响之后新启动的 worker（新建、续接、释放后发送），项目级 `false` 仍可覆盖关闭，不改变当前连接的 RC。
 - `PUT /api/sessions/:id/plugins`：请求 `{id,enabled,scope?}`，仅 Claude；id 和 scope 必须匹配该 cwd 最近一次插件列表，scope 从列表取（缺失则不传）。通过 `execFile` 参数数组在会话 cwd 执行 `claude plugin enable|disable <id> --json [-s scope]`；返回 `{plugins,reloaded,reloadError?}`，重新运行列表刷新状态。已有 worker 依次发 `get_settings`、`reload_plugins` 并刷新斜杠命令；重载失败仍返回已保存状态及 `reloadError`。dead/released 会话不拉起 worker，`reloaded:false` 提示新会话或重新续接后生效。CLI 失败或参数非法为 400 / 40065，会话不存在为 404 / 40401；CLI 单次 15 秒、重载 30 秒，前端总请求上限 80 秒。协议证据见 §10。
+- `POST /api/sessions/:id/mcp`：仅 Claude，请求 `{action:"toggle",serverName,enabled:boolean}` 或 `{action:"reconnect",serverName}`。driver 先读 `mcp_status` 并核对服务器名，再发 `mcp_toggle {serverName,enabled}` / `mcp_reconnect {serverName}`，最后读回 `mcp_status`，`data` 为 `{mcpServers:[…]}`。操作成功但读回失败时返回旧列表及 `refreshError`，前端明确提示刷新；不能把已执行操作伪装成失败。开关只改变当前 worker，非持久配置。已释放会话先续接，dead、非 Claude、回复中、启动中、有未决审批、重启中、名称不存在或 CLI 错误为 400 / 40066，不存在为 404 / 40401。单次查询 15 秒、开关/重连 30 秒，前端总上限 80 秒；没有任意协议转发入口。
+- `GET /api/sessions/:id/info/:kind` 新增 `status` → `get_status`（`{sections:[{title,rows:[{label,value}]}]}`）；`usage` → `get_usage`（会话费用、订阅与额度）；`memory` / `instructions` → `get_memory_dialog`（files/folders/memories、自动记忆状态）；`skills` → `get_skills_dialog`；`sandbox` → `get_sandbox_dialog`；`export` → `export_conversation`（`{text,default_filename}`，纯文本，以 CLI 导出内容为准，不受前端事件窗口限制）；均为只读控制请求，错误沿用 400 / 40063。
+- `output` 先 `initialize` 获取 `available_output_styles`，再 `get_settings` 刷新磁盘设置，返回 `{outputStyle,availableStyles,settingsFiles}`，两次请求各 15 秒、前端总上限 40 秒。仅返回样式字段，不暴露整个 settings（可能含环境变量）。
+- `settings` 直接返回 `{settingsFiles:[{source,label,path,uri}]}`，无需 worker，dead 会话也可打开；三个范围为用户、项目、项目本地。用户路径尊重 `CLAUDE_CONFIG_DIR`，默认 `~/.claude/settings.json`。hooks/permissions/skills/sandbox/memory/output 查看也附带 `settingsFiles`；memory/instructions 的文件及目录行附带 `uri`。
+- `uri` 仅为协议链接：WSL 返回 `vscode://vscode-remote/wsl+<distro>/<encoded-path>`，其他 Linux 返回 `vscode://file/<encoded-path>`；路径分段编码，非绝对路径或控制字符返回 null。后端不启动 VSCode，不写 settings；文件可以尚未创建。Hooks 等在编辑器保存后重新打开面板查看，某些配置需下次续接。插件/策略提供的 Hooks 仍按原来源展示，不伪装成用户 settings 中的条目。
+- 新菜单只用于 Claude；Rewind 没有接入：虽然协议有 `rewind_files {user_message_id,dry_run}`，当前 worker 未启用 SDK 文件检查点且 wb 事件没有原生用户 UUID，实测 `canRewind:false,error:"File rewinding is not enabled."`，无法提供可信的文件/消息预览。扩展的会话回退另走宿主 fork + resume 截点，不能直接移植。调查表与冒烟证据见 `.work-orders/2026-10-01-slash-ext-report.md`、`scratch/slash-ext/`。
 - `GET /api/sessions/:id/files?q=<关键词>&limit=<默认50>`：在会话 `cwd` 内检索可引用的普通文件
 - `DELETE /api/sessions/:id`：停止 worker 并移除注册表条目；不删除 Workbench 或原生 CLI transcript
 - `GET /api/history`：只读列出三家 CLI 自己保存的所有来源会话；没有用户消息的会话隐藏，`empty` 单独计数（分页为本页扫描计数），`skipped` 记录损坏/不可读候选。命中 delegate 元数据的条目附带 `dispatch:{runId,name}`，UUID 和 `session_...` 原样匹配；派单映射只读全部目录的 `run.json`/旧 `meta.json`，缓存 30 秒。
@@ -144,6 +150,8 @@ webhook 地址就是密钥：文件权限设为 600，也不要写进日志或�
 ### 重启当前实例
 
 `POST /api/restart` 先完成 202 响应，再延迟 200ms 以 POSIX `detached`（新 session / process group）启动仓库的 `bin/workbench restart`。继承当前进程环境，明确传入当前监听的 `WORKBENCH_PORT`、`workbenchHome` 和 `WORKBENCH_NO_OPEN=1`；数据目录和日志路径按当前进程工作目录转为绝对路径；`WORKBENCH_LOG` 保留显式路径，未设置时落到当前 `WORKBENCH_HOME/server.log`。显式 `WORKBENCH_STATIC_DIR` 同样透传已解析的绝对路径，其他环境原样继承。因此远程入口发起重启也会停本实例的主监听端口，重新读取同一数据目录的远程配置，不弹浏览器。启动器与旧服务进程组分离；脚本的 SIGTERM 走既有 `shutdown()` 释放会话与终端，再启动服务加载新代码。`bin/workbench` 行为未改。
+
+停服一开始，本机与远程入口均拒绝新的 WS 升级，新的 HTTP 请求返回 503 并带 `Connection: close`；已有 WS 发出关闭通知。两个监听保持到 worker 停完，保留 `wb stop` 以主端口空出判断 worker 已停止的语义。随后并行关闭两个监听，主动断开残留 HTTP、普通 WS 与终端 WS 连接，显式退出 0；关闭失败退出 1，整个关闭流程超过 10 秒则记录错误并强制退出 1。
 
 前端点按钮先重新拉取会话列表；`status === "running"` 或 `backgroundTasks` 非空的会话去重计数，非零时显示数量并二次确认。确认后全屏显示「重启中」，既有 WS 断线重连在观察到断开再恢复后解除遮罩。60 秒未恢复或接口失败时给出关闭提示和按当前实例环境执行 `wb restart` 后刷新的说明。202 后启动失败记录服务端日志，客户端以恢复超时提示失败；断线重连不自动重发重启请求。
 
@@ -239,7 +247,7 @@ interface Dispatch {
   startedAt: string | null; endedAt: string | null;
   elapsedS: number | null; exit: number | null; files: number | null;
   session: string | null;
-  parent: {agent: string; sessionId: string | null; entrypoint: string | null; runId?: string} | null;
+  parent: {agent: string; sessionId: string | null; entrypoint: string | null; model: string | null; runId?: string} | null;
   promptHead: string | null;
 }
 interface DispatchDetail extends Dispatch {
@@ -335,20 +343,30 @@ Promise。复制前先检查目标文件系统可用空间至少为扫描量的 
 `GET /api/meta` 的 `data.drivers.<agent>.options` 是前端配置控件的唯一事实源。每项结构为 `{id,name,values,default,mutable,mutableVia?}`；`default` 可以是 `null`，对应 values 中“跟随 … 配置”的标签；`mutable:false` 表示只能建会话时设置。`mutableVia:"restart"` 表示界面上允许修改，但代价是停止并重启底层 worker。来源如下：
 
 - Claude：CLI 启动 flag 与 stream-json control protocol；审批模式原生活改。模型和推理强度的 schema 为 `mutable:true, mutableVia:"restart"`。首条消息前切换会直接启动新 worker；发过消息或从历史续接的会话在空闲且已有 `nativeSessionId` 时通过“停止 worker → `--resume` 同一原生会话 → 带新 `--model / --effort` 重启”。
-- Codex：模型选项来自 `model/list`；默认 model/effort 来自 `config/read(cwd)` 返回的有效合并配置，而不是模型内建默认。创建或续接线程后，再以 `thread/start` / `thread/resume` 返回的实际 `model / reasoningEffort / approvalPolicy` 更新 session。若旧版 app-server 无法提供 `config/read`，schema 的 model/effort 默认值为 `null`，不会猜值。effort 可选覆盖仍限定为 `minimal / low / medium / high / xhigh`；三项活修改在下一次 `turn/start` 生效。
+- Codex：模型选项来自 `model/list`；默认 model/effort 来自 `config/read(cwd)` 返回的有效合并配置，而不是模型内建默认。创建或续接线程后，再以 `thread/start` / `thread/resume` 返回的实际 `model / reasoningEffort` 和 `approvalPolicy + approvalsReviewer + sandbox` 更新 session；权限模式是三者的组合，不能只用 `approvalPolicy` 回填。若旧版 app-server 无法提供 `config/read`，schema 的 model/effort 默认值为 `null`，不会猜值。effort 可选覆盖仍限定为 `minimal / low / medium / high / xhigh`；三项活修改在下一次 `turn/start` 生效。
 - Kimi：三项和值全部从一次真实 `session/new` 返回的 `configOptions` 转换，不在 Workbench 手抄；三项均通过 `session/set_config_option` 活改。
 
 Codex 与 Kimi 的元数据探针失败时，对应 driver 返回 `options:[]` 和 `error`。Claude 启动时后台发一次不含用户消息的 stream-json `initialize` 控制请求，从应答的 `response.models` 中提取模型描述开头的名字与版本号，仅更新 `fable / opus / sonnet / haiku` 的显示标签；每个 Claude worker 的 initialize 应答也会刷新这些标签。`value` 和“跟随 Claude 配置”标签不变。探针失败或某条描述缺失时，该项保留静态“（最新）”标签，不妨碍建会话。
 
-每个 driver 还在 `/api/meta` 暴露 `commands / mentions` 两个布尔能力位。本机协议实测后的能力矩阵是：Claude `true / true`、Codex `false / true`、Kimi `true / true`。前端必须以能力位决定是否展示功能；尤其不能把 Codex 的普通文本 `/compact` 冒充为原生斜杠命令。
+每个 driver 还在 `/api/meta` 暴露 `commands / mentions` 两个布尔能力位。本机协议实测后的能力矩阵是：Claude `true / true`、Codex `true / true`、Kimi `true / true`。前端必须以能力位决定是否展示功能；尤其不能把 Codex 的普通文本 `/compact` 冒充为原生斜杠命令。
 
 Claude 的模型或推理强度不显式覆盖时，schema 默认值、`config` 和兼容字段 `model / effort` 的初始值均为 `null`，标签为“跟随 Claude 配置”。创建每个 worker 时，服务端只读并依次合并 `~/.claude/settings.json`、`<cwd>/.claude/settings.json`、`<cwd>/.claude/settings.local.json`，后层同名字符串覆盖前层；模型读取 `model`，推理强度读取 `effortLevel`。每个文件独立容错：缺失、无权限、坏 JSON、非对象或该项不是非空字符串时忽略该层的该项并保留上一层；三层都没有可用值才报告 `null`。合并 settings 时不启动 Claude 查询配置，不要求预热，也不在 `~/.claude`、`~/.codex` 或 `~/.kimi-code` 写缓存文件。
 
 Claude 在首轮 `system/init` 报出实际模型后，兼容字段 `model` 和 `effectiveModel` 都更新为完整模型名，`effectiveModelSource` 变为 `init`，并广播一条 `config_updated`。若未来 init 回报 effort，同样提升 effort；当前 Claude Code 2.1.238 的 init 不回报有效 effort，因此兼容字段 `effort` 保持 `null`，`effectiveEffort` 则继续使用 settings 合并值及 `settings` 来源，不会猜测精确模型侧 effort。审批模式缺省由 driver 明确传 `auto`（2026-09-30 起，此前为 `manual`；ROADMAP P1-10），用户选 `manual` 时 init 回报的协议值 `default` 会归一为 `manual`。
 
-Codex 0.148.0 的 `approvalPolicy` 实测只接受 `untrusted / on-request / never`（另支持结构化 `granular`，不属于当前三档 UI）。`on-failure` 请求会被 app-server 以 `unknown variant` 拒绝，因此 schema 不暴露该值。
+Codex 权限菜单已按当前官方三个常用预设更新（2026-10-01；本机 0.159.3 原生 `thread/start` 无模型请求实测通过）：
 
-`snapshot` 的 `data` 为 `{session, seq, events}`。`events` 是重建会话视图所需的全量统一事件；客户端完成快照后连接 `/ws?sessionId=<id>&afterSeq=<seq>`。连接期间产生的缺口由每会话 1,000 条 ring buffer 补发；超出 ring 时服务端发送 `resync_required`，客户端重新取快照。
+| 菜单 | Workbench `permissionMode` | `approvalPolicy` | `approvalsReviewer` | 沙盒 |
+| --- | --- | --- | --- | --- |
+| Ask for approval（缺省） | `on-request` | `on-request` | `user` | `workspace-write` |
+| Approve for me | `auto-review` | `on-request` | `auto_review` | `workspace-write` |
+| Full access | `full-access` | `never` | `user` | `danger-full-access` |
+
+每次 `thread/start` / `thread/resume` 都显式传三项；每次 `turn/start` 同时传 `approvalPolicy / approvalsReviewer / sandboxPolicy`。因此切回人工审批会同时撤销自动审核和完全访问。前两项的沙盒禁止网络，额外权限分别交给用户与 Codex 审核；Full access 的 `sandboxPolicy` 为 `{type:"dangerFullAccess"}`，并沿用高权限提示。自动审核由原生 Codex 执行，WB 不自行批准请求，也不改全局配置。
+
+旧会话续接仍接受原来保存的 `untrusted` 和 `never`，但菜单不再提供这两个旧值。旧 `never` 保留 `workspace-write` 沙盒，绝不自动升级为 Full access；旧值在前端作为当前值显示，可切换到新预设。新会话不得显式选择旧值。官方的 `Custom (config.toml)` 属于自定义权限组合，本菜单仅提供上述三个常用预设。协议回归在 `server/codex-permissions.test.ts`；运行 `node --import tsx server/codex-permissions.test.ts`。
+
+`snapshot` 的 `data` 为 `{session, seq, events}`。`events` 是重建会话视图所需的全量统一事件；单会话客户端可在快照后连接 `/ws?sessionId=<id>&afterSeq=<seq>`；当前前端使用全局 `/ws`，以 `replay` 消息传各已加载会话的 `afterSeq`（详见性能接口契约）。连接期间产生的缺口由每会话 1,000 条 ring buffer 补发；超出 ring 时服务端发送 `resync_required`，客户端重新取快照。
 
 ## 三家 CLI 原生历史
 
@@ -439,7 +457,7 @@ Claude 跳过 meta/sidechain，按 assistant 内容块顺序输出文字与 `too
 
 ### 释放（release）worker
 
-`POST /api/sessions/:id/release` 把会话的 worker 停掉但保留会话：状态保持 `idle`，记录新增持久化字段 `released:true`，`processId` 置空，广播 `worker_released`（payload `{reason:"manual"|"idle"|"shutdown", resumeCommand, idleMinutes?}`，写进统一 transcript）。成功响应的 `data` 为 `{session, resumeCommand}`。释放前提：会话 `idle`、没有进行中的回合或待处理闸门、不在重启/检查中、已有 `nativeSessionId`；不满足时手动释放返回 400 可读错误，自动释放直接跳过。worker 先从内存表删除再停止，因此 `exited` 回调不会把会话标成 `dead`；Claude 会话同时把 `remoteControl` 置为 `disconnected` 并广播 `remote_control_updated`。
+`POST /api/sessions/:id/release` 把会话的 worker 停掉但保留会话：状态保持 `idle`，记录新增持久化字段 `released:true`，`processId` 置空，广播 `worker_released`（payload `{reason:"manual"|"idle"|"shutdown", resumeCommand, idleMinutes?}`，写进统一 transcript）。成功响应的 `data` 为 `{session, resumeCommand, vscodeUri: string | null}`。Claude 链接为 `vscode://anthropic.claude-code/open?session=<编码后的 nativeSessionId>`；Codex/Kimi 链接为 `vscode://vscode-remote/wsl+<WSL_DISTRO_NAME><cwd>`，发行版名及路径各段分别 URL 编码（`=` → `%3D`、空格 → `%20`），无 `WSL_DISTRO_NAME` 时为 null。链接由浏览器在释放成功后导航，服务端不启动任何 Windows 程序。释放前提：会话 `idle`、没有进行中的回合或待处理闸门、不在重启/检查中、已有 `nativeSessionId`；不满足时手动释放返回 400 可读错误，自动释放直接跳过。worker 先从内存表删除再停止，因此 `exited` 回调不会把会话标成 `dead`；Claude 会话同时把 `remoteControl` 置为 `disconnected` 并广播 `remote_control_updated`。
 
 `resumeCommand` 是带 cwd 的原生续接命令，cwd 做 shell 单引号转义：Claude `cd '<cwd>' && claude --resume <id>`，Codex `cd '<cwd>' && codex resume <id>`，Kimi `cd '<cwd>' && kimi -S <id>`。
 
@@ -529,7 +547,7 @@ interface PageHealth {
 }
 ```
 
-事件最小集为 `session_created / config_update_started / external_messages_added / user_message / agent_text_delta / thought_delta / tool_call_started / tool_call_updated / tool_call_completed / permission_request / permission_resolved / commands_updated / config_updated / usage_updated / turn_completed / session_error / process_exited / worker_released`；另有容错用 `raw_event`。每个 session 独立计数，`seq` 单调递增。
+事件最小集为 `session_created / config_update_started / external_messages_added / user_message / agent_text_delta / thought_delta / tool_call_started / tool_call_updated / tool_call_completed / permission_request / permission_resolved / commands_updated / config_updated / usage_updated / turn_completed / session_error / process_exited / worker_released`；另有容错用 `raw_event`。每个 session 的持久事件独立计数，`seq` 单调递增。临时事件不推进该游标。
 
 Kimi 的 `tool_call_started / tool_call_updated / tool_call_completed` 在 ACP 更新含 `kind`（字符串）或 `locations`（`{path, line?}` 数组）时，分别原样透传为 payload 的同名字段；缺失时不添加。Kimi 命令工具的完成事件若 `content` 含 `{type:"terminal", terminalId}` 且终端仍在运行或已释放，会额外包含 `terminalOutput: {terminalId, output, truncated, exitCode, signal}`。事件另行收集真正的输出末尾，`output` 最多保留末尾 64 KiB（按 UTF-8 字节并在字符边界截取）；发生过截断，包括 ACP 终端原收集上限造成的截断，`truncated` 为 `true`。ACP `terminal/output` 仍按其 `outputByteLimit` 返回输出开头，语义不变。尚未退出时事件返回已收集部分，`exitCode` 为 `null`；无退出信号时 `signal` 为 `null`。多个 terminal content 只取第一个；找不到终端则不添加 `terminalOutput`。已释放终端最多保留最近 64 个，每条仅存事件尾部与退出状态，随会话结束清空。以上新增字段只有 Kimi driver 提供，Claude、Codex 的工具事件契约不变。
 
@@ -617,13 +635,13 @@ Claude 的 model/effort 切换先广播 `config_update_started`，其 payload �
 }
 ```
 
-`name` 不含开头的 `/`；发送时既可用上面的结构化 `command`，也仍可把原生命令作为普通 `text` 交给支持命令的 driver。结构化命令和 `text` 不能同时出现，但可附 `mentions`。命令始终复用普通 prompt 通道，没有单独的执行快车道；由命令触发的工具调用仍走既有审批流程，Kimi 的 `terminal/create / fs/write_text_file` 最终闸门照常生效。
+`name` 不含开头的 `/`；发送时既可用上面的结构化 `command`，也仍可把原生命令作为普通 `text` 交给支持命令的 driver。结构化命令和 `text` 不能同时出现，Claude/Kimi 可附 `mentions`；Codex 命令不能附文本或附件。Claude/Kimi 命令复用普通 prompt 通道；Codex 命令走下节列出的专用 RPC；由命令触发的工具调用仍走既有审批流程，Kimi 的 `terminal/create / fs/write_text_file` 最终闸门照常生效。
 
 命令表按会话保存于内存，并通过 `commands_updated` 实时广播完整新表：
 
 - Claude 启动时发送 stream-json `control_request {subtype:"initialize"}`，把 `response.commands[]` 的 `name / description / argumentHint` 归一；收到 `system/commands_changed` 后重新查询。首次控制查询失败时，首轮 `system/init.slash_commands` 可提供只有名称的后备表。
 - Kimi 每次收到 ACP `session/update` 的 `available_commands_update.availableCommands` 都覆盖当前表，不把初始更新当成一次性快照。
-- Codex app-server 没有可枚举的斜杠命令协议，始终返回空数组；结构化命令会明确报错。
+- Codex 0.159.3：由 wb 按已核实的 app-server 方法提供 8 项客户端命令（见下节），不冒充 TUI 命令枚举。
 
 `mentions` 接受两类条目：`{"type":"file","path","name"?}` 和 `{"type":"image","path","mimeType","name"?}`。`path` 可为会话 `cwd` 的相对路径或绝对路径，必须是已存在的普通文件；单条消息最多 20 个。`image` 额外要求 `mimeType` 属于 `image/png|jpeg|gif/webp`（否则 400/`40024`）且文件 ≤ 10 MB（否则发送前报错）。三家翻译如下：
 
@@ -727,3 +745,66 @@ node server/scripts/verify-snapshot.mjs '<sessionId>' --probe-message "只回复
 - [x] **20. 本轮范围与类型检查。** `npm run typecheck` 与 `git diff --check` 均退出码 0；Kimi 启动时无条件 `applyConfigOption("permissionMode", requestedConfig.permissionMode ?? "default")` 及三类审批/最终闸门代码均未修改。
 
 验收产生的 agent 测试文件仅位于 `server/test-sandbox/`，该目录内容已被 Git 忽略。
+
+派单列表与详情的 `parent.model`：Claude 父会话按 `parent.sessionId` 定位 `~/.claude/projects/*/<sessionId>.jsonl`，最多只读尾部 1 MiB，取最后一条完整可解析 assistant 消息的 `message.model`；缺失、不可读或尾部窗口没有模型时返回 null，其他 agent 同样为 null。命中与空结果缓存 30 秒，同会话并发复用，最多 256 项。前端工作台会话匹配成功时优先使用该会话的有效模型。
+
+#### 派单详情与近 7 天历史（P1-14 第二版）
+
+以下接口均沿用 `/api` 的访问控制，只读；不控制进程、不续接、不清理派单目录。
+
+- `GET /api/dispatches/history?offset=0` → `{dispatches:Dispatch[],total:number,nextOffset:number|null}`。
+  每页 20 条，按结束时间倒序（同时间以 runId 倒序）；覆盖结束时间在请求时刻前 7 天内的非 running 单。
+  旧目录缺 `endedAt` 时，用 `startedAt + elapsedS` 推导；没有可确认结束时间的单不列入历史。
+  扫描不受普通列表的 200 条上限影响；非负整数 offset 无效时返回 400 / `40000`。
+- `GET /api/dispatches?parent=<Claude原生会话ID>` → `{dispatches:Dispatch[]}`。
+  仅返回 `parent.agent=claude` 且 `parent.sessionId` 精确匹配的 running 单，不受普通列表条数上限限制。
+  parent 仅接受 1–128 位字母、数字、下划线或连字符；无效返回 400 / `40000`。
+- `GET /api/dispatches/<runId>/messages?cursor=<上次cursor>` →
+  `{source:"native"|"stdout",agent?:"codex"|"kimi",messages:HistoryMessage[],replaceFrom:number,cursor:string|null,truncated:boolean}`。
+  先经 `NativeConversationReader` 限定原生根目录、校验会话 ID 和真实文件路径，再复用
+  `history.ts` 的 `parseHistoryMessages` / `mergeHistoryMessages`；读取末尾最多 4 MiB、最多 400 条消息，
+  并沿用 `boundExternalMessages` 的 512 KiB 正文限制。前端复用 `HistoryTimeline`、`StreamItems` 和工具摘要。
+  客户端用 `已有消息.slice(0,replaceFrom).concat(messages)` 更新，工具结果会替换原调用；没有变化返回空 messages。
+  cursor 为消息快照 SHA-256，不是路径；服务端最多保留 32 个派单快照，缓存失效或未知 cursor 自动从 0 替换。
+  拿不到会话、原生文件不可读或 Copilot 无现有解析器时返回 source=stdout，客户端改用既有 `/log` 尾读与字节增量接口。
+  runId/目录校验与已有详情、日志一致，非法 ID、目录穿越、目录符号链接逃逸返回 404 / `40400`。
+- `DispatchDetail` 追加 `acceptResult:string|null`、`resume:string|null`、`credits:number|null`。
+  ACCEPT / RESUME 取 summary 行；resume 也兼容 run.json 的字符串字段；Copilot credits 优先取
+  `usage.json.totalNanoAiu / 1e9`，没有时读 summary STATUS 行。所有派单附件仍使用固定文件名与禁止符号链接的读取。
+
+前端详情路由 `#/dispatches/<runId>`，多单跳转 `#/dispatches?runs=<ID1>,<ID2>` 并高亮目标卡片。
+流程图仍为 30 分钟窗口；近 7 天历史是独立只读视图。详情每 3 秒轮询，运行时每秒走时，
+隐藏页面暂停；结束后再刷新一次以等待原生记录刷盘。历史每 15 秒刷新已加载页，不新增 WS 通道或依赖。
+
+
+## Codex 命令与 skills（2026-10-01，CLI 0.159.3）
+
+能力依据：本机 `codex app-server generate-json-schema --out scratch/codex-commands/schema`；官方 [app-server](https://learn.chatgpt.com/docs/app-server) 的 Skills 与 Compaction 章节。旧版探针与验收记录是历史结果，当前能力以下表及本节为准。
+
+| wb 命令 | app-server 方法 | 行为 |
+|---|---|---|
+| `/status` | `thread/read {threadId,includeTurns:false}` | 线程元数据与当前 wb 会话配置；不读取全量对话 |
+| `/model` | `model/list {limit:100,includeHidden:false,cursor?}` | 只读模型列表；切换沿用底栏模型菜单，在下次 turn/start 生效 |
+| `/mcp` | `mcpServerStatus/list {threadId,limit:100,cursor?}` | 当前线程连接、认证、工具数量与发现错误；分页读全，无启停/登录入口 |
+| `/skills` | `skills/list {cwds:[cwd],forceReload:true}` | 仅返回当前 cwd 的 enabled skills 和读取错误 |
+| `/compact` | `thread/compact/start {threadId}` | 空闲时接受异步压缩；RPC ack 不代表完成，进度走现有 turn/item 事件 |
+| `/review [要求]` | `review/start {threadId,delivery:"inline",target}` | 留空为 uncommittedChanges，有参数为 custom.instructions；结果在当前对话 |
+| `/new` | 新 wb 会话 → `thread/start` | 同 cwd、当前会话配置，新建 native id，保留旧会话 |
+| `/interrupt` | `turn/interrupt {threadId,turnId}` | 只打断正在运行的执行，以 turn/completed 为准 |
+
+`GET /api/sessions/:id/commands` 和 `commands_updated` 返回上述客户端命令表；Codex `commands:true`。前端 `/` 面板和底栏 `/` 菜单使用同一表，不显示 Claude 专属能力。前端调用 `POST /api/sessions/:id/codex/command {name,arguments?}` 并在原有查看弹窗样式中显示结果/错误；无任意 RPC 透传。未知名称、非 review 参数、过长参数或忙碌/待审批时执行 compact/review/new 均拒绝；400/40067，缺失 session 为 404/40401。WS `user_message.command` 同样走该白名单，结果为 raw_event（前端交互优先 HTTP）。`GET /info/status|model|mcp|skills` 对 Codex 开放；其他查看项拒绝。
+
+Codex 输入框 `$` 在光标 token 处打开名称+描述面板，支持过滤、上下键、Enter/Tab 插入、Esc 关闭；IME 组合期间不触发。选中插入 `$name `，文本保留，后端按真实 `skills/list` 的启用清单附加 `{type:"skill",name,path}` 到 `turn/start.input`；不接受客户端提供 skill 文件路径、不读取/嵌入 skill 内容、不写 skills 配置。重复提及去重，同名不同文件报错而不猜路径；禁用 skill 不主动附加。列表来源覆盖用户、仓库与系统的实际发现结果；读取错误在面板提示并可在 `/skills` 查看。
+
+不接 `/init`、undo/revert、`/diff`、`/prompts:<name>`、thread/shellCommand 或 MCP 配置改写：写文件/不可逆、无直接对应方法、TUI 本地能力，或超出本单可逆能力范围。详情与真实报文见 `spikes/PROTOCOL-NOTES.md` §12 和 `.work-orders/2026-10-01-codex-commands-report.md`。生效需要后端重启（本单不执行 wb restart）；前端重新 build 后由静态文件服务读取。
+
+
+### 性能接口契约（P0 / P1）
+
+- `GET /api/sessions` 的每个列表项增加 `title: string` 与 `pendingGateCount: number`。标题取首条 `user_message.payload.text`，空白压成单空格，按显示宽度 30 截断（CJK/全角计 2，其余计 1，超出加 `…`）；首条为空或尚无消息时为“新会话”。前后端共用 `shared/session-title.ts`。审批数来自内存未决闸门集合；dead 会话固定为 0。新的 `user_message` 事件还带顶层 `title`，用于未加载会话的实时标题（包括首条为空的情况）。
+- 前端启动只取当前打开会话的 snapshot；未加载会话的标题和跨会话审批徽标以列表字段及 WS 实时事件维护，重连重新取列表校准。已加载会话在全局 `/ws` 上发送 `{type:"replay", sessionId, afterSeq}`，服务端补发 ring 内 `seq > afterSeq` 的持久事件，再发送 `{type:"replay_complete", sessionId, currentSeq}`；超出 ring 则发送 `resync_required`，客户端取 snapshot。旧 `/ws?sessionId=...&afterSeq=...` 连接补发仍可使用。
+- 首连与重连对齐期间的实时帧先缓存，补发完成后排序去重。snapshot 在途期间也缓存事件，落地后只追加大于 snapshot seq 的持久事件；普通 seq 缺口复用在途请求。仅显式强制刷新、`resync_required` 或 WS 重连可作废在途 snapshot。
+- Claude 只含 `toolCallId`、`partialInput` 的 `tool_call_updated` 标为顶层 `ephemeral:true`，`seq` 取当前持久游标，不写 transcript、不进 ring；仅 WS 实时发送，同一调用常规最多每 100ms 一次（保留最新值）。工具完成、最终 `inputComplete` 参数、审批、回合结束或错误前强制推出待发更新，该边界推出不受 100ms 限制。前端只更新实时卡片参数，跳过缺口检测且不推进游标。最终参数事件仍持久化；临时状态不支持回放或崩溃恢复。Codex/Kimi 更新保持原契约，旧 transcript 不迁移。
+- `commands_updated` 对规范化命令表按内容去重；服务启动以 transcript 最后一条命令表为比较基线，实际内容变化仍持久化并广播。
+- `npm run build` 为 `frontend/dist/assets/` 的 JS/CSS 生成旁路 `.gz`。静态请求接受 gzip（且 q 非 0）并有对应文件时返回 gzip，带 `Content-Encoding: gzip` 和 `Vary: accept-encoding`；否则返回原文件，现有缓存策略不变。
+- 流式事件只标记会话登记表脏，最多每秒集中保存一次；创建、移除、释放、配置、状态变化及 shutdown 立即保存并刷出未写内容。transcript 仍逐条保存持久事件，恢复时以其末尾 seq 为准；未变化的 Claude 原生 session ID 元数据不触发重复保存。

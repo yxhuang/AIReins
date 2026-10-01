@@ -5,10 +5,13 @@ import { workbenchHome } from "./persistence.js";
 export interface WorkbenchPrefs {
   /** 空闲自动释放 worker 的分钟数；0 = 关闭 */
   idleReleaseMinutes: number;
+  /** 会话保留天数：最后活动早于此的会话在启动时清掉（对标 Claude 的 cleanupPeriodDays）；0 = 不清 */
+  retentionDays: number;
 }
 
 export const MAX_IDLE_RELEASE_MINUTES = 1_440;
-export const DEFAULT_PREFS: WorkbenchPrefs = { idleReleaseMinutes: 30 };
+export const MAX_RETENTION_DAYS = 3_650;
+export const DEFAULT_PREFS: WorkbenchPrefs = { idleReleaseMinutes: 30, retentionDays: 30 };
 
 export function prefsPath(): string {
   return join(workbenchHome, "prefs.json");
@@ -21,14 +24,26 @@ export function isValidIdleReleaseMinutes(value: unknown): value is number {
     && value <= MAX_IDLE_RELEASE_MINUTES;
 }
 
-/** 文件缺失、坏 JSON 或字段无效时按默认值处理。 */
+export function isValidRetentionDays(value: unknown): value is number {
+  return typeof value === "number"
+    && Number.isInteger(value)
+    && value >= 0
+    && value <= MAX_RETENTION_DAYS;
+}
+
+/** 文件缺失、坏 JSON 时按默认值处理；单个字段无效只回落该字段。 */
 export function loadPrefs(): WorkbenchPrefs {
   try {
     const path = prefsPath();
     if (!existsSync(path)) return { ...DEFAULT_PREFS };
     const parsed: unknown = JSON.parse(readFileSync(path, "utf8"));
-    const value = (parsed as Record<string, unknown> | null)?.idleReleaseMinutes;
-    return { idleReleaseMinutes: isValidIdleReleaseMinutes(value) ? value : DEFAULT_PREFS.idleReleaseMinutes };
+    const record = parsed as Record<string, unknown> | null;
+    const idle = record?.idleReleaseMinutes;
+    const retention = record?.retentionDays;
+    return {
+      idleReleaseMinutes: isValidIdleReleaseMinutes(idle) ? idle : DEFAULT_PREFS.idleReleaseMinutes,
+      retentionDays: isValidRetentionDays(retention) ? retention : DEFAULT_PREFS.retentionDays,
+    };
   } catch {
     return { ...DEFAULT_PREFS };
   }

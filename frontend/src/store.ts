@@ -13,17 +13,13 @@ import type {
   UnifiedEvent,
 } from "./types";
 import { createSession, deleteSession, fetchCommands, fetchFiles, fetchMeta, fetchPages, fetchSessions, fetchSnapshot, releaseSession, type CreateSessionInput } from "./api";
+import { sessionTitle } from "../../shared/session-title";
 import { extractMentionTokens, stripMentionCandidates } from "./mentions";
 import { partitionPages, type SkippedPage } from "./pages";
 
-// 全局状态与连接恢复：
-// - 一条全局 WS（不带 sessionId）收全部会话事件，支撑左栏跨会话待审批徽标；
-//   服务端只对带 sessionId&afterSeq 的连接补发，全局连接没有任何补发——
-//   因此断线重连后的 WS open 对每个会话都重取快照对齐（不只当前会话）；
-//   只有启动首连复用 init 已成功取得的快照，避免同一快照紧接着取第二遍；
-// - 进入会话先 GET snapshot 拿全量 events + seq，WS 上 seq 更大的事件追加；
-// - 快照请求按会话去重（in-flight 复用同一 Promise）并带版本戳（过期响应丢弃）；
-// - WS 断线指数退避重连；收到 resync_required 或 seq 缺口时对该会话重取快照。
+// 全局 WS 收全部会话实时事件；首连和重连按已加载会话的 afterSeq 补发。
+// 未加载会话只维护列表摘要；快照期间缓存事件，落地后追加更大的 seq。
+// 仅明确强制刷新、resync_required 或重连作废在途快照。
 
 export type WsState = "connecting" | "open" | "closed";
 
@@ -45,6 +41,7 @@ export const MAX_MENTIONS = 20;
 
 /** 草稿在 localStorage 的 key 前缀：workbench-draft-<sessionId>。 */
 const DRAFT_STORAGE_PREFIX = "workbench-draft-";
+const LAST_SESSION_KEY = "workbench-last-session";
 
 interface SessionData {
   events: UnifiedEvent[];
@@ -126,6 +123,8 @@ export class Store {
   private nextSnapshotGen = 0;
   /** 每会话 in-flight 快照请求：并发对齐复用同一 Promise */
   private snapshotInflight = new Map<string, Promise<void>>();
+  private snapshotBuffers = new Map<string, UnifiedEvent[]>();
+  private replayBuffers = new Map<string, UnifiedEvent[]>();
   private configHintTimers = new Map<string, ReturnType<typeof setTimeout>>();
   /** @ 引用精确查询 in-flight 去重（key = sessionId + \n + path） */
   private fileKnownInflight = new Map<string, Promise<boolean>>();
@@ -195,6 +194,12 @@ export class Store {
     // 手机锁屏 / 切后台回来、网络恢复：立即重连，不等退避计时器（最长 15 秒）。
     document.addEventListener("visibilitychange", this.onVisibilityChange);
     window.addEventListener("online", this.onOnline);
+    // 无 hash 进入（托盘 / 快捷方式 / PWA 冷启动）时回到上次打开的会话
+    let restored: string | null = null;
+    if (!window.location.hash) {
+      try { restored = localStorage.getItem(LAST_SESSION_KEY); } catch { /* 存储不可用就停在主页 */ }
+      if (restored) history.replaceState(null, "", `#/session/${encodeURIComponent(restored)}`);
+    }
     this.onHashChange();
     try {
       this.meta = await fetchMeta();
@@ -202,16 +207,16 @@ export class Store {
       this.lastError = { message: error instanceof Error ? error.message : String(error) };
     }
     await this.refreshSessions();
+    if (restored && this.currentId === restored && !this.sessions.some((x) => x.id === restored)) this.navigate(null);
     this.startClock();
     await this.refreshPages();
-    // 启动时为每个会话取一次快照：既给左栏标题，也算出跨会话待审批徽标。
-    await Promise.allSettled(this.sessions.map((s) => this.ensureLoaded(s.id)));
+    if (this.currentId) await this.ensureLoaded(this.currentId);
     this.connect();
     this.notify();
   }
 
   private onHashChange = (): void => {
-    if (window.location.hash === "#/dispatches") {
+    if (/^#\/dispatches(?:\/[^?]+)?(?:\?runs=.*)?$/.test(window.location.hash)) {
       if (!this.dispatchesOpen) {
         this.beforeDispatches = {
           hash: this.historyOpen ? "#/history" : this.currentPageId
@@ -249,6 +254,10 @@ export class Store {
     const match = window.location.hash.match(/^#\/session\/([^/]+)$/);
     this.currentId = match?.[1] ? decodeURIComponent(match[1]) : null;
     if (this.currentId) void this.ensureLoaded(this.currentId);
+    try {
+      if (this.currentId) localStorage.setItem(LAST_SESSION_KEY, this.currentId);
+      else localStorage.removeItem(LAST_SESSION_KEY);
+    } catch { /* 忽略 */ }
     this.notify();
   };
 
@@ -273,6 +282,12 @@ export class Store {
       window.location.hash = "#/dispatches";
       this.onHashChange();
     }
+  }
+
+  navigateDispatches(runIds: string[] = []): void {
+    window.location.hash = runIds.length === 1 ? `#/dispatches/${encodeURIComponent(runIds[0]!)}`
+      : runIds.length ? `#/dispatches?runs=${runIds.map(encodeURIComponent).join(",")}` : "#/dispatches";
+    this.onHashChange();
   }
 
   closeDispatches(returnToList = false): void {
@@ -317,12 +332,18 @@ export class Store {
   }
 
   pendingCount(id: string): number {
-    return this.data.get(id)?.pendingGates.size ?? 0;
+    if (this.session(id)?.status === "dead") return 0;
+    return this.data.get(id)?.pendingGates.size ?? this.session(id)?.pendingGateCount ?? 0;
   }
 
   async refreshSessions(): Promise<void> {
     try {
-      this.sessions = await fetchSessions();
+      const sessions = await fetchSessions();
+      // REST 请求途中收到的较新 WS 摘要不能被旧列表覆盖。
+      this.sessions = sessions.map((session) => {
+        const live = this.session(session.id);
+        return live && live.seq > session.seq ? live : session;
+      });
     } catch (error) {
       this.lastError = { message: error instanceof Error ? error.message : String(error) };
     }
@@ -360,6 +381,8 @@ export class Store {
     // 校验处取回的仍是 undefined，新会话首次快照必被误丢（界面永远空白的根因）。
     const gen = ++this.nextSnapshotGen;
     this.snapshotGen.set(id, gen);
+    const buffered = this.snapshotBuffers.get(id) ?? [];
+    this.snapshotBuffers.set(id, buffered);
     // 先声明再赋值（! 断言）：finally 里的所有权校验要引用 promise 自身，赋值在闭包执行前完成
     let promise!: Promise<void>;
     promise = (async () => {
@@ -367,9 +390,13 @@ export class Store {
         const snapshot = await fetchSnapshot(id);
         if (this.snapshotGen.get(id) === gen) {
           this.applySnapshot(id, snapshot.session, snapshot.seq, snapshot.events);
+          this.snapshotBuffers.delete(id);
+          // 先解除在途状态，缓存中的缺口才可发起下一次必要的快照。
+          if (this.snapshotInflight.get(id) === promise) this.snapshotInflight.delete(id);
+          for (const event of buffered.sort((a, b) => a.seq - b.seq || Number(!!a.ephemeral) - Number(!!b.ephemeral))) this.handleEvent(event);
         }
       } catch (error) {
-        this.lastError = {
+        if (this.snapshotGen.get(id) === gen) this.lastError = {
           message: error instanceof Error ? error.message : String(error),
           sessionId: id,
         };
@@ -392,7 +419,7 @@ export class Store {
   }
 
   /**
-   * 作废 in-flight 快照响应并强制重取（seq 缺口 / resync_required / WS open 对齐）。
+   * 作废 in-flight 快照响应并强制重取（显式刷新 / resync_required / WS 重连）。
    * 旧 data 保留到新快照完整落地，避免当前会话闪回「载入会话…」并破坏滚动/展开状态。
    */
   resync(id: string): Promise<void> {
@@ -427,6 +454,8 @@ export class Store {
         if (!dead) pendingGates.set(String(event.payload.requestId ?? ""), event.seq);
       } else if (event.type === "permission_resolved") {
         pendingGates.delete(String(event.payload.requestId ?? ""));
+      } else if (event.type === "process_exited") {
+        pendingGates.clear();
       } else if (event.type === "usage_updated") {
         latestUsage = event.payload;
       } else if (event.type === "commands_updated") {
@@ -452,10 +481,10 @@ export class Store {
     const index = this.sessions.findIndex((s) => s.id === id);
     if (index >= 0) {
       const next = [...this.sessions];
-      next[index] = session;
+      next[index] = { ...session, title: session.title ?? sessionTitle({}, events), pendingGateCount: pendingGates.size };
       this.sessions = next;
     } else {
-      this.sessions = [...this.sessions, session];
+      this.sessions = [...this.sessions, { ...session, title: sessionTitle({}, events), pendingGateCount: pendingGates.size }];
     }
   }
 
@@ -492,6 +521,7 @@ export class Store {
     const protocol = window.location.protocol === "https:" ? "wss" : "ws";
     const socket = new WebSocket(`${protocol}://${window.location.host}/ws`);
     this.socket = socket;
+    for (const id of this.data.keys()) this.replayBuffers.set(id, []);
 
     socket.addEventListener("open", () => {
       if (this.socket !== socket) return; // 已被 reconnectNow 换掉的旧连接
@@ -499,7 +529,7 @@ export class Store {
       this.reconnectDelay = 1000;
       const reconnected = this.hasOpenedSocket;
       this.hasOpenedSocket = true;
-      void this.alignAfterSocketOpen(reconnected);
+      void this.alignAfterSocketOpen(reconnected, socket);
       this.notify();
     });
     socket.addEventListener("message", (messageEvent) => {
@@ -521,31 +551,48 @@ export class Store {
     socket.addEventListener("error", () => socket.close());
   }
 
-  private async alignAfterSocketOpen(reconnected: boolean): Promise<void> {
+  private async alignAfterSocketOpen(reconnected: boolean, socket = this.socket): Promise<void> {
     await this.refreshSessions();
-    // 全局 WS 没有 afterSeq 补发：任何一次断线重连都必须为全部会话重取快照，
-    // 否则会静默漏掉断连期间的审批事件。唯一可省的是启动首连：它发生在 init
-    // 等完首轮 ensureLoaded 之后，成功落地的 data 就是启动基线，复用可避免紧接着
-    // 再取同一份快照和当前视图闪烁；首取失败（data 不存在）或首连才发现的新会话
-    // 仍然立即补取。hasOpenedSocket 一旦为 true，后续 open 一律按“可能漏事件”处理。
-    const needsSnapshot = this.sessions.filter(
-      (session) => reconnected || !this.data.has(session.id),
-    );
-    await Promise.allSettled(needsSnapshot.map((session) => this.resync(session.id)));
+    if (this.socket !== socket) return;
+    // 列表恢复未加载会话的审批数；已加载会话通过同一条全局连接按各自游标补发。
+    for (const [id, data] of this.data) {
+      if (this.removed.has(id) || !this.session(id)) { this.replayBuffers.delete(id); continue; }
+      if (reconnected && this.snapshotInflight.has(id)) {
+        this.replayBuffers.delete(id);
+        void this.resync(id);
+      } else if (this.socket?.readyState === WebSocket.OPEN) {
+        this.socket.send(JSON.stringify({ type: "replay", sessionId: id, afterSeq: data.seq }));
+      }
+    }
+    if (reconnected) {
+      for (const id of this.snapshotInflight.keys()) {
+        if (!this.data.has(id)) void this.resync(id);
+      }
+    }
+    if (this.currentId && !this.data.has(this.currentId)) await this.ensureLoaded(this.currentId);
   }
 
   private handleFrame(frame: Record<string, unknown>): void {
     const type = String(frame.type ?? "");
     if (type === "ready") return;
+    if (type === "replay_complete") {
+      const id = String(frame.sessionId ?? "");
+      const buffered = this.replayBuffers.get(id) ?? [];
+      this.replayBuffers.delete(id);
+      for (const event of buffered.sort((a, b) => a.seq - b.seq || Number(!!a.ephemeral) - Number(!!b.ephemeral))) this.handleEvent(event);
+      return;
+    }
     if (type === "ack") return;
     if (type === "resync_required") {
       const id = String(frame.sessionId ?? "");
-      if (id) void this.resync(id);
+      if (id) { this.replayBuffers.delete(id); void this.resync(id); }
       return;
     }
     if (type === "error") {
       const msg = String(frame.msg ?? "未知错误");
       const sid = typeof frame.sessionId === "string" ? frame.sessionId : "";
+      // 补发失败：放掉补发缓存（否则该会话事件永远卡在缓存里），退回快照对齐
+      if (sid && frame.action === "replay" && this.replayBuffers.delete(sid)) void this.resync(sid);
       // 有 set_config 在等结果的会话：错误归到配置控件旁，不进全局提示条。
       if (sid && this.configPending.has(sid)) {
         this.configPending.delete(sid);
@@ -563,13 +610,38 @@ export class Store {
   private handleEvent(event: UnifiedEvent): void {
     if (this.removed.has(event.sessionId)) return; // DELETE 后残留事件直接忽略
     const data = this.data.get(event.sessionId);
+    const replayBuffer = this.replayBuffers.get(event.sessionId);
+    if (replayBuffer) { replayBuffer.push(event); return; }
+    if (this.snapshotInflight.has(event.sessionId)) {
+      const buffer = this.snapshotBuffers.get(event.sessionId) ?? [];
+      buffer.push(event);
+      this.snapshotBuffers.set(event.sessionId, buffer);
+      return;
+    }
+    if (event.ephemeral) {
+      if (data && event.type === "tool_call_updated") {
+        const events = data.events.filter((item) => !(item.ephemeral && item.payload.toolCallId === event.payload.toolCallId));
+        // 断线前的迟到临时帧不得覆盖已完成工具的最终参数。
+        if (!events.some((item) => item.payload.toolCallId === event.payload.toolCallId
+          && (item.type === "tool_call_completed" || item.payload.inputComplete))) {
+          events.push(event);
+          this.data.set(event.sessionId, { ...data, events });
+          this.notifyStreamDelta();
+        }
+      }
+      return;
+    }
     if (data) {
       // 快照语义：只追加 seq 更大的事件；出现缺口则重取快照。
       if (event.seq > data.seq + 1) {
-        void this.resync(event.sessionId);
+        this.snapshotBuffers.set(event.sessionId, [event]);
+        void this.alignSnapshot(event.sessionId);
         return;
       }
       if (event.seq === data.seq + 1) {
+        if (event.type === "tool_call_completed" || event.payload.inputComplete) {
+          data.events = data.events.filter((item) => !(item.ephemeral && item.payload.toolCallId === event.payload.toolCallId));
+        }
         data.events.push(event);
         data.seq = event.seq;
         if (event.type === "permission_request") {
@@ -615,10 +687,9 @@ export class Store {
         // SessionData 内含可变数组/Map；每次有效增量替换外层引用，供 selector 正确比较。
         this.data.set(event.sessionId, { ...data });
       }
-      // event.seq <= data.seq：重发，忽略。
+      else return; // event.seq <= data.seq：补发重复帧，忽略。
     } else {
-      // 未加载的会话（如别的客户端刚建的）：取快照，快照会包含这条事件。
-      void this.ensureLoaded(event.sessionId);
+      // 未加载会话只维护列表摘要，打开时再取快照。
     }
 
     // 任何事件都刷新该会话的本地视图（lastActivityAt / 状态推断）。
@@ -628,7 +699,20 @@ export class Store {
         ...this.sessions[sessionIndex]!,
         lastActivityAt: event.timestamp,
       };
-      const status = statusFromEvent(event);
+      const freshSummary = event.seq > session.seq;
+      if (freshSummary) {
+        if (event.type === "user_message") {
+          session.title = event.title ?? sessionTitle({}, data?.events ?? [event]);
+        }
+        if (!data) {
+          if (event.type === "permission_request" && session.status !== "dead") session.pendingGateCount = (session.pendingGateCount ?? 0) + 1;
+          if (event.type === "permission_resolved") session.pendingGateCount = Math.max(0, (session.pendingGateCount ?? 0) - 1);
+          if (event.type === "process_exited") session.pendingGateCount = 0;
+        }
+        session.seq = event.seq;
+      } else if (!data) return;
+      if (data) session.pendingGateCount = data.pendingGates.size;
+      const status = freshSummary ? statusFromEvent(event) : undefined;
       if (status) session.status = status;
       if (event.type === "config_updated") this.applyConfigUpdated(event, session);
       if (event.type === "remote_control_updated") {
@@ -1004,6 +1088,8 @@ export class Store {
     // 作废该会话 in-flight 快照，防止过期响应把已删会话写回列表
     this.snapshotGen.set(id, ++this.nextSnapshotGen);
     this.snapshotInflight.delete(id);
+    this.snapshotBuffers.delete(id);
+    this.replayBuffers.delete(id);
     if (this.currentId === id) {
       // 与左栏同序：有未决闸门的优先（最后活动倒序），其次普通会话，最后才是折叠区的 dead
       const remaining = [...this.sessions].sort(
@@ -1024,10 +1110,10 @@ export class Store {
   }
 
   /**
-   * 手动释放会话 worker（「到 VSCode/终端继续」）：后端停进程、广播 worker_released，
-   * 返回带 cwd 的原生续接命令；成功响应里的 session 直接覆盖本地列表项。
+   * 手动释放会话 worker（「VSCode / CLI 继续」）：后端停进程、广播 worker_released，
+   * 返回续接命令和 VSCode 协议链接；成功响应里的 session 直接覆盖本地列表项。
    */
-  async release(id: string): Promise<string> {
+  async release(id: string): Promise<{ resumeCommand: string; vscodeUri: string | null }> {
     const result = await releaseSession(id);
     const index = this.sessions.findIndex((s) => s.id === id);
     if (index >= 0) {
@@ -1036,7 +1122,7 @@ export class Store {
       this.sessions = next;
     }
     this.notify();
-    return result.resumeCommand;
+    return { resumeCommand: result.resumeCommand, vscodeUri: result.vscodeUri ?? null };
   }
 
   dismissRemovalNotice(): void {

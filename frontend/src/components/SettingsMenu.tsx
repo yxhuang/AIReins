@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Segmented } from "./Segmented";
+import { BODY_FONT_MAX, BODY_FONT_MIN, BODY_FONT_STEP, BODY_FONT_STORAGE_KEY, applyBodyFontSize, bodyFontSize, readBodyFontSize } from "../body-font";
 import { fetchClaudeStartupSettings, fetchPrefs, fetchSessions, restartWorkbench, saveClaudeStartupSettings, savePrefs } from "../api";
 import { restartAndReconnect, restartBusyCount } from "../restart";
 import { store } from "../store";
@@ -59,6 +60,11 @@ const SETTING_GROUPS: SettingGroup[] = [
           { value: "xlarge", label: "特大" },
         ],
       },
+      {
+        id: "body-font",
+        label: "正文字号",
+        options: [],
+      },
     ],
   },
   {
@@ -109,6 +115,7 @@ export function SettingsMenu() {
   const [open, setOpen] = useState(false);
   const [theme, setTheme] = useState<ThemeChoice>(() => readTheme());
   const [scaleChoice, setScaleChoice] = useState<FontScaleChoice>(readFontScaleChoice);
+  const [bodySize, setBodySize] = useState(readBodyFontSize);
   const [idleRelease, setIdleRelease] = useState("30");
   const [rcStartup, setRcStartup] = useState<boolean | null>(null);
   const [rcSaving, setRcSaving] = useState(false);
@@ -286,12 +293,19 @@ export function SettingsMenu() {
   const choose = (id: string, value: string) => {
     if (id === "theme") chooseTheme(value);
     else if (id === "font-scale") chooseFontScale(value);
+    else if (id === "body-font") {
+      const next = bodyFontSize(value);
+      setBodySize(next);
+      applyBodyFontSize(next);
+      try { localStorage.setItem(BODY_FONT_STORAGE_KEY, String(next)); } catch { /* 仅本次生效 */ }
+    }
     else if (id === "idle-release") chooseIdleRelease(value);
   };
 
   const selectedValue = (id: string): string => {
     if (id === "theme") return theme;
     if (id === "font-scale") return scaleChoice;
+    if (id === "body-font") return String(bodySize);
     return idleRelease;
   };
 
@@ -324,6 +338,16 @@ export function SettingsMenu() {
                     </div>
                     <span className="settings-hint" id="settings-rc-hint">仅对新建、续接或释放后再发送的会话生效。</span>
                     {rcError && <span className="new-error" role="alert">{rcError}</span>}
+                  </div>
+                ) : item.id === "body-font" ? (
+                  <div className="settings-item" key={item.id}>
+                    <div className="settings-row">
+                      <label className="settings-item-label" htmlFor="settings-body-font">{item.label}</label>
+                      <span className="settings-range-value">{bodySize}px</span>
+                    </div>
+                    <input id="settings-body-font" className="settings-range" type="range"
+                      min={BODY_FONT_MIN} max={BODY_FONT_MAX} step={BODY_FONT_STEP} value={bodySize}
+                      onChange={(e) => choose(item.id, e.target.value)} />
                   </div>
                 ) : (
                   <div className="settings-item" key={item.id}>

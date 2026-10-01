@@ -7,7 +7,7 @@
     "server": "tsx server/index.ts",
     "typecheck": "tsc --noEmit",
     "typecheck:frontend": "tsc --noEmit -p frontend",
-    "build": "vite build --config frontend/vite.config.ts",
+    "build": "vite build --config frontend/vite.config.ts && node frontend/scripts/precompress.mjs",
     "dev": "vite --config frontend/vite.config.ts",
     "spike:claude": "tsx spikes/claude-loop.ts",
     "spike:codex": "tsx spikes/codex-loop.ts",

@@ -12,6 +12,7 @@ import { pillText } from "../config-view";
 import { DirectoryBrowser } from "./DirectoryBrowser";
 import { HistoryView } from "./HistoryView";
 import { PageView } from "./PageView";
+import { TerminalIcon } from "./TerminalIcon";
 
 const AGENT_LABELS: Record<AgentKind, string> = {
   claude: "claude",
@@ -75,9 +76,10 @@ interface SidebarProps {
   terminalCapable: boolean;
   termOpen: boolean;
   onToggleTerm: () => void;
+  returnToSession?: boolean;
 }
 
-export function Sidebar({ collapsed, onToggle, newOpen, onNewOpenChange, terminalCapable, termOpen, onToggleTerm }: SidebarProps) {
+export function Sidebar({ collapsed, onToggle, newOpen, onNewOpenChange, terminalCapable, termOpen, onToggleTerm, returnToSession = false }: SidebarProps) {
   const sessionRecords = useStore(selectSessions);
   const now = useStore(selectNow);
   const currentId = useStore(selectCurrentId);
@@ -90,9 +92,9 @@ export function Sidebar({ collapsed, onToggle, newOpen, onNewOpenChange, termina
   const sidebarRef = useRef<HTMLElement>(null);
   const closePanel = useCallback(() => {
     const trigger = sidebarRef.current?.querySelector<HTMLButtonElement>('.sidebar-panel-open .page-nav-item');
-    store.closeSidebarPanel(window.matchMedia("(max-width: 720px)").matches);
+    store.closeSidebarPanel(window.matchMedia("(max-width: 720px)").matches && !returnToSession);
     trigger?.focus();
-  }, []);
+  }, [returnToSession]);
   useEffect(() => {
     if (!panelOpen) return;
     const onKeyDown = (event: KeyboardEvent) => {
@@ -109,6 +111,26 @@ export function Sidebar({ collapsed, onToggle, newOpen, onNewOpenChange, termina
   // pendingGates 是可变 Map；用可比较的原始字符串捕获“总数相同但分布换了会话”的变化。
   useStore(selectPendingSignature);
   const [deadExpanded, setDeadExpanded] = useState(false);
+  const [swipedId, setSwipedId] = useState<string | null>(null);
+  useEffect(() => {
+    if (!swipedId) return;
+    const close = (event: Event) => {
+      const target = event.target;
+      if ((event.type === "pointerdown" || event.type === "touchstart") && target instanceof Element
+        && target.closest(".session-swipe-open")) return;
+      setSwipedId(null);
+    };
+    document.addEventListener("pointerdown", close, true);
+    document.addEventListener("touchstart", close, true);
+    window.addEventListener("scroll", close, true);
+    window.addEventListener("resize", close);
+    return () => {
+      document.removeEventListener("pointerdown", close, true);
+      document.removeEventListener("touchstart", close, true);
+      window.removeEventListener("scroll", close, true);
+      window.removeEventListener("resize", close);
+    };
+  }, [swipedId]);
   // 按最后活动时间倒序（2026-10-01 用户定）。代价：agent 跑动时行序会变，曾有正要点的那行被挤走的反馈。
   const byActivity = (a: SessionRecord, b: SessionRecord) =>
     Date.parse(b.lastActivityAt) - Date.parse(a.lastActivityAt);
@@ -135,6 +157,8 @@ export function Sidebar({ collapsed, onToggle, newOpen, onNewOpenChange, termina
         pending={store.pendingCount(session.id)}
         active={session.id === currentId}
         now={now}
+        swipeOpen={swipedId === session.id}
+        onSwipeChange={setSwipedId}
       />
     </li>
   );
@@ -279,22 +303,7 @@ function TerminalNav({
         aria-pressed={open}
         onClick={onToggle}
       >
-        <span className="page-icon" aria-hidden="true">
-          <svg
-            viewBox="0 0 24 24"
-            width="16"
-            height="16"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            <rect x="2" y="4" width="20" height="16" rx="2" />
-            <polyline points="6 9 9 12 6 15" />
-            <line x1="12" y1="15" x2="18" y2="15" />
-          </svg>
-        </span>
+        <TerminalIcon />
         {!collapsed && <span className="page-nav-name">终端</span>}
       </button>
     </nav>
@@ -426,11 +435,15 @@ function SessionRow({
   pending,
   active,
   now,
+  swipeOpen,
+  onSwipeChange,
 }: {
   session: SessionRecord;
   pending: number;
   active: boolean;
   now: number;
+  swipeOpen: boolean;
+  onSwipeChange: (id: string | null) => void;
 }) {
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -447,6 +460,62 @@ function SessionRow({
   const menuRef = useRef<HTMLDivElement>(null);
   const data = store.data.get(session.id);
   const title = sessionTitle(session, data?.events);
+  const [swipeOffset, setSwipeOffset] = useState<number | null>(null);
+  const swiping = useRef(false);
+
+  useEffect(() => {
+    const row = rowRef.current;
+    if (!row || confirming) return;
+    let start: { x: number; y: number; initial: number } | null = null;
+    let direction: "horizontal" | "vertical" | null = null;
+    let offset = 0;
+    const begin = (event: TouchEvent) => {
+      if (!window.matchMedia("(max-width: 720px)").matches || event.touches.length !== 1) return;
+      const touch = event.touches[0];
+      if (!touch) return;
+      start = { x: touch.clientX, y: touch.clientY, initial: swipeOpen ? -80 : 0 };
+      offset = start.initial;
+      direction = null;
+      swiping.current = false;
+      suppressClick.current = false;
+    };
+    const move = (event: TouchEvent) => {
+      if (!start || event.touches.length !== 1) return;
+      const touch = event.touches[0];
+      if (!touch) return;
+      const dx = touch.clientX - start.x;
+      const dy = touch.clientY - start.y;
+      if (!direction && Math.max(Math.abs(dx), Math.abs(dy)) >= 10) {
+        direction = Math.abs(dx) > Math.abs(dy) * 1.2 ? "horizontal" : "vertical";
+        clearLongPress();
+      }
+      if (direction !== "horizontal") return;
+      if (event.cancelable) event.preventDefault();
+      swiping.current = true;
+      suppressClick.current = true;
+      offset = Math.max(-80, Math.min(0, start.initial + dx));
+      setSwipeOffset(offset);
+    };
+    const finish = (event: TouchEvent) => {
+      if (direction === "horizontal") onSwipeChange(event.type !== "touchcancel" && offset <= -40 ? session.id : null);
+      setSwipeOffset(null);
+      swiping.current = false;
+      start = null;
+      direction = null;
+    };
+    row.addEventListener("touchstart", begin, { passive: true });
+    // React 的根 touchmove 监听是 passive；只在锁定横向后阻止默认动作。
+    row.addEventListener("touchmove", move, { passive: false });
+    row.addEventListener("touchend", finish);
+    row.addEventListener("touchcancel", finish);
+    return () => {
+      row.removeEventListener("touchstart", begin);
+      row.removeEventListener("touchmove", move);
+      row.removeEventListener("touchend", finish);
+      row.removeEventListener("touchcancel", finish);
+      clearLongPress();
+    };
+  }, [confirming, swipeOpen, session.id, onSwipeChange]);
 
   // 进入确认态把焦点收进行内按钮：默认落「取消」，连按 Enter 不会误删
   useEffect(() => {
@@ -479,6 +548,7 @@ function SessionRow({
   }, [menuAt]);
 
   const openMenu = (x: number, y: number) => {
+    onSwipeChange(null);
     // 别贴出视口：菜单约 180×44
     setMenuAt({ x: Math.min(x, window.innerWidth - 188), y: Math.min(y, window.innerHeight - 52) });
   };
@@ -506,6 +576,12 @@ function SessionRow({
     // 焦点还给这一行（等下一轮渲染后按钮重新挂载）
     requestAnimationFrame(() => rowRef.current?.focus());
   };
+  const beginConfirm = () => {
+    onSwipeChange(null);
+    setMenuAt(null);
+    setError(null);
+    setConfirming(true);
+  };
 
   if (confirming) {
     const running = session.status === "starting" || session.status === "running";
@@ -521,7 +597,7 @@ function SessionRow({
         }}
       >
         <p className="session-confirm-text">
-          从工作台移除此会话？{AGENT_LABELS[session.agent]} 自己的对话记录不会被删除。
+          从工作台移除此会话？{AGENT_LABELS[session.agent]} 自己的对话记录不会被删除（CLI / VS Code 仍可续接），工作台里的这份记录与附件会一并删除。
           {running && "该会话仍在运行，移除会停止它。"}
         </p>
         {error && <p className="session-confirm-error">{error}</p>}
@@ -550,7 +626,9 @@ function SessionRow({
   }
 
   return (
-    <div className="session-item">
+    <div className={`session-item${swipeOpen ? " session-swipe-open" : ""}${swipeOffset !== null ? " session-swiping" : ""}`}>
+      <button type="button" className="session-swipe-remove" tabIndex={swipeOpen ? 0 : -1} aria-hidden={!swipeOpen}
+        onClick={beginConfirm}>移除</button>
       <button
         type="button"
         ref={rowRef}
@@ -585,11 +663,14 @@ function SessionRow({
         className={`session-row agent-${session.agent}${
           active ? " active" : ""
         }${session.status === "dead" ? " dead" : ""}`}
+        style={swipeOffset !== null ? { transform: `translateX(${swipeOffset}px)` } : undefined}
         onClick={() => {
+          if (swiping.current) return;
           if (suppressClick.current) {
             suppressClick.current = false;
             return;
           }
+          if (swipeOpen) { onSwipeChange(null); return; }
           store.navigate(session.id);
         }}
       >
@@ -632,11 +713,7 @@ function SessionRow({
             type="button"
             role="menuitem"
             className="attach-item row-menu-danger"
-            onClick={() => {
-              setMenuAt(null);
-              setError(null);
-              setConfirming(true);
-            }}
+            onClick={beginConfirm}
           >
             从工作台移除…
           </button>

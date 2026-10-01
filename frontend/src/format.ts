@@ -51,36 +51,7 @@ export function compactTokens(n: number): string {
   return `${(n / 1_000_000).toFixed(2)}M`;
 }
 
-// 会话标题：后端没有标题字段，用该会话第一条 user_message 的文本派生。
-// 所有空白（含换行）压成单空格后按显示宽度截断（CJK/全角计 2，其余计 1，上限 30，超出加 …）；
-// 首条消息还没到时返回占位「新会话」。
-export function sessionTitle(session: SessionRecord, events: UnifiedEvent[] | undefined): string {
-  const firstUser = events?.find((event) => event.type === "user_message");
-  const text = firstUser ? String(firstUser.payload.text ?? "") : "";
-  const flat = text.replace(/\s+/g, " ").trim();
-  if (!flat) return "新会话";
-  return truncateDisplayWidth(flat, 30);
-}
-
-// 按显示宽度截断：CJK/全角字符计 2，其余计 1；超出上限时截断并追加 …。
-export function truncateDisplayWidth(text: string, maxWidth: number): string {
-  let width = 0;
-  let out = "";
-  for (const ch of text) {
-    const w = charDisplayWidth(ch);
-    if (width + w > maxWidth) return `${out}…`;
-    width += w;
-    out += ch;
-  }
-  return out;
-}
-
-// 宽字符区间：CJK 统一表意、假名、谚文、全角形式等（足够覆盖标题场景的近似判定）。
-const WIDE_CHAR = /[ᄀ-ᅟ⺀-鿿ꥠ-꥿가-ퟻ豈-﫿︰-﹏＀-｠￠-￦𠀀-𫿿]/u;
-
-function charDisplayWidth(ch: string): number {
-  return WIDE_CHAR.test(ch) ? 2 : 1;
-}
+export { sessionTitle, truncateDisplayWidth } from "../../shared/session-title";
 
 // 把未知形状的 input 收敛成可读的等宽文本（命令/路径优先，兜底 JSON）。
 export function asRecord(value: unknown): Record<string, unknown> {

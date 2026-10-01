@@ -1,3 +1,4 @@
+import { sessionTitle } from "../shared/session-title.js";
 import { statSync } from "node:fs";
 import { isAbsolute, resolve } from "node:path";
 import { readClaudeEffectiveSettings, type ClaudeEffectiveSettings } from "./claude-settings.js";
@@ -13,6 +14,7 @@ import {
 } from "./session-config.js";
 import {
   appendTranscript,
+  deleteSessionFiles,
   loadRegistry,
   readTranscript,
   saveRegistry,
@@ -38,6 +40,8 @@ import type {
   UserMessageInput,
 } from "./types.js";
 import { ulid } from "./ulid.js";
+import { menuSettingsFiles, withMenuFileUris, type McpAction } from "./session-menu.js";
+import { parseCodexCommand } from "./codex-commands.js";
 
 const RING_SIZE = 1_000;
 export type DriverFactory = typeof createDriver;
@@ -50,6 +54,14 @@ const SESSION_INFO_SUBTYPES: Record<string, string> = {
   hooks: "get_hooks_listing",
   permissions: "list_permission_rules",
   context: "get_context_usage",
+  status: "get_status",
+  memory: "get_memory_dialog",
+  instructions: "get_memory_dialog",
+  skills: "get_skills_dialog",
+  sandbox: "get_sandbox_dialog",
+  usage: "get_usage",
+  export: "export_conversation",
+  output: "initialize",
 };
 
 export class SessionManager {
@@ -68,6 +80,12 @@ export class SessionManager {
   private readonly pendingGates = new Map<string, Set<string>>();
   /** shutdown 开始后不再起新 worker（否则停服期间的发送会拉起一个 shutdown 管不到的进程） */
   private stopping = false;
+  private registryDirty = false;
+  private registryTimer?: ReturnType<typeof setTimeout>;
+  private readonly titles = new Map<string, string>();
+  private readonly partialUpdates = new Map<string, Map<string, {
+    lastSent: number; payload?: Record<string, unknown>; timer?: ReturnType<typeof setTimeout>;
+  }>>();
 
   constructor(
     private readonly driverFactory: DriverFactory = createDriver,
@@ -109,7 +127,10 @@ export class SessionManager {
         riskyMode: isRiskyConfig(stored.agent, config),
       });
       this.rings.set(stored.id, events.slice(-RING_SIZE));
-      this.commands.set(stored.id, []);
+      // 还没有首条消息的会话不设标题，否则首条 user_message 到来时 titles.has 已为真、标题卡在「新会话」
+      if (events.some((event) => event.type === "user_message")) this.titles.set(stored.id, sessionTitle({}, events));
+      const lastCommands = [...events].reverse().find((event) => event.type === "commands_updated");
+      this.commands.set(stored.id, (lastCommands?.payload.commands as UnifiedCommand[] | undefined) ?? []);
       this.pendingGates.set(stored.id, pendingGatesFrom(events));
     }
     if (loaded.length > 0) this.persistRegistry();
@@ -117,7 +138,10 @@ export class SessionManager {
 
   list(): SessionRecord[] {
     return [...this.sessions.values()]
-      .map(cloneSession)
+      .map((session) => ({ ...cloneSession(session),
+        title: this.titles.get(session.id) ?? "新会话",
+        pendingGateCount: session.status === "dead" ? 0 : this.pendingGates.get(session.id)?.size ?? 0,
+      }))
       .sort((left, right) => right.lastActivityAt.localeCompare(left.lastActivityAt));
   }
 
@@ -259,6 +283,12 @@ export class SessionManager {
   }
 
   async sendUserMessage(id: string, input: UserMessageInput): Promise<void> {
+    if (this.sessions.get(id)?.agent === "codex" && input.command) {
+      if (input.text || input.mentions?.length) throw new Error("Codex 命令不能附带文本或附件");
+      const result = await this.executeCodexCommand(id, input.command);
+      this.emit(id, "raw_event", { source: "codex-command", command: input.command, result });
+      return;
+    }
     if (this.restartingSessions.has(id)) throw new Error("正在切换模型，请稍候再发送消息");
     const record = this.sessions.get(id);
     if (!record) throw new Error(`会话不存在：${id}`);
@@ -293,15 +323,33 @@ export class SessionManager {
   /** 「/」菜单只读查看：kind 映射到 Claude control_request；已释放会话按 ensureWorker 拉起。 */
   async queryInfo(id: string, kind: string): Promise<unknown> {
     const session = this.sessions.get(id);
+    if (session?.agent === "codex") {
+      if (!["status", "model", "mcp", "skills"].includes(kind)) throw new Error(`未知 Codex 查看项：${kind}`);
+      const worker = await this.ensureWorker(id);
+      if (!worker.queryInfo) throw new Error("Codex driver 不支持该查看");
+      return worker.queryInfo(kind);
+    }
     if (!session || session.agent !== "claude") throw new Error("仅 Claude 会话支持该查看");
     // 插件列表没有 control_request，与 VSCode 扩展一样跑 CLI；不需要 worker，已结束的会话也能看
     if (kind === "plugins") return { plugins: await this.claudePlugins.list(session.cwd) };
+    if (kind === "settings") return { settingsFiles: menuSettingsFiles(session.cwd) };
     const subtype = SESSION_INFO_SUBTYPES[kind];
     if (!subtype) throw new Error(`未知查看项：${kind}`);
     if (this.restartingSessions.has(id)) throw new Error("Claude worker 正在重启");
     const worker = await this.ensureWorker(id);
     if (!worker.queryInfo) throw new Error("Claude driver 不支持该查看");
     const result = await worker.queryInfo(subtype);
+    const r = result && typeof result === "object" ? result as Record<string, unknown> : {};
+    if (["hooks", "permissions", "sandbox", "skills"].includes(kind)) {
+      return { ...r, settingsFiles: menuSettingsFiles(session.cwd) };
+    }
+    if (kind === "memory" || kind === "instructions") {
+      return { ...r, files: withMenuFileUris(r.files), folders: withMenuFileUris(r.folders), memories: withMenuFileUris(r.memories), settingsFiles: menuSettingsFiles(session.cwd) };
+    }
+    if (kind === "output") {
+      const settings = await worker.queryInfo("get_settings") as { effective?: { outputStyle?: string } } | undefined;
+      return { outputStyle: settings?.effective?.outputStyle ?? r.output_style, availableStyles: r.available_output_styles, settingsFiles: menuSettingsFiles(session.cwd) };
+    }
     // 上下文用量原样约 50KB（终端方格 gridRows、逐个 MCP 工具等），前端只用分类与总数
     if (kind === "context" && result && typeof result === "object") {
       const r = result as Record<string, unknown>;
@@ -310,6 +358,48 @@ export class SessionManager {
         isAutoCompactEnabled: r.isAutoCompactEnabled };
     }
     return result;
+  }
+
+  async executeCodexCommand(id: string, input: unknown): Promise<unknown> {
+    const session = this.sessions.get(id);
+    if (!session || session.agent !== "codex") throw new Error("仅 Codex 会话支持该命令");
+    const command = parseCodexCommand(input);
+    if (["status", "model", "mcp", "skills"].includes(command.name)) return this.queryInfo(id, command.name);
+    if (command.name === "interrupt") {
+      if (session.status !== "running") throw new Error("当前没有可中断的执行");
+      const worker = this.requireWorker(id);
+      if (!worker.executeCommand) throw new Error("Codex driver 不支持该命令");
+      return worker.executeCommand(command.name);
+    }
+    if (session.status !== "idle" || this.pendingGates.get(id)?.size
+      || this.checkingSessions.has(id) || this.restartingSessions.has(id)) {
+      throw new Error("请等当前执行与审批结束后再操作");
+    }
+    this.checkingSessions.add(id);
+    try {
+      if (command.name === "new") {
+        return { session: await this.create({ agent: "codex", cwd: session.cwd, config: { ...session.config }, snapshot: "skip" }) };
+      }
+      const worker = await this.ensureWorker(id);
+      if (!worker.executeCommand) throw new Error("Codex driver 不支持该命令");
+      const result = await worker.executeCommand(command.name, command.arguments);
+      this.emit(id, "user_message", { command });
+      return result;
+    } finally {
+      this.checkingSessions.delete(id);
+    }
+  }
+
+  async manageMcp(id: string, action: McpAction): Promise<unknown> {
+    const session = this.sessions.get(id);
+    if (!session || session.agent !== "claude") throw new Error("仅 Claude 会话支持 MCP 管理");
+    if (this.restartingSessions.has(id)) throw new Error("Claude worker 正在重启");
+    if (session.status === "running" || session.status === "starting" || this.pendingGates.get(id)?.size) {
+      throw new Error("请在当前回复与审批结束后操作 MCP 服务器");
+    }
+    const worker = await this.ensureWorker(id);
+    if (!worker.manageMcp) throw new Error("Claude driver 不支持 MCP 管理");
+    return worker.manageMcp(action);
   }
 
   async setPluginEnabled(id: string, pluginId: string, enabled: boolean, scope?: unknown): Promise<{
@@ -406,22 +496,27 @@ export class SessionManager {
     this.nativeMarks.delete(id);
     this.pendingMarkReads.delete(id);
     this.pendingGates.delete(id);
+    this.titles.delete(id);
+    const updates = this.partialUpdates.get(id);
+    if (updates) for (const update of updates.values()) if (update.timer) clearTimeout(update.timer);
+    this.partialUpdates.delete(id);
     this.rings.delete(id);
     this.commands.delete(id);
     this.persistRegistry();
+    deleteSessionFiles(record, [...this.sessions.values()]);
     return cloneSession({ ...record, status: "dead", processId: undefined });
   }
 
   /**
    * 释放会话 worker：停掉进程但保留会话记录（status 保持 idle，released=true 持久化），
    * 下次发送或需要 worker 的操作会按原生会话 id 从磁盘续接（与「别处续聊」同一条路径）。
-   * 返回带 cwd 的原生续接命令，供用户去 VSCode/CLI/终端继续。
+   * 返回带 cwd 的续接命令和协议链接，供浏览器「VSCode / CLI 继续」。
    */
   async release(
     id: string,
     reason: "manual" | "idle",
     context: { idleMinutes?: number } = {},
-  ): Promise<{ session: SessionRecord; resumeCommand: string }> {
+  ): Promise<{ session: SessionRecord; resumeCommand: string; vscodeUri: string | null }> {
     const record = this.sessions.get(id);
     if (!record) throw new Error(`会话不存在：${id}`);
     if (record.released) throw new Error("会话 worker 已释放；下次发送时会自动从磁盘续接");
@@ -446,7 +541,7 @@ export class SessionManager {
       resumeCommand,
       ...(reason === "idle" && context.idleMinutes !== undefined ? { idleMinutes: context.idleMinutes } : {}),
     });
-    return { session: cloneSession(record), resumeCommand };
+    return { session: cloneSession(record), resumeCommand, vscodeUri: buildVSCodeUri(record) };
   }
 
   /** 自动释放跳过的原因；null 表示可以释放。手动释放把这些原因转成可读错误。 */
@@ -493,6 +588,7 @@ export class SessionManager {
    */
   async shutdown(): Promise<void> {
     this.stopping = true;
+    for (const id of this.partialUpdates.keys()) this.flushPartialUpdates(id);
     await Promise.allSettled(this.pendingMarkReads.values());
     const running = [...this.workers.entries()];
     this.workers.clear();
@@ -520,18 +616,27 @@ export class SessionManager {
     this.persistRegistry();
   }
 
-  private emit(id: string, type: EventType, payload: Record<string, unknown> = {}): UnifiedEvent | undefined {
+  private emit(id: string, type: EventType, payload: Record<string, unknown> = {}, ephemeral = false): UnifiedEvent | undefined {
     const session = this.sessions.get(id);
     if (!session) return undefined;
+    if (!ephemeral && (["tool_call_completed", "permission_request", "turn_completed", "session_error", "process_exited"].includes(type)
+      || (type === "tool_call_updated" && payload.inputComplete))) this.flushPartialUpdates(id);
     const timestamp = new Date().toISOString();
     const event: UnifiedEvent = {
       type,
       sessionId: id,
       agentId: session.agentId,
-      seq: ++session.seq,
+      seq: ephemeral ? session.seq : ++session.seq,
+      ...(ephemeral ? { ephemeral: true as const } : {}),
       timestamp,
       payload,
     };
+    if (ephemeral) {
+      for (const listener of this.listeners) listener(event);
+      return event;
+    }
+    if (type === "user_message" && !this.titles.has(id)) this.titles.set(id, sessionTitle({}, [event]));
+    if (type === "user_message") event.title = this.titles.get(id);
     session.lastActivityAt = timestamp;
     appendTranscript(session.transcriptPath, event);
     const ring = this.rings.get(id) ?? [];
@@ -539,7 +644,8 @@ export class SessionManager {
     if (ring.length > RING_SIZE) ring.splice(0, ring.length - RING_SIZE);
     this.rings.set(id, ring);
     this.trackPendingGate(id, event);
-    this.persistRegistry();
+    if (["config_updated", "session_created", "worker_released", "process_exited"].includes(type)) this.persistRegistry();
+    else this.markRegistryDirty();
     for (const listener of this.listeners) listener(event);
     if (type === "turn_completed") {
       const pending = this.captureNativeMark(id);
@@ -845,6 +951,13 @@ export class SessionManager {
       emit: (type, payload = {}) => {
         if (!current()) return undefined;
         const session = this.sessions.get(id);
+        if (session?.agent === "claude") {
+          if (type === "tool_call_updated" && typeof payload.partialInput === "string"
+            && Object.keys(payload).every((key) => key === "toolCallId" || key === "partialInput")) {
+            this.queuePartialUpdate(id, payload);
+            return undefined;
+          }
+        }
         return this.emit(
           id,
           type,
@@ -856,30 +969,36 @@ export class SessionManager {
       metadata: (metadata) => {
         const session = this.sessions.get(id);
         if (!session || !current()) return;
+        const before = JSON.stringify(session);
         if (metadata.nativeSessionId) session.nativeSessionId = metadata.nativeSessionId;
         if (metadata.nativeTranscriptPath) session.nativeTranscriptPath = metadata.nativeTranscriptPath;
         if (metadata.config) this.applyConfig(session, metadata.config);
         if (metadata.effectiveConfig) this.applyEffectiveConfig(session, metadata.effectiveConfig);
-        if (metadata.remoteControl) {
+        if (metadata.remoteControl && JSON.stringify(session.remoteControl) !== JSON.stringify(metadata.remoteControl)) {
           session.remoteControl = metadata.remoteControl;
           this.emit(id, "remote_control_updated", { ...metadata.remoteControl });
         }
-        if (metadata.backgroundTasks) this.setBackgroundTasks(id, metadata.backgroundTasks);
+        if (metadata.backgroundTasks && JSON.stringify(session.backgroundTasks ?? []) !== JSON.stringify(metadata.backgroundTasks)) this.setBackgroundTasks(id, metadata.backgroundTasks);
         const pid = worker().child?.pid;
         if (pid) session.processId = pid;
-        this.persistRegistry();
+        if (JSON.stringify(session) !== before) this.persistRegistry();
       },
       commands: (commands) => {
         if (!this.sessions.has(id) || !current()) return;
         const normalized = commands.map((command) => ({ ...command }));
+        if (commandContent(this.commands.get(id) ?? []) === commandContent(normalized)) return;
         this.commands.set(id, normalized);
         this.emit(id, "commands_updated", { commands: normalized });
       },
       status: (status) => {
-        if (current()) this.setStatus(id, status);
+        if (current()) {
+          if (status === "error" || status === "dead") this.flushPartialUpdates(id);
+          this.setStatus(id, status);
+        }
       },
       exited: (info) => {
         if (!this.sessions.has(id) || !current()) return;
+        this.flushPartialUpdates(id);
         this.emit(id, "process_exited", info as unknown as Record<string, unknown>);
         const session = this.sessions.get(id);
         if (session?.agent === "claude") {
@@ -960,8 +1079,55 @@ export class SessionManager {
     };
   }
 
+  private queuePartialUpdate(id: string, payload: Record<string, unknown>): void {
+    const tools = this.partialUpdates.get(id) ?? new Map();
+    this.partialUpdates.set(id, tools);
+    const key = String(payload.toolCallId ?? "");
+    const update = tools.get(key) ?? { lastSent: -Infinity };
+    tools.set(key, update);
+    update.payload = payload;
+    const send = () => {
+      if (update.timer) clearTimeout(update.timer);
+      update.timer = undefined;
+      if (!update.payload) return;
+      const latest = update.payload;
+      update.payload = undefined;
+      update.lastSent = Date.now();
+      this.emit(id, "tool_call_updated", latest, true);
+    };
+    const delay = 100 - (Date.now() - update.lastSent);
+    if (delay <= 0) send();
+    else if (!update.timer) {
+      update.timer = setTimeout(send, delay);
+      update.timer.unref();
+    }
+  }
+
+  private flushPartialUpdates(id: string): void {
+    const tools = this.partialUpdates.get(id);
+    if (!tools) return;
+    this.partialUpdates.delete(id);
+    for (const update of tools.values()) {
+      if (update.timer) clearTimeout(update.timer);
+      if (update.payload) this.emit(id, "tool_call_updated", update.payload, true);
+    }
+  }
+
+  private markRegistryDirty(): void {
+    this.registryDirty = true;
+    if (this.registryTimer) return;
+    this.registryTimer = setTimeout(() => {
+      this.registryTimer = undefined;
+      if (this.registryDirty) this.persistRegistry();
+    }, 1000);
+    this.registryTimer.unref();
+  }
+
   private persistRegistry(): void {
+    if (this.registryTimer) clearTimeout(this.registryTimer);
+    this.registryTimer = undefined;
     saveRegistry([...this.sessions.values()]);
+    this.registryDirty = false;
   }
 
   private claudeEffectivePayload(session: SessionRecord): Record<string, unknown> {
@@ -1049,6 +1215,16 @@ function pendingGatesFrom(events: UnifiedEvent[]): Set<string> {
   return gates;
 }
 
+/** 浏览器协议链接；不在服务端启动 VSCode，WSL cwd 保留目录分隔符。 */
+export function buildVSCodeUri(record: Pick<SessionRecord, "agent" | "nativeSessionId" | "cwd">, distro = process.env.WSL_DISTRO_NAME): string | null {
+  if (record.agent === "claude") {
+    return record.nativeSessionId ? `vscode://anthropic.claude-code/open?session=${encodeURIComponent(record.nativeSessionId)}` : null;
+  }
+  if (!distro?.trim()) return null;
+  const cwd = record.cwd.split("/").map(encodeURIComponent).join("/");
+  return `vscode://vscode-remote/wsl+${encodeURIComponent(distro.trim())}${cwd}`;
+}
+
 /** 带 cwd 的原生续接命令；cwd 做 shell 单引号转义（' → '\''）。 */
 function buildResumeCommand(record: SessionRecord): string {
   const cwd = `'${record.cwd.replace(/'/g, `'\\''`)}'`;
@@ -1056,4 +1232,10 @@ function buildResumeCommand(record: SessionRecord): string {
   if (record.agent === "claude") return `cd ${cwd} && claude --resume ${nativeId}`;
   if (record.agent === "codex") return `cd ${cwd} && codex resume ${nativeId}`;
   return `cd ${cwd} && kimi -S ${nativeId}`;
+}
+
+/** 对象键顺序不影响命令表内容，数组顺序仍保留菜单顺序。 */
+function commandContent(value: unknown): string {
+  return JSON.stringify(value, (_key, item) => item && typeof item === "object" && !Array.isArray(item)
+    ? Object.fromEntries(Object.keys(item).sort().map((key) => [key, item[key]])) : item);
 }

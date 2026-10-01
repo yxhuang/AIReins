@@ -15,6 +15,7 @@ import type {
 import { BaseDriver, mentionFallbackNote, parseJsonLine, tryReadMentionText, userMessageText, withTimeout } from "./base.js";
 import { readClaudeEffectiveSettings } from "../claude-settings.js";
 import type { RemoteControlState } from "../types.js";
+import type { McpAction } from "../session-menu.js";
 
 interface ClaudePermission {
   protocolRequestId: string;
@@ -214,6 +215,7 @@ export class ClaudeDriver extends BaseDriver {
   private readonly pendingCommandRequests = new Map<string, PendingCommandRequest>();
   private readonly toolBlocks = new Map<number, { id: string; name: string; partialInput: string }>();
   private commands: UnifiedCommand[] = [];
+  private reportedNativeSessionId?: string;
   private refreshingCommands?: Promise<void>;
   private remoteControl: RemoteControlState = { status: "disconnected" };
   private remoteRequest?: { id: string; resolve: (state: RemoteControlState) => void; reject: (error: Error) => void };
@@ -422,7 +424,8 @@ export class ClaudeDriver extends BaseDriver {
       this.callbacks.emit("raw_event", { source: "stdout", raw: line });
       return;
     }
-    if (typeof message.session_id === "string") {
+    if (typeof message.session_id === "string" && message.session_id !== this.reportedNativeSessionId) {
+      this.reportedNativeSessionId = message.session_id;
       this.callbacks.metadata({ nativeSessionId: message.session_id });
     }
 
@@ -652,6 +655,7 @@ export class ClaudeDriver extends BaseDriver {
         const tool = this.toolBlocks.get(index);
         if (tool) {
           tool.partialInput += delta.partial_json ?? "";
+          // SessionManager 对 Claude 的纯 partialInput 更新节流，并仅通过 WS 临时广播。
           this.callbacks.emit("tool_call_updated", {
             toolCallId: tool.id,
             partialInput: tool.partialInput,
@@ -683,15 +687,34 @@ export class ClaudeDriver extends BaseDriver {
 
   /** 「/」菜单的只读查看：与 VSCode 扩展同一批 control_request（2.1.285 实测，见 PROTOCOL-NOTES §10）。 */
   async queryInfo(subtype: string): Promise<unknown> {
+    return this.requestControl({ subtype });
+  }
+
+  private async requestControl(request: { subtype: string; [key: string]: unknown }): Promise<unknown> {
+    const { subtype } = request;
     const requestId = randomUUID();
     const result = new Promise<unknown>((resolve, reject) => {
       this.pendingCommandRequests.set(requestId, { resolve, reject });
-      this.send({ type: "control_request", request_id: requestId, request: { subtype } });
+      this.send({ type: "control_request", request_id: requestId, request });
     });
     try {
-      return await withTimeout(result, subtype === "reload_plugins" ? 30_000 : 15_000, `Claude ${subtype}`);
+      return await withTimeout(result, ["reload_plugins", "mcp_reconnect", "mcp_toggle"].includes(subtype) ? 30_000 : 15_000, `Claude ${subtype}`);
     } finally {
       this.pendingCommandRequests.delete(requestId);
+    }
+  }
+
+  async manageMcp(action: McpAction): Promise<unknown> {
+    const listing = await this.queryInfo("mcp_status") as { mcpServers?: { name: string }[] } | undefined;
+    if (!listing?.mcpServers?.some(server => server.name === action.serverName)) throw new Error("MCP 服务器不在当前会话列表中");
+    await this.requestControl(action.action === "toggle"
+      ? { subtype: "mcp_toggle", serverName: action.serverName, enabled: action.enabled }
+      : { subtype: "mcp_reconnect", serverName: action.serverName });
+    try {
+      return await this.queryInfo("mcp_status");
+    } catch (error) {
+      // 操作已经成功；读回失败不能让界面误以为操作没发生并反复重试。
+      return { ...listing, refreshError: error instanceof Error ? error.message : String(error) };
     }
   }
 

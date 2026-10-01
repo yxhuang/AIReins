@@ -60,6 +60,10 @@ export abstract class BaseDriver implements Driver {
     createInterface({ input: child.stderr }).on("line", (line) => {
       log("warn", "driver stderr", { sessionId: this.sessionId, driver: this.kind, line });
     });
+    // 进程退出瞬间的写入会异步抛 EPIPE；退出本身由 close 处理，这里只防止崩掉 wb
+    child.stdin.on("error", (error) => {
+      log("warn", "driver stdin error", { sessionId: this.sessionId, driver: this.kind, message: error.message });
+    });
     child.on("error", (error) => {
       this.callbacks.emit("session_error", { message: error.message, source: "process" });
       this.callbacks.status("error");

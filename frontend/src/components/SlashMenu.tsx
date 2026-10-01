@@ -1,13 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import type { SessionRecord } from "../types";
-import { fetchSessionInfo, setSessionPlugin, type SessionInfoKind } from "../api";
+import { fetchSessionInfo, manageSessionMcp, setSessionPlugin, type SessionInfoKind } from "../api";
+import { ClaudeMenuPanel, SettingsFileLinks } from "./ClaudeMenuPanels";
 import { compactTokens } from "../format";
 import { store, type Store } from "../store";
 import { useStore } from "../useStore";
 
-// 输入框底栏「/」菜单：仿 VSCode 扩展同名按钮（2.1.285 的 commandRegistry 分组）。
-// Claude 的查看（MCP / Hooks / 权限规则 / 上下文用量走 control_request，插件通过 CLI 列表及启停）、
-// 浏览斜杠命令（打开现有命令面板）、Focus view 开关。
+// 输入框底栏「/」菜单：VSCode 扩展 2.1.286 的常用查看、MCP 管理、文件编辑与纯文本导出。
+// 协议以本机 CLI 2.1.285 实测为准；Rewind 缺少文件检查点，不接破坏性操作。
 
 const INFO_LABELS: Record<SessionInfoKind, string> = {
   mcp: "MCP 服务器",
@@ -15,20 +15,32 @@ const INFO_LABELS: Record<SessionInfoKind, string> = {
   permissions: "权限规则",
   context: "上下文用量",
   plugins: "插件",
+  status: "状态",
+  usage: "账户与用量",
+  memory: "Memory",
+  instructions: "Instructions · CLAUDE.md",
+  skills: "Skills",
+  sandbox: "Sandbox",
+  output: "输出样式",
+  settings: "Claude 设置",
+  export: "导出对话",
 };
 
 const selectFocusView = (value: Store) => value.focusView;
 
-export function SlashMenu({ session, commandsSupported, onBrowseCommands }: {
+export function SlashMenu({ session, commandsSupported, onBrowseCommands, onCodexCommand, canInsertCommand = true }: {
   session: SessionRecord;
   commandsSupported: boolean;
   onBrowseCommands: () => void;
+  onCodexCommand?: (name: string) => void;
+  canInsertCommand?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [info, setInfo] = useState<SessionInfoKind | null>(null);
   const rootRef = useRef<HTMLSpanElement>(null);
   const focusView = useStore(selectFocusView);
   const claude = session.agent === "claude";
+  const commands = useStore(value => value.commands.get(session.id));
   const workerReady = session.status !== "dead" && Boolean(session.processId || session.released);
 
   // Esc 或点外部关闭（与「+」菜单同一纪律）
@@ -56,19 +68,36 @@ export function SlashMenu({ session, commandsSupported, onBrowseCommands }: {
       </button>
       {open && (
         <div className="attach-menu slash-menu" role="menu" aria-label="命令与设置">
+          {session.agent === "codex" && commandsSupported && onCodexCommand && <>
+            <div className="slash-group">Codex 命令</div>
+            {(commands ?? []).map(command => <button key={command.name} type="button" className="attach-item" role="menuitem"
+              disabled={!workerReady || (["compact", "review", "new"].includes(command.name) && session.status !== "idle")
+                || (command.name === "review" && !canInsertCommand)
+                || (command.name === "interrupt" && session.status !== "running")}
+              title={command.description} onClick={() => { setOpen(false); onCodexCommand(command.name); }}>
+              /{command.name} · {command.description}
+            </button>)}
+          </>}
           {claude && (
             <>
               <div className="slash-group">查看</div>
-              {(Object.keys(INFO_LABELS) as SessionInfoKind[]).map((kind) => (
+              {(Object.keys(INFO_LABELS) as SessionInfoKind[]).filter(kind => kind !== "export" && kind !== "settings").map((kind) => (
                 <button key={kind} type="button" className="attach-item" role="menuitem" disabled={!workerReady && kind !== "plugins"}
                   title={workerReady || kind === "plugins" ? undefined : "会话已结束，查看不到"}
                   onClick={() => { setOpen(false); setInfo(kind); }}>
                   {INFO_LABELS[kind]}
                 </button>
               ))}
+              <div className="slash-group">对话与配置</div>
+              <button type="button" className="attach-item" role="menuitem" disabled={!workerReady}
+                onClick={() => { setOpen(false); setInfo("export"); }}>导出对话</button>
+              <button type="button" className="attach-item" role="menuitem" onClick={() => { setOpen(false); setInfo("hooks"); }} disabled={!workerReady}>编辑 Hooks</button>
+              <button type="button" className="attach-item" role="menuitem" onClick={() => { setOpen(false); setInfo("settings"); }}>Claude 设置</button>
+              <a className="attach-item" role="menuitem" href="https://code.claude.com/docs/en/vs-code" target="_blank" rel="noreferrer"
+                onClick={() => setOpen(false)}>帮助文档</a>
             </>
           )}
-          {commandsSupported && (
+          {commandsSupported && canInsertCommand && (
             <>
               <div className="slash-group">斜杠命令</div>
               <button type="button" className="attach-item" role="menuitem"
@@ -94,6 +123,8 @@ function InfoDialog({ session, kind, onClose }: { session: SessionRecord; kind: 
   const [error, setError] = useState<string | null>(null);
   const [pendingPlugin, setPendingPlugin] = useState<string | null>(null);
   const [pluginNotice, setPluginNotice] = useState<string | null>(null);
+  const [pendingServer, setPendingServer] = useState<string | null>(null);
+  const mcpPending = useRef(false);
   const pluginPending = useRef(false);
   const aliveRef = useRef(true);
   const closeButton = useRef<HTMLButtonElement>(null);
@@ -144,6 +175,28 @@ function InfoDialog({ session, kind, onClose }: { session: SessionRecord; kind: 
     }
   };
 
+  const updateMcp = async (action: "toggle" | "reconnect" | "refresh", server: Rec = {}) => {
+    if (mcpPending.current) return;
+    mcpPending.current = true;
+    setPendingServer(str(server.name) || "refresh");
+    setError(null);
+    setPluginNotice(null);
+    try {
+      const result = action === "refresh" ? await fetchSessionInfo(session.id, "mcp")
+        : await manageSessionMcp(session.id, action, str(server.name), action === "toggle" ? server.status === "disabled" : undefined);
+      if (!aliveRef.current) return;
+      setData(result);
+      const refreshError = str(rec(result).refreshError);
+      if (refreshError) setError(`操作已成功，状态读回失败：${refreshError}。请刷新列表。`);
+      else setPluginNotice(action === "refresh" ? "已刷新服务器状态。" : "操作已完成；连接可能仍在建立，可刷新查看最新状态。");
+    } catch (e) {
+      if (aliveRef.current) setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      mcpPending.current = false;
+      if (aliveRef.current) setPendingServer(null);
+    }
+  };
+
   return (
     <div className="dir-overlay" onKeyDown={(e) => { if (e.key === "Escape") { e.stopPropagation(); onClose(); } }}
       onPointerDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
@@ -160,8 +213,16 @@ function InfoDialog({ session, kind, onClose }: { session: SessionRecord; kind: 
               onClick={() => void refreshPlugins()}>刷新列表</button>
           </>}
           {pluginNotice && <p className="new-hint" role="status">{pluginNotice}</p>}
+          {kind === "mcp" && <>
+            <p className="new-hint">开关与重连用于当前会话；回复或审批期间不可操作。</p>
+            <button type="button" className="btn" disabled={pendingServer !== null || data === undefined}
+              onClick={() => void updateMcp("refresh")}>刷新状态</button>
+          </>}
+          {data !== undefined && ["hooks", "permissions", "sandbox", "skills", "output"].includes(kind)
+            && <SettingsFileLinks files={rec(data).settingsFiles} hooks={kind === "hooks"} />}
           {data === undefined ? (!error && <p className="new-hint">正在读取…</p>)
-            : <InfoBody kind={kind} data={data} onTogglePlugin={togglePlugin} pendingPlugin={pendingPlugin} />}
+            : <InfoBody kind={kind} data={data} onTogglePlugin={togglePlugin} pendingPlugin={pendingPlugin}
+                onMcpAction={updateMcp} pendingServer={pendingServer} mcpLocked={session.status === "running" || session.status === "starting"} />}
         </div>
       </div>
     </div>
@@ -175,11 +236,14 @@ const str = (v: unknown) => (typeof v === "string" ? v : "");
 const pluginKey = (p: Rec) => `${str(p.id)}:${str(p.scope)}`;
 const pluginEnabled = (p: Rec) => p.enabled === true;
 
-function InfoBody({ kind, data, onTogglePlugin, pendingPlugin }: {
+function InfoBody({ kind, data, onTogglePlugin, pendingPlugin, onMcpAction, pendingServer, mcpLocked }: {
   kind: SessionInfoKind;
   data: unknown;
   onTogglePlugin: (plugin: Rec) => void;
   pendingPlugin: string | null;
+  onMcpAction: (action: "toggle" | "reconnect", server: Rec) => void;
+  pendingServer: string | null;
+  mcpLocked: boolean;
 }) {
   const d = rec(data);
   if (kind === "mcp") {
@@ -198,10 +262,17 @@ function InfoBody({ kind, data, onTogglePlugin, pendingPlugin }: {
             {str(s.scope)} · {str(config.type)}{tools.length > 0 ? ` · ${tools.length} 个工具` : ""}
           </div>
           <div className="info-meta mono">{str(config.url) || [str(config.command), ...(Array.isArray(config.args) ? config.args.map(String) : [])].join(" ")}</div>
+          <div className="info-actions">
+            <button type="button" className="btn" disabled={pendingServer !== null || mcpLocked}
+              onClick={() => onMcpAction("toggle", s)}>{pendingServer === str(s.name) ? "处理中…" : s.status === "disabled" ? "启用" : "停用"}</button>
+            <button type="button" className="btn" disabled={pendingServer !== null || mcpLocked || s.status === "disabled"}
+              onClick={() => onMcpAction("reconnect", s)}>重连</button>
+          </div>
         </div>
       );
     })}</>;
   }
+  if (!["hooks", "permissions", "plugins", "context"].includes(kind)) return <ClaudeMenuPanel kind={kind} data={d} />;
   if (kind === "hooks") {
     const hooks = arr(d.hooks);
     if (hooks.length === 0) return <p className="new-hint">没有配置 hooks。</p>;

@@ -3,7 +3,7 @@ import { strict as assert } from 'node:assert';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { readFileSync } from 'node:fs';
-import { groupDispatches, dispatchName, dispatchSeconds, dispatchTime, dispatchStatus, dispatcherTitle, RECENT_DISPATCH_MS } from '../src/dispatch-flow.ts';
+import { groupDispatches, dispatchName, dispatchSeconds, dispatchTime, dispatchStatus, dispatcherTitle, dispatcherModel, RECENT_DISPATCH_MS } from '../src/dispatch-flow.ts';
 import { startDispatchPolling } from '../src/dispatch-polling.ts';
 import { fetchDispatches } from '../src/api.ts';
 
@@ -74,6 +74,13 @@ await t('简要：name 是执行端兜底时用派单首行', () => {
   assert.equal(dispatchName(run({ name: 'codex', promptHead: '# 工单：派单流程图正式版\n\n正文' })), '派单流程图正式版');
   assert.equal(dispatchName(run({ name: '自定义名', promptHead: '# 工单：别的' })), '自定义名');
   assert.equal(dispatchName(run({ name: 'codex', promptHead: null })), 'codex');
+});
+await t('派单模型优先匹配 nativeSessionId，外部会话用 parent.model，共用模型短名；缺失无占位', () => {
+  const parent = { agent: 'claude', sessionId: 'native', model: 'claude-sonnet-4-5', entrypoint: 'cli' };
+  assert.equal(dispatcherModel([run({ parent })], [{ id: 'wb', nativeSessionId: 'native', title: '会话', model: 'claude-opus-5-5' }]), 'opus-5.5');
+  assert.equal(dispatcherModel([run({ parent })], []), 'sonnet-4.5');
+  assert.equal(dispatcherModel([run({ parent: { ...parent, model: null } })], []), null);
+  assert.equal(dispatcherModel([run({ parent: { ...parent, agent: 'codex' } })], []), null);
 });
 await t('只读列表 URL 与现有信封，错误 msg 透传', async () => {
   let url;

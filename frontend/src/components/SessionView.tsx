@@ -5,7 +5,9 @@ import { buildRenderItems, focusVisible, groupReadOnlyTools, promptCacheExpiry }
 import { filterCommands, noteCommandUsed, readRecentCommands, recentInTable } from "../commands";
 import { extractMentionTokens, mentionQueryAt, mentionTokenEnd } from "../mentions";
 import { needsRestartNote, effectiveFor, modelShortName, pillText, EFFECTIVE_SOURCE_LABELS, ALIAS_NOTE, RESTART_NOTE } from "../config-view";
-import { fetchFiles, uploadAttachment } from "../api";
+import { fetchFiles, uploadAttachment, fetchCodexSkills, runCodexCommand, type CodexSkillInfo } from "../api";
+import { filterSkills, insertSkill, skillQueryAt } from "../codex-skills";
+import { CodexCommandPanel, type CodexCommandResult } from "./CodexCommandPanel";
 import { attachmentMention, localImageMimeType, prepareImageForUpload, type Attachment } from "../attachments";
 import { MAX_MENTIONS, store, type Store } from "../store";
 import { shallowEqual, useStore } from "../useStore";
@@ -15,6 +17,8 @@ import { ResumedHistory } from "./ResumedHistory";
 import { ClockIcon, ConfigPills, SendIcon, StopIcon, type MenuGroup, type MenuItem } from "./ConfigMenu";
 import { DirectoryBrowser } from "./DirectoryBrowser";
 import { SlashMenu } from "./SlashMenu";
+import { AgentIcon, VSCodeIcon } from "./AgentIcon";
+import { SessionDispatchLink } from "./SessionDispatchLink";
 
 const selectMeta = (value: Store) => value.meta;
 const selectWsState = (value: Store) => value.wsState;
@@ -111,19 +115,17 @@ export function SessionView({ session }: { session: SessionRecord }) {
     <div className={`session agent-${session.agent}`}>
       <header className="session-head">
         <div className="session-head-main">
-          <div className="session-title-line">
-            <span className="agent-name">{session.agent}</span>
-            <span className="session-cwd mono">{session.cwd}</span>
-          </div>
-          <div className="session-sub mono">
-            <ConfigSummary session={session} />
-          </div>
+          <AgentIcon agent={session.agent} label={session.agent} />
+          <span className="session-model mono"><ConfigSummary session={session} /></span>
+          <span className="session-cwd mono" title={session.cwd}>{session.cwd}</span>
         </div>
         <div className="session-head-actions">
           <span className={`ws-dot ws-${wsState}`} title={`连接：${wsState}`} />
           <ReleaseButton session={session} />
         </div>
       </header>
+
+      {session.agent === "claude" && <SessionDispatchLink nativeId={session.nativeSessionId} backgroundCount={session.backgroundTasks?.length ?? 0} />}
 
       {session.riskyMode && (
         <div className="risky-banner" role="alert">
@@ -195,7 +197,7 @@ export function SessionView({ session }: { session: SessionRecord }) {
   );
 }
 
-// 「到 VSCode/终端继续」：释放本会话 worker 并把原生续接命令复制到剪贴板。
+// 「VSCode / CLI 继续」：释放 worker、复制续接命令，桌面浏览器再打开 VSCode 协议链接。
 // 三家都显示；不可用原因写进 title，释放结果（含失败）就地短暂显示。
 function ReleaseButton({ session }: { session: SessionRecord }) {
   const [busy, setBusy] = useState(false);
@@ -217,20 +219,25 @@ function ReleaseButton({ session }: { session: SessionRecord }) {
       ? "首轮完成前没有原生会话 id，无法释放"
       : session.status !== "idle"
         ? "会话空闲时才能释放"
-        : "停掉工作台里的 worker，把续接命令复制到剪贴板，去 VSCode 或终端继续";
+        : "VSCode / CLI 继续：释放 worker、复制续接命令，桌面端尝试打开 VSCode";
 
   const onClick = async () => {
     setBusy(true);
     try {
-      const command = await store.release(session.id);
+      const { resumeCommand: command, vscodeUri } = await store.release(session.id);
+      let copied = false;
       try {
         await navigator.clipboard.writeText(command);
-        showNotice("已释放，续接命令已复制", false);
+        copied = true;
       } catch {
         // 剪贴板不可用（权限/非安全上下文）：弹窗让用户手动复制
         window.prompt("已释放。手动复制续接命令：", command);
-        showNotice("已释放", false);
       }
+      const openVSCode = Boolean(vscodeUri) && !window.matchMedia("(max-width: 720px), (pointer: coarse)").matches;
+      showNotice(copied
+        ? openVSCode ? "已释放，命令已复制，正在打开 VSCode" : "已释放，命令已复制"
+        : openVSCode ? "已释放，正在打开 VSCode；请手动复制命令" : "已释放；请手动复制命令", false);
+      if (openVSCode) window.location.href = vscodeUri!;
     } catch (error) {
       showNotice(error instanceof Error ? error.message : String(error), true);
     } finally {
@@ -245,20 +252,20 @@ function ReleaseButton({ session }: { session: SessionRecord }) {
           {notice.text}
         </span>
       )}
-      <button type="button" className="btn" disabled={!canRelease} title={title} onClick={() => void onClick()}>
-        {busy ? "释放中…" : "到 VSCode/终端继续"}
+      <button type="button" className="btn" aria-label="VSCode / CLI 继续" disabled={!canRelease} title={title} onClick={() => void onClick()}>
+        {busy ? "释放中…" : <><VSCodeIcon /> / CLI 继续</>}
       </button>
     </>
   );
 }
 
-// 会话头的只读配置摘要，也是会话头第二行的全部内容（如「opus-5.5 · high · auto」，未覆盖项显示实际生效值或「跟随配置」）；
+// 会话头单行模型/推理摘要（如「opus-5.5 · high」，未覆盖项显示实际生效值或「跟随配置」）；
 // 可交互控件只在输入框上方一处，会话头不再放可点的，避免两处不一致。
 function ConfigSummary({ session }: { session: SessionRecord }) {
   const meta = useStore(selectMeta);
   const options = meta?.drivers[session.agent]?.options ?? [];
   if (options.length === 0) return null;
-  const parts = options.map((option) => {
+  const parts = options.filter((option) => option.id === "model" || option.id === "effort").map((option) => {
     const current = session.config?.[option.id];
     if (current) return option.id === "model" ? modelShortName(current) : current;
     // claude 跟随配置时并入实际生效值（首轮前是设置别名，init 后是精确 id；精度差异见控件旁标注）
@@ -524,6 +531,12 @@ function Composer({ session, dead, errored }: { session: SessionRecord; dead: bo
   // IME 组合输入期间：不触发检索、不弹/不更新面板、Enter 不当确认（很多输入法用 Enter 上屏组合串）
   const [composing, setComposing] = useState(false);
   const [files, setFiles] = useState<string[]>([]);
+  const [skills, setSkills] = useState<CodexSkillInfo[]>([]);
+  const [skillError, setSkillError] = useState<string | null>(null);
+  const [skillsLoading, setSkillsLoading] = useState(false);
+  const [codexResult, setCodexResult] = useState<CodexCommandResult | null>(null);
+  const codexBusy = useRef(false);
+  const closeCodexResult = useCallback(() => setCodexResult(null), []);
   const listRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   /** 选中补全项后要落到的光标位置（setText 之后在 effect 里应用） */
@@ -554,7 +567,7 @@ function Composer({ session, dead, errored }: { session: SessionRecord; dead: bo
 
   // 仅行首 / 触发（整段文本即「/query」形态）；行中间的 /（如路径）是普通字符
   const slashQuery = /^\/([^\s]*)$/.exec(text)?.[1] ?? null;
-  const slashOpen = commandsSupported && !dead && slashQuery !== null && !dismissed;
+  const slashOpen = commandsSupported && !dead && !composing && slashQuery !== null && !dismissed;
   // 最近使用（每 agent 独立记忆；localStorage 不可用时为空数组，静默降级）：
   // 面板打开期间读一次，空 query 置顶成「最近使用」段，有 query 时作排序加权。
   const recentNames = useMemo(
@@ -566,11 +579,17 @@ function Composer({ session, dead, errored }: { session: SessionRecord; dead: bo
   const recentCount = slashOpen && slashQuery === "" ? recentInTable(table, recentNames).length : 0;
   const sel = Math.min(selected, Math.max(filtered.length - 1, 0));
   const active = filtered[sel];
+  const skillToken = session.agent === "codex" && !dead && !slashOpen && !composing ? skillQueryAt(text, cursor) : null;
+  const skillOpen = skillToken !== null && !dismissed;
+  const skillQuery = skillToken?.query ?? "";
+  const filteredSkills = filterSkills(skills, skillQuery);
+  const selSkill = Math.min(selected, Math.max(filteredSkills.length - 1, 0));
+  const activeSkill = filteredSkills[selSkill];
 
   // @ 引用：光标处 token 以 @ 开头即触发（句中也可以，不同于 / 的整行锚定）；
   // IME 组合期间不触发；与 / 面板互斥（slashOpen 时不评估 @）。
   const mention =
-    mentionsSupported && !dead && !slashOpen && !composing
+    mentionsSupported && !dead && !slashOpen && !skillOpen && !composing
       ? mentionQueryAt(text, cursor)
       : null;
   const mentionOpen = mention !== null && !dismissed;
@@ -607,7 +626,22 @@ function Composer({ session, dead, errored }: { session: SessionRecord; dead: bo
     }
   });
 
-  useEffect(() => setSelected(0), [slashQuery, mentionQuery]);
+  useEffect(() => setSelected(0), [slashQuery, mentionQuery, skillQuery]);
+
+  useEffect(() => {
+    if (!skillOpen) return;
+    const controller = new AbortController();
+    setSkillsLoading(true);
+    setSkillError(null);
+    fetchCodexSkills(session.id, controller.signal).then(result => {
+      if (controller.signal.aborted) return;
+      setSkills(result.skills);
+      if (result.errors.length) setSkillError("部分 skill 读取失败；详情可通过 /skills 查看");
+    }).catch(error => {
+      if (!controller.signal.aborted) { setSkills([]); setSkillError(error instanceof Error ? error.message : String(error)); }
+    }).finally(() => { if (!controller.signal.aborted) setSkillsLoading(false); });
+    return () => controller.abort();
+  }, [skillOpen, session.id]);
 
   // @ 检索：250ms 防抖 + 序号作废旧响应；检索结果同时写进存在性缓存
   useEffect(() => {
@@ -651,9 +685,17 @@ function Composer({ session, dead, errored }: { session: SessionRecord; dead: bo
 
   // 选中项滚动进可视区（长列表必须可达）
   useEffect(() => {
-    if (!slashOpen && !mentionOpen) return;
+    if (!slashOpen && !mentionOpen && !skillOpen) return;
     listRef.current?.querySelector(".cmd-item.selected")?.scrollIntoView({ block: "nearest" });
-  }, [slashOpen, mentionOpen, sel, selM, active?.name, activeFile]);
+  }, [slashOpen, mentionOpen, skillOpen, sel, selM, selSkill, active?.name, activeFile]);
+
+  // 输入框随内容长高（参照 VSCode 扩展），上限由 CSS max-height 管，超过才出滚动条
+  useLayoutEffect(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${el.scrollHeight + el.offsetHeight - el.clientHeight}px`;
+  }, [text]);
 
   // 补全插入后把光标落到插入路径之后
   useEffect(() => {
@@ -758,11 +800,41 @@ function Composer({ session, dead, errored }: { session: SessionRecord; dead: bo
     ]);
   };
 
+  const executeCodex = async (name: string, args?: string) => {
+    if (codexBusy.current) return;
+    codexBusy.current = true;
+    setCodexResult({ name });
+    try {
+      const data = await runCodexCommand(session.id, name, args);
+      setCodexResult(current => current ? { name, data } : null);
+      if (name === "new" && data.session) {
+        const next = data.session as SessionRecord;
+        await store.resync(next.id);
+        store.navigate(next.id);
+      }
+    } catch (error) {
+      setCodexResult(current => current ? { name, error: error instanceof Error ? error.message : String(error) } : null);
+    } finally { codexBusy.current = false; }
+  };
+
+  const confirmSkill = (skill: CodexSkillInfo) => {
+    if (!skillToken) return;
+    const next = insertSkill(text, skillToken, skill.name);
+    pendingCursor.current = next.cursor;
+    setText(next.text);
+    setCursor(next.cursor);
+    setDismissed(false);
+  };
+
   const confirm = (cmd: CommandInfo, fillOnly: boolean) => {
     if (!fillOnly && !cmd.argHint) {
       // 无参数命令：确认即直接发（结构化 command，不拼 text）；失败保留文本，错误条提示
       noteCommandUsed(session.agent, cmd.name);
-      if (store.sendCommand(session.id, cmd.name, "")) setText("");
+      if (session.agent === "codex") {
+        if (codexBusy.current) return;
+        setText("");
+        void executeCodex(cmd.name);
+      } else if (store.sendCommand(session.id, cmd.name, "")) setText("");
     } else {
       // 有参数（或 Tab 只填充）：填入「/name 」，光标留在末尾参数位等用户补完
       setText(`/${cmd.name} `);
@@ -786,6 +858,18 @@ function Composer({ session, dead, errored }: { session: SessionRecord; dead: bo
     const trimmed = text.trim();
     if (dead) return;
     if (!trimmed && readyMentions.length === 0) return;
+    if (session.agent === "codex" && trimmed.startsWith("/")) {
+      if (!willBeCommand || !cmdMatch || readyMentions.length) {
+        setCodexResult({ name: "status", error: "未知 Codex 命令或命令带有附件。请从 / 面板选择可用项。" });
+        return;
+      }
+      if (codexBusy.current) return;
+      noteCommandUsed(session.agent, cmdMatch[1]!);
+      setText("");
+      setDismissed(false);
+      void executeCodex(cmdMatch[1]!, /^\/\S+\s+([\s\S]*)$/.exec(trimmed)?.[1]);
+      return;
+    }
     // 「/命令 参数」整行形态经 sendComposerInput 走结构化 command，同样记入最近使用；
     // 带附件时 store 不走 command 分支（按文本+mentions 发），这里也就不记
     if (readyMentions.length === 0 && willBeCommand && cmdMatch) noteCommandUsed(session.agent, cmdMatch[1]!);
@@ -833,6 +917,19 @@ function Composer({ session, dead, errored }: { session: SessionRecord; dead: bo
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     // IME 组合期间：Enter/Tab 等都是输入法上屏键，不当确认也不发送
     if (e.nativeEvent.isComposing) return;
+    if (skillOpen) {
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        e.preventDefault();
+        if (filteredSkills.length) setSelected(i => (i + (e.key === "ArrowDown" ? 1 : -1) + filteredSkills.length) % filteredSkills.length);
+        return;
+      }
+      if (e.key === "Escape") { e.preventDefault(); setDismissed(true); return; }
+      if (e.key === "Tab" || (e.key === "Enter" && !e.shiftKey && activeSkill)) {
+        e.preventDefault();
+        if (activeSkill) confirmSkill(activeSkill);
+        return;
+      }
+    }
     if (slashOpen) {
       if (e.key === "ArrowDown" || e.key === "ArrowUp") {
         e.preventDefault();
@@ -974,6 +1071,17 @@ function Composer({ session, dead, errored }: { session: SessionRecord; dead: bo
           ))}
         </div>
       )}
+      {skillOpen && <div className="cmd-panel" role="listbox" aria-label="Codex skills" ref={listRef}>
+        <div className="cmd-section">Skills · 选择后插入 $名称</div>
+        {skillsLoading && <div className="cmd-empty">正在读取 skills…</div>}
+        {skillError && <div className="cmd-empty config-error" role="alert">{skillError}</div>}
+        {!skillsLoading && filteredSkills.length === 0 && <div className="cmd-empty">没有匹配的 skill</div>}
+        {filteredSkills.map((skill, i) => <div key={skill.path} role="option" aria-selected={i === selSkill}
+          className={`cmd-item${i === selSkill ? " selected" : ""}`} title={skill.description}
+          onMouseDown={e => { e.preventDefault(); confirmSkill(skill); }} onMouseEnter={() => setSelected(i)}>
+          <span className="cmd-name mono">${skill.name}</span><span className="cmd-desc">{skill.description}</span>
+        </div>)}
+      </div>}
       {tokens.length > 0 && (
         <div className="mention-preview">
           {attachable.length > 0 && (
@@ -999,14 +1107,7 @@ function Composer({ session, dead, errored }: { session: SessionRecord; dead: bo
           <span className="mono">/{activeCmd.name}</span> 参数：{activeCmd.argHint}
         </div>
       )}
-      {caps && !caps.commands && (
-        <div
-          className="composer-note"
-          title="Codex app-server 没有斜杠命令枚举协议（listPrompts / customPrompts / slashCommands 等请求都返回未知方法），这里没有命令面板；行首 / 只会按普通文本发送。"
-        >
-          Codex 不支持斜杠命令
-        </div>
-      )}
+      {codexResult && <CodexCommandPanel result={codexResult} onClose={closeCodexResult} />}
       {attachments.length > 0 && (
         <div className="attach-bar" aria-label="待发送附件">
           {attachments.map((att) => (
@@ -1127,7 +1228,12 @@ function Composer({ session, dead, errored }: { session: SessionRecord; dead: bo
               </div>
             )}
           </span>
-          <SlashMenu session={session} commandsSupported={commandsSupported && !dead && !text}
+          <SlashMenu session={session} commandsSupported={commandsSupported && !dead}
+            canInsertCommand={!text}
+            onCodexCommand={name => {
+              if (name === "review") { setText("/review "); textareaRef.current?.focus(); }
+              else void executeCodex(name);
+            }}
             onBrowseCommands={() => {
               setText("/");
               setCursor(1);
