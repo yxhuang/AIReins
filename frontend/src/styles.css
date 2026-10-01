@@ -253,8 +253,10 @@ body.resizing {
   z-index: -1;
   pointer-events: none;
   border-radius: 6px;
-  background: var(--surface);
-  box-shadow: 0 1px 3px color-mix(in srgb, var(--text) 8%, transparent);
+  /* 深色下 --surface 与凹槽太接近，滑块提亮并加一圈细边 */
+  background: light-dark(var(--surface), color-mix(in srgb, var(--surface) 84%, white));
+  box-shadow: 0 1px 3px color-mix(in srgb, var(--text) 8%, transparent),
+    inset 0 0 0 1px light-dark(transparent, color-mix(in srgb, white 8%, transparent));
   transition: transform 180ms ease, width 180ms ease;
 }
 
@@ -2042,19 +2044,22 @@ body.resizing {
   background: var(--surface-sunk);
 }
 
-/* 锚定在齿轮按钮上方的浮层（非模态） */
+/* 锚定在齿轮按钮上方的浮层（非模态）。
+   分组之间用细分隔线；选项一律用整行分段滑块（.settings-seg），选项等分、可收缩，
+   放大字号档位下也不会横向溢出。选中态沿用分段控件的中性浮起块，不用暖色（配色不变量）。 */
 .settings-panel {
   position: absolute;
   bottom: calc(100% + 8px);
   left: 0;
   z-index: 20;
-  width: 224px;
-  max-height: 60vh;
+  width: 272px;
+  max-width: calc(100vw - 24px);
+  max-height: 70vh;
   overflow-y: auto;
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 10px 12px 12px;
+  border-radius: 12px;
+  padding: 4px 14px;
   box-shadow: var(--shadow-pop);
   animation: settings-pop 0.12s ease-out;
 }
@@ -2064,11 +2069,15 @@ body.resizing {
   to { opacity: 1; transform: translateY(0); }
 }
 
+.settings-group { padding: 12px 0 14px; }
+.settings-group + .settings-group { border-top: 1px solid var(--border); }
+
 .settings-group-title {
-  margin: 0 0 8px;
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
+  margin: 0 0 10px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
   color: var(--text-faint);
 }
 
@@ -2078,35 +2087,60 @@ body.resizing {
   gap: 6px;
 }
 
-.settings-item + .settings-item { margin-top: 12px; }
+.settings-item + .settings-item { margin-top: 14px; }
 
 .settings-item-label {
   font-size: 12.5px;
-  color: var(--text-muted);
+  color: var(--text);
 }
 
-.settings-options { display: flex; gap: 6px; }
-.settings-option.settings-toggle { display: flex; align-items: center; justify-content: space-between; padding: 5px 8px; }
-.settings-hint { font-size: 12px; color: var(--text-faint); line-height: 1.5; }
-.settings-option:disabled { cursor: default; opacity: 0.6; }
+.settings-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
 
-.settings-option {
-  flex: 1;
-  border: 1px solid var(--border-strong);
-  background: var(--surface);
+.settings-hint { font-size: 11.5px; color: var(--text-faint); line-height: 1.5; }
+
+.settings-seg { display: flex; width: 100%; }
+.settings-seg .segmented-option {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 32px;
+  padding: 5px 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.settings-switch {
+  flex: none;
+  display: inline-flex;
+  padding: 4px;
+  border: 0;
+  background: transparent;
+  border-radius: 999px;
+  cursor: pointer;
+}
+.settings-switch:disabled { cursor: default; opacity: 0.6; }
+
+.settings-action {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  min-height: 34px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-sunk);
   color: var(--text);
-  border-radius: var(--radius);
-  padding: 5px 0;
+  font-family: inherit;
   font-size: 12.5px;
   cursor: pointer;
 }
-
-/* 选中态用冷色 --busy：面板不用暖色（配色不变量） */
-.settings-option.selected {
-  border-color: var(--busy);
-  color: var(--busy);
-  box-shadow: inset 0 0 0 1px var(--busy);
-}
+.settings-action:hover:not(:disabled) { border-color: var(--border-strong); }
+.settings-action:disabled { cursor: default; opacity: 0.6; }
 
 /* 减少动态：关光标闪烁、徽标脉冲与浮层动画 */
 @media (prefers-reduced-motion: reduce) {

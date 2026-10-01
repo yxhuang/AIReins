@@ -72,13 +72,13 @@ const SETTING_GROUPS: SettingGroup[] = [
       },
       {
         id: "idle-release",
-        label: "空闲自动释放",
+        label: "空闲自动释放（分钟）",
         options: [
           { value: "0", label: "关闭" },
-          { value: "15", label: "15 分钟" },
-          { value: "30", label: "30 分钟" },
-          { value: "60", label: "60 分钟" },
-          { value: "120", label: "120 分钟" },
+          { value: "15", label: "15" },
+          { value: "30", label: "30" },
+          { value: "60", label: "60" },
+          { value: "120", label: "120" },
         ],
       },
     ],
@@ -299,7 +299,7 @@ export function SettingsMenu() {
   const optionsFor = (item: SettingItem): SettingOption[] => {
     if (item.id !== "idle-release") return item.options;
     if (item.options.some((option) => option.value === idleRelease)) return item.options;
-    return [...item.options, { value: idleRelease, label: `${idleRelease} 分钟` }];
+    return [...item.options, { value: idleRelease, label: idleRelease }];
   };
 
   return (
@@ -310,76 +310,43 @@ export function SettingsMenu() {
             <section className="settings-group" key={group.id}>
               <h3 className="settings-group-title">{group.label}</h3>
               {group.items.map((item) => (
-                <div className="settings-item" key={item.id}>
-                  <span className="settings-item-label" id={`settings-item-${item.id}`}>
-                    {item.label}
-                  </span>
-                  {item.id === "remote-control-startup" ? <>
-                    <button type="button" role="switch" aria-checked={rcStartup === true}
-                      aria-labelledby={`settings-item-${item.id}`} aria-describedby="settings-rc-hint"
-                      className="settings-option settings-toggle" disabled={rcStartup === null || rcSaving}
-                      onClick={() => void toggleRcStartup()}>
-                      <span>{rcSaving ? "保存中…" : rcStartup === null ? (rcError ? "读取失败" : "读取中…") : rcStartup ? "开启" : "关闭"}</span>
-                      <span className={`slash-switch${rcStartup ? " on" : ""}`} aria-hidden="true" />
-                    </button>
+                item.id === "remote-control-startup" ? (
+                  <div className="settings-item" key={item.id}>
+                    <div className="settings-row">
+                      <span className="settings-item-label" id={`settings-item-${item.id}`}>{item.label}</span>
+                      <button type="button" role="switch" aria-checked={rcStartup === true}
+                        aria-labelledby={`settings-item-${item.id}`} aria-describedby="settings-rc-hint"
+                        className="settings-switch" disabled={rcStartup === null || rcSaving}
+                        title={rcSaving ? "保存中…" : rcStartup === null ? (rcError ? "读取失败" : "读取中…") : rcStartup ? "已开启" : "已关闭"}
+                        onClick={() => void toggleRcStartup()}>
+                        <span className={`slash-switch${rcStartup ? " on" : ""}`} aria-hidden="true" />
+                      </button>
+                    </div>
                     <span className="settings-hint" id="settings-rc-hint">仅对新建、续接或释放后再发送的会话生效。</span>
                     {rcError && <span className="new-error" role="alert">{rcError}</span>}
-                  </> : item.id === "theme" ? <Segmented
-                    options={item.options}
-                    value={theme}
-                    onChange={chooseTheme}
-                    role="radiogroup"
-                    ariaLabelledby={`settings-item-${item.id}`}
-                  /> : <div
-                    className="settings-options"
-                    role="radiogroup"
-                    aria-labelledby={`settings-item-${item.id}`}
-                    onKeyDown={(e) => {
-                      // roving tabindex：方向键在组内循环移动焦点并同时选中
-                      const dir =
-                        e.key === "ArrowDown" || e.key === "ArrowRight"
-                          ? 1
-                          : e.key === "ArrowUp" || e.key === "ArrowLeft"
-                            ? -1
-                            : 0;
-                      if (dir === 0) return;
-                      e.preventDefault();
-                      const buttons = Array.from(
-                        e.currentTarget.querySelectorAll<HTMLButtonElement>("button"),
-                      );
-                      const index = buttons.indexOf(e.target as HTMLButtonElement);
-                      if (index === -1) return;
-                      const options = optionsFor(item);
-                      const nextIndex = (index + dir + options.length) % options.length;
-                      const nextButton = buttons[nextIndex];
-                      const nextOption = options[nextIndex];
-                      if (!nextButton || !nextOption) return;
-                      nextButton.focus();
-                      choose(item.id, nextOption.value);
-                    }}
-                  >
-                    {optionsFor(item).map((option) => (
-                      <button
-                        key={option.value}
-                        type="button"
-                        role="radio"
-                        aria-checked={selectedValue(item.id) === option.value}
-                        tabIndex={selectedValue(item.id) === option.value ? 0 : -1}
-                        className={`settings-option${selectedValue(item.id) === option.value ? " selected" : ""}`}
-                        onClick={() => choose(item.id, option.value)}
-                      >
-                        {option.label}
-                      </button>
-                    ))}
-                  </div>}
-                </div>
+                  </div>
+                ) : (
+                  <div className="settings-item" key={item.id}>
+                    <span className="settings-item-label" id={`settings-item-${item.id}`}>{item.label}</span>
+                    <Segmented
+                      className="settings-seg"
+                      options={optionsFor(item)}
+                      value={selectedValue(item.id)}
+                      onChange={(value) => item.id === "theme" ? chooseTheme(value as ThemeChoice) : choose(item.id, value)}
+                      role="radiogroup"
+                      ariaLabelledby={`settings-item-${item.id}`}
+                    />
+                  </div>
+                )
               ))}
             </section>
           ))}
           <section className="settings-group">
             <h3 className="settings-group-title">Workbench</h3>
-            <button type="button" className="settings-option" disabled={restartState !== "idle"}
-              onClick={() => void restart()}>{restartState === "checking" ? "检查会话中…" : "重启 Workbench"}</button>
+            <button type="button" className="settings-action" disabled={restartState !== "idle"}
+              onClick={() => void restart()}>
+              <span aria-hidden="true">↻</span>{restartState === "checking" ? "检查会话中…" : "重启 Workbench"}
+            </button>
           </section>
         </div>
       )}
@@ -409,7 +376,7 @@ export function SettingsMenu() {
             <p id="restart-description" role={restartState === "failed" ? "alert" : "status"}>
               {restartState === "restarting" ? "正在等待 Workbench 恢复连接，请稍候。" : `${restartError}。请在电脑终端按当前实例的端口和 WORKBENCH_HOME 执行 wb restart，再刷新页面；手机用户请到电脑操作。`}
             </p>
-            {restartState === "failed" && <button type="button" className="settings-option" onClick={() => {
+            {restartState === "failed" && <button type="button" className="btn" onClick={() => {
               setRestartState("idle");
               gearRef.current?.focus();
             }}>关闭提示</button>}
