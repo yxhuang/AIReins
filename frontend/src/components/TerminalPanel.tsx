@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { Terminal, type ITheme } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
+import { Segmented } from "./Segmented";
 import "@xterm/xterm/css/xterm.css";
 import type { ShellKind, TerminalInfo } from "../types";
 import { createTerminal, fetchTerminals, killTerminal } from "../api";
@@ -102,9 +103,9 @@ function readTermFontSize(): number {
   return base * (Number.isFinite(scale) && scale > 0 ? scale : 1);
 }
 
-const SHELL_OPTIONS: Array<{ kind: ShellKind; label: string }> = [
-  { kind: "bash", label: "bash" },
-  { kind: "powershell", label: "PowerShell" },
+const SHELL_OPTIONS: Array<{ value: ShellKind; label: string }> = [
+  { value: "bash", label: "bash" },
+  { value: "powershell", label: "PowerShell" },
 ];
 
 interface TermRuntime {
@@ -499,20 +500,15 @@ export function TerminalPanel({ open, onClose }: { open: boolean; onClose: () =>
           <button type="button" className="btn term-back" aria-label="返回" onClick={onClose}>
             ‹ 返回
           </button>
-          <span className="term-shells" role="group" aria-label="切换 shell">
-            {SHELL_OPTIONS.map(({ kind, label }) => (
-              <button
-                key={kind}
-                type="button"
-                className={`term-shell${info?.kind === kind ? " active" : ""}`}
-                aria-pressed={info?.kind === kind}
-                disabled={confirmKill || switching}
-                onClick={() => { if (info?.kind !== kind) void runtimeRef.current?.switchShell(kind); }}
-              >
-                {label}
-              </button>
-            ))}
-          </span>
+          <Segmented
+            className="term-shells"
+            buttonClassName="term-shell"
+            options={SHELL_OPTIONS}
+            value={info?.kind ?? null}
+            ariaLabel="切换 shell"
+            disabled={confirmKill || switching}
+            onChange={(kind) => { if (info?.kind !== kind) void runtimeRef.current?.switchShell(kind); }}
+          />
           <span className="term-cwd mono" title={info?.cwd ?? ""}>
             {info?.cwd ?? "…"}
           </span>

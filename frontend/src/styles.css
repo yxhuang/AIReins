@@ -230,25 +230,48 @@ body.resizing {
   display: none;
 }
 
-/* shell 切换：中性分段按钮（琥珀金留给闸门） */
-.term-shells {
-  flex: 0 0 auto;
+/* 共用分段切换：凹槽与浮起滑块只用现有中性令牌。 */
+.segmented {
+  position: relative;
   display: inline-flex;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius);
-  overflow: hidden;
+  isolation: isolate;
+  padding: 3px;
+  gap: 3px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--surface-sunk);
 }
-.term-shell {
-  padding: 2px 8px;
+
+.segmented-slider {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: -1;
+  pointer-events: none;
+  border-radius: 6px;
+  background: var(--surface);
+  box-shadow: 0 1px 3px color-mix(in srgb, var(--text) 8%, transparent);
+  transition: transform 180ms ease, width 180ms ease;
+}
+
+.segmented-option {
+  flex: 1 0 auto;
+  min-height: 36px;
+  padding: 7px 12px;
   border: 0;
+  border-radius: 6px;
   background: transparent;
   color: var(--text-muted);
+  font-family: inherit;
   font-size: 12px;
+  white-space: nowrap;
   cursor: pointer;
+  touch-action: manipulation;
 }
-.term-shell + .term-shell { border-left: 1px solid var(--border-strong); }
-.term-shell.active { background: var(--surface-sunk); color: var(--text); font-weight: 600; }
-.term-shell:disabled { cursor: default; opacity: 0.6; }
+.segmented-option.active { color: var(--text); }
+.segmented-option:disabled { cursor: default; opacity: 0.6; }
+.segmented-option:focus-visible { outline-offset: -2px; }
+.term-shells { flex: 0 0 auto; }
 
 .term-cwd {
   flex: 1 1 auto;
@@ -343,12 +366,22 @@ body.resizing {
 }
 
 .brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
   font-weight: 700;
   letter-spacing: 0.04em;
   font-size: 15px;
+  white-space: nowrap;
 }
 
-.app.sidebar-collapsed .brand { display: none; }
+.brand-mark {
+  font: 700 24px var(--font-mono);
+  letter-spacing: -0.08em;
+}
+.brand-line { width: 1px; height: 28px; background: var(--border-strong); margin: 0 3px; }
+.app.sidebar-collapsed .brand-line,
+.app.sidebar-collapsed .brand-name { display: none; }
 
 /* 刷新按钮紧跟「workbench」，收起按钮仍靠右 */
 .sidebar-reload { margin-right: auto; margin-left: 6px; }
@@ -2073,6 +2106,7 @@ body.resizing {
 /* 减少动态：关光标闪烁、徽标脉冲与浮层动画 */
 @media (prefers-reduced-motion: reduce) {
   .cursor, .gate-badge, .settings-panel, .cmd-panel, .cfg-menu, .attach-menu, .timeline-item.timeline-running::before { animation: none; }
+  .segmented-slider { transition: none; }
 }
 
 /* ── 扩展页面：左栏分区与页面视图（全部冷色/中性，暖色仍是闸门专用） ── */
@@ -2284,7 +2318,7 @@ body.resizing {
 
 @media (min-width: 721px) {
   .sidebar { transition: width 160ms ease; }
-  .app:not(.sidebar-collapsed) .sidebar.sidebar-page-open { width: min(440px, 45vw); }
+  .app:not(.sidebar-collapsed) .sidebar.sidebar-page-open { width: min(352px, 36vw); }
 }
 
 @media (min-width: 721px) and (prefers-reduced-motion: reduce) {
@@ -2891,7 +2925,7 @@ body.resizing {
 @media (pointer: coarse) {
   /* 触屏点按目标至少 44px */
   .btn, .icon-btn, .cfg-pill, .cfg-item, .attach-item, .session-row, .history-row { min-height: 44px; }
-  .term-key, .term-shell { min-height: 44px; }
+  .term-key, .segmented-option { min-height: 44px; }
   .send-btn, .attach-btn { width: 44px; height: 44px; }
   .cfg-slider { width: 176px; height: 32px; }
   /* iOS 聚焦字号小于 16px 的输入框会自动放大页面；!important 用来压过各处更具体的字号规则 */

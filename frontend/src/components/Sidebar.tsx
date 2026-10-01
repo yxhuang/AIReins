@@ -138,7 +138,11 @@ export function Sidebar({ collapsed, onToggle, newOpen, onNewOpenChange, termina
   return (
     <aside className={`sidebar${pageOpen && !collapsed ? " sidebar-page-open" : ""}`} ref={sidebarRef}>
       <div className="sidebar-head">
-        <span className="brand">workbench</span>
+        <span className="brand" aria-label="workbench">
+          <span className="brand-mark" aria-hidden="true">wb</span>
+          <span className="brand-line" aria-hidden="true" />
+          <span className="brand-name" aria-hidden="true">workbench</span>
+        </span>
         {/* Chrome --app 窗口和主屏幕 PWA 没有地址栏和刷新键 */}
         <button
           type="button"

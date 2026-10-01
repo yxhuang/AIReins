@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { Segmented } from "./Segmented";
 import { fetchClaudeStartupSettings, fetchPrefs, fetchSessions, restartWorkbench, saveClaudeStartupSettings, savePrefs } from "../api";
 import { restartAndReconnect, restartBusyCount } from "../restart";
 import { store } from "../store";
@@ -323,7 +324,13 @@ export function SettingsMenu() {
                     </button>
                     <span className="settings-hint" id="settings-rc-hint">仅对新建、续接或释放后再发送的会话生效。</span>
                     {rcError && <span className="new-error" role="alert">{rcError}</span>}
-                  </> : <div
+                  </> : item.id === "theme" ? <Segmented
+                    options={item.options}
+                    value={theme}
+                    onChange={chooseTheme}
+                    role="radiogroup"
+                    ariaLabelledby={`settings-item-${item.id}`}
+                  /> : <div
                     className="settings-options"
                     role="radiogroup"
                     aria-labelledby={`settings-item-${item.id}`}
