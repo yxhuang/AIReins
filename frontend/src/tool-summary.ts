@@ -6,6 +6,7 @@
 
 import type { AgentKind } from "./types";
 import { asRecord, stringifyBlock } from "./format";
+import { lineDiff } from "./components/DiffView";
 
 /** kimi tool_call_completed 上可选的终端输出（后端阶段 2 契约；旧事件没有此字段） */
 export interface ToolTerminalOutput {
@@ -385,7 +386,9 @@ function parseUnifiedDiff(diff: string, kindType: string): { removed: string; ad
 }
 
 function sumLines(chunks: { removed: string; added: string }[], field: "removed" | "added"): number {
-  return chunks.reduce((sum, c) => sum + countTextLines(c[field]), 0);
+  // 按逐行对齐后的实际增删计数，与 DiffView 显示一致
+  const op = field === "added" ? "+" : "-";
+  return chunks.reduce((sum, c) => sum + lineDiff(c.removed, c.added).filter(([o]) => o === op).length, 0);
 }
 
 // ── 原始数据归一 ─────────────────────────────────────

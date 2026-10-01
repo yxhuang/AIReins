@@ -24,7 +24,7 @@ import { store } from "../store";
 import { uploadsFileUrl } from "../api";
 import type { AgentKind, ImageMention } from "../types";
 import { summarizeTool, type ToolSummary } from "../tool-summary";
-import { DiffView, countLines } from "./DiffView";
+import { DiffView, lineDiff } from "./DiffView";
 import { MarkdownMessage, UserMessageText } from "./MarkdownMessage";
 
 export function UserBlockView({ item }: { item: UserBlock }) {
@@ -285,8 +285,9 @@ export const GateBlock = forwardRef<HTMLDivElement, { item: GateView; sessionId:
 
     const isEdit = Boolean(item.removed || item.added);
     const addedText = isEdit ? item.added : item.content;
-    const addedCount = countLines(addedText);
-    const removedCount = countLines(item.removed);
+    const ops = lineDiff(isEdit ? item.removed : "", addedText);
+    const addedCount = ops.filter(([o]) => o === "+").length;
+    const removedCount = ops.filter(([o]) => o === "-").length;
 
     return (
       <div className="gate-block" ref={ref}>

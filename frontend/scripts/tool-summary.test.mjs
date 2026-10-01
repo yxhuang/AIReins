@@ -442,5 +442,13 @@ t("Grep 附注：content 模式「N 处」、files_with_matches「N 个文件」
   assert.equal(undetermined.s.note, "", "模式判不定时省略附注");
 });
 
+const { lineDiff } = await import("../src/components/DiffView.tsx");
+t("lineDiff：未变行保留、改动行成对", () => {
+  assert.deepEqual(lineDiff("a\nb\nc\n", "a\nB\nc\n"), [[" ", "a"], ["-", "b"], ["+", "B"], [" ", "c"]]);
+  assert.deepEqual(lineDiff("", "x"), [["+", "x"]]);
+  assert.deepEqual(lineDiff("x", ""), [["-", "x"]]);
+  assert.deepEqual(lineDiff("a\nb", "a\nb\nc"), [[" ", "a"], [" ", "b"], ["+", "c"]]);
+});
+
 if (!process.exitCode) console.log(`✅ tool-summary 单测全过（${pass} 例）`);
 else console.error(`部分用例失败（通过 ${pass} 例）`);
