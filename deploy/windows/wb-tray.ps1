@@ -4,6 +4,7 @@
 .DESCRIPTION
     Chrome 自绘标题栏无法从外部拦截 ×。看门狗发现窗口消失时视为收到托盘，
     下次点击重开页面；WSL 服务和会话继续运行。保留任务栏及系统最小化行为。
+    左键单击切换显隐；被遮挡或最小化时先显示，双击和冷启动期间补点只受理一次。
     使用默认 Chrome 配置，以保留 localStorage 和已登录的外部站点。
 .NOTES
     必须使用 UTF-8 带 BOM 保存，由 powershell.exe 5.1 运行，不用 pwsh。
@@ -32,6 +33,17 @@ public static class WbNative {
     [DllImport("user32.dll", CharSet=CharSet.Unicode)]
     private static extern int GetClassName(IntPtr h, StringBuilder text, int count);
     [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr h);
+    [DllImport("user32.dll")] public static extern bool IsWindow(IntPtr h);
+    [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);
+    [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT rect);
+    [DllImport("user32.dll")] public static extern IntPtr WindowFromPoint(POINT point);
+    [DllImport("user32.dll")] public static extern IntPtr GetAncestor(IntPtr h, uint flags);
+    [DllImport("user32.dll")] public static extern int GetMessageTime();
+    [StructLayout(LayoutKind.Sequential)]
+    public struct RECT { public int Left, Top, Right, Bottom; }
+    [StructLayout(LayoutKind.Sequential)]
+    public struct POINT { public int X, Y; }
+    private static readonly HashSet<IntPtr> iconWindows = new HashSet<IntPtr>();
     [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int command);
     [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
     [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr h, uint msg, IntPtr w, IntPtr l);
@@ -51,13 +63,24 @@ public static class WbNative {
                 (t == "workbench" || t.EndsWith(" · workbench", StringComparison.Ordinal))) hits.Add(h);
             return true;
         }, IntPtr.Zero);
+        // EnumWindows 包含隐藏窗口；仅忘记已经消失的 hwnd。
+        iconWindows.RemoveWhere(delegate(IntPtr h) { return !hits.Contains(h); });
         return hits.ToArray();
     }
+    private static bool SetIconIfNeeded(IntPtr h, int kind, IntPtr icon) {
+        IntPtr current;
+        // WM_GETICON；读取超时则下次重试，避免在未知状态下反复改图标。
+        if (SendMessageTimeout(h, 0x7F, new IntPtr(kind), IntPtr.Zero, 2, 200, out current) == IntPtr.Zero)
+            return false;
+        if (current == icon) return true;
+        IntPtr previous;
+        return SendMessageTimeout(h, 0x80, new IntPtr(kind), icon, 2, 200, out previous) != IntPtr.Zero;
+    }
     public static void SetIcons(IntPtr h, IntPtr small, IntPtr large) {
-        IntPtr result;
-        // WM_SETICON：只改匹配窗口的大小图标；不改 Chrome 的窗口样式或进程。
-        SendMessageTimeout(h, 0x80, IntPtr.Zero, small, 2, 200, out result);
-        SendMessageTimeout(h, 0x80, new IntPtr(1), large, 2, 200, out result);
+        if (iconWindows.Contains(h)) return;
+        bool smallReady = SetIconIfNeeded(h, 0, small); // ICON_SMALL
+        bool largeReady = SetIconIfNeeded(h, 1, large); // ICON_BIG
+        if (smallReady && largeReady) iconWindows.Add(h);
     }
 }
 '@
@@ -70,6 +93,8 @@ $script:HadWindow = $false
 $script:NotifiedClose = $false
 $script:Icon = $null
 $script:LargeIcon = $null
+$script:LastClickTick = [long][Environment]::TickCount - 10000
+$script:LastActionEndTick = $script:LastClickTick
 
 function Resolve-Chrome {
     $candidates = @(
@@ -163,10 +188,80 @@ function Ensure-Service {
     throw "15 秒内工作台未就绪：$lastError"
 }
 
+# 以下判据只用参数，不调 Win32；测试从 AST 提取源函数运行。
+function Get-ClickAction([bool]$alive, [bool]$visible, [bool]$iconic, [bool]$onTop) {
+    if ($alive -and $visible -and (-not $iconic) -and $onTop) { return 'Hide' }
+    return 'Show'
+}
+
+function Get-ShowAction([bool]$visible, [bool]$iconic, [bool]$onTop) {
+    if ($iconic) { return 'Restore' }
+    if ($visible -and (-not $onTop)) { return 'Reshow' }
+    return 'Show'
+}
+
+# GetMessageTime / TickCount 同为有符号 32 位毫秒计数，差值需处理回绕。
+function Get-TickElapsed([long]$now, [long]$then) {
+    $elapsed = $now - $then
+    if ($elapsed -lt -2147483648L) { $elapsed += 4294967296L }
+    if ($elapsed -gt 2147483647L) { $elapsed -= 4294967296L }
+    return $elapsed
+}
+
+function Test-AcceptClick([long]$sent, [long]$actionEnd, [long]$lastClick, [int]$doubleClickTime) {
+    if ((Get-TickElapsed $sent $actionEnd) -le 0) { return $false }
+    if ((Get-TickElapsed $sent $lastClick) -lt $doubleClickTime) { return $false }
+    return $true
+}
+
+function Test-WindowOnTop([IntPtr]$Window) {
+    if (-not [WbNative]::IsWindowVisible($Window) -or [WbNative]::IsIconic($Window)) { return $false }
+    $rect = New-Object WbNative+RECT
+    if (-not [WbNative]::GetWindowRect($Window, [ref]$rect)) { return $true }
+    $width = $rect.Right - $rect.Left
+    $height = $rect.Bottom - $rect.Top
+    # 与 ai-usage 相同：任一采样点属于本窗口即可；不用点托盘后已变成任务栏的前台句柄。
+    foreach ($fraction in @(0.25, 0.5, 0.75)) {
+        $point = New-Object WbNative+POINT
+        $point.X = $rect.Left + [int]($width * $fraction)
+        $point.Y = $rect.Top + [int]($height * $fraction)
+        $top = [WbNative]::GetAncestor([WbNative]::WindowFromPoint($point), 2) # GA_ROOT
+        if ($top -eq $Window) { return $true }
+    }
+    return $false
+}
+
 function Raise-Window([IntPtr]$Window) {
     if ($script:Icon) { [WbNative]::SetIcons($Window, $script:Icon.Handle, $script:LargeIcon.Handle) }
-    if ([WbNative]::IsIconic($Window)) { [void][WbNative]::ShowWindow($Window, 9) } # SW_RESTORE
+    $visible = [WbNative]::IsWindowVisible($Window)
+    $iconic = [WbNative]::IsIconic($Window)
+    switch (Get-ShowAction $visible $iconic (Test-WindowOnTop $Window)) {
+        'Restore' { [void][WbNative]::ShowWindow($Window, 9) } # SW_RESTORE
+        'Reshow' {
+            [void][WbNative]::ShowWindow($Window, 0) # SW_HIDE
+            [void][WbNative]::ShowWindow($Window, 5) # SW_SHOW
+        }
+        'Show' { [void][WbNative]::ShowWindow($Window, 5) }
+    }
     [void][WbNative]::SetForegroundWindow($Window)
+}
+
+function Switch-Workbench {
+    if ($script:Busy -or $script:Exiting) { return }
+    try {
+        $windows = @([WbNative]::Windows())
+        if ($windows.Length -eq 0) { Open-Workbench; return }
+        $window = $windows[0]
+        $alive = [WbNative]::IsWindow($window)
+        $visible = $alive -and [WbNative]::IsWindowVisible($window)
+        $iconic = $alive -and [WbNative]::IsIconic($window)
+        $onTop = $alive -and (Test-WindowOnTop $window)
+        if ((Get-ClickAction $alive $visible $iconic $onTop) -eq 'Hide') {
+            [void][WbNative]::ShowWindow($window, 0) # SW_HIDE；任务栏按钮随之消失
+        } elseif ($alive) { Raise-Window $window }
+        else { Open-Workbench }
+    } catch { Show-Failure $_.Exception.Message }
+    finally { $script:LastActionEndTick = [Environment]::TickCount }
 }
 
 # 两实例同时启动、或双击托盘时，串行执行找窗口/开窗口，避免重复 Chrome 窗口。
@@ -199,6 +294,7 @@ function Open-Workbench([switch]$ServiceReady, [switch]$RetryService) {
     finally {
         if ($locked) { $script:OpenMutex.ReleaseMutex() }
         $script:Busy = $false
+        $script:LastActionEndTick = [Environment]::TickCount
     }
 }
 
@@ -277,11 +373,15 @@ try {
     $exitItem.add_Click({ Exit-Workbench })
     $script:Tray.ContextMenuStrip = $menu
     $script:Tray.add_MouseClick({ param($sender, $eventArgs)
-        if ($eventArgs.Button -eq [System.Windows.Forms.MouseButtons]::Left) { Open-Workbench }
+        if ($eventArgs.Button -ne [System.Windows.Forms.MouseButtons]::Left) { return }
+        $sent = [WbNative]::GetMessageTime()
+        if (Test-AcceptClick $sent $script:LastActionEndTick $script:LastClickTick `
+                ([System.Windows.Forms.SystemInformation]::DoubleClickTime)) {
+            $script:LastClickTick = $sent
+            Switch-Workbench
+        }
     })
-    $script:Tray.add_MouseDoubleClick({ param($sender, $eventArgs)
-        if ($eventArgs.Button -eq [System.Windows.Forms.MouseButtons]::Left) { Open-Workbench }
-    })
+    # 不挂 MouseDoubleClick：双击的第二次 MouseClick 由投递时间过滤。
     $script:Tray.Visible = $true
 
     $timer = New-Object System.Windows.Forms.Timer

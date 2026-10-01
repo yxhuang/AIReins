@@ -8,9 +8,59 @@
 [CmdletBinding()]
 param(
     [string]$ShortcutPath,
-    [string]$SourceDir
+    [string]$SourceDir,
+    # Chrome 给 --app=http://127.0.0.1:<端口>/ 窗口的任务栏 ID（与端口无关）。快捷方式带上同一个 ID，
+    # 窗口才会归到固定项那一格，而不是另起一个 Chrome 图标。
+    [string]$AppId = 'Chrome.127.0.0.1_/'
 )
 $ErrorActionPreference = 'Stop'
+Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+public static class WbLink {
+    [ComImport, Guid("00021401-0000-0000-C000-000000000046")] class CShellLink {}
+    [ComImport, InterfaceType(ComInterfaceType.InterfaceIsIUnknown), Guid("0000010b-0000-0000-C000-000000000046")]
+    interface IPersistFile {
+        void GetClassID(out Guid id); [PreserveSig] int IsDirty();
+        void Load([MarshalAs(UnmanagedType.LPWStr)] string file, uint mode);
+        void Save([MarshalAs(UnmanagedType.LPWStr)] string file, [MarshalAs(UnmanagedType.Bool)] bool remember);
+        void SaveCompleted([MarshalAs(UnmanagedType.LPWStr)] string file); void GetCurFile(out IntPtr file);
+    }
+    [StructLayout(LayoutKind.Sequential, Pack=4)] struct PropertyKey { public Guid fmtid; public uint pid; }
+    [StructLayout(LayoutKind.Explicit)] struct PropVariant {
+        [FieldOffset(0)] public ushort vt; [FieldOffset(8)] public IntPtr p; [FieldOffset(16)] public IntPtr pad;
+    }
+    [ComImport, InterfaceType(ComInterfaceType.InterfaceIsIUnknown), Guid("886D8EEB-8CF2-4446-8D02-CDBA1DBDCF99")]
+    interface IPropertyStore {
+        void GetCount(out uint n); void GetAt(uint i, out PropertyKey key);
+        void GetValue(ref PropertyKey key, out PropVariant value);
+        void SetValue(ref PropertyKey key, ref PropVariant value); void Commit();
+    }
+    static PropertyKey AppIdKey() {
+        var k = new PropertyKey(); k.fmtid = new Guid("9F4C2855-9F79-4B39-A8D0-E1D42DE1D5F3"); k.pid = 5; return k;
+    }
+    public static string GetAppId(string path) {
+        var link = new CShellLink();
+        try {
+            ((IPersistFile)link).Load(path, 0);
+            var key = AppIdKey(); PropVariant v;
+            ((IPropertyStore)link).GetValue(ref key, out v);
+            return v.vt == 31 ? Marshal.PtrToStringUni(v.p) : null; // VT_LPWSTR；只读一次，不回收这点内存
+        } finally { Marshal.ReleaseComObject(link); }
+    }
+    public static void SetAppId(string path, string appId) {
+        var link = new CShellLink();
+        try {
+            ((IPersistFile)link).Load(path, 2); // STGM_READWRITE
+            var key = AppIdKey();
+            var v = new PropVariant(); v.vt = 31; v.p = Marshal.StringToCoTaskMemUni(appId);
+            try { var store = (IPropertyStore)link; store.SetValue(ref key, ref v); store.Commit(); }
+            finally { Marshal.FreeCoTaskMem(v.p); }
+            ((IPersistFile)link).Save(null, true);
+        } finally { Marshal.ReleaseComObject(link); }
+    }
+}
+'@
 $shortcutName = 'Workbench 工作台.lnk'
 $installDir = Join-Path $env:LOCALAPPDATA 'workbench'
 
@@ -62,6 +112,15 @@ $pinned = @()
 if (Test-Path -LiteralPath $pinnedDir -PathType Container) {
     $pinned = @(Get-ChildItem -LiteralPath $pinnedDir -Filter $shortcutName -File)
 }
+# 直接把 Chrome 工作台窗口固定到任务栏时，Windows 生成的是「Google Chrome (2).lnk」这类只指向 chrome.exe 的固定项：
+# 图标是 Chrome 的，窗口关掉后再点只会开一个普通 Chrome 窗口。按任务栏 ID 认出这类固定项，一并改成走托盘。
+if (Test-Path -LiteralPath $pinnedDir -PathType Container) {
+    foreach ($item in Get-ChildItem -LiteralPath $pinnedDir -Filter '*.lnk' -File) {
+        if ($pinned.FullName -contains $item.FullName) { continue }
+        try { $id = [WbLink]::GetAppId($item.FullName) } catch { continue }
+        if ($id -eq $AppId) { $pinned += $item }
+    }
+}
 foreach ($item in $pinned) { if ($targets -notcontains $item.FullName) { $targets += $item.FullName } }
 
 New-Item -ItemType Directory -Path $installDir -Force | Out-Null
@@ -100,6 +159,7 @@ foreach ($target in $targets) {
     $shortcut.Arguments = "`"$launcher`""
     $shortcut.WorkingDirectory = $installDir
     $shortcut.IconLocation = "$(Join-Path $installDir 'workbench.ico'),0"
+    $shortcut.Description = 'Workbench 工作台'
     try { $shortcut.Save() }
     catch {
         throw "无法修改 $target ：$($_.Exception.Message)。若位于所有用户开始菜单，请用管理员 PowerShell 重跑。已完成的其他项和备份保留。"
@@ -110,7 +170,10 @@ foreach ($target in $targets) {
         $saved.IconLocation -ne $shortcut.IconLocation -or $saved.WorkingDirectory -ne $shortcut.WorkingDirectory) {
         throw "快捷方式读回不一致：$target"
     }
+    [WbLink]::SetAppId($target, $AppId)
+    if ([WbLink]::GetAppId($target) -ne $AppId) { throw "任务栏 ID 读回不一致：$target" }
     Write-Host "  已改为：$($saved.TargetPath) $($saved.Arguments)"
+    Write-Host "  任务栏 ID：$AppId"
     Write-Host "  新图标：$($saved.IconLocation)"
 }
 if ($pinned.Count -eq 0) { Write-Host '未找到同名任务栏固定项：请从修改后的快捷方式重新固定到任务栏。' }
