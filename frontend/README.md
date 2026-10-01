@@ -555,3 +555,9 @@ frontend/
 - **实测**：`npm run typecheck` / `npm run typecheck:frontend` / `npm test`（含新增 `test:attach` 7 例与 server 侧 19 个测试文件）/ `npm run build` 全部通过；18790 隔离实例真机冒烟：生成写着 `WB-IMG-7Q2K` 的 PNG 经 `/api/uploads` 上传后以 image mention 发给 Claude 与 Kimi，两家回复均恰含 `WB-IMG-7Q2K`（原始回复与记录见 `scratch/attach-smoke/` 与 `scratch/attach-report.md`）。
 - **截图验收**（playwright，390px × 深浅色，`scratch/attach-*.png`）：「+」菜单打开、附件条一张图一个文件、已发送气泡含缩略图，六张均无页面横滚、无页面错误。
 - **代码复核未实测**：Codex 的 `localImage` 形状只经 `codex app-server generate-json-schema`（0.159.2）核对 + 单测，本周期额度用尽未真跑；iOS 三选项与拖放手感待真机；图片压缩路径（HEIC→JPEG）在 node 测试里只覆盖判定逻辑，canvas 部分未跑。
+
+### M28 设置菜单重启 Workbench（2026-10-01）
+
+- **入口**：设置 → Workbench →「重启 Workbench」，手机沿用同一入口和同源请求。点击重新读取会话，按托盘口径计数 running 或有后台任务的会话，非零先二次确认；取消不发 POST。
+- **恢复**：受访问控制保护的 `POST /api/restart` 返回 202 后由独立进程组重启当前实例。全屏 portal 遮罩显示「重启中」，既有 WS 观察到断开再恢复后撤掉；接口失败或 60 秒未恢复显示失败提示，可关闭，说明按当前实例环境执行 `wb restart` 再刷新。组件卸载清理订阅和计时器。
+- **回归**：新增 `test:restart` 并追加到 `npm test`，覆盖会话计数去重、旧连接不误判成功、断线早于处理 202、超时、请求失败及取消清理。隔离实例实测与验收记录见 `.work-orders/2026-10-01-restart-button-report.md`。

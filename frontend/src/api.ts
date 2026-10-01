@@ -67,6 +67,10 @@ export function fetchSessions(): Promise<SessionRecord[]> {
   return call<{ sessions: SessionRecord[] }>("/api/sessions").then((data) => data.sessions);
 }
 
+export function restartWorkbench(signal?: AbortSignal): Promise<{ restarting: boolean }> {
+  return call("/api/restart", { method: "POST", signal });
+}
+
 export function fetchSnapshot(id: string): Promise<Snapshot> {
   return call<Snapshot>(`/api/sessions/${encodeURIComponent(id)}/snapshot`);
 }

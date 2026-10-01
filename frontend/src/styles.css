@@ -1982,6 +1982,10 @@ body.resizing {
 
 .settings { position: relative; }
 
+.restart-overlay { z-index: 100; }
+.restart-overlay h3, .restart-overlay p { margin: 0; }
+.restart-overlay p { overflow-wrap: anywhere; }
+
 .settings-gear {
   display: inline-flex;
   align-items: center;

@@ -1,4 +1,5 @@
 import { createReadStream, existsSync, statSync } from "node:fs";
+import { spawn } from "node:child_process";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { extname, join, resolve } from "node:path";
 import type { Duplex } from "node:stream";
@@ -284,6 +285,7 @@ function startRemoteListener(config: RemoteConfig): Server {
 }
 
 let shuttingDown = false;
+let restartPending = false;
 async function shutdown(signal: string): Promise<void> {
   if (shuttingDown) return;
   shuttingDown = true;
@@ -316,6 +318,36 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
         ...meta,
         capabilities: { terminal: terminalEnabled(policy, REMOTE_CONFIG) },
       }, requestId);
+    } else if (method === "POST" && url.pathname === "/api/restart") {
+      if (!restartPending) {
+        restartPending = true;
+        // finish 保证先交付 202；稍后让浏览器有机会处理响应并进入遮罩。
+        response.once("finish", () => {
+          setTimeout(() => {
+            // POSIX detached 会新建 session / process group，stop 不会连坐此启动器。
+            const child = spawn("bash", [fileURLToPath(new URL("../bin/workbench", import.meta.url)), "restart"], {
+              detached: true,
+              stdio: "ignore",
+              env: {
+                ...process.env,
+                WORKBENCH_PORT: String(PORT),
+                WORKBENCH_HOME: resolve(workbenchHome),
+                WORKBENCH_LOG: resolve(process.env.WORKBENCH_LOG || join(workbenchHome, "server.log")),
+                ...(process.env.WORKBENCH_STATIC_DIR ? { WORKBENCH_STATIC_DIR: STATIC_ROOT } : {}),
+                WORKBENCH_NO_OPEN: "1",
+              },
+            });
+            child.once("error", (error) => {
+              restartPending = false;
+              log("error", "workbench restart launcher failed", { message: error.message });
+            });
+            // 启动器在停服前就失败退出时放开闸门，允许再点
+            child.once("exit", (code) => { if (code) restartPending = false; });
+            child.unref();
+          }, 200);
+        });
+      }
+      respond(response, 202, 0, "accepted", { restarting: true }, requestId);
     } else if (url.pathname === "/api/terminals" && method === "GET") {
       requireTerminalEnabled(policy);
       respond(response, 200, 0, "success", { terminals: terminals.list() }, requestId);

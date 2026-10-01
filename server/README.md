@@ -137,8 +137,15 @@ webhook 地址就是密钥：文件权限设为 600，也不要写进日志或�
 - `GET /api/history`：只读列出三家 CLI 自己保存的所有来源会话；没有用户消息的会话隐藏，`empty` 单独计数（分页为本页扫描计数），`skipped` 记录损坏/不可读候选。命中 delegate 元数据的条目附带 `dispatch:{runId,name}`，UUID 和 `session_...` 原样匹配；派单映射只读全部目录的 `run.json`/旧 `meta.json`，缓存 30 秒。
 - `GET /api/history/:agent/:nativeSessionId/messages`：从最新消息向前分页读取完整原生历史
 - `GET /api/meta`：server/CLI 实测版本、按请求入口计算的终端能力位、三 driver 能力位与配置 schema
+- `POST /api/restart`：无请求体，返回 HTTP 202，信封 `{code:0,msg:"accepted",data:{restarting:true},request_id}`；表示已接受，不表示重启已完成。沿用两个入口的 Host / Origin 校验，远程入口还须 Tailscale 身份白名单；不新增豁免。同一进程内重复请求仍回 202，只启动一次重启。
 - `GET /api/pages`：启动时已注册的扩展页面列表
 - `GET /api/pages/:id/health`：限时探测一个扩展页面的目标服务
+
+### 重启当前实例
+
+`POST /api/restart` 先完成 202 响应，再延迟 200ms 以 POSIX `detached`（新 session / process group）启动仓库的 `bin/workbench restart`。继承当前进程环境，明确传入当前监听的 `WORKBENCH_PORT`、`workbenchHome` 和 `WORKBENCH_NO_OPEN=1`；数据目录和日志路径按当前进程工作目录转为绝对路径；`WORKBENCH_LOG` 保留显式路径，未设置时落到当前 `WORKBENCH_HOME/server.log`。显式 `WORKBENCH_STATIC_DIR` 同样透传已解析的绝对路径，其他环境原样继承。因此远程入口发起重启也会停本实例的主监听端口，重新读取同一数据目录的远程配置，不弹浏览器。启动器与旧服务进程组分离；脚本的 SIGTERM 走既有 `shutdown()` 释放会话与终端，再启动服务加载新代码。`bin/workbench` 行为未改。
+
+前端点按钮先重新拉取会话列表；`status === "running"` 或 `backgroundTasks` 非空的会话去重计数，非零时显示数量并二次确认。确认后全屏显示「重启中」，既有 WS 断线重连在观察到断开再恢复后解除遮罩。60 秒未恢复或接口失败时给出关闭提示和按当前实例环境执行 `wb restart` 后刷新的说明。202 后启动失败记录服务端日志，客户端以恢复超时提示失败；断线重连不自动重发重启请求。
 
 Kimi 配置探测仍通过 `session/new` 读取 configOptions。探测进程关闭后，仅定位本次返回的 sessionId：历史根取 `WORKBENCH_KIMI_HISTORY_DIR` 或 `~/.kimi-code/sessions`；只有一个匹配目录、`state.json.id` 相同且完整 `agents/main/wire.jsonl` 仅含 `metadata / permission.set_mode / profile.bind / runtime.set_binding` 时才删除，并清除 `.index-dirty` 中以该 ID 开头的普通标记文件。异常、身份不符、对话或未知记录均保留并记日志；既有空会话只隐藏，不批量删除。
 

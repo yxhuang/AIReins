@@ -1,5 +1,8 @@
 import { useEffect, useRef, useState } from "react";
-import { fetchClaudeStartupSettings, fetchPrefs, saveClaudeStartupSettings, savePrefs } from "../api";
+import { createPortal } from "react-dom";
+import { fetchClaudeStartupSettings, fetchPrefs, fetchSessions, restartWorkbench, saveClaudeStartupSettings, savePrefs } from "../api";
+import { restartAndReconnect, restartBusyCount } from "../restart";
+import { store } from "../store";
 import {
   FONT_SCALE_EVENT,
   FONT_SCALE_STORAGE_KEY,
@@ -114,6 +117,45 @@ export function SettingsMenu() {
   const rootRef = useRef<HTMLDivElement>(null);
   const gearRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
+  const [restartState, setRestartState] = useState<"idle" | "checking" | "restarting" | "failed">("idle");
+  const [restartError, setRestartError] = useState("");
+  const restartPending = useRef(false);
+  const restartAbort = useRef<AbortController | null>(null);
+  const restartDialog = useRef<HTMLDivElement>(null);
+
+  useEffect(() => () => restartAbort.current?.abort(), []);
+  useEffect(() => {
+    if (restartState === "restarting" || restartState === "failed") restartDialog.current?.focus();
+  }, [restartState]);
+
+  const restart = async () => {
+    if (restartPending.current) return;
+    restartPending.current = true;
+    setRestartState("checking");
+    setRestartError("");
+    const controller = new AbortController();
+    restartAbort.current = controller;
+    try {
+      const count = restartBusyCount(await fetchSessions());
+      if (controller.signal.aborted) return;
+      if (count > 0 && !window.confirm(`有 ${count} 个会话正在运行或带有后台任务，重启会中断它们。仍要重启 Workbench？`)) {
+        setRestartState("idle");
+        return;
+      }
+      close(false);
+      setRestartState("restarting");
+      await restartAndReconnect(store, () => restartWorkbench(controller.signal), controller.signal);
+      setRestartState("idle");
+      gearRef.current?.focus();
+    } catch (error) {
+      if (controller.signal.aborted) return;
+      setRestartError(error instanceof Error ? error.message : String(error));
+      setRestartState("failed");
+    } finally {
+      controller.abort();
+      restartPending.current = false;
+    }
+  };
 
   // 空闲自动释放存在服务端（/api/prefs），打开面板时对齐一次
   useEffect(() => {
@@ -327,6 +369,11 @@ export function SettingsMenu() {
               ))}
             </section>
           ))}
+          <section className="settings-group">
+            <h3 className="settings-group-title">Workbench</h3>
+            <button type="button" className="settings-option" disabled={restartState !== "idle"}
+              onClick={() => void restart()}>{restartState === "checking" ? "检查会话中…" : "重启 Workbench"}</button>
+          </section>
         </div>
       )}
       <button
@@ -341,6 +388,27 @@ export function SettingsMenu() {
       >
         <GearIcon />
       </button>
+      {(restartState === "restarting" || restartState === "failed") && createPortal(
+        <div className="dir-overlay restart-overlay" onKeyDown={(event) => {
+          event.stopPropagation();
+          if (event.key === "Tab") {
+            event.preventDefault();
+            if (restartState === "failed") restartDialog.current?.querySelector<HTMLButtonElement>("button")?.focus();
+          }
+        }}>
+          <div className="dir-dialog" ref={restartDialog} tabIndex={-1} role="dialog" aria-modal="true"
+            aria-labelledby="restart-title" aria-describedby="restart-description">
+            <h3 id="restart-title">{restartState === "restarting" ? "重启中…" : "重启未确认成功"}</h3>
+            <p id="restart-description" role={restartState === "failed" ? "alert" : "status"}>
+              {restartState === "restarting" ? "正在等待 Workbench 恢复连接，请稍候。" : `${restartError}。请在电脑终端按当前实例的端口和 WORKBENCH_HOME 执行 wb restart，再刷新页面；手机用户请到电脑操作。`}
+            </p>
+            {restartState === "failed" && <button type="button" className="settings-option" onClick={() => {
+              setRestartState("idle");
+              gearRef.current?.focus();
+            }}>关闭提示</button>}
+          </div>
+        </div>, document.body,
+      )}
     </div>
   );
 }
