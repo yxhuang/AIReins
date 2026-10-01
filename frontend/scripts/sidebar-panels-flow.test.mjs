@@ -2,6 +2,7 @@
 // 静态渲染核对主区/侧栏分工；真实浏览器动画、点击与 iframe 网络另行验收。
 import { strict as assert } from "node:assert";
 import React from "react";
+import { readFileSync } from "node:fs";
 import { renderToStaticMarkup } from "react-dom/server";
 
 globalThis.React = React;
@@ -75,6 +76,28 @@ t("收起面板恢复会话列表；图标态仍保留历史/页面/终端/设�
   assert.ok(icons.includes('aria-label="AI 用量"'));
   assert.ok(icons.includes('aria-label="终端"'));
   assert.ok(icons.includes('class="settings"'));
+});
+
+t("入口留在底部原序，内容在独立覆盖区；不再把展开标题排到顶部", () => {
+  const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
+  const foot = (html) => sidebarOf(html)?.match(/<div class="sidebar-foot">([\s\S]*)/)?.[1];
+  store.navigateHistory();
+  const history = renderApp();
+  assert.ok(sidebarOf(history).indexOf('id="sidebar-history-panel"') < sidebarOf(history).indexOf('class="sidebar-foot"'));
+  assert.ok(!foot(history).includes('sidebar-panel-content'));
+  assert.ok(foot(history).indexOf('aria-label="派单"') < foot(history).indexOf('aria-label="所有来源会话"'));
+  assert.ok(foot(history).indexOf('aria-label="所有来源会话"') < foot(history).indexOf('aria-label="AI 用量"'));
+  assert.ok(history.includes('inert=""'), "覆盖时会话区不可聚焦");
+  store.navigatePage("ai-usage");
+  const pageHtml = renderApp();
+  assert.ok(!foot(pageHtml).includes('sidebar-panel-content'));
+  assert.ok(foot(pageHtml).indexOf('aria-label="所有来源会话"') < foot(pageHtml).indexOf('aria-label="AI 用量"'));
+  assert.match(css, /\.sidebar-session-area \{\s*grid-area: 1 \/ 1;/);
+  assert.match(css, /\.sidebar-foot \{\s*grid-area: 2 \/ 1;/);
+  const overlayCss = css.match(/\.sidebar-panel-expanded \{([\s\S]*?)\}/)[1];
+  assert.ok(overlayCss.includes("grid-area: 1 / 1"));
+  assert.ok(!overlayCss.includes("order:"));
+  assert.ok(!css.includes(".sidebar-foot.has-panel"));
 });
 
 if (!process.exitCode) console.log(`✅ sidebar panels 回归全过（${pass} 例）`);

@@ -72,6 +72,8 @@ export class Store {
   /** 侧栏面板：historyOpen 与 currentPageId 互斥，保留右侧当前会话。 */
   historyOpen = false;
   historySelection: HistorySession | null = null;
+  dispatchesOpen = false;
+  private beforeDispatches: { hash: string; currentId: string | null; selection: HistorySession | null } | null = null;
   data = new Map<string, SessionData>();
   wsState: WsState = "closed";
   /** Focus view：只显示用户输入与助手回复（闸门/提问照常），按浏览器记忆 */
@@ -209,6 +211,24 @@ export class Store {
   }
 
   private onHashChange = (): void => {
+    if (window.location.hash === "#/dispatches") {
+      if (!this.dispatchesOpen) {
+        this.beforeDispatches = {
+          hash: this.historyOpen ? "#/history" : this.currentPageId
+            ? `#/page/${encodeURIComponent(this.currentPageId)}`
+            : this.currentId ? `#/session/${encodeURIComponent(this.currentId)}` : "#/",
+          currentId: this.currentId,
+          selection: this.historySelection,
+        };
+      }
+      this.dispatchesOpen = true;
+      this.historyOpen = false;
+      this.currentPageId = null;
+      this.historySelection = null;
+      this.notify();
+      return;
+    }
+    this.dispatchesOpen = false;
     // 旧 history/page 链接打开侧栏面板；当前会话留在主区。
     if (window.location.hash === "#/history") {
       if (!this.historyOpen) this.historySelection = null;
@@ -245,6 +265,24 @@ export class Store {
   navigateHistory(): void {
     window.location.hash = "#/history";
     this.onHashChange();
+  }
+
+  toggleDispatches(): void {
+    if (this.dispatchesOpen) this.closeDispatches();
+    else {
+      window.location.hash = "#/dispatches";
+      this.onHashChange();
+    }
+  }
+
+  closeDispatches(returnToList = false): void {
+    const previous = this.beforeDispatches;
+    this.currentId = previous?.currentId ?? null;
+    const panel = previous?.hash === "#/history" || previous?.hash.startsWith("#/page/");
+    window.location.hash = returnToList && !panel ? "#/" : previous?.hash ?? "#/";
+    this.onHashChange();
+    if (this.historyOpen && !returnToList) this.historySelection = previous?.selection ?? null;
+    this.notify();
   }
 
   closeSidebarPanel(returnToList = false): void {

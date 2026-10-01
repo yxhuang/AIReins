@@ -5,6 +5,7 @@ import { SessionView } from "./components/SessionView";
 import { HistoryPreviewPane } from "./components/HistoryView";
 // xterm 体积大（~300KB），第一次打开终端才按需加载，别拖慢手机首屏
 const TerminalPanel = lazy(() => import("./components/TerminalPanel").then((m) => ({ default: m.TerminalPanel })));
+const DispatchView = lazy(() => import("./components/DispatchView").then((m) => ({ default: m.DispatchView })));
 import { sessionTitle } from "./format";
 import { store, type Store } from "./store";
 import { shallowEqual, useStore } from "./useStore";
@@ -22,6 +23,7 @@ const selectErrorContext = (value: Store) => {
 };
 const selectAppUi = (value: Store) =>
   [
+    value.dispatchesOpen,
     value.historyOpen,
     value.currentPageId,
     value.historySelection,
@@ -64,13 +66,13 @@ export function App() {
     return () => cancelAnimationFrame(raf);
   }, [termOpen]);
   const current = useStore(selectCurrentSession);
-  const [historyOpen, currentPageId, historySelection, lastError, errorContext, removalNotice] = useStore(
+  const [dispatchesOpen, historyOpen, currentPageId, historySelection, lastError, errorContext, removalNotice] = useStore(
     selectAppUi,
     shallowEqual,
   );
   const pendingTotal = useStore(selectPendingTotal);
-  // 手机窄屏下，面板就是主页；只有历史预览或会话进入主区。
-  const hasMain = Boolean(historySelection || (current && !historyOpen && !currentPageId));
+  // 手机窄屏下，面板就是主页；派单、历史预览或会话进入主区。
+  const hasMain = Boolean(dispatchesOpen || historySelection || (current && !historyOpen && !currentPageId));
   useEffect(() => {
     if (historyOpen || currentPageId) setCollapsed(false);
   }, [historyOpen, currentPageId]);
@@ -102,9 +104,12 @@ export function App() {
         <main className="main">
           {hasMain && (
             <div className="mobile-topbar">
-              <button type="button" className="btn" onClick={() => historySelection
-                ? store.backToHistoryList() : store.navigate(null)}>
-                {historySelection ? "‹ 所有来源会话" : "‹ 会话列表"}
+              <button type="button" className="btn" onClick={() => {
+                if (dispatchesOpen) { store.closeDispatches(true); setCollapsed(false); }
+                else if (historySelection) store.backToHistoryList();
+                else store.navigate(null);
+              }}>
+                {dispatchesOpen ? "‹ 返回侧栏" : historySelection ? "‹ 所有来源会话" : "‹ 会话列表"}
               </button>
               {pendingTotal > 0 && (
                 <span className="gate-badge" title={`${pendingTotal} 个闸门等待处理`}>
@@ -113,7 +118,11 @@ export function App() {
               )}
             </div>
           )}
-          {historySelection ? (
+          {dispatchesOpen ? (
+            <Suspense fallback={<div className="empty-state" aria-label="派单流程图">正在加载派单…</div>}>
+              <DispatchView terminalOpen={termOpen} />
+            </Suspense>
+          ) : historySelection ? (
             <HistoryPreviewPane item={historySelection} onBack={() => store.backToHistoryList()} />
           ) : current ? (
             <SessionView key={current.id} session={current} />

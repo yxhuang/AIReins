@@ -82,10 +82,14 @@ export function Sidebar({ collapsed, onToggle, newOpen, onNewOpenChange, termina
   const now = useStore(selectNow);
   const currentId = useStore(selectCurrentId);
   const panelOpen = useStore((value) => value.historyOpen || value.currentPageId !== null);
+  const historyOpen = useStore(selectHistoryOpen);
+  const currentPageId = useStore((value) => value.currentPageId);
+  const pages = useStore((value) => value.pages);
+  const currentPage = pages.find((page) => page.id === currentPageId);
   const pageOpen = useStore((value) => value.currentPageId !== null);
   const sidebarRef = useRef<HTMLElement>(null);
   const closePanel = useCallback(() => {
-    const trigger = sidebarRef.current?.querySelector<HTMLButtonElement>('.sidebar-panel-expanded .page-nav-item');
+    const trigger = sidebarRef.current?.querySelector<HTMLButtonElement>('.sidebar-panel-open .page-nav-item');
     store.closeSidebarPanel(window.matchMedia("(max-width: 720px)").matches);
     trigger?.focus();
   }, []);
@@ -207,10 +211,10 @@ export function Sidebar({ collapsed, onToggle, newOpen, onNewOpenChange, termina
                     type="button"
                     className="session-dead-toggle"
                     aria-expanded={deadExpanded}
-                    title={deadExpanded ? "收起已结束会话" : "展开已结束会话"}
+                    title={deadExpanded ? "收起工作台会话" : "展开工作台会话"}
                     onClick={() => setDeadExpanded((v) => !v)}
                   >
-                    {deadExpanded ? "▾" : "▸"} {dead.length} 个已结束会话
+                    {deadExpanded ? "▾" : "▸"} {dead.length} 个工作台会话
                   </button>
                 </li>
               )}
@@ -224,7 +228,15 @@ export function Sidebar({ collapsed, onToggle, newOpen, onNewOpenChange, termina
             </ul>
           </div>
         )}
-        <div className={`sidebar-foot${panelOpen && !collapsed ? " has-panel" : ""}`}>
+        {panelOpen && !collapsed && (
+          <section className="sidebar-panel-expanded" aria-label={historyOpen ? "所有来源会话内容" : currentPage?.name || "页面不存在"}>
+            {historyOpen ? <div id="sidebar-history-panel" className="sidebar-panel-content"><HistoryView /></div>
+              : currentPage ? <div id={`sidebar-page-${currentPage.id}`} className="sidebar-panel-content"><PageView page={currentPage} sidebar onCollapse={closePanel} /></div>
+              : <div className="sidebar-panel-content sidebar-panel-missing">该页面可能已从 pages/ 移除或 manifest 失效。页面列表在启动时扫描，改动需重启后生效。</div>}
+          </section>
+        )}
+        <div className="sidebar-foot">
+          <DispatchNav collapsed={collapsed} />
           <HistoryNav collapsed={collapsed} onPrepare={preparePanel} onClose={closePanel} />
           <PageNav collapsed={collapsed} onPrepare={preparePanel} onClose={closePanel} />
           {terminalCapable && (
@@ -235,6 +247,16 @@ export function Sidebar({ collapsed, onToggle, newOpen, onNewOpenChange, termina
       </div>
     </aside>
   );
+}
+
+function DispatchNav({ collapsed }: { collapsed: boolean }) {
+  const open = useStore((value) => value.dispatchesOpen);
+  return <nav className="page-nav" aria-label="派单">
+    <button type="button" className={`page-nav-item${open ? " active" : ""}`} aria-label="派单" aria-pressed={open} title="派单：查看派单流程图；再次点击返回原视图" onClick={() => store.toggleDispatches()}>
+      <span className="page-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M4 5h7v6H4zM13 13h7v6h-7zM15 5h5M18 3l2 2-2 2M4 17h5M7 15l2 2-2 2" /></svg></span>
+      {!collapsed && <span className="page-nav-name">派单</span>}
+    </button>
+  </nav>;
 }
 
 /** 左栏底部「终端」入口（页面分区下方、齿轮上方，同一套分区语言；收起态只显图标）。 */
@@ -315,9 +337,7 @@ function HistoryNav({ collapsed, onPrepare, onClose }: PanelNavProps) {
         </span>
         {!collapsed && <span className="page-nav-name">所有来源会话</span>}
       </button>
-    }>
-      {historyOpen && !collapsed && <div id="sidebar-history-panel" className="sidebar-panel-content"><HistoryView /></div>}
-    </SidebarPanel>
+    } />
   );
 }
 
@@ -360,20 +380,12 @@ function PageNav({ collapsed, onPrepare, onClose }: PanelNavProps) {
           <PageIcon icon={page.icon} />
           {!collapsed && <span className="page-nav-name">{page.name}</span>}
         </button>
-        }>
-        {currentPageId === page.id && !collapsed && (
-          <div id={`sidebar-page-${page.id}`} className="sidebar-panel-content">
-            <PageView page={page} sidebar onCollapse={onClose} />
-          </div>
-        )}
-        </SidebarPanel>
+        } />
       ))}
       {currentPageId && !pages.some((page) => page.id === currentPageId) && !collapsed && (
         <SidebarPanel name="页面不存在" open collapsed={false} onClose={onClose} header={
           <button type="button" className="page-nav-item active" aria-expanded="true" onClick={onClose}>页面不存在</button>
-        }>
-          <div className="sidebar-panel-content sidebar-panel-missing">该页面可能已从 pages/ 移除或 manifest 失效。页面列表在启动时扫描，改动需重启后生效。</div>
-        </SidebarPanel>
+        } />
       )}
       {!collapsed && skippedPages.length > 0 && (
         <p className="page-nav-skipped">
@@ -391,22 +403,20 @@ interface PanelNavProps {
   onClose: () => void;
 }
 
-/** 入口原地变成标题行；展开项排在覆盖层顶部，其余入口仍在底部。 */
-function SidebarPanel({ name, open, collapsed, onClose, header, children }: {
+/** 标题始终留在底部入口位置；内容由 Sidebar 的第一行承载。 */
+function SidebarPanel({ name, open, collapsed, onClose, header }: {
   name: string;
   open: boolean;
   collapsed: boolean;
   onClose: () => void;
   header: ReactNode;
-  children: ReactNode;
 }) {
   return (
-    <section className={`page-nav sidebar-panel-slot${open && !collapsed ? " sidebar-panel-expanded" : ""}`} aria-label={name}>
+    <section className={`page-nav sidebar-panel-slot${open && !collapsed ? " sidebar-panel-open" : ""}`} aria-label={name}>
       <div className="sidebar-panel-head">
         {header}
         {open && !collapsed && <button type="button" className="icon-btn" aria-label={`收起${name}`} title={`收起${name}`} onClick={onClose}>⌄</button>}
       </div>
-      {children}
     </section>
   );
 }

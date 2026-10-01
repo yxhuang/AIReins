@@ -1,6 +1,7 @@
 import type { ApiEnvelope, CommandInfo, DirectoryListing, HistoryListData, HistoryMessagesPage, MetaInfo, PageHealth, PageManifest, SessionConfig, SessionRecord, ShellKind, Snapshot, SnapshotPreflight, TerminalInfo, WorkbenchPrefs } from "./types";
 import type { AgentKind } from "./types";
 import { buildHistoryQuery, type HistoryQueryInput } from "./history";
+import type { DispatchRun } from "./dispatch-flow";
 
 // REST 信封统一为 {code,msg,data,request_id}；code 非 0 时 msg 是中文错误消息。
 async function call<T>(path: string, init?: RequestInit): Promise<T> {
@@ -31,6 +32,10 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
 
 export function fetchMeta(): Promise<MetaInfo> {
   return call<MetaInfo>("/api/meta");
+}
+
+export function fetchDispatches(signal?: AbortSignal): Promise<{ dispatches: DispatchRun[] }> {
+  return call("/api/dispatches?limit=50", { signal });
 }
 
 /** 不传 path 时从服务端 $HOME 浏览；files=true 时同层普通文件一并返回（选文件模式）。 */

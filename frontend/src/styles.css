@@ -3,6 +3,7 @@
    底色前提 = Claude 网页版风格：浅色 = 象牙白 #FAF9F5、深色 = 暖深灰 #1F1E1D（非纯黑）。
    三家身份色 = 各自品牌色，与 ai-usage 面板(8788)的进度条保持一致：
      claude 珊瑚橙 #D97757 / codex 青绿 #10A37F / kimi 蓝 #1A73E8
+   派单 Copilot 身份色（2026-10-01，dispatch-flow mockup）：紫 #8053C8 / 深 #B69AEB，文字 #7042B6 / #B69AEB。
    claude 珊瑚橙作文字时用 -ink 变体（原色在象牙白上对比度仅 2.96）。
    闸门专用色 = 琥珀金（浅 #8F5806 / 底 #F6E3AE，深 #F2B32C / 底 #3A2E10），仅闸门卡片、提问卡片和「N 个闸门等待处理」贴条可用。
    claude 的珊瑚橙与琥珀金色相相邻但明度饱和度差异大，不要把两者互相靠近。
@@ -33,6 +34,8 @@
   --agent-codex-ink:  light-dark(#0A7A5E, #2BC49C);   /* 作文字用：#10A37F 在象牙白上仅 3.04 */
   --agent-kimi:       light-dark(#1A73E8, #5AA9FF);
   --agent-kimi-ink:   light-dark(#1663C6, #5AA9FF);   /* 作文字用：#1A73E8 在象牙白上仅 4.28 */
+  --agent-copilot:    light-dark(#8053C8, #B69AEB);
+  --agent-copilot-ink: light-dark(#7042B6, #B69AEB);
   --gate:             light-dark(#8F5806, #F2B32C);
   --gate-bg:          light-dark(#F6E3AE, #3A2E10);
   --gate-border:      light-dark(#C08A1E, #8A6A1C);
@@ -141,12 +144,13 @@ body {
   position: relative;
   flex: 1 1 auto;
   min-height: 0;
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
   gap: 10px;
 }
 
 .sidebar-session-area {
+  grid-area: 1 / 1;
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
@@ -2005,6 +2009,7 @@ body.resizing {
 
 /* ── 设置入口与浮层 ─────────────────────────── */
 .sidebar-foot {
+  grid-area: 2 / 1;
   margin-top: auto; /* 顶住左栏底部 */
   display: flex;
   flex-direction: column;
@@ -2281,28 +2286,20 @@ body.resizing {
   margin-top: 14px;
 }
 
-/* 底部展开项盖住会话列表；其标题在顶部，其余入口保持在底部。 */
-.sidebar-foot.has-panel {
-  position: absolute;
-  inset: 0;
-  z-index: 2;
-  margin-top: 0;
-  background: var(--surface);
-  min-height: 0;
-}
-
+/* 内容覆盖会话区所在网格行；入口始终在底部第二行，不参与展开动画。 */
 .sidebar-panel-slot { flex: 0 0 auto; min-width: 0; }
-.sidebar-panel-head { display: flex; align-items: center; flex: 0 0 auto; }
+.sidebar-panel-head { position: relative; display: flex; align-items: center; flex: 0 0 auto; }
 .sidebar-panel-head > .page-nav-item { flex: 1 1 auto; min-width: 0; }
-.sidebar-panel-head > .icon-btn { flex: 0 0 auto; }
+.sidebar-panel-head > .icon-btn { position: absolute; right: 0; top: 50%; transform: translateY(-50%); }
+.sidebar-panel-open .page-nav-item { padding-right: 36px; }
 
 .sidebar-panel-expanded {
-  order: -1;
-  flex: 1 1 auto;
+  grid-area: 1 / 1;
+  z-index: 2;
+  display: flex;
   min-height: 0;
-  border-top: none;
-  padding-top: 0;
-  gap: 6px;
+  min-width: 0;
+  background: var(--surface);
   overflow: hidden;
   animation: sidebar-panel-rise 180ms ease-out;
 }
@@ -2930,4 +2927,58 @@ body.resizing {
   .cfg-slider { width: 176px; height: 32px; }
   /* iOS 聚焦字号小于 16px 的输入框会自动放大页面；!important 用来压过各处更具体的字号规则 */
   textarea, input, select { font-size: 16px !important; }
+}
+
+/* 派单流程图：几何与 scratch/mockups/dispatch-flow.html 对齐。 */
+.dispatch-view { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 0 max(0px, calc((100% - 1040px) / 2)); }
+.dispatch-intro { padding: 24px 18px 16px; }
+.dispatch-intro h1 { margin: 0 0 3px; font-size: 23px; font-weight: 650; letter-spacing: -.04em; }
+.dispatch-intro p { margin: 0; font-size: 12px; color: var(--text-muted); }
+.dispatch-panel { margin: 0 10px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); box-shadow: 0 16px 60px rgb(0 0 0 / .055); overflow: hidden; container: dispatch / inline-size; }
+.dispatch-panel-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 13px 16px 0; }
+.dispatch-panel-head strong { font-size: 12px; font-weight: 600; }
+.dispatch-panel-head span { font-size: 10px; color: var(--text-faint); }
+.dispatch-tree { position: relative; padding: 18px 14px 20px; isolation: isolate; }
+.dispatch-wires { position: absolute; inset: 0; display: block; width: 100%; height: 100%; z-index: 0; overflow: visible; pointer-events: none; }
+.dispatch-wire { fill: none; stroke: var(--border-strong); stroke-width: 1.5; stroke-linejoin: round; stroke-linecap: round; }
+.dispatch-wire.flow { stroke: var(--wire-color); stroke-dasharray: 5 7; animation: dispatch-flow 1.1s linear infinite; }
+.dispatch-wire.finish { stroke: var(--wire-color); }
+@keyframes dispatch-flow { to { stroke-dashoffset: -24; } }
+.dispatch-node { position: relative; z-index: 1; border: 1px solid var(--border); border-radius: 9px; background: var(--surface); min-width: 0; }
+.dispatch-source { padding: 12px; border-color: color-mix(in srgb, var(--agent-claude-ink) 33%, var(--border)); background: color-mix(in srgb, var(--agent-claude-ink) 4%, var(--surface)); }
+.dispatch-source-head { display: flex; align-items: center; gap: 8px; font-weight: 600; }
+.dispatch-source-head .agent-icon { width: 23px; height: 23px; }
+.dispatch-role { margin-left: auto; font-size: 10px; color: var(--agent-claude-ink); font-weight: 400; }
+.dispatch-session-title { margin: 7px 0 0; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dispatch-executors { margin: 54px 0 0 44px; display: flex; flex-direction: column; gap: 22px; }
+.dispatch-executor { --identity: var(--agent-codex); --ink: var(--agent-codex-ink); padding: 11px 12px; border-left: 3px solid var(--identity); }
+.dispatch-executor[data-tool="kimi"] { --identity: var(--agent-kimi); --ink: var(--agent-kimi-ink); }
+.dispatch-executor[data-tool="copilot"] { --identity: var(--agent-copilot); --ink: var(--agent-copilot-ink); }
+.dispatch-executor.idle { --identity: var(--border-strong); --ink: var(--text-faint); background: var(--bg); }
+.dispatch-executor.idle .agent-icon { filter: grayscale(1); opacity: .5; }
+.dispatch-node-head { display: flex; gap: 7px; align-items: center; }
+.dispatch-node-head .agent-icon { color: var(--ink); width: 19px; height: 19px; }
+.dispatch-node-head h2 { margin: 0; font-size: 14px; color: var(--ink); font-weight: 650; }
+.dispatch-model { margin: 3px 0 8px; color: var(--text-muted); font: 10px/1.5 var(--font-mono); overflow-wrap: anywhere; }
+.dispatch-jobs { display: flex; flex-direction: column; gap: 8px; }
+.dispatch-job + .dispatch-job { border-top: 1px solid var(--border); padding-top: 8px; }
+.dispatch-job-meta { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 10px; }
+.dispatch-status { color: var(--ink); }
+.dispatch-status.failed { color: var(--danger); }
+.dispatch-status.finished { color: var(--ok); }
+.dispatch-elapsed { color: var(--text-faint); font: 10px var(--font-mono); font-variant-numeric: tabular-nums; }
+.dispatch-activity { margin: 3px 0 0; color: var(--text); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dispatch-executor.idle .dispatch-activity, .dispatch-executor.idle .dispatch-job-meta { color: var(--text-faint); }
+.dispatch-more { font: 10px var(--font-mono); color: var(--text-muted); padding-top: 7px; }
+.dispatch-empty { padding: 16px 18px 26px; margin: 0; color: var(--text-faint); font-size: 12px; }
+.dispatch-error { margin: 0 18px 16px; color: var(--danger); font-size: 12px; }
+@container dispatch (min-width: 720px) {
+  .dispatch-tree { padding: 24px 24px 30px; }
+  .dispatch-source { width: 340px; margin-inline: auto; }
+  .dispatch-executors { margin: 96px 0 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; align-items: start; }
+  .dispatch-executor { border-left-width: 1px; border-left-color: var(--border); border-top: 3px solid var(--identity); padding: 14px; }
+}
+@media (max-width: 720px) { .dispatch-intro { padding-top: 18px; } }
+@media (prefers-reduced-motion: reduce) {
+  .dispatch-wire.flow { animation: none; stroke-dasharray: none; stroke-dashoffset: 0; }
 }
