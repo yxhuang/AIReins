@@ -1,4 +1,4 @@
-import React, { createContext, isValidElement, useContext, useEffect, useState, type ReactNode } from "react";
+import React, { createContext, memo, isValidElement, useContext, useEffect, useState, type ReactNode } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { mentionSegments } from "../mentions";
@@ -58,7 +58,7 @@ const markdownComponents: React.ComponentProps<typeof Markdown>["components"] = 
   pre: MarkdownCodeBlock,
 };
 
-export function MarkdownMessage({ text, streaming = false }: { text: string; streaming?: boolean }) {
+export const MarkdownMessage = memo(function MarkdownMessage({ text, streaming = false }: { text: string; streaming?: boolean }) {
   return (
     <div className="markdown-message">
       <StreamingContext value={streaming}>
@@ -70,7 +70,7 @@ export function MarkdownMessage({ text, streaming = false }: { text: string; str
       </StreamingContext>
     </div>
   );
-}
+});
 
 export function UserMessageText({ text }: { text: string }) {
   return <span className="user-text">{mentionSegments(text).map((part, index) =>

@@ -1,5 +1,23 @@
 # M0：三家 CLI 协议 spike 与报文抓取
 
+## 运行中插话探针（2026-10-01，steering）
+
+版本：Claude Code 2.1.285、Codex 0.159.3、Kimi 2.1.1。cwd 为 `/tmp/wb-steer-gxjL0R/{claude,codex,kimi}`，不触碰运行中的 wb；证据在 `captures/2026-10-01-steer/`。NDJSON 的 `captureLine` 指向原始捕获行；思考内容、签名和凭证字段省略，Kimi 未完成的工具参数流省略。
+
+| 家族 | 实测与证据（归档文件行号） | Workbench 行为 |
+| --- | --- | --- |
+| Claude / Haiku 4.5 | `claude.ndjson:18-33`：首个 Bash 的 `sleep 3` 期间发送 user，省略 priority；工具正常输出 ONE（27），最终 OK（32-33），只有一个 result。 | 默认 priority 路径已能在当前回合注入；保留现有 driver，不加 interrupt、不改 priority。 |
+| Codex / gpt-6-luna，low | `codex.ndjson:24-77`：同一 turn 的首个 commandExecution 期间发 `turn/steer`（63）；返回原 turnId（64），工具 exitCode=0（66），同一 turn completed/OK（77），没有第二个 turn/started。 | 运行中用 `turn/steer{threadId,expectedTurnId,input}`，保留中断目标；空闲仍用 turn/start。 |
+| Kimi / K2.7 Code Highspeed（K3 同样结果） | `kimi.ndjson:184-187`（Highspeed）、18-21（K3）：并发 session/prompt 返回 -32600 / `turn.agent_busy`；原任务继续，第二条未注入。initialize 仅提供 prompt/session 能力，没有 steering 扩展（165）。 | 运行中仅入 worker 的 FIFO 内存队列，当前 prompt 结束后才发下一个 session/prompt；UI 明示降级。 |
+
+Codex schema 由本机 `codex app-server generate-json-schema` 导出：TurnSteerParams 必需 `threadId`、`expectedTurnId`、`input`，返回 `{turnId}`；不接受新回合 model/effort/sandbox 覆盖。与 [OpenAI app-server 文档](https://learn.chatgpt.com/docs/app-server)一致。ACP 的 [prompt-turn 契约](https://agentclientprotocol.com/protocol/v1/prompt-turn)以原 session/prompt 的响应结束回合，再发送下一条；Kimi 是否存在未声明的专用扩展仍未知，本次不假设支持。
+
+预算与边界：5 次初始模型任务（Claude 2、Codex 1、Kimi 2）+ 2 次接受的插话，共 7 次接受模型输入，未超过 8。另有 2 次 Kimi busy 拒绝、Codex model/list 未提供 mini 的无推理预检、Kimi Highspeed 的 low 配置预检失败（切模型后的选项不再接受 low）；未产生模型输入。Claude 首次纯 sleep 任务被模型拒绝，第二次改为阶段文件的依赖验证才形成有效探针；按范围更正只验证默认 priority，不测试 now/later。Codex 采用可用的 Luna 低价档，Kimi 采用 Highspeed；未核实订阅额度的跨模型价格换算。
+
+清理：Claude 用 `--no-session-persistence`；Codex 用隔离 CODEX_HOME + ephemeral thread，完成后 unsubscribe/退出；Kimi 三个探针会话均先 close 后 session/delete，成功回读见 `kimi.ndjson:146,163,297`（含没有推理的配置预检会话）。
+
+契约：服务端按发送时状态决定插话；已接受的 user_message.payload 带 `steer:true`，Kimi 同时带 `queued:true`。待审批闸门期间统一拒绝发送/插话，拒绝不写 user_message、不调用 CLI。启动中拒绝发送。插话失败不改当前运行状态、不自动另开回合；可重发。Kimi 队列不跨 worker 重启，停止、退出或 RPC 失败会取消并发 session_error 提示；queued 标记记录该消息发送时采用的降级路径。
+
 ## Claude Remote Control（2026-09-29）
 
 已实测环境：Claude Code 2.1.281、无头 `--print --input-format stream-json --output-format stream-json --replay-user-messages`，`CLAUDE_CODE_ENTRYPOINT=claude-vscode`。此模式不会自行执行 `remoteControlAtStartup`，宿主需向 stdin 发 `{"type":"control_request","request_id":"<id>","request":{"subtype":"remote_control","enabled":true}}`；可选 `name`。成功的 `control_response.response.response` 含 `session_url`、`connect_url`、`environment_id`、`bridge_epoch`、`bridge_session_id`。stdout 先有 `system/bridge_state:ready`，开启后有 `connected`；关闭发同一请求且 `enabled:false`，实测 success。其他 bridge state 值尚无协议实测，Workbench 作为中间态或错误态容错。
@@ -676,3 +694,17 @@ Hooks 编辑在扩展实际通过 `claude edit-hook`（JSON stdin）后刷新 `g
 以上为 schema 对齐的字段示例，非真机成功声明。skills input 的 name/path/type 均 required，无 byte-range 字段；text_elements 仍只用于已有文件 @mention。`compact` 返回 `{}`，进度为 turn/started、contextCompaction item/started/completed、turn/completed；review 返回 turn 与 reviewThreadId，通过当前线程事件流呈现。model/list 与 mcpServerStatus/list 的 data/nextCursor 按 cursor 读完；MCP 含 authStatus、tools、resources、resourceTemplates 及可选 runtimeStatus/toolsError。new 沿用新 wb session 的 thread/start，模型/effort 不添加新的默认覆盖。
 
 实测脚本：`scratch/codex-commands/run-smoke.sh`；限 18794、setsid、端口反查 PGID、trap，仅终止自身启动的进程组。wrapper 只记录本单 RPC 与 turn/item 通知，不记录 config/read 或 account/auth。原 ~/.codex 状态库在沙箱只读启动失败，脚本以 scratch 下独立 CODEX_HOME（配置/auth 0600）运行。结果、真实 RPC 路径及截图验收状态以工单报告为准，失败不伪造成功。
+
+
+## 13. Claude 模型与推理强度热切换（CLI 2.1.285，2026-10-01）
+
+证据来自主会话提供的 stream-json 控制探针：`--print --input-format stream-json`，未发用户消息、未调用模型。本轮实现只以假 CLI 验收，未重新启动真实 Claude。
+
+```json
+{"type":"control_request","request_id":"effort-id","request":{"subtype":"apply_flag_settings","settings":{"effortLevel":"low"}}}
+{"type":"control_request","request_id":"model-id","request":{"subtype":"set_model","model":"sonnet"}}
+```
+
+两者均收到对应 request_id 的 `control_response` / `response.subtype:"success"`。effort 约 9ms，之后 `get_settings.effective.effortLevel` 从 high 变成 low；model 约 0.92s，但 get_settings 的 model 仍为 settings 层 opus。`set_model` 修改运行时模型，不落 settings；不要用 get_settings.model 判断它是否成功。CLI 定义允许 model 为 null 或 "default"，回到会话默认模型；wb 使用 null。
+
+wb schema 对 model/effort 标为 `mutableVia:"control"`。仅空闲且无待审批闸门时发送控制请求；success 后发 config_updated 并更新 config/effectiveModel/effectiveEffort。控制报错或 15 秒超时回落到原重启路径，释放后仅保存配置，下一次 worker 启动带入 flags。effort:null 尝试 apply_flag_settings 清除覆盖，CLI 不支持时回落到省略 --effort 的重启；这个 null 协议行为尚待真机验证。仍拒绝进行中的回合；不放宽审批或最终闸门。切换期间与发送、释放、移除互斥。成功事件 mutableVia=control、workerRestarted=false；回落成功为 restart、workerRestarted=true。

@@ -247,6 +247,17 @@ body.resizing {
   flex: 0 0 auto;
 }
 
+.term-titlebar .panel-icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 32px;
+  min-height: 32px;
+  padding: 6px;
+  color: var(--text);
+}
+.term-titlebar .panel-kill-button:hover { color: var(--danger); }
+
 /* 「‹ 返回」只在窄屏出现（宽屏用左栏入口开关面板） */
 .term-back {
   display: none;
@@ -541,11 +552,20 @@ body.resizing {
 }
 
 .dir-heading, .dir-nav, .dir-actions { display: flex; align-items: center; gap: 8px; }
+.dir-contents { display: flex; flex: 1 1 auto; flex-direction: column; gap: 10px; min-height: 0; }
 .dir-heading { justify-content: space-between; }
 .dir-heading h2 { margin: 0; font-size: 16px; }
 .dir-actions { justify-content: flex-end; }
 .dir-path { margin: 0; padding: 8px; background: var(--surface-sunk); overflow-wrap: anywhere; }
-.dir-list { min-height: 80px; overflow-y: auto; border: 1px solid var(--border); border-radius: var(--radius); }
+.dir-copy-status {
+  margin: 0;
+  padding: 8px;
+  color: var(--text);
+  background: var(--surface-sunk);
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+.dir-list { flex: 1 1 auto; min-height: 80px; overflow-y: auto; border: 1px solid var(--border); border-radius: var(--radius); }
 .dir-list .new-hint { padding: 10px; }
 .dir-entry {
   display: block;
@@ -837,17 +857,57 @@ body.resizing {
   gap: 10px;
   flex-shrink: 0;
 }
-/* 「VSCode / CLI 继续」保持单行；左侧路径收缩，模型段完整显示。 */
+/* 「VSCode 继续」在更多菜单内保持单行；左侧路径收缩，模型段完整显示。 */
 .session-head-actions .btn { white-space: nowrap; display: inline-flex; align-items: center; gap: 3px; }
 .session-head-actions .btn svg { flex-shrink: 0; }
+.panel-actions { display: flex; align-items: center; gap: 4px; flex: 0 0 auto; }
+.panel-actions .btn, .session-more-trigger { display: inline-flex; align-items: center; justify-content: center; min-width: 32px; min-height: 32px; padding: 6px; color: var(--text); background: transparent; }
+.panel-actions .page-icon, .panel-actions svg { width: 18px; height: 18px; flex: 0 0 18px; }
+.panel-actions .btn:hover, .panel-actions .btn[aria-pressed="true"] { color: var(--text); background: var(--chrome-sunk); border-color: var(--border-strong); }
+.session-panel-controls { display: flex; align-items: center; gap: 4px; flex: 0 0 auto; }
+.session-more { position: relative; display: inline-flex; }
+.session-more .session-more-trigger[aria-expanded="true"] { background: var(--chrome-sunk); border-color: var(--border-strong); }
+.session-more-menu { position: absolute; top: calc(100% + 8px); right: 0; z-index: 20; width: 260px; max-width: calc((100vw - 24px) / var(--font-scale)); max-height: calc(100dvh - 120px); overflow-y: auto; padding: 6px; background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--radius); box-shadow: var(--shadow-pop); }
+.session-more-menu .session-more-item { width: 100%; justify-content: flex-start; gap: 8px; padding: 8px 10px; border: 0; color: var(--text); }
+.session-more-menu .session-more-item:hover:not(:disabled) { background: var(--surface-sunk); }
+.session-more-menu .btn.session-more-item:disabled { color: var(--text-faint); background: transparent; }
+.session-more-reason { margin: 2px 10px 6px; font-size: 14px; line-height: 1.5; color: var(--text-muted); overflow-wrap: anywhere; }
+.view-panel-actions { display: flex; align-items: center; flex: 0 0 auto; padding: 6px 8px; background: var(--chrome); border-bottom: 1px solid var(--border); }
+.view-panel-actions .panel-actions { margin-left: auto; }
+.welcome-view { display: flex; flex: 1 1 auto; flex-direction: column; min-height: 0; overflow-y: auto; }
+/* 手机顶栏（参照 Claude App）：色带 · 圆形返回 · 标题/模型 · 闸门计数 · 圆形「⋯」。
+   文件/终端/派单/AI 用量收进「⋯」；顶栏渐变半透明，事件流从它下面滚过。 */
+.session-head .mobile-back, .mobile-title, .mobile-tail, .session-head-actions .session-more-mobile { display: none; }
+.session-more-sep { margin: 4px 6px; border: 0; border-top: 1px solid var(--border); }
+.session-more-menu .page-icon { width: 18px; height: 18px; }
 @media (max-width: 720px) {
-  .session-head { gap: 6px; padding: 6px 8px; }
-  .session-head-main { gap: 5px; }
-  .session-head-actions { gap: 5px; }
-  .session-head-actions .btn { padding-inline: 6px; }
+  .session-head {
+    position: relative; z-index: 5; gap: 8px;
+    padding: 6px 10px 22px 8px; margin-bottom: -22px;
+    border-bottom: none;
+    background: linear-gradient(to bottom, var(--bg) 55%, transparent);
+  }
+  .session-head + .stream { padding-top: 30px; }
+  .session-head + .session-dispatch-link, .session-head + .risky-banner { margin-top: 22px; }
+  .session-head-main, .session-head .panel-actions { display: none; }
+  .session-head .mobile-back { display: inline-flex; }
+  .session-head .btn.mobile-round, .session-head .btn.session-more-trigger {
+    display: inline-flex; align-items: center; justify-content: center;
+    flex: 0 0 auto; width: 40px; height: 40px; min-width: 40px; min-height: 40px; padding: 0;
+    border: none; border-radius: 50%; color: var(--text);
+    background: color-mix(in srgb, var(--text) 9%, var(--bg));
+  }
+  .mobile-title { display: flex; flex: 1; min-width: 0; flex-direction: column; align-items: center; line-height: 1.25; }
+  .mobile-title-text { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 16px; font-weight: 600; }
+  .mobile-subtitle { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; color: var(--text-muted); }
+  .session-head-actions { margin-left: 0; gap: 6px; }
+  .mobile-tail { display: flex; align-items: center; }
+  .session-head-actions .session-more-mobile { display: flex; }
+  .session-head-actions hr.session-more-mobile { display: block; }
+  .session-more-menu .session-more-item { min-height: 44px; }
 }
 
-/* 「VSCode / CLI 继续」提示浮在操作区下方，不挤压单行标题。 */
+/* 「VSCode 继续」提示浮在操作区下方，独立于更多菜单的开关。 */
 .release-note {
   position: absolute;
   top: calc(100% + 8px);
@@ -948,14 +1008,12 @@ body.resizing {
   flex: 0 0 auto;
 }
 
-.ws-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
+/* 连接正常不显示；断开/重连时才在标题栏出一行小字。 */
+.ws-note {
+  font-size: 13px;
+  color: var(--text-muted);
+  white-space: nowrap;
 }
-.ws-open { background: var(--ok); }
-.ws-connecting { background: var(--busy); }
-.ws-closed { background: var(--dead); }
 
 /* 事件流 */
 .stream {
@@ -2899,7 +2957,7 @@ body.resizing {
 .history-back { display: none; }
 
 /* 桌面也可退回当前会话；手机返回统一由 mobile-topbar 提供。 */
-.main > .history-preview-pane > .history-back { display: inline-flex; align-self: flex-start; margin: 10px 14px 0; }
+.main > .history-preview-pane .history-back { display: inline-flex; }
 
 /* ── 建会话前快照确认弹窗 ─────────────────────
    风险确认 = 在等用户拍板，复用闸门暖色（--gate*）与闸门块的 2px 硬边直角语言；
@@ -2978,6 +3036,11 @@ body.resizing {
 @media (max-width: 720px) {
   /* dvh = 扣掉浏览器工具栏后的可见高度，避免底部输入框被 Safari 工具栏挡住 */
   .app { height: 100dvh; }
+  /* 手机列表页仍保留完整侧栏；面板入口单独放在顶部，打开面板后让位。 */
+  .app:not(.has-main) { flex-direction: column; }
+  .app:not(.has-main) .sidebar { flex: 1 1 auto; min-height: 0; }
+  .app:not(.has-main) .workspace { flex: 0 0 auto; min-height: 0; }
+  .app:not(.has-main).term-open .workspace { flex: 1 1 auto; }
   /* 主屏幕 PWA 里内容会铺到 iPhone 状态栏与底部横条下面（viewport-fit=cover 让 env() 报出真实值），
      四周让出安全区；非全面屏或浏览器里 env() 为 0，不受影响 */
   .app {
@@ -2996,7 +3059,7 @@ body.resizing {
   .app.sidebar-collapsed .sidebar { width: calc(100% / var(--font-scale)); border-right: none; }
   .app.has-main .sidebar { display: none; }
   .app:not(.has-main) .main { display: none; }
-  .main > .history-preview-pane > .history-back { display: none; }
+  .main > .history-preview-pane .history-back { display: none; }
   /* manifest 的 maxWidth（如 ai-usage 的 33%）是给宽屏的，单栏下铺满；!important 压过内联样式 */
   .page-view { max-width: none !important; }
   /* 单栏下「收起」没有意义；只在已收起时保留按钮，作为展开的唯一出口 */
@@ -3010,6 +3073,8 @@ body.resizing {
     border-bottom: 1px solid var(--border);
     background: var(--chrome);
   }
+  .mobile-panel-launcher { flex: 0 0 auto; justify-content: flex-end; }
+  .app.term-open .mobile-panel-launcher { display: none; }
   /* 终端在窄屏不做左右分栏：打开时占满主区（列表与会话主区都让位），「‹ 返回」回原视图 */
   .app.term-open .sidebar,
   .app.term-open .main {
@@ -3043,6 +3108,8 @@ body.resizing {
 
 @media (pointer: coarse) {
   /* 触屏点按目标至少 44px */
+  .term-titlebar .panel-icon-button { min-width: 44px; min-height: 44px; }
+  .panel-actions .btn, .session-more-trigger { min-width: 44px; min-height: 44px; }
   .btn, .icon-btn, .cfg-pill, .cfg-item, .attach-item, .session-row, .history-row { min-height: 44px; }
   .term-key, .segmented-option { min-height: 44px; }
   .send-btn, .attach-btn { width: 44px; height: 44px; }
@@ -3051,11 +3118,28 @@ body.resizing {
   textarea, input, select { font-size: 16px !important; }
 }
 
+/* 派单右侧面板复用终端容器、标题条、分隔条与窄屏全屏规则。 */
+.dispatch-side-panel { background: var(--bg); container: dispatch-sidebar / inline-size; }
+.dispatch-side-title { flex: 1; font-size: 16px; font-weight: 600; }
+.dispatch-side-panel .dispatch-view { padding-top: 10px; }
+
+.file-side-panel { background: var(--bg); }
+.file-side-title { flex: 1; font-size: 16px; font-weight: 600; }
+.file-side-panel .dir-contents { padding: 10px 8px; overflow: hidden; }
+.file-side-panel .dir-nav { flex-wrap: wrap; }
+.file-notice { flex: 0 1 auto; min-height: 0; overflow-y: auto; padding: 8px; font-size: 14px; }
+.file-notice p { margin: 0; }
+.file-notice .dir-copy-status { margin-top: 4px; }
+@container dispatch-sidebar (max-width: 720px) {
+  .dispatch-panel-head, .dispatch-section-head { flex-wrap: wrap; }
+  .dispatch-side-panel .dispatch-history-row { grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
+  .dispatch-side-panel .dispatch-history-row > .mono { grid-column: 1; }
+  .dispatch-side-panel .dispatch-history-row > time { grid-column: 2; }
+  .dispatch-side-panel .dispatch-history-row > span:last-child { display: none; }
+}
+
 /* 派单流程图：几何与 scratch/mockups/dispatch-flow.html 对齐。 */
 .dispatch-view { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 0 max(0px, calc((100% - 1040px) / 2)); }
-.dispatch-intro { padding: 24px 18px 16px; }
-.dispatch-intro h1 { margin: 0 0 3px; font-size: 23px; font-weight: 650; letter-spacing: -.04em; }
-.dispatch-intro p { margin: 0; font-size: 16px; color: var(--text-muted); }
 .dispatch-panel { margin: 0 10px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); box-shadow: 0 16px 60px rgb(0 0 0 / .055); overflow: hidden; container: dispatch / inline-size; }
 .dispatch-panel-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 13px 16px 0; }
 .dispatch-panel-head strong { font-size: 16px; font-weight: 600; }
@@ -3072,8 +3156,21 @@ body.resizing {
 .dispatch-source-head .agent-icon { width: 23px; height: 23px; }
 .dispatch-role { margin-left: auto; font-size: 16px; color: var(--agent-claude-ink); font-weight: 400; }
 .dispatch-session-title { margin: 7px 0 0; font-size: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.dispatch-executors { margin: 54px 0 0 44px; display: flex; flex-direction: column; gap: 22px; }
-.dispatch-executor { --identity: var(--agent-codex); --ink: var(--agent-codex-ink); padding: 11px 12px; border-left: 3px solid var(--identity); }
+/* 树形在任何宽度都保留：窄（侧面板 / 手机）用紧凑卡片，≥720px 放大。 */
+/* 卡片偏方形、两层拉开（用户 10-01 定）。 */
+.dispatch-source { width: min(260px, 72%); min-height: 112px; margin-inline: auto; padding: 10px 12px; }
+.dispatch-executors { margin: 84px 0 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; align-items: stretch; }
+.dispatch-subagents { margin-top: 84px; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px 8px; }
+.dispatch-subagent { --ink: var(--agent-codex-ink); box-sizing: border-box; width: min(100%, 150px); justify-self: center; padding: 7px; border-top: 3px solid var(--agent-codex); min-height: 88px; }
+.dispatch-subagent-name { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink); font-size: 14px; }
+.dispatch-subagent .dispatch-model { margin: 4px 0; }
+.dispatch-subagent .dispatch-status, .dispatch-subagent .dispatch-activity { font-size: 13px; }
+/* 最小高度≈列宽（100cqi 是 .dispatch-panel 宽，减 tree 左右 padding 28 与两道 gap 16），同排拉齐等高 */
+.dispatch-executor { --identity: var(--agent-codex); --ink: var(--agent-codex-ink); min-height: calc((100cqi - 44px) / 3); padding: 8px 8px 10px; border-top: 3px solid var(--identity); }
+.dispatch-executor .dispatch-model { overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; margin: 2px 0 6px; }
+.dispatch-executor .dispatch-activity { white-space: normal; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; }
+.dispatch-executor .dispatch-node-head { gap: 5px; }
+.dispatch-executor .dispatch-node-head h2 { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .dispatch-executor[data-tool="kimi"] { --identity: var(--agent-kimi); --ink: var(--agent-kimi-ink); }
 .dispatch-executor[data-tool="copilot"] { --identity: var(--agent-copilot); --ink: var(--agent-copilot-ink); }
 .dispatch-executor.idle { --identity: var(--border-strong); --ink: var(--text-faint); background: var(--bg); }
@@ -3096,11 +3193,12 @@ body.resizing {
 .dispatch-error { margin: 0 18px 16px; color: var(--danger); font-size: 16px; }
 @container dispatch (min-width: 720px) {
   .dispatch-tree { padding: 24px 24px 30px; }
-  .dispatch-source { width: 340px; margin-inline: auto; }
-  .dispatch-executors { margin: 96px 0 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; align-items: start; }
-  .dispatch-executor { border-left-width: 1px; border-left-color: var(--border); border-top: 3px solid var(--identity); padding: 14px; }
+  .dispatch-source { width: 300px; min-height: 130px; padding: 14px; }
+  .dispatch-executors { margin: 130px 0 0; gap: 20px; }
+  .dispatch-subagents { margin-top: 130px; gap: 20px; }
+  .dispatch-executor { min-height: 210px; padding: 14px; }
+  .dispatch-executor .dispatch-model { margin: 3px 0 8px; }
 }
-@media (max-width: 720px) { .dispatch-intro { padding-top: 18px; } }
 @media (prefers-reduced-motion: reduce) {
   .dispatch-wire.flow { animation: none; stroke-dasharray: none; stroke-dashoffset: 0; }
 }
@@ -3132,7 +3230,12 @@ body.resizing {
 .dispatch-resume { border-top: 1px solid var(--border); padding-top: 18px; margin-top: 22px; }
 .dispatch-note { line-height: 1.6; }
 .dispatch-highlight-note { margin-inline: 18px; }
-.dispatch-history { margin: 28px 10px; padding: 18px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); }
+.dispatch-history > summary { cursor: pointer; list-style: none; margin-bottom: 0; }
+.dispatch-history > summary::-webkit-details-marker { display: none; }
+.dispatch-history > summary h2::before { content: "▸ "; color: var(--text-faint); }
+.dispatch-history[open] > summary { margin-bottom: 14px; }
+.dispatch-history[open] > summary h2::before { content: "▾ "; }
+.dispatch-history { margin: 28px 10px; padding: 14px 18px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); }
 .dispatch-history-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto auto auto; gap: 14px; align-items: center; width: 100%; padding: 14px 0; border: 0; border-top: 1px solid var(--border); background: transparent; color: var(--text); font: 16px/1.5 var(--font-ui); text-align: left; cursor: pointer; }
 .dispatch-history-row:hover { background: var(--surface-sunk); }
 .dispatch-history-name { overflow-wrap: anywhere; font-weight: 600; }
@@ -3141,8 +3244,7 @@ body.resizing {
 .dispatch-history-more { display: block; margin: 18px auto 0; }
 .session-dispatch-link { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; padding: 8px 18px; color: var(--text-muted); font-size: 16px; border-bottom: 1px solid var(--border); }
 @media (max-width: 720px) {
-  /* 详情自带返回派单；列表仍使用 App 的返回侧栏。 */
-  .main:has(> .dispatch-detail) > .mobile-topbar { display: none; }
+  /* 窄屏详情和历史收窄间距；面板标题条负责关闭回到原视图。 */
   .dispatch-detail-head { padding: 16px; margin: 14px 10px; }
   .dispatch-detail-section { padding: 16px; margin: 14px 10px; }
   .dispatch-detail-nav { padding: 10px; }

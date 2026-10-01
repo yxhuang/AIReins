@@ -12,6 +12,8 @@ import type {
   SessionConfig,
   UnifiedCommand,
   UserMessageInput,
+  SendUserMessageOptions,
+  SendUserMessageReceipt,
 } from "../types.js";
 import { BaseDriver, errorMessage, mentionFallbackNote, parseJsonLine, tryReadMentionText, userMessageText, withTimeout } from "./base.js";
 import { StdioRpcProbe } from "./rpc-probe.js";
@@ -251,6 +253,8 @@ export class KimiDriver extends BaseDriver {
   private nativeSessionId = "";
   private terminalCounter = 0;
   private configOptions: AcpConfigOption[] = [];
+  private promptActive = false;
+  private readonly queuedPrompts: Record<string, unknown>[][] = [];
 
   async start(): Promise<void> {
     this.spawnProcess("kimi", ["acp"]);
@@ -297,7 +301,7 @@ export class KimiDriver extends BaseDriver {
     return current;
   }
 
-  async sendUserMessage(message: UserMessageInput): Promise<void> {
+  async sendUserMessage(message: UserMessageInput, options?: SendUserMessageOptions): Promise<void | SendUserMessageReceipt> {
     if (!this.nativeSessionId) throw new Error("Kimi session 尚未就绪");
     const prompt: Record<string, unknown>[] = [];
     let text = userMessageText(message);
@@ -332,19 +336,42 @@ export class KimiDriver extends BaseDriver {
     }
     if (text) prompt.push({ type: "text", text });
     prompt.push(...attachments);
+    if (options?.steer) {
+      if (!this.promptActive) throw new Error("Kimi 当前回合已结束，请重发消息");
+      this.queuedPrompts.push(prompt);
+      return { queued: true };
+    }
+    this.startPrompt(prompt);
+  }
+
+  private startPrompt(prompt: Record<string, unknown>[]): void {
+    this.promptActive = true;
     this.callbacks.status("running");
     void this.request("session/prompt", {
       sessionId: this.nativeSessionId,
       prompt,
     }).then((result) => {
+      this.promptActive = false;
       this.callbacks.emit("turn_completed", {
         stopReason: result?.stopReason,
         result,
       });
-      this.callbacks.status("idle");
+      const next = this.queuedPrompts.shift();
+      if (next) this.startPrompt(next);
+      else this.callbacks.status("idle");
     }).catch((error) => {
+      this.promptActive = false;
+      this.cancelQueuedPrompts("当前回合失败");
       this.callbacks.emit("session_error", { message: errorMessage(error), source: "session/prompt" });
       this.callbacks.status("error");
+    });
+  }
+
+  private cancelQueuedPrompts(reason: string): void {
+    const count = this.queuedPrompts.length;
+    this.queuedPrompts.length = 0;
+    if (count) this.callbacks.emit("session_error", {
+      source: "steer_queue", message: `Kimi 的 ${count} 条排队消息已取消：${reason}`,
     });
   }
 
@@ -396,12 +423,14 @@ export class KimiDriver extends BaseDriver {
   }
 
   async interrupt(): Promise<void> {
+    this.cancelQueuedPrompts("用户停止了执行");
     this.cancelElicitations();
     if (!this.nativeSessionId) return;
     this.send({ jsonrpc: "2.0", method: "session/cancel", params: { sessionId: this.nativeSessionId } });
   }
 
   async stop(): Promise<void> {
+    this.cancelQueuedPrompts("worker 已停止");
     this.cancelElicitations();
     for (const terminal of this.terminals.values()) {
       if (terminal.process.exitCode === null && terminal.process.signalCode === null) terminal.process.kill("SIGTERM");
@@ -556,6 +585,8 @@ export class KimiDriver extends BaseDriver {
   }
 
   protected handleProcessExit(): void {
+    this.promptActive = false;
+    this.cancelQueuedPrompts("worker 已退出");
     this.permissions.clear();
     this.rpc.clear();
     this.releasedTerminals.clear();

@@ -28,7 +28,159 @@ export interface Dispatch {
   session: string | null;
   parent: { agent: string; sessionId: string | null; entrypoint: string | null; model: string | null; runId?: string } | null;
   promptHead: string | null;
+  subagents?: CodexSubagent[];
 }
+
+export interface CodexSubagent {
+  threadId: string;
+  nickname: string;
+  role: string | null;
+  depth: number;
+  parentThreadId: string;
+  status: "running" | "finished" | "unknown";
+  startedAt: string | null;
+  lastActivityAt: string;
+  activity?: string;
+}
+
+interface SubagentSnapshot {
+  agent: CodexSubagent;
+  lifecycle: "active" | "finished" | "unknown";
+  mtimeMs: number;
+}
+
+/** Only session_meta's first line (<=64 KiB) and the last 64 KiB; never parse the body. */
+export async function readCodexSubagent(path: string): Promise<SubagentSnapshot | null> {
+  const file = await openFile(dirname(path), basename(path));
+  if (!file) return null;
+  try {
+    const { size, mtimeMs } = await file.stat();
+    let head = Buffer.alloc(0);
+    while (head.length < CHUNK_SIZE && head.length < size && !head.includes(10)) {
+      const chunk = await readBytes(file, head.length, Math.min(4096, CHUNK_SIZE - head.length, size - head.length));
+      if (!chunk.length) break; // A writer may truncate the file after stat.
+      head = Buffer.concat([head, chunk]);
+    }
+    const newline = head.indexOf(10);
+    if (newline < 0) return null; // Partial/oversized metadata is not a usable session.
+    const row = JSON.parse(head.subarray(0, newline).toString("utf8"));
+    if (row.type !== "session_meta") return null;
+    const meta = row.payload;
+    const spawn = meta?.source?.subagent?.thread_spawn;
+    const parentThreadId = stringValue(meta?.parent_thread_id) ?? stringValue(spawn?.parent_thread_id);
+    const threadId = stringValue(meta?.id);
+    if ((!spawn && meta?.thread_source !== "subagent") || !parentThreadId || !threadId) return null;
+    const offset = Math.max(0, size - CHUNK_SIZE);
+    const lines = (await readBytes(file, offset, size - offset)).toString("utf8").split("\n");
+    if (offset) lines.shift();
+    if (lines.at(-1) !== "") lines.pop(); // An appending writer can leave an incomplete last line.
+    let lifecycle: SubagentSnapshot["lifecycle"] = "unknown";
+    let lastActivityAt = stringValue(meta.timestamp) ?? new Date(mtimeMs).toISOString();
+    let activity: string | undefined;
+    // Real 0.159.2 Carver rollout: task_started -> item_completed/token_count -> task_complete.
+    // item_completed alone is NOT a turn completion. A later task_started reopens the agent.
+    // final_answer is a fallback when task_complete has not yet been flushed; stale active
+    // files (>5 minutes without a write) are unknown, never guessed finished from mtime.
+    for (const line of lines) {
+      try {
+        const event = JSON.parse(line);
+        if (Number.isFinite(Date.parse(event.timestamp))) lastActivityAt = event.timestamp;
+        const payload = event.payload;
+        if (event.type === "event_msg") {
+          if (["task_complete", "turn_aborted"].includes(payload?.type)) lifecycle = "finished";
+          else if (payload?.type === "task_started" || payload?.type === "user_message") {
+            lifecycle = "active"; activity = undefined;
+          } else if (payload?.type === "agent_message" || payload?.type === "agent_reasoning") {
+            if (lifecycle !== "finished") lifecycle = "active";
+            activity = stringValue(payload.message) ?? activity;
+          } else if (payload?.type === "item_completed" && lifecycle === "unknown") lifecycle = "active";
+        } else if (event.type === "response_item") {
+          if (payload?.type === "message" && payload.role === "assistant") {
+            if (payload.phase === "final_answer" || payload.phase === "final") lifecycle = "finished";
+            else {
+              lifecycle = "active";
+              activity = payload.content?.find((part: { text?: string }) => typeof part.text === "string")?.text ?? activity;
+            }
+          } else if (["function_call", "custom_tool_call", "reasoning"].includes(payload?.type)) {
+            lifecycle = "active";
+            if (payload.name) activity = `调用 ${payload.name}`;
+          }
+        }
+      } catch { /* Malformed/boundary lines do not hide the other agents. */ }
+    }
+    return { lifecycle, mtimeMs, agent: {
+      threadId, parentThreadId,
+      nickname: stringValue(meta.agent_nickname) ?? stringValue(spawn?.agent_nickname) ?? threadId.slice(0, 8),
+      role: stringValue(meta.agent_role) ?? stringValue(spawn?.agent_role),
+      depth: numberValue(spawn?.depth) ?? 1, status: "unknown",
+      startedAt: stringValue(meta.timestamp) ?? stringValue(row.timestamp), lastActivityAt,
+      ...(activity ? { activity: activity.replace(/\s+/gu, " ").trim().slice(0, 160) } : {}),
+    } };
+  } finally { await file.close(); }
+}
+
+/** Parsed snapshots cache by path + mtime + size; caller's shared 2s scan owns enumeration. */
+export function createCodexSubagentReader(read = readCodexSubagent) {
+  const cache = new Map<string, { fingerprint: string; value: Promise<SubagentSnapshot | null> }>();
+  return async (runs: Dispatch[], root: string, now = Date.now()): Promise<void> => {
+    const codex = runs.filter((run) => run.tool === "codex");
+    if (!codex.length) return;
+    for (const run of codex) run.subagents = [];
+    let canonicalRoot: string;
+    try { canonicalRoot = await realpath(root); } catch { return; }
+    const dates = new Set<string>();
+    for (const run of codex) {
+      if (!run.session) continue;
+      // Include local and UTC start dates: native folder names and metadata timestamps
+      // differ across midnight. Only +/-1 day, never a recursive history-directory scan.
+      for (const day of [run.startedAt?.slice(0, 10), run.startedAt ? new Date(run.startedAt).toJSON()?.slice(0, 10) : null]) {
+        if (!day) continue;
+        const start = Date.parse(`${day}T00:00:00Z`);
+        if (!Number.isFinite(start)) continue;
+        for (const delta of [-1, 0, 1]) dates.add(new Date(start + delta * 86400_000).toISOString().slice(0, 10).replaceAll("-", "/"));
+      }
+    }
+    const agents = new Map<string, CodexSubagent>();
+    for (const day of dates) {
+      const directory = join(canonicalRoot, day);
+      try {
+        if (await realpath(directory) !== directory) continue;
+        for (const entry of await readdir(directory, { withFileTypes: true })) {
+          if (!entry.isFile() || !/^rollout-.*\.jsonl$/u.test(entry.name)) continue;
+          try {
+            const path = join(directory, entry.name);
+            const info = await stat(path);
+            const fingerprint = `${info.mtimeMs}:${info.size}`;
+            let snapshot = cache.get(path);
+            if (!snapshot || snapshot.fingerprint !== fingerprint) {
+              snapshot = { fingerprint, value: read(path) };
+              cache.delete(path);
+              if (cache.size >= 4096) cache.delete(cache.keys().next().value!);
+              cache.set(path, snapshot);
+            }
+            const value = await snapshot.value;
+            if (value) agents.set(value.agent.threadId, { ...value.agent,
+              status: value.lifecycle === "finished" ? "finished"
+                : value.lifecycle === "active" && now - value.mtimeMs <= 300_000 ? "running" : "unknown",
+            });
+          } catch { /* Inaccessible/invalid rollout is isolated. */ }
+        }
+      } catch { /* Missing adjacent date directory. */ }
+    }
+    for (const run of codex) {
+      let parents = new Set(run.session ? [run.session] : []);
+      const seen = new Set(parents);
+      for (let depth = 1; depth <= 2; depth++) {
+        const children = [...agents.values()].filter((agent) => parents.has(agent.parentThreadId) && !seen.has(agent.threadId))
+          .sort((a, b) => (a.startedAt ?? "").localeCompare(b.startedAt ?? "") || a.threadId.localeCompare(b.threadId));
+        parents = new Set(children.map((agent) => agent.threadId));
+        for (const agent of children) { seen.add(agent.threadId); run.subagents!.push({ ...agent, depth }); }
+      }
+    }
+  };
+}
+
+const attachCodexSubagents = createCodexSubagentReader();
 
 export interface DispatchDetail extends Dispatch {
   prompt: string | null;
@@ -315,25 +467,20 @@ async function readDispatch(runId: string, directory: string, includePrompt = tr
 export async function listDispatches(limit: string | number | null = null, root = rootDirectory()): Promise<Dispatch[]> {
   const raw = limit === null ? 50 : Number(limit);
   const count = Number.isFinite(raw) && raw >= 1 ? Math.min(200, Math.floor(raw)) : 50;
-  let entries;
-  try { entries = await readdir(root, { withFileTypes: true }); }
-  catch { return []; }
-  const names = entries.filter((entry) => validId(entry.name) && (entry.isDirectory() || entry.isSymbolicLink()))
-    .map((entry) => entry.name).sort().reverse();
-  const dispatches: Dispatch[] = [];
-  for (const runId of names) {
-    const directory = await resolveRun(runId, root);
-    if (!directory) continue;
-    dispatches.push(await readDispatch(runId, directory));
-    if (dispatches.length === count) break;
-  }
+  const dispatches = (await allDispatches(root)).sort((a, b) => a.runId < b.runId ? 1 : a.runId > b.runId ? -1 : 0).slice(0, count);
+  await Promise.all(dispatches.map(async (run) => {
+    const directory = await resolveRun(run.runId, root);
+    try { if (directory) run.promptHead = await promptHead(directory); } catch { run.status = "unknown"; }
+  }));
   return dispatches;
 }
 
 export async function getDispatch(runId: string, root = rootDirectory()): Promise<DispatchDetail | null> {
   const directory = await resolveRun(runId, root);
   if (!directory) return null;
-  const dispatch = await readDispatch(runId, directory);
+  const dispatch = (await allDispatches(root)).find((run) => run.runId === runId);
+  if (!dispatch) return null;
+  try { dispatch.promptHead = await promptHead(directory); } catch { dispatch.status = "unknown"; }
   const readOptional = async (filename: string, limit?: number, tail = false) => {
     try { return await readText(directory, filename, limit, tail); }
     catch { dispatch.status = "unknown"; return null; }
@@ -357,7 +504,7 @@ export async function getDispatch(runId: string, root = rootDirectory()): Promis
 }
 
 /** No list cap: history and parent links must include older-started, still-running jobs. */
-async function allDispatches(root: string): Promise<Dispatch[]> {
+async function scanDispatches(root: string): Promise<Dispatch[]> {
   let entries;
   try { entries = await readdir(root, { withFileTypes: true }); } catch { return []; }
   const result: Dispatch[] = [];
@@ -366,8 +513,35 @@ async function allDispatches(root: string): Promise<Dispatch[]> {
     const directory = await resolveRun(entry.name, root);
     if (directory) result.push(await readDispatch(entry.name, directory, false));
   }
+  await attachCodexSubagents(result, process.env.WORKBENCH_CODEX_HISTORY_DIR || join(homedir(), ".codex", "sessions"));
   return result;
 }
+
+/** 每个 root 共享一次在途扫描；TTL 从扫描完成起算，失败不缓存。 */
+export function createDispatchScanCache(scan: (root: string) => Promise<Dispatch[]>, now = Date.now) {
+  const cache = new Map<string, { expires: number; pending: Promise<Dispatch[]> }>();
+  return async (root: string): Promise<Dispatch[]> => {
+    let entry = cache.get(root);
+    if (!entry || entry.expires <= now()) {
+      entry = { expires: Infinity, pending: Promise.resolve().then(() => scan(root)) };
+      cache.set(root, entry);
+      const current = entry;
+      try {
+        await current.pending;
+        current.expires = now() + 2000;
+      } catch (error) {
+        if (cache.get(root) === current) cache.delete(root);
+        throw error;
+      }
+    }
+    // 调用方补 prompt 或详情错误状态时不得污染共享扫描结果。
+    return (await entry.pending).map((run) => ({ ...run, ...(run.parent ? { parent: { ...run.parent } } : {}),
+      ...(run.subagents ? { subagents: run.subagents.map((agent) => ({ ...agent })) } : {}),
+    }));
+  };
+}
+
+const allDispatches = createDispatchScanCache(scanDispatches, () => Date.now());
 
 export async function listParentDispatches(parent: string, root = rootDirectory()): Promise<Dispatch[]> {
   if (!/^[A-Za-z0-9_-]{1,128}$/.test(parent)) throw new DispatchQueryError("parent 必须是原生会话 ID");

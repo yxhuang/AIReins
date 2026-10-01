@@ -57,7 +57,8 @@ export function DispatchDetail({ runId, sessions, terminalOpen }: { runId: strin
         if (flow.source === "native" && flow.agent) {
           cursor = flow.cursor;
           setNativeAgent(flow.agent);
-          setMessages((previous) => previous.slice(0, flow.replaceFrom).concat(flow.messages));
+          setMessages((previous) => !flow.messages.length && flow.replaceFrom === previous.length
+            ? previous : previous.slice(0, flow.replaceFrom).concat(flow.messages));
         } else if (part) {
           setNativeAgent(null);
           offset = part.nextOffset;
@@ -73,21 +74,27 @@ export function DispatchDetail({ runId, sessions, terminalOpen }: { runId: strin
       } finally { if (request === controller) request = null; }
     };
     let settled = false;
+    let tick: number | undefined;
     const visibility = () => {
+      if (tick !== undefined) window.clearInterval(tick);
+      tick = undefined;
       if (!visible()) { request?.abort(); request = null; }
-      else void poll();
+      else {
+        setNow(Date.now());
+        tick = window.setInterval(() => setNow(Date.now()), 1000);
+        void poll();
+      }
     };
     const mobile = window.matchMedia("(max-width: 720px)");
     document.addEventListener("visibilitychange", visibility);
     mobile.addEventListener("change", visibility);
-    void poll();
+    visibility();
     const timer = window.setInterval(() => void poll(), 3000);
-    const tick = window.setInterval(() => { if (visible()) setNow(Date.now()); }, 1000);
     return () => {
       active = false;
       request?.abort();
       window.clearInterval(timer);
-      window.clearInterval(tick);
+      if (tick !== undefined) window.clearInterval(tick);
       document.removeEventListener("visibilitychange", visibility);
       mobile.removeEventListener("change", visibility);
     };

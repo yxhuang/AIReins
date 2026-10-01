@@ -5,14 +5,20 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DispatchQueryError, dispatchSessionMap, getDispatch, getDispatchLog, listDispatches, readClaudeTranscriptModel, readClaudeParentModel } from "./dispatches.js";
 
+const realNow = Date.now;
+let cacheNow = realNow();
+Date.now = () => cacheNow;
 const root = await mkdtemp(join(tmpdir(), "wb-dispatches-"));
 const outside = await mkdtemp(join(tmpdir(), "wb-dispatches-outside-"));
 const previousRoot = process.env.WB_DELEGATE_DIR;
+const previousHistory = process.env.WORKBENCH_CODEX_HISTORY_DIR;
 process.env.WB_DELEGATE_DIR = root;
+process.env.WORKBENCH_CODEX_HISTORY_DIR = join(root, "codex-history");
 
 async function fixture(id: string, files: Record<string, unknown> = {}): Promise<string> {
   const directory = join(root, id);
   await mkdir(directory);
+  cacheNow += 2001;
   for (const [name, value] of Object.entries(files)) {
     await writeFile(join(directory, name), typeof value === "string" ? value : JSON.stringify(value));
   }
@@ -57,7 +63,7 @@ try {
     status: "OK", startedAt: "2026-10-01T12:00:00+08:00", endedAt: "2026-10-01T12:01:00+08:00",
     elapsedS: 60, exit: 0, files: 2, session: "session", parent, promptHead: "第一行",
     prompt: "\n  \n第一行\n第二行", promptTruncated: false, summary: "完成摘要\n", final: "最终结果\n", accept: "通过\n",
-    acceptResult: null, resume: null, credits: null,
+    acceptResult: null, resume: null, credits: null, subagents: [],
   });
 
   const runningId = "20261001-120001-codex-running";
@@ -111,7 +117,8 @@ try {
   await chmod(join(unreadable, "run.json"), 0);
   try {
     if (process.getuid?.() !== 0) assert.equal((await getDispatch(unreadableId))?.status, "unknown", "无权限单条降级");
-  } finally { await chmod(join(unreadable, "run.json"), 0o600); }
+  } finally {
+    await chmod(join(unreadable, "run.json"), 0o600); }
 
   const list = await listDispatches();
   assert.equal(list.length, 7);
@@ -240,6 +247,9 @@ try {
   assert.equal((await dispatchSessionMap(manyRoot)).size, 205, "遍历全部目录，不套用列表 200 条上限");
   console.log("✅ dispatches 只读接口及全量缓存会话映射测试全过");
 } finally {
+  Date.now = realNow;
   if (previousRoot === undefined) delete process.env.WB_DELEGATE_DIR;
   else process.env.WB_DELEGATE_DIR = previousRoot;
+  if (previousHistory === undefined) delete process.env.WORKBENCH_CODEX_HISTORY_DIR;
+  else process.env.WORKBENCH_CODEX_HISTORY_DIR = previousHistory;
 }

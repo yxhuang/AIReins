@@ -70,6 +70,11 @@ export class Store {
   historyOpen = false;
   historySelection: HistorySession | null = null;
   dispatchesOpen = false;
+  termOpen = false;
+  filesOpen = false;
+  /** 文件面板发给 Composer 的一次性请求；模块加载不依赖 DOM。 */
+  fileMentionRequest: { sessionId: string; path: string; version: number } | null = null;
+  private fileMentionSequence = 0;
   private beforeDispatches: { hash: string; currentId: string | null; selection: HistorySession | null } | null = null;
   data = new Map<string, SessionData>();
   wsState: WsState = "closed";
@@ -227,13 +232,13 @@ export class Store {
         };
       }
       this.dispatchesOpen = true;
-      this.historyOpen = false;
-      this.currentPageId = null;
-      this.historySelection = null;
+      this.termOpen = false;
+      this.filesOpen = false;
       this.notify();
       return;
     }
     this.dispatchesOpen = false;
+    this.beforeDispatches = null;
     // 旧 history/page 链接打开侧栏面板；当前会话留在主区。
     if (window.location.hash === "#/history") {
       if (!this.historyOpen) this.historySelection = null;
@@ -253,6 +258,7 @@ export class Store {
     this.currentPageId = null;
     const match = window.location.hash.match(/^#\/session\/([^/]+)$/);
     this.currentId = match?.[1] ? decodeURIComponent(match[1]) : null;
+    if (this.fileMentionRequest?.sessionId !== this.currentId) this.fileMentionRequest = null;
     if (this.currentId) void this.ensureLoaded(this.currentId);
     try {
       if (this.currentId) localStorage.setItem(LAST_SESSION_KEY, this.currentId);
@@ -290,14 +296,39 @@ export class Store {
     this.onHashChange();
   }
 
-  closeDispatches(returnToList = false): void {
+  closeDispatches(): void {
     const previous = this.beforeDispatches;
     this.currentId = previous?.currentId ?? null;
-    const panel = previous?.hash === "#/history" || previous?.hash.startsWith("#/page/");
-    window.location.hash = returnToList && !panel ? "#/" : previous?.hash ?? "#/";
+    window.location.hash = previous?.hash ?? "#/";
     this.onHashChange();
-    if (this.historyOpen && !returnToList) this.historySelection = previous?.selection ?? null;
+    if (this.historyOpen) this.historySelection = previous?.selection ?? null;
     this.notify();
+  }
+
+  setTerminalOpen(open: boolean): void {
+    if (open && this.dispatchesOpen) this.closeDispatches();
+    if (open) this.filesOpen = false;
+    this.termOpen = open;
+    this.notify();
+  }
+
+  setFilesOpen(open: boolean): void {
+    if (open && this.dispatchesOpen) this.closeDispatches();
+    if (open) this.termOpen = false;
+    this.filesOpen = open;
+    this.notify();
+  }
+
+  requestFileMention(sessionId: string, path: string): void {
+    this.fileMentionRequest = { sessionId, path, version: ++this.fileMentionSequence };
+    this.notify();
+  }
+
+  consumeFileMention(version: number): boolean {
+    if (this.fileMentionRequest?.version !== version) return false;
+    this.fileMentionRequest = null;
+    this.notify();
+    return true;
   }
 
   closeSidebarPanel(returnToList = false): void {
@@ -734,7 +765,7 @@ export class Store {
       void this.refreshSessions();
     }
     this.scheduleListRefresh();
-    if (event.type === "agent_text_delta" || event.type === "thought_delta") this.notifyStreamDelta();
+    if (["agent_text_delta", "thought_delta", "tool_call_updated", "raw_event"].includes(event.type)) this.notifyStreamDelta();
     else this.notify();
   }
 
@@ -1110,7 +1141,7 @@ export class Store {
   }
 
   /**
-   * 手动释放会话 worker（「VSCode / CLI 继续」）：后端停进程、广播 worker_released，
+   * 手动释放会话 worker（「VSCode 继续」）：后端停进程、广播 worker_released，
    * 返回续接命令和 VSCode 协议链接；成功响应里的 session 直接覆盖本地列表项。
    */
   async release(id: string): Promise<{ resumeCommand: string; vscodeUri: string | null }> {

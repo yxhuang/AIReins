@@ -31,6 +31,41 @@ const ev = (seq, type, payload = {}) => ({
 const cmd = (name, description = "") => ({ name, description, source: "claude" });
 const names = (list) => list.map((c) => c.name);
 
+t("插话保留标记且不拆开当前工具回合，普通消息仍开始新回合", () => {
+  const items = buildRenderItems([
+    ev(1, "user_message", { text: "开始" }),
+    ev(2, "agent_text_delta", { text: "原计划" }),
+    ev(3, "user_message", { text: "调整", steer: true }),
+    ev(4, "agent_text_delta", { text: "新计划" }),
+    ev(5, "turn_completed", {}),
+    ev(6, "user_message", { text: "新回合" }),
+    ev(7, "agent_text_delta", { text: "继续" }),
+  ], "codex");
+  const users = items.filter(item => item.kind === "user");
+  const texts = items.filter(item => item.kind === "text");
+  assert.equal(users[0].steer, undefined);
+  assert.equal(users[1].steer, true);
+  assert.equal(users[1].queued, undefined);
+  assert.equal(texts[0].turn, texts[1].turn);
+  assert.notEqual(texts[1].turn, texts[2].turn);
+});
+
+t("Kimi 排队标记读回保留，回合结束后生成的文本归入下一回合", () => {
+  const items = buildRenderItems([
+    ev(1, "user_message", { text: "开始" }),
+    ev(2, "agent_text_delta", { text: "原回合" }),
+    ev(3, "user_message", { text: "排队", steer: true, queued: true }),
+    ev(4, "agent_text_delta", { text: "继续原回合" }),
+    ev(5, "turn_completed", {}),
+    ev(6, "agent_text_delta", { text: "处理排队消息" }),
+  ], "kimi");
+  const user = items.find(item => item.kind === "user" && item.steer);
+  const texts = items.filter(item => item.kind === "text");
+  assert.equal(user.queued, true);
+  assert.equal(texts[0].turn, texts[1].turn);
+  assert.notEqual(texts[1].turn, texts[2].turn);
+});
+
 // ══ 连续成功只读工具分组（实时流与历史共用） ══
 const readTool = (id, extra = {}) => ({
   kind: "tool", key: `tool:${id}`, seq: id, toolCallId: String(id),

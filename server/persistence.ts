@@ -7,6 +7,13 @@ import {
   renameSync,
   rmSync,
   writeFileSync,
+  openSync,
+  closeSync,
+  readSync,
+  writeSync,
+  fsyncSync,
+  fstatSync,
+  fchmodSync,
 } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
@@ -107,4 +114,86 @@ export function readTranscript(path: string): UnifiedEvent[] {
     }
   }
   return events;
+}
+
+/** 有界分块读取，保留原始行字节（含换行），不把整个 transcript 留在内存中。 */
+function* transcriptLines(fd: number): Generator<{ bytes: Buffer; offset: number }> {
+  let parts: Buffer[] = [];
+  let position = 0;
+  let offset = 0;
+  for (;;) {
+    const chunk = Buffer.allocUnsafe(64 * 1024);
+    const size = readSync(fd, chunk, 0, chunk.length, position);
+    if (!size) break;
+    position += size;
+    const bytes = chunk.subarray(0, size);
+    let start = 0;
+    for (let end = bytes.indexOf(10); end !== -1; end = bytes.indexOf(10, start)) {
+      const segment = bytes.subarray(start, end + 1);
+      const line = parts.length ? Buffer.concat([...parts, segment]) : segment;
+      parts = [];
+      yield { bytes: line, offset };
+      offset += line.length;
+      start = end + 1;
+    }
+    if (start < bytes.length) parts.push(bytes.subarray(start));
+  }
+  if (parts.length) yield { bytes: Buffer.concat(parts), offset };
+}
+
+function legacyPartial(bytes: Buffer): boolean | undefined {
+  const text = bytes.toString("utf8");
+  if (!text.trim()) return undefined;
+  const event = JSON.parse(text);
+  return event.type === "tool_call_updated" && event.payload !== null
+    && typeof event.payload === "object" && Object.hasOwn(event.payload, "partialInput")
+    && event.payload.inputComplete !== true;
+}
+
+/** 启动恢复前执行；只处理登记为 Claude 的 wb 副本，Codex/Kimi 即使有同名字段也保留。 */
+export function compactClaudeTranscripts(sessions: SessionRecord[]): { files: number; rewrittenFiles: number; removedLines: number; removedBytes: number } {
+  const result = { files: 0, rewrittenFiles: 0, removedLines: 0, removedBytes: 0 };
+  const claudeIds = new Set(sessions.filter((session) => session.agent === "claude").map((session) => session.id));
+  for (const name of readdirSync(transcriptsDir)) {
+    if (!name.endsWith(".ndjson") || !claudeIds.has(name.slice(0, -7))) continue;
+    const path = join(transcriptsDir, name);
+    const fd = openSync(path, "r");
+    let output: number | undefined;
+    try {
+      result.files++;
+      let lines = 0;
+      let bytes = 0;
+      let lastOffset = -1;
+      let lastRemovedBytes = 0;
+      for (const line of transcriptLines(fd)) {
+        const removable = legacyPartial(line.bytes);
+        if (removable === undefined) continue;
+        lastOffset = line.offset;
+        lastRemovedBytes = removable ? line.bytes.length : 0;
+        if (lastRemovedBytes) { lines++; bytes += lastRemovedBytes; }
+      }
+      // 末尾有效行是恢复 seq 的依据；即使它也是旧 partialInput，也必须保留。
+      if (lastRemovedBytes) { lines--; bytes -= lastRemovedBytes; }
+      if (!lines) continue; // 幂等：无可删行时不创建临时文件、不触碰 inode/mtime。
+      const temporary = `${path}.compact.tmp`;
+      output = openSync(temporary, "w", fstatSync(fd).mode & 0o777);
+      fchmodSync(output, fstatSync(fd).mode & 0o777);
+      for (const line of transcriptLines(fd)) {
+        if (line.offset !== lastOffset && legacyPartial(line.bytes)) continue;
+        let written = 0;
+        while (written < line.bytes.length) written += writeSync(output, line.bytes, written, line.bytes.length - written);
+      }
+      fsyncSync(output);
+      closeSync(output);
+      output = undefined;
+      renameSync(temporary, path);
+      result.rewrittenFiles++;
+      result.removedLines += lines;
+      result.removedBytes += bytes;
+    } finally {
+      if (output !== undefined) closeSync(output);
+      closeSync(fd);
+    }
+  }
+  return result;
 }

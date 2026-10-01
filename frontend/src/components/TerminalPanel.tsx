@@ -1,16 +1,15 @@
-import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Terminal, type ITheme } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
+import { PanelRightIcon, SidePanelResize, useSidePanelWidth } from "./SidePanelResize";
 import { Segmented } from "./Segmented";
 import "@xterm/xterm/css/xterm.css";
 import type { ShellKind, TerminalInfo } from "../types";
 import { createTerminal, fetchTerminals, killTerminal } from "../api";
 import {
   isTerminalToggleKey,
-  TERM_DEFAULT_WIDTH,
   TERM_SHORTCUT_KEYS,
   buildTerminalWsUrl,
-  clampPanelWidth,
   initialTermState,
   pickAttachTarget,
   pickTerminalCwd,
@@ -19,30 +18,6 @@ import {
 } from "../terminal";
 import { store } from "../store";
 import { FONT_SCALE_EVENT } from "../font-scale";
-
-const WIDTH_STORAGE_KEY = "workbench-term-width";
-
-// localStorage 与主题/草稿同一纪律：typeof 判定 + try/catch，失败无声降级
-function readSavedWidth(): number | null {
-  try {
-    if (typeof localStorage === "undefined") return null;
-    const raw = localStorage.getItem(WIDTH_STORAGE_KEY);
-    if (raw === null) return null;
-    const value = Number(raw);
-    return Number.isFinite(value) ? value : null;
-  } catch {
-    return null;
-  }
-}
-
-function writeSavedWidth(width: number): void {
-  try {
-    if (typeof localStorage === "undefined") return;
-    localStorage.setItem(WIDTH_STORAGE_KEY, String(width));
-  } catch {
-    /* localStorage 不可用时仅本次会话生效 */
-  }
-}
 
 /** xterm 主题字段 ← --term-* 令牌；通过 color 属性解析 light-dark()。 */
 const TERM_THEME_VARS: [keyof ITheme, string][] = [
@@ -125,11 +100,7 @@ interface TermRuntime {
  */
 export function TerminalPanel({ open, onClose }: { open: boolean; onClose: () => void }) {
   const hostRef = useRef<HTMLDivElement>(null);
-  const [width, setWidth] = useState(() =>
-    clampPanelWidth(readSavedWidth() ?? TERM_DEFAULT_WIDTH, window.innerWidth),
-  );
-  const widthRef = useRef(width);
-  widthRef.current = width;
+  const [width, setWidth] = useSidePanelWidth();
   const [info, setInfo] = useState<TerminalInfo | null>(null);
   /** null = 运行中；否则已退出（exitCode 可能为 null = 服务端没给码） */
   const [exit, setExit] = useState<{ code: number | null } | null>(null);
@@ -412,41 +383,11 @@ export function TerminalPanel({ open, onClose }: { open: boolean; onClose: () =>
     return () => cancelAnimationFrame(raf);
   }, [open]);
 
-  // 宽度变化：面板尺寸变了要重新 fit；持久化到 localStorage
+  // 宽度变化：面板尺寸变了要重新 fit
   useEffect(() => {
-    writeSavedWidth(width);
     const raf = requestAnimationFrame(() => runtimeRef.current?.fit());
     return () => cancelAnimationFrame(raf);
   }, [width]);
-
-  // 窗口尺寸变化：宽度重新 clamp（视口变窄时别让面板把主区挤没）
-  useEffect(() => {
-    const onResize = () => setWidth((w) => clampPanelWidth(w, window.innerWidth));
-    window.addEventListener("resize", onResize);
-    return () => window.removeEventListener("resize", onResize);
-  }, []);
-
-  const draggingRef = useRef(false);
-  const onSplitPointerDown = (e: ReactPointerEvent<HTMLDivElement>) => {
-    e.preventDefault();
-    e.currentTarget.setPointerCapture(e.pointerId);
-    draggingRef.current = true;
-    document.body.classList.add("resizing");
-  };
-  const onSplitPointerMove = (e: ReactPointerEvent<HTMLDivElement>) => {
-    if (!draggingRef.current) return;
-    // 面板在右侧：宽度 = 工作区右缘 − 指针 x
-    const workspace = e.currentTarget.parentElement;
-    if (!workspace) return;
-    const right = workspace.getBoundingClientRect().right;
-    setWidth(clampPanelWidth(right - e.clientX, window.innerWidth));
-  };
-  const endSplitDrag = (e: ReactPointerEvent<HTMLDivElement>) => {
-    if (!draggingRef.current) return;
-    draggingRef.current = false;
-    document.body.classList.remove("resizing");
-    e.currentTarget.releasePointerCapture(e.pointerId);
-  };
 
   const kill = async () => {
     if (killBusy || !info) return;
@@ -466,30 +407,7 @@ export function TerminalPanel({ open, onClose }: { open: boolean; onClose: () =>
 
   return (
     <>
-      {open && (
-        <div
-          className="term-split"
-          role="separator"
-          aria-orientation="vertical"
-          aria-label="调整终端面板宽度"
-          aria-valuenow={width}
-          aria-valuemin={320}
-          aria-valuemax={Math.max(320, window.innerWidth - 480)}
-          tabIndex={0}
-          title="拖动调整宽度，双击复位"
-          onPointerDown={onSplitPointerDown}
-          onPointerMove={onSplitPointerMove}
-          onPointerUp={endSplitDrag}
-          onPointerCancel={endSplitDrag}
-          onDoubleClick={() => setWidth(clampPanelWidth(TERM_DEFAULT_WIDTH, window.innerWidth))}
-          onKeyDown={(e) => {
-            const delta = e.key === "ArrowLeft" ? 16 : e.key === "ArrowRight" ? -16 : 0;
-            if (delta === 0) return;
-            e.preventDefault();
-            setWidth((w) => clampPanelWidth(w + delta, window.innerWidth));
-          }}
-        />
-      )}
+      {open && <SidePanelResize label="终端" width={width} setWidth={setWidth} />}
       <div
         className={`term-panel${open ? "" : " term-hidden"}`}
         role="region"
@@ -554,15 +472,16 @@ export function TerminalPanel({ open, onClose }: { open: boolean; onClose: () =>
           ) : (
             <button
               type="button"
-              className="btn"
+              className="btn panel-icon-button panel-kill-button"
               aria-label="结束终端进程"
+              title="结束终端进程"
               onClick={() => setConfirmKill(true)}
             >
-              结束
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" aria-hidden="true"><path d="M18.36 6.64a9 9 0 1 1-12.73 0M12 2v10" /></svg>
             </button>
           )}
-          <button type="button" className="btn" aria-label="隐藏终端面板" onClick={onClose}>
-            隐藏
+          <button type="button" className="btn panel-icon-button" aria-label="隐藏终端面板" title="收起面板" onClick={onClose}>
+            <PanelRightIcon />
           </button>
         </div>
         {omitted > 0 && (

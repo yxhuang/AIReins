@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
 import type { AgentKind, SessionRecord } from "../types";
 import { HistoryTimeline } from "./HistoryTimeline";
 import { fetchHistoryMessages } from "../api";
@@ -14,14 +14,17 @@ type Phase = "loading" | "ready" | "error";
 
 /** Imported history and preview share the same latest-first reader.
  * 历史区异步加载、插在实时流上方，载入后同样滚到底，进会话停在最新消息。 */
-export function ResumedHistory({ session, streamRef }: { session: SessionRecord; streamRef: RefObject<HTMLDivElement | null> }) {
+export const ResumedHistory = memo(function ResumedHistory({ session, streamRef }: { session: SessionRecord; streamRef: RefObject<HTMLDivElement | null> }) {
   if (!session.resumedFrom) return null;
   return <PagedHistory key={`${session.resumedFrom.agent}:${session.resumedFrom.nativeSessionId}`}
     agent={session.resumedFrom.agent} nativeSessionId={session.resumedFrom.nativeSessionId}
     cwd={session.cwd} streamRef={streamRef} imported startAtEnd initialCursor={session.resumedFrom.historyCursor} />;
-}
+}, (previous, next) => previous.streamRef === next.streamRef && previous.session.cwd === next.session.cwd
+  && previous.session.resumedFrom?.agent === next.session.resumedFrom?.agent
+  && previous.session.resumedFrom?.nativeSessionId === next.session.resumedFrom?.nativeSessionId
+  && previous.session.resumedFrom?.historyCursor === next.session.resumedFrom?.historyCursor);
 
-export function PagedHistory({ agent, nativeSessionId, cwd, streamRef, imported = false, startAtEnd = false, initialCursor }: {
+export const PagedHistory = memo(function PagedHistory({ agent, nativeSessionId, cwd, streamRef, imported = false, startAtEnd = false, initialCursor }: {
   agent: AgentKind; nativeSessionId: string; cwd: string;
   streamRef: RefObject<HTMLDivElement | null>; imported?: boolean;
   /** 首页加载后滚到底（历史页预览：首屏是最后几轮） */
@@ -172,4 +175,4 @@ export function PagedHistory({ agent, nativeSessionId, cwd, streamRef, imported 
       )}
     </section>
   );
-}
+});

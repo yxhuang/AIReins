@@ -7,12 +7,14 @@
     "server": "tsx server/index.ts",
     "typecheck": "tsc --noEmit",
     "typecheck:frontend": "tsc --noEmit -p frontend",
+    "check:theme": "node frontend/scripts/check-theme.mjs",
     "build": "vite build --config frontend/vite.config.ts && node frontend/scripts/precompress.mjs",
     "dev": "vite --config frontend/vite.config.ts",
     "spike:claude": "tsx spikes/claude-loop.ts",
     "spike:codex": "tsx spikes/codex-loop.ts",
     "spike:kimi": "tsx spikes/kimi-loop.ts",
     "test:mentions": "node --import tsx frontend/scripts/mentions.test.mjs",
+    "test:file-panel": "node --import tsx frontend/scripts/file-panel.test.mjs",
     "test:store": "node --import tsx frontend/scripts/store-flow.test.mjs",
     "test:attach": "node --import tsx frontend/scripts/attach-flow.test.mjs",
     "test:pages": "node --import tsx frontend/scripts/pages-flow.test.mjs",
@@ -27,10 +29,11 @@
     "test:server": "n=0; for f in server/*.test.ts; do node --import tsx \"$f\" > /dev/null || { echo \"❌ $f\"; exit 1; }; n=$((n+1)); done; echo \"✅ server 测试全过（$n 个文件）\"",
     "test:markdown": "node --import tsx frontend/scripts/markdown.test.mjs",
     "test:tool-summary": "node --import tsx frontend/scripts/tool-summary.test.mjs",
-    "test": "npm run test:mentions && npm run test:store && npm run test:attach && npm run test:pages && npm run test:resume && npm run test:effective-ask && npm run test:history && npm run test:sidebar-panels && npm run test:dispatch-flow && npm run test:render-items && npm run test:snapshot && npm run test:reconnect && npm run test:terminal && npm run test:font-scale && npm run test:server && npm run test:markdown && npm run test:tool-summary && npm run test:restart",
+    "test": "npm run test:mentions && npm run test:file-panel && npm run test:store && npm run test:attach && npm run test:pages && npm run test:resume && npm run test:effective-ask && npm run test:history && npm run test:sidebar-panels && npm run test:dispatch-flow && npm run test:render-items && npm run test:snapshot && npm run test:reconnect && npm run test:terminal && npm run test:font-scale && npm run test:server && npm run test:markdown && npm run test:tool-summary && npm run test:restart && npm run test:perf-round2",
     "test:sidebar-panels": "node --import tsx frontend/scripts/sidebar-panels-flow.test.mjs",
     "test:restart": "node --import tsx frontend/scripts/restart-flow.test.mjs",
-    "test:dispatch-flow": "node --import tsx frontend/scripts/dispatch-flow.test.mjs"
+    "test:dispatch-flow": "node --import tsx frontend/scripts/dispatch-flow.test.mjs",
+    "test:perf-round2": "node --import tsx frontend/scripts/performance-round2.test.mjs"
   },
   "devDependencies": {
     "@types/node": "^26.2.0",

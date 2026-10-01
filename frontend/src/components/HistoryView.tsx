@@ -13,6 +13,7 @@ import { AgentIcon } from "./AgentIcon";
 import { PagedHistory } from "./ResumedHistory";
 import { store, type Store } from "../store";
 import { shallowEqual, useStore } from "../useStore";
+import { PanelActions } from "./PanelActions";
 
 const AGENTS: AgentKind[] = ["claude", "codex", "kimi"];
 
@@ -308,9 +309,15 @@ export function HistoryPreviewPane({ item, onBack }: { item: HistorySession | un
     setImportError(null);
   }, [item]);
 
+  const toolbar = <div className="view-panel-actions">
+    {item && <button type="button" className="btn history-back" onClick={onBack}>‹ 所有来源会话</button>}
+    <PanelActions />
+  </div>;
+
   if (!item) {
     return (
       <aside className="history-preview-pane" aria-label="会话预览" aria-live="polite">
+        {toolbar}
         <div className="history-preview-empty">从左侧选一个会话查看预览</div>
       </aside>
     );
@@ -335,9 +342,7 @@ export function HistoryPreviewPane({ item, onBack }: { item: HistorySession | un
 
   return (
     <aside className="history-preview-pane" aria-label="会话预览" aria-live="polite">
-      <button type="button" className="btn history-back" onClick={onBack}>
-        ‹ 所有来源会话
-      </button>
+      {toolbar}
       <div className="history-preview-head">
         <h2 className="history-preview-title">{item.title}</h2>
         <p className="history-preview-meta">

@@ -4,7 +4,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { join, resolve } from "node:path";
 import type { Duplex } from "node:stream";
 import { fileURLToPath } from "node:url";
-import { gzipSync } from "node:zlib";
+import { compressResponse } from "./response-compression.js";
 import { WebSocket, WebSocketServer } from "ws";
 import { checkAccess, loadRemoteConfig, localPolicy, remotePolicy, type AccessPolicy, type RemoteConfig } from "./access.js";
 import { DispatchQueryError, getDispatch, getDispatchLog, getDispatchMessages, listDispatches, listDispatchHistory, listParentDispatches } from "./dispatches.js";
@@ -364,7 +364,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
     const method = request.method ?? "GET";
     if (method === "GET" && url.pathname === "/api/meta") {
       const meta = await getMeta();
-      respond(response, 200, 0, "success", {
+      await respond(response, 200, 0, "success", {
         ...meta,
         capabilities: { terminal: terminalEnabled(policy, REMOTE_CONFIG) },
       }, requestId);
@@ -397,17 +397,17 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
           }, 200);
         });
       }
-      respond(response, 202, 0, "accepted", { restarting: true }, requestId);
+      await respond(response, 202, 0, "accepted", { restarting: true }, requestId);
     } else if (url.pathname === "/api/terminals" && method === "GET") {
       requireTerminalEnabled(policy);
-      respond(response, 200, 0, "success", { terminals: terminals.list() }, requestId);
+      await respond(response, 200, 0, "success", { terminals: terminals.list() }, requestId);
     } else if (url.pathname === "/api/terminals" && method === "POST") {
       requireTerminalEnabled(policy);
       const input = await readJson(request);
       if (!input || typeof input !== "object" || Array.isArray(input)) throw new ApiError(400, 40040, "请求体必须是 JSON 对象");
       try {
         const { cwd, shell, cols, rows } = input as Record<string, unknown>;
-        respond(response, 201, 0, "success", terminals.create({ cwd: cwd as string | undefined, shell, cols: cols as number, rows: rows as number }), requestId);
+        await respond(response, 201, 0, "success", terminals.create({ cwd: cwd as string | undefined, shell, cols: cols as number, rows: rows as number }), requestId);
       } catch (error) {
         throw asTerminalApiError(error);
       }
@@ -416,7 +416,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       const id = decodeURIComponent(url.pathname.split("/")[3]);
       try {
         terminals.kill(id);
-        respond(response, 200, 0, "success", { ok: true }, requestId);
+        await respond(response, 200, 0, "success", { ok: true }, requestId);
       } catch (error) {
         throw asTerminalApiError(error);
       }
@@ -426,7 +426,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
         if (files !== null && files !== "1" && files !== "0") {
           throw new ApiError(400, 40036, "files 参数只接受 1 或 0");
         }
-        respond(response, 200, 0, "success", await listDirectories(url.searchParams.get("path") ?? undefined, { files: files === "1" }), requestId);
+        await respond(response, 200, 0, "success", await listDirectories(url.searchParams.get("path") ?? undefined, { files: files === "1" }), requestId);
       } catch (error) {
         if (error instanceof DirListError) throw new ApiError(400, 40035, error.message);
         throw error;
@@ -437,7 +437,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       const name = url.searchParams.get("name") ?? "";
       if (!name.trim()) throw new ApiError(400, 40070, "name 参数必须是非空文件名");
       try {
-        respond(response, 201, 0, "success", await saveUpload(sessionId, name, request), requestId);
+        await respond(response, 201, 0, "success", await saveUpload(sessionId, name, request), requestId);
       } catch (error) {
         if (error instanceof UploadError) throw new ApiError(error.status, error.code, error.message);
         throw error;
@@ -458,14 +458,14 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
     } else if (method === "GET" && url.pathname === "/api/dispatches") {
       try {
         const parent = url.searchParams.get("parent");
-        respond(response, 200, 0, "success", { dispatches: parent !== null ? await listParentDispatches(parent) : await listDispatches(url.searchParams.get("limit")) }, requestId);
+        await respond(response, 200, 0, "success", { dispatches: parent !== null ? await listParentDispatches(parent) : await listDispatches(url.searchParams.get("limit")) }, requestId);
       } catch (error) {
         if (error instanceof DispatchQueryError) throw new ApiError(400, 40000, error.message);
         throw error;
       }
     } else if (method === "GET" && url.pathname === "/api/dispatches/history") {
       try {
-        respond(response, 200, 0, "success", await listDispatchHistory(url.searchParams.get("offset")), requestId);
+        await respond(response, 200, 0, "success", await listDispatchHistory(url.searchParams.get("offset")), requestId);
       } catch (error) {
         if (error instanceof DispatchQueryError) throw new ApiError(400, 40000, error.message);
         throw error;
@@ -483,15 +483,15 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
           ? await getDispatchLog(runId, url.searchParams.get("stream") ?? "stdout", url.searchParams.get("offset"))
           : await getDispatch(runId);
         if (!data) throw new ApiError(404, 40400, "派单或日志不可读取");
-        respond(response, 200, 0, "success", data, requestId);
+        await respond(response, 200, 0, "success", data, requestId);
       } catch (error) {
         if (error instanceof DispatchQueryError) throw new ApiError(400, 40000, error.message);
         throw error;
       }
     } else if (method === "GET" && url.pathname === "/api/pages") {
-      respond(response, 200, 0, "success", { pages }, requestId);
+      await respond(response, 200, 0, "success", { pages }, requestId);
     } else if (url.pathname === "/api/prefs" && method === "GET") {
-      respond(response, 200, 0, "success", { ...prefs }, requestId);
+      await respond(response, 200, 0, "success", { ...prefs }, requestId);
     } else if (url.pathname === "/api/prefs" && method === "PUT") {
       const input = await readJson(request);
       if (!input || typeof input !== "object" || Array.isArray(input)) throw new ApiError(400, 40061, "请求体必须是 JSON 对象");
@@ -501,7 +501,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       }
       prefs = { ...prefs, idleReleaseMinutes };
       savePrefs(prefs);
-      respond(response, 200, 0, "success", { ...prefs }, requestId);
+      await respond(response, 200, 0, "success", { ...prefs }, requestId);
     } else if (url.pathname === "/api/claude/settings" && (method === "GET" || method === "PUT")) {
       let enabled: boolean | undefined;
       if (method === "PUT") {
@@ -517,16 +517,16 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       }
       try {
         const settings = enabled === undefined ? readClaudeStartupSettings() : writeClaudeStartupSettings(enabled);
-        respond(response, 200, 0, "success", settings, requestId);
+        await respond(response, 200, 0, "success", settings, requestId);
       } catch (error) {
         throw new ApiError(400, 40064, error instanceof Error ? error.message : String(error));
       }
     } else if (method === "GET" && url.pathname === "/api/sessions") {
-      respond(response, 200, 0, "success", { sessions: manager.list() }, requestId);
+      await respond(response, 200, 0, "success", { sessions: manager.list() }, requestId);
     } else if (method === "GET" && url.pathname === "/api/history") {
       const input = validateHistoryQuery(url.searchParams);
       try {
-        respond(response, 200, 0, "success", await history.list(input), requestId);
+        await respond(response, 200, 0, "success", await history.list(input), requestId);
       } catch (error) {
         if (error instanceof HistoryQueryError) throw new ApiError(400, 40032, error.message);
         throw error;
@@ -534,7 +534,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
     } else if (method === "POST" && url.pathname === "/api/snapshot/preflight") {
       const cwd = validateSnapshotPreflight(await readJson(request));
       try {
-        respond(response, 200, 0, "success", await preflightSnapshot(cwd), requestId);
+        await respond(response, 200, 0, "success", await preflightSnapshot(cwd), requestId);
       } catch (error) {
         if (error instanceof SnapshotCwdError) throw new ApiError(400, 40022, error.message);
         throw error;
@@ -555,7 +555,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
         }
       }
       const session = await manager.create({ ...input, historyCursor });
-      respond(response, 201, 0, "success", { session }, requestId);
+      await respond(response, 201, 0, "success", { session }, requestId);
     } else {
       const snapshotMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/snapshot$/);
       const commandsMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/commands$/);
@@ -573,18 +573,18 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
         const id = decodeURIComponent(pageHealthMatch[1]);
         const page = pagesById.get(id);
         if (!page) throw new ApiError(404, 40410, `页面不存在：${id}`);
-        respond(response, 200, 0, "success", await checkPageHealth(page), requestId);
+        await respond(response, 200, 0, "success", await checkPageHealth(page), requestId);
       } else if (method === "GET" && snapshotMatch) {
         const id = decodeURIComponent(snapshotMatch[1]);
         const snapshot = manager.getSnapshot(id);
         if (!snapshot) throw new ApiError(404, 40401, `会话不存在：${id}`);
-        respond(response, 200, 0, "success", snapshot, requestId);
+        await respond(response, 200, 0, "success", snapshot, requestId);
       } else if (method === "POST" && codexCommandMatch) {
         const id = decodeURIComponent(codexCommandMatch[1]);
         if (!manager.get(id)) throw new ApiError(404, 40401, `会话不存在：${id}`);
         const input = await readJson(request);
         try {
-          respond(response, 200, 0, "success", await manager.executeCodexCommand(id, input), requestId);
+          await respond(response, 200, 0, "success", await manager.executeCodexCommand(id, input), requestId);
         } catch (error) {
           throw new ApiError(400, 40067, error instanceof Error ? error.message : String(error));
         }
@@ -592,7 +592,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
         const id = decodeURIComponent(commandsMatch[1]);
         const commands = manager.getCommands(id);
         if (!commands) throw new ApiError(404, 40401, `会话不存在：${id}`);
-        respond(response, 200, 0, "success", { commands }, requestId);
+        await respond(response, 200, 0, "success", { commands }, requestId);
       } else if (method === "GET" && filesMatch) {
         const id = decodeURIComponent(filesMatch[1]);
         const session = manager.get(id);
@@ -600,13 +600,13 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
         const query = validateFileQuery(session.cwd, url.searchParams.get("q") ?? "");
         const limit = validateFileLimit(url.searchParams.get("limit"));
         const files = await searchFiles(session.cwd, query, limit);
-        respond(response, 200, 0, "success", { files }, requestId);
+        await respond(response, 200, 0, "success", { files }, requestId);
       } else if (method === "POST" && releaseMatch) {
         const id = decodeURIComponent(releaseMatch[1]);
         if (!manager.get(id)) throw new ApiError(404, 40401, `会话不存在：${id}`);
         try {
           const result = await manager.release(id, "manual");
-          respond(response, 200, 0, "success", result, requestId);
+          await respond(response, 200, 0, "success", result, requestId);
         } catch (error) {
           throw new ApiError(400, 40060, error instanceof Error ? error.message : String(error));
         }
@@ -615,7 +615,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
         if (!manager.get(id)) throw new ApiError(404, 40401, `会话不存在：${id}`);
         const input = await readJson(request);
         try {
-          respond(response, 200, 0, "success", await manager.manageMcp(id, parseMcpAction(input)), requestId);
+          await respond(response, 200, 0, "success", await manager.manageMcp(id, parseMcpAction(input)), requestId);
         } catch (error) {
           throw new ApiError(400, 40066, error instanceof Error ? error.message : String(error));
         }
@@ -631,7 +631,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
           throw new ApiError(400, 40065, "id 必须是字符串，enabled 必须是布尔值");
         }
         try {
-          respond(response, 200, 0, "success", await manager.setPluginEnabled(id, body.id, body.enabled, body.scope), requestId);
+          await respond(response, 200, 0, "success", await manager.setPluginEnabled(id, body.id, body.enabled, body.scope), requestId);
         } catch (error) {
           throw new ApiError(400, 40065, error instanceof Error ? error.message : String(error));
         }
@@ -639,7 +639,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
         const id = decodeURIComponent(infoMatch[1]);
         if (!manager.get(id)) throw new ApiError(404, 40401, `会话不存在：${id}`);
         try {
-          respond(response, 200, 0, "success", await manager.queryInfo(id, infoMatch[2]), requestId);
+          await respond(response, 200, 0, "success", await manager.queryInfo(id, infoMatch[2]), requestId);
         } catch (error) {
           throw new ApiError(400, 40063, error instanceof Error ? error.message : String(error));
         }
@@ -649,7 +649,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
         try {
           const page = await history.messages(agent, nativeSessionId, validateHistoryMessagesQuery(url.searchParams));
           if (!page) throw new ApiError(404, 40430, "历史会话不存在或无法读取");
-          respond(response, 200, 0, "success", page, requestId);
+          await respond(response, 200, 0, "success", page, requestId);
         } catch (error) {
           if (error instanceof HistoryQueryError) throw new ApiError(400, 40034, error.message);
           throw error;
@@ -658,12 +658,12 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
         const id = decodeURIComponent(detailMatch[1]);
         const session = manager.get(id);
         if (!session) throw new ApiError(404, 40401, `会话不存在：${id}`);
-        respond(response, 200, 0, "success", { session }, requestId);
+        await respond(response, 200, 0, "success", { session }, requestId);
       } else if (method === "DELETE" && detailMatch) {
         const id = decodeURIComponent(detailMatch[1]);
         const removed = await manager.remove(id);
         if (!removed) throw new ApiError(404, 40401, `会话不存在：${id}`);
-        respond(response, 200, 0, "success", {
+        await respond(response, 200, 0, "success", {
           removedSessionId: id,
           transcriptsDeleted: false,
           nativeTranscriptPath: removed.nativeTranscriptPath,
@@ -700,7 +700,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
     const apiError = error instanceof ApiError
       ? error
       : new ApiError(500, 50000, error instanceof Error ? error.message : String(error));
-    if (!response.headersSent) respond(response, apiError.status, apiError.code, apiError.message, {}, requestId);
+    if (!response.headersSent) await respond(response, apiError.status, apiError.code, apiError.message, {}, requestId);
     log("error", "request failed", {
       request_id: requestId,
       method: request.method,
@@ -883,18 +883,18 @@ function decodeHistorySegment(value: string): string {
   }
 }
 
-function respond(
+async function respond(
   response: ServerResponse,
   status: number,
   code: number,
   msg: string,
   data: unknown,
   requestId: string,
-): void {
+): Promise<void> {
   const json = JSON.stringify({ code, msg, data, request_id: requestId });
   // 长会话快照可达十几 MB，手机走远程时 10 秒内下不完；大响应按 Accept-Encoding 用 gzip（level 1：约 1/5 体积、百毫秒内）
   const gzip = json.length > 32 * 1024 && /\bgzip\b/.test(String(response.req?.headers["accept-encoding"] ?? ""));
-  const body = gzip ? gzipSync(json, { level: 1 }) : json;
+  const body = gzip ? await compressResponse(json) : json;
   response.writeHead(status, {
     "content-type": "application/json; charset=utf-8",
     "content-length": Buffer.byteLength(body),

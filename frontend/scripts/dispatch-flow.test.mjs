@@ -9,10 +9,10 @@ import { fetchDispatches } from '../src/api.ts';
 
 globalThis.React = React;
 globalThis.WebSocket = { CONNECTING: 0, OPEN: 1, CLOSING: 2, CLOSED: 3 };
-globalThis.window = { location: { hash: '#/' }, addEventListener() {} };
+globalThis.window = { location: { hash: '#/' }, innerWidth: 1280, addEventListener() {} };
 const { Store, store } = await import('../src/store.ts');
 const { App } = await import('../src/App.tsx');
-const { DispatchView } = await import('../src/components/DispatchView.tsx');
+const { DispatchView, DispatchTree } = await import('../src/components/DispatchView.tsx');
 let pass = 0;
 const t = async (name, fn) => { try { await fn(); pass++; } catch (e) { console.error(`❌ ${name}\n${e.stack}`); process.exitCode = 1; } };
 const now = Date.parse('2026-10-01T10:00:00Z');
@@ -113,32 +113,125 @@ await t('加载失败后可重试；初始隐藏零请求', async () => {
   assert.equal(calls, 0); visible = true; change(); await Promise.resolve(); await Promise.resolve(); assert.equal(error, '离线');
   timers.get(3000)(); await Promise.resolve(); await Promise.resolve(); assert.equal(data, 1); assert.equal(error, ''); stop();
 });
-await t('派单 toggle 恢复主区会话/历史预览/页面；手机返回侧栏，路由离开清除选中态', () => {
+await t('面板路由保留会话/历史预览/页面；关闭恢复，主页和旧链接可用', () => {
   const s = new Store(); s.ensureLoaded = async () => {};
-  s.navigate('session-a'); s.toggleDispatches(); assert.equal(s.dispatchesOpen, true); assert.equal(window.location.hash, '#/dispatches');
+  s.navigate('session-a'); s.toggleDispatches();
+  assert.equal(s.dispatchesOpen, true); assert.equal(s.currentId, 'session-a');
+  assert.equal(window.location.hash, '#/dispatches');
   s.toggleDispatches(); assert.equal(s.currentId, 'session-a'); assert.equal(window.location.hash, '#/session/session-a');
   s.navigateHistory(); s.selectHistory({ title: '预览' }); const preview = s.historySelection;
-  s.toggleDispatches(); assert.equal(s.historyOpen, false); s.toggleDispatches(); assert.equal(s.historySelection, preview); assert.equal(s.currentId, 'session-a');
-  s.navigatePage('ai-usage'); s.toggleDispatches(); s.toggleDispatches(); assert.equal(s.currentPageId, 'ai-usage');
-  s.navigate('session-a'); s.toggleDispatches(); s.closeDispatches(true); assert.equal(s.currentId, null); assert.equal(s.dispatchesOpen, false);
-  s.navigateHistory(); s.selectHistory({ title: '预览' }); s.toggleDispatches(); s.closeDispatches(true); assert.equal(s.historyOpen, true); assert.equal(s.historySelection, null);
+  s.toggleDispatches(); assert.equal(s.historyOpen, true); assert.equal(s.historySelection, preview);
+  s.toggleDispatches(); assert.equal(s.historySelection, preview); assert.equal(s.currentId, 'session-a');
+  s.navigatePage('ai-usage'); s.toggleDispatches(); assert.equal(s.currentPageId, 'ai-usage');
+  s.toggleDispatches(); assert.equal(s.currentPageId, 'ai-usage');
+  s.navigate('session-a');
+  for (const hash of ['#/dispatches', '#/dispatches/run-one', '#/dispatches?runs=one,two']) {
+    window.location.hash = hash; s.onHashChange();
+    assert.equal(s.currentId, 'session-a'); assert.ok(s.dispatchesOpen);
+    s.closeDispatches(); assert.equal(window.location.hash, '#/session/session-a');
+  }
   s.toggleDispatches(); s.navigatePage('ai-usage'); assert.equal(s.dispatchesOpen, false);
-  const fresh = new Store(); window.location.hash = '#/dispatches'; fresh.onHashChange(); assert.ok(fresh.dispatchesOpen); fresh.toggleDispatches(); assert.equal(window.location.hash, '#/');
+  const fresh = new Store(); window.location.hash = '#/dispatches/run-one'; fresh.onHashChange();
+  assert.ok(fresh.dispatchesOpen); assert.equal(fresh.currentId, null);
+  fresh.closeDispatches(); assert.equal(window.location.hash, '#/');
 });
-await t('派单在主区，三个执行端常驻、入口顺序/选中态和手机返回；无详情原文或操控', () => {
-  store.toggleDispatches();
+await t('终端与派单所有打开入口互斥，切详情不关闭面板或丢失会话', () => {
+  const s = new Store(); s.ensureLoaded = async () => {};
+  s.navigate('parent'); s.setTerminalOpen(true);
+  s.toggleDispatches(); assert.ok(s.dispatchesOpen); assert.equal(s.termOpen, false);
+  s.navigateDispatches(['one']); assert.equal(s.currentId, 'parent');
+  s.setTerminalOpen(true); assert.equal(s.dispatchesOpen, false); assert.ok(s.termOpen);
+  assert.equal(window.location.hash, '#/session/parent');
+  s.navigateDispatches(['one', 'two']); assert.equal(s.termOpen, false); assert.ok(s.dispatchesOpen);
+  s.setTerminalOpen(true); window.location.hash = '#/dispatches/old-link'; s.onHashChange();
+  assert.equal(s.termOpen, false); assert.ok(s.dispatchesOpen);
+  s.closeDispatches(); assert.equal(s.currentId, 'parent'); assert.equal(s.termOpen, false);
+});
+await t('派单与主区并列，当前会话仍有输入框；主页仍可打开并关闭', () => {
+  store.ensureLoaded = async () => {};
+  store.sessions = [{ id: 'parent', agent: 'claude', cwd: '/repo', status: 'idle', createdAt: iso(now), title: '父会话', config: {} }];
+  store.navigate('parent'); store.navigateDispatches();
   const html = renderToStaticMarkup(React.createElement(App));
   const main = html.match(/<main class="main">([\s\S]*?)<\/main>/)[1];
-  assert.ok(html.includes('class="app has-main"')); assert.ok(main.includes('aria-label="派单流程图"'));
+  assert.ok(main.includes('composer-box')); assert.ok(main.includes('/repo'));
+  assert.ok(!main.includes('派单面板')); assert.ok(html.indexOf('aria-label="派单面板"') > html.indexOf('</main>'));
+  assert.ok(html.includes('aria-label="关闭派单面板"')); assert.ok(html.includes('aria-label="调整派单面板宽度"'));
+  assert.ok(html.includes('aria-label="派单" aria-pressed="true"'));
+  assert.ok(main.includes('aria-label="派单" aria-pressed="true"'));
+  const sidebar = html.match(/<aside class="sidebar(?: sidebar-page-open)?">([\s\S]*?)<\/aside>/)[1];
+  assert.ok(!sidebar.includes('aria-label="派单"'));
+  store.closeDispatches(); const closed = renderToStaticMarkup(React.createElement(App));
+  assert.ok(closed.includes('composer-box')); assert.ok(!closed.includes('aria-label="派单面板"'));
+  store.navigate(null); store.navigateDispatches(); const home = renderToStaticMarkup(React.createElement(App));
+  assert.ok(home.includes('aria-label="派单面板"')); assert.ok(home.includes('新建会话'));
+  store.closeDispatches(); assert.equal(store.currentId, null);
   const flow = renderToStaticMarkup(React.createElement(DispatchView));
   assert.equal((flow.match(/dispatch-node dispatch-executor idle/g) || []).length, 3);
-  assert.ok(main.includes('‹ 返回侧栏')); assert.ok(html.includes('aria-label="派单" aria-pressed="true"'));
-  assert.ok(html.indexOf('aria-label="派单"') < html.indexOf('aria-label="所有来源会话"'));
-  assert.ok(!main.includes('summary')); assert.ok(!main.includes('重派'));
+  assert.ok(!flow.includes('dispatch-intro')); assert.ok(!flow.includes('谁在接力'));
   const css = readFileSync(new URL('../src/styles.css', import.meta.url), 'utf8');
+  assert.ok(!css.includes('dispatch-intro'));
   assert.match(css, /--agent-copilot:\s+light-dark\(#8053C8, #B69AEB\)/);
   assert.match(css, /@container dispatch \(min-width: 720px\)/);
   assert.match(css, /\.dispatch-wire.flow \{ animation: none; stroke-dasharray: none/);
+  assert.match(css, /\.app.term-open \.main \{\s*display: none/);
+  assert.match(css, /\.workspace.term-open \.term-panel \{[\s\S]*?width: auto !important/);
+});
+await t('子 agent 两层递归卡片、昵称/档位/状态、动态一行与 Codex 连线；超过四个换行', () => {
+  const agent = (threadId, over = {}) => ({ threadId, nickname: threadId, role: 'sol', depth: 1,
+    parentThreadId: 'parent', status: 'running', startedAt: iso(now), lastActivityAt: iso(now),
+    activity: '正在核对夹具', ...over });
+  const subagents = [agent('Carver'), agent('Luna', { role: 'luna', status: 'finished', activity: '已结束不显示的动态' }),
+    agent('Unknown', { status: 'unknown' }), ...Array.from({ length: 3 }, (_, i) => agent(`Child${i}`)),
+    agent('Nested', { depth: 2, parentThreadId: 'Carver' }),
+    agent('TooDeep', { depth: 3, parentThreadId: 'Nested' }), agent('Orphan', { depth: 2, parentThreadId: 'missing' })];
+  const groups = groupDispatches([run({ session: 'parent', subagents })], now);
+  const html = renderToStaticMarkup(React.createElement(DispatchTree, { groups, title: '派单人', model: null, now }));
+  assert.equal((html.match(/class="dispatch-node dispatch-subagent"/g) || []).length, 7);
+  assert.equal((html.match(/class="dispatch-subagents"/g) || []).length, 2);
+  assert.ok(html.includes('Codex 子 agent 第 1 层')); assert.ok(html.includes('Codex 子 agent 第 2 层'));
+  for (const text of ['Carver', 'luna', 'sol', '运行中', '已完成', '未知', '正在核对夹具']) assert.ok(html.includes(text));
+  assert.ok(html.includes('data-parent-id="Carver" data-depth="2"'));
+  assert.ok(!html.includes('TooDeep')); assert.ok(!html.includes('Orphan')); assert.ok(!html.includes('已结束不显示的动态'));
+  assert.equal((html.match(/dispatch-subagent-wire flow/g) || []).length, 5);
+  assert.ok(html.includes('dispatch-subagent-wire finish')); assert.ok(html.includes('dispatch-subagent-wire idle'));
+  assert.ok(html.includes('--wire-color:var(--agent-codex)'));
+  const css = readFileSync(new URL('../src/styles.css', import.meta.url), 'utf8');
+  assert.match(css, /\.dispatch-subagents \{ margin-top: 84px;[^{]*repeat\(4, minmax\(0, 1fr\)\)/);
+  assert.match(css, /\.dispatch-subagent \{[^}]*width: min\(100%, 150px\)/);
+  assert.match(css, /\.dispatch-subagents \{ margin-top: 130px/);
+  assert.match(css, /\.dispatch-subagent \{[^}]*border-top: 3px solid var\(--agent-codex\)/);
+  assert.match(css, /\.dispatch-executors \{ margin: 84px/);
+  assert.match(css, /\.dispatch-source \{ width: min\(260px, 72%\); min-height: 112px/);
+});
+await t('无子 agent 不新增层/连线；空数组和旧列表都保持原来三端布局', () => {
+  for (const subagents of [undefined, []]) {
+    const groups = groupDispatches([run({ subagents })], now);
+    const html = renderToStaticMarkup(React.createElement(DispatchTree, { groups, title: '派单人', model: null, now }));
+    assert.ok(!html.includes('dispatch-subagent')); assert.ok(!html.includes('Codex 子 agent'));
+    assert.equal((html.match(/class="dispatch-node dispatch-executor/g) || []).length, 3);
+    assert.equal((html.match(/class="dispatch-wire /g) || []).length, 3);
+  }
+});
+await t('关闭面板或切到终端后停止列表轮询和走秒，清理在途请求', async () => {
+  for (const close of [s => s.closeDispatches(), s => s.setTerminalOpen(true)]) {
+    const s = new Store(); s.navigateDispatches();
+    const timers = new Map(); let signal, resolve, received = 0, ticks = 0;
+    const stop = startDispatchPolling({ visible: () => s.dispatchesOpen, now: () => now,
+      every: (fn, ms) => { timers.set(ms, fn); return ms; }, cancel: id => timers.delete(id), onVisibility: () => () => {},
+    }, value => { signal = value; return new Promise(done => { resolve = done; }); }, () => received++, () => {}, () => ticks++);
+    assert.deepEqual([...timers.keys()], [3000, 1000]);
+    close(s); stop(); // App 的条件渲染在关闭/互斥时卸载 DispatchPanel。
+    assert.equal(timers.size, 0); assert.ok(signal.aborted);
+    const previousTicks = ticks; resolve({ dispatches: [run()] });
+    await Promise.resolve(); await Promise.resolve();
+    assert.equal(received, 0); assert.equal(ticks, previousTicks);
+  }
+  const app = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8');
+  assert.ok(app.includes('{dispatchesOpen && <DispatchPanel'));
+  const detail = readFileSync(new URL('../src/components/DispatchDetail.tsx', import.meta.url), 'utf8');
+  const history = readFileSync(new URL('../src/components/DispatchHistory.tsx', import.meta.url), 'utf8');
+  assert.ok(detail.includes('request?.abort()')); assert.ok(detail.includes('window.clearInterval(tick)'));
+  assert.ok(history.includes('controller.abort()')); assert.ok(history.includes('window.clearInterval(timer)'));
 });
 if (!process.exitCode) console.log(`✅ dispatch flow 全过（${pass} 例）`);
 process.exit(process.exitCode ?? 0);

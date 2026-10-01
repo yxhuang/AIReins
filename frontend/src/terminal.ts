@@ -14,10 +14,10 @@ export const TERM_DEFAULT_WIDTH = 480;
  * 视口过窄（上限 < 下限）时区间为空，按下限 320 收口——宁挤主区也不让面板消失；
  * 非有限输入（坏 localStorage 数据）按默认宽度再 clamp。
  */
-export function clampPanelWidth(width: number, viewportWidth: number): number {
-  const max = Math.max(TERM_MIN_WIDTH, viewportWidth - TERM_MAIN_MIN_WIDTH);
-  if (!Number.isFinite(width)) return Math.min(TERM_DEFAULT_WIDTH, max);
-  return Math.min(Math.max(TERM_MIN_WIDTH, Math.round(width)), max);
+export function clampPanelWidth(width: number, viewportWidth: number, minWidth = TERM_MIN_WIDTH, defaultWidth = TERM_DEFAULT_WIDTH): number {
+  const max = Math.max(minWidth, viewportWidth - TERM_MAIN_MIN_WIDTH);
+  if (!Number.isFinite(width)) return Math.min(defaultWidth, max);
+  return Math.min(Math.max(minWidth, Math.round(width)), max);
 }
 
 /** 手机快捷键栏按键 → 发往终端的控制序列。 */

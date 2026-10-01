@@ -6,6 +6,7 @@ import type {
   QuestionAnswers,
   SessionConfig,
   UserMessageInput,
+  SendUserMessageOptions,
 } from "../types.js";
 import { relative, sep } from "node:path";
 import { isRiskyConfig, mergeSessionConfig } from "../session-config.js";
@@ -189,6 +190,7 @@ export class CodexDriver extends BaseDriver {
   private readonly userInputs = new Map<string, CodexUserInput>();
   private threadId = "";
   private turnId = "";
+  private startingTurn?: Promise<void>;
   private configSchema = codexConfigSchemaFromModels([], undefined);
   private sendModel: boolean;
   private sendEffort: boolean;
@@ -363,7 +365,7 @@ export class CodexDriver extends BaseDriver {
     return { ...this.config };
   }
 
-  async sendUserMessage(message: UserMessageInput): Promise<void> {
+  async sendUserMessage(message: UserMessageInput, options?: SendUserMessageOptions): Promise<void> {
     if (!this.threadId) throw new Error("Codex thread 尚未就绪");
     if (message.command) throw new Error("Codex 命令必须通过会话命令接口执行");
     const input: Record<string, unknown>[] = [];
@@ -407,11 +409,22 @@ export class CodexDriver extends BaseDriver {
       const listing = await this.queryInfo("skills") as ReturnType<typeof codexSkillsForCwd>;
       input.push(...codexSkillInputs(text, listing.skills));
     }
+    if (options?.steer) {
+      // turn/start 的响应尚未到达时等待 ID；不得清空当前回合或套用下一轮配置。
+      if (this.startingTurn) await withTimeout(this.startingTurn, 15_000, "Codex 等待当前回合 ID");
+      if (!this.turnId) throw new Error("Codex 当前没有可插话的回合，请重发消息");
+      await withTimeout(this.request("turn/steer", {
+        threadId: this.threadId,
+        expectedTurnId: this.turnId,
+        input,
+      }), 15_000, "Codex turn/steer");
+      return;
+    }
     this.callbacks.status("running");
     this.turnId = "";
     const applyingConfig = this.capturePendingConfig();
     const permissions = codexPermissions(this.config.permissionMode ?? "on-request");
-    void this.request("turn/start", {
+    this.startingTurn = this.request("turn/start", {
       threadId: this.threadId,
       input,
       approvalPolicy: permissions.approvalPolicy,
@@ -622,9 +635,10 @@ export class CodexDriver extends BaseDriver {
       return;
     }
     if (method === "turn/completed") {
-      this.turnId = params.turn?.id ?? params.turnId ?? this.turnId;
+      const turnId = params.turn?.id ?? params.turnId ?? this.turnId;
+      this.turnId = "";
       this.callbacks.emit("turn_completed", {
-        turnId: this.turnId,
+        turnId,
         status: params.turn?.status,
         error: params.turn?.error,
       });

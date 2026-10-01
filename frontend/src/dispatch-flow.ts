@@ -14,6 +14,13 @@ export interface DispatchRun {
   session: string | null;
   parent: { agent: string; sessionId: string | null; entrypoint: string | null; model?: string | null; runId?: string } | null;
   promptHead?: string | null;
+  subagents?: DispatchSubagent[];
+}
+
+export interface DispatchSubagent {
+  threadId: string; nickname: string; role: string | null; depth: number; parentThreadId: string;
+  status: "running" | "finished" | "unknown";
+  startedAt: string | null; lastActivityAt: string; activity?: string;
 }
 
 export const DISPATCH_TOOLS = ["codex", "kimi", "copilot"] as const;

@@ -1,6 +1,6 @@
-import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { Fragment, type ReactNode, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import type { CommandInfo, DriverConfigOption, SessionRecord } from "../types";
-import { truncateDisplayWidth } from "../format";
+import { sessionTitle, truncateDisplayWidth } from "../format";
 import { buildRenderItems, focusVisible, groupReadOnlyTools, promptCacheExpiry } from "../render-items";
 import { filterCommands, noteCommandUsed, readRecentCommands, recentInTable } from "../commands";
 import { extractMentionTokens, mentionQueryAt, mentionTokenEnd } from "../mentions";
@@ -16,9 +16,12 @@ import { ExternalHistoryView } from "./HistoryTimeline";
 import { ResumedHistory } from "./ResumedHistory";
 import { ClockIcon, ConfigPills, SendIcon, StopIcon, type MenuGroup, type MenuItem } from "./ConfigMenu";
 import { DirectoryBrowser } from "./DirectoryBrowser";
+import { insertFileMention, planFileMention } from "./FilePanel";
 import { SlashMenu } from "./SlashMenu";
 import { AgentIcon, VSCodeIcon } from "./AgentIcon";
 import { SessionDispatchLink } from "./SessionDispatchLink";
+import { PanelActions, PanelMenuItems } from "./PanelActions";
+import { PageIcon } from "./Sidebar";
 
 const selectMeta = (value: Store) => value.meta;
 const selectWsState = (value: Store) => value.wsState;
@@ -28,7 +31,9 @@ const selectNow = (value: Store) => value.now;
 /** 触屏设备（手机、平板）：软键盘的回车只换行，发送靠按钮或 Ctrl/⌘+Enter。 */
 const TOUCH = typeof window !== "undefined" && window.matchMedia?.("(pointer: coarse)").matches === true;
 
-export function SessionView({ session }: { session: SessionRecord }) {
+/** 手机顶栏（参照 Claude App）：返回 · 标题 · 「⋯」。mobileTail 是「⋯」左侧的闸门计数；
+ *  usage 是收进「⋯」的 AI 用量入口，两者由 App 提供。 */
+export function SessionView({ session, mobileTail, usage }: { session: SessionRecord; mobileTail?: ReactNode; usage?: UsageEntry }) {
   const running = session.status === "running" || session.status === "starting";
   const dead = session.status === "dead";
   const selectData = useCallback((value: Store) => value.data.get(session.id), [session.id]);
@@ -114,14 +119,25 @@ export function SessionView({ session }: { session: SessionRecord }) {
   return (
     <div className={`session agent-${session.agent}`}>
       <header className="session-head">
+        <button type="button" className="btn mobile-round mobile-back" aria-label="返回会话列表" title="会话列表" onClick={() => store.navigate(null)}>
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7" /></svg>
+        </button>
         <div className="session-head-main">
           <AgentIcon agent={session.agent} label={session.agent} />
           <span className="session-model mono"><ConfigSummary session={session} /></span>
           <span className="session-cwd mono" title={session.cwd}>{session.cwd}</span>
         </div>
+        <div className="mobile-title">
+          <span className="mobile-title-text">{sessionTitle(session, data?.events)}</span>
+          <span className="mobile-subtitle"><ConfigSummary session={session} /></span>
+        </div>
         <div className="session-head-actions">
-          <span className={`ws-dot ws-${wsState}`} title={`连接：${wsState}`} />
-          <ReleaseButton session={session} />
+          <div className="session-panel-controls">
+            <PanelActions />
+            {mobileTail && <div className="mobile-tail">{mobileTail}</div>}
+            <SessionMoreMenu session={session} usage={usage} />
+          </div>
+          {wsState !== "open" && <span className="ws-note" role="status">{wsState === "connecting" ? "正在重连…" : "连接已断开"}</span>}
         </div>
       </header>
 
@@ -197,14 +213,50 @@ export function SessionView({ session }: { session: SessionRecord }) {
   );
 }
 
-// 「VSCode / CLI 继续」：释放 worker、复制续接命令，桌面浏览器再打开 VSCode 协议链接。
-// 三家都显示；不可用原因写进 title，释放结果（含失败）就地短暂显示。
-function ReleaseButton({ session }: { session: SessionRecord }) {
+// 「VSCode 继续」：释放 worker、复制续接命令，桌面浏览器再打开 VSCode 协议链接。
+// 三家都显示；菜单内直接说明不可用原因，进度与结果留在标题栏。
+type UsageEntry = { icon: string; open: () => void };
+
+function SessionMoreMenu({ session, usage }: { session: SessionRecord; usage?: UsageEntry }) {
+  const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<{ text: string; error: boolean } | null>(null);
   const noticeTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const rootRef = useRef<HTMLSpanElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const wasOpen = useRef(false);
+  const menuId = useId();
+  const closeMenu = useCallback(() => setOpen(false), []);
 
   useEffect(() => () => clearTimeout(noticeTimer.current), []);
+
+  useEffect(() => {
+    if (!open) {
+      if (wasOpen.current) triggerRef.current?.focus();
+      wasOpen.current = false;
+      return;
+    }
+    wasOpen.current = true;
+    // 手机专用项在桌面 display:none，跳过不可见按钮
+    const firstVisible = [...menuRef.current?.querySelectorAll<HTMLButtonElement>("button:not(:disabled)") ?? []].find((button) => button.offsetParent);
+    (firstVisible ?? menuRef.current)?.focus();
+    const onKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      event.stopPropagation();
+      closeMenu();
+    };
+    const onPointerDown = (event: PointerEvent) => {
+      if (rootRef.current && !rootRef.current.contains(event.target as Node)) closeMenu();
+    };
+    document.addEventListener("keydown", onKeyDown);
+    document.addEventListener("pointerdown", onPointerDown);
+    return () => {
+      document.removeEventListener("keydown", onKeyDown);
+      document.removeEventListener("pointerdown", onPointerDown);
+    };
+  }, [open, closeMenu]);
 
   const showNotice = (text: string, error: boolean) => {
     clearTimeout(noticeTimer.current);
@@ -212,16 +264,21 @@ function ReleaseButton({ session }: { session: SessionRecord }) {
     noticeTimer.current = setTimeout(() => setNotice(null), 6000);
   };
 
-  const canRelease = !busy && session.status === "idle" && !session.released && Boolean(session.nativeSessionId);
-  const title = session.released
-    ? "worker 已释放；下次发送时自动从磁盘续接"
-    : !session.nativeSessionId
-      ? "首轮完成前没有原生会话 id，无法释放"
-      : session.status !== "idle"
-        ? "会话空闲时才能释放"
-        : "VSCode / CLI 继续：释放 worker、复制续接命令，桌面端尝试打开 VSCode";
+  const disabledReason = busy
+    ? "正在释放 worker，请稍候"
+    : session.released
+      ? "worker 已释放；下次发送时自动从磁盘续接"
+      : !session.nativeSessionId
+        ? "首轮完成前没有原生会话 id，无法释放"
+        : session.status !== "idle"
+          ? "会话空闲时才能释放"
+          : null;
+  const canRelease = disabledReason === null;
+  const title = disabledReason ?? "VSCode 继续：释放 worker、复制续接命令，桌面端尝试打开 VSCode";
 
   const onClick = async () => {
+    if (!canRelease) return;
+    closeMenu();
     setBusy(true);
     try {
       const { resumeCommand: command, vscodeUri } = await store.release(session.id);
@@ -245,16 +302,41 @@ function ReleaseButton({ session }: { session: SessionRecord }) {
     }
   };
 
+  const feedback = busy ? { text: "释放中…", error: false } : notice;
+
   return (
     <>
-      {notice && (
-        <span className={`release-note${notice.error ? " release-note-error" : ""}`} role={notice.error ? "alert" : "status"}>
-          {notice.text}
+      {feedback && (
+        <span className={`release-note${feedback.error ? " release-note-error" : ""}`} role={feedback.error ? "alert" : "status"}>
+          {feedback.text}
         </span>
       )}
-      <button type="button" className="btn" aria-label="VSCode / CLI 继续" disabled={!canRelease} title={title} onClick={() => void onClick()}>
-        {busy ? "释放中…" : <><VSCodeIcon /> / CLI 继续</>}
-      </button>
+      <span className="session-more" ref={rootRef}>
+        <button ref={triggerRef} type="button" className="btn session-more-trigger" aria-label="更多" title="更多" aria-haspopup="menu" aria-expanded={open} aria-controls={menuId}
+          onClick={() => open ? closeMenu() : setOpen(true)}
+          onKeyDown={(event) => {
+            if (event.key === "ArrowDown" || event.key === "ArrowUp") { event.preventDefault(); setOpen(true); }
+          }}>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="1.5" /><circle cx="12" cy="12" r="1.5" /><circle cx="19" cy="12" r="1.5" /></svg>
+        </button>
+        <div id={menuId} className="session-more-menu" role="menu" aria-label="会话更多操作" ref={menuRef} tabIndex={-1} hidden={!open} onKeyDown={(event) => {
+          if (["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) {
+            event.preventDefault();
+            [...menuRef.current?.querySelectorAll<HTMLButtonElement>("button:not(:disabled)") ?? []].find((button) => button.offsetParent)?.focus();
+          }
+        }}>
+          <PanelMenuItems onDone={closeMenu} />
+          {usage && <button type="button" className="btn session-more-item session-more-mobile" role="menuitem" onClick={() => { closeMenu(); usage.open(); }}>
+            <PageIcon icon={usage.icon} /> AI 用量
+          </button>}
+          <hr className="session-more-mobile session-more-sep" />
+          <button type="button" className="btn session-more-item" role="menuitem" aria-label="VSCode 继续" disabled={!canRelease} aria-disabled={!canRelease}
+            aria-describedby={disabledReason ? `${menuId}-reason` : undefined} title={title} onClick={() => void onClick()}>
+            <VSCodeIcon /> VSCode 继续
+          </button>
+          {disabledReason && <p id={`${menuId}-reason`} className="session-more-reason">{disabledReason}</p>}
+        </div>
+      </span>
     </>
   );
 }
@@ -518,6 +600,7 @@ function Composer({ session, dead, errored }: { session: SessionRecord; dead: bo
     [session.id],
   );
   const commands = useStore(selectCommands);
+  const fileMentionRequest = useStore((value) => value.fileMentionRequest);
   useStore((value) => value.mentionVersion);
   // 草稿随会话恢复：SessionView 按会话 id key 重挂载，useState 惰性初始值即该会话草稿
   const [text, setText] = useState(() => store.getDraft(session.id));
@@ -541,6 +624,7 @@ function Composer({ session, dead, errored }: { session: SessionRecord; dead: bo
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   /** 选中补全项后要落到的光标位置（setText 之后在 effect 里应用） */
   const pendingCursor = useRef<number | null>(null);
+  const focusAfterInsert = useRef(false);
   /** @ 检索序号：晚到的旧响应丢弃 */
   const searchSeq = useRef(0);
   // 「+」附件：附件条状态、弹出菜单、「电脑上的文件」浏览器
@@ -700,10 +784,26 @@ function Composer({ session, dead, errored }: { session: SessionRecord; dead: bo
   // 补全插入后把光标落到插入路径之后
   useEffect(() => {
     if (pendingCursor.current !== null && textareaRef.current) {
+      if (focusAfterInsert.current) textareaRef.current.focus();
       textareaRef.current.setSelectionRange(pendingCursor.current, pendingCursor.current);
       pendingCursor.current = null;
+      focusAfterInsert.current = false;
     }
   }, [text]);
+
+  // 消费一次性面板请求；cursor 即输入框失焦前保存的位置。
+  useEffect(() => {
+    if (!fileMentionRequest || fileMentionRequest.sessionId !== session.id || store.currentId !== session.id) return;
+    if (!store.consumeFileMention(fileMentionRequest.version)) return;
+    const plan = planFileMention(session, mentionsSupported, fileMentionRequest.path);
+    if (dead || plan.path === null) return;
+    const next = insertFileMention(text, cursor, plan.path);
+    pendingCursor.current = next.cursor;
+    focusAfterInsert.current = true;
+    setText(next.text);
+    setCursor(next.cursor);
+    setDismissed(false);
+  }, [fileMentionRequest, session.id, session.cwd, dead, mentionsSupported, text, cursor]);
 
   // 卸载时回收全部本地预览 URL
   useEffect(() => {
@@ -1108,6 +1208,9 @@ function Composer({ session, dead, errored }: { session: SessionRecord; dead: bo
         </div>
       )}
       {codexResult && <CodexCommandPanel result={codexResult} onClose={closeCodexResult} />}
+      {session.agent === "kimi" && session.status === "running" && (
+        <div className="composer-hint" role="status">Kimi 不支持运行中插话；发送将排队到当前回合结束，停止执行会取消队列。</div>
+      )}
       {attachments.length > 0 && (
         <div className="attach-bar" aria-label="待发送附件">
           {attachments.map((att) => (
@@ -1243,7 +1346,7 @@ function Composer({ session, dead, errored }: { session: SessionRecord; dead: bo
           {session.agent === "claude" && <RemoteControlPill session={session} />}
           <ConfigControls session={session} />
           {session.agent === "claude" && <CacheTimer session={session} />}
-          {/* 运行中且输入框为空：发送键变中断键；有内容时仍是发送（运行中可追加消息） */}
+          {/* 运行中且输入框为空：发送键变中断键；有内容时插话，Kimi 降级为排队 */}
           {session.status === "running" && caps?.interrupt && session.processId
             && !text.trim() && readyMentions.length === 0 ? (
             <button
@@ -1260,7 +1363,7 @@ function Composer({ session, dead, errored }: { session: SessionRecord; dead: bo
               type="button"
               className="send-btn"
               aria-label="发送"
-              title="发送"
+              title={session.status === "running" ? "插话（不中断）" : "发送"}
               disabled={dead || (!text.trim() && readyMentions.length === 0)}
               onClick={send}
             >

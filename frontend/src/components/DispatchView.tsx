@@ -63,8 +63,37 @@ export function DispatchView({ terminalOpen = false }: { terminalOpen?: boolean 
   const running = visibleRuns.filter((run) => run.status === "running").length;
   const title = dispatcherTitle(visibleRuns, sessions);
   const model = dispatcherModel(visibleRuns, sessions);
+
+  if (selectedId) return <DispatchDetail key={selectedId} runId={selectedId} sessions={sessions} terminalOpen={terminalOpen} />;
+
+  return (
+    <section className="dispatch-view" aria-label="派单流程图">
+      {error && <p className="dispatch-error" role="alert">派单加载失败：{error}（稍后自动重试）</p>}
+      <section className="dispatch-panel" aria-label="派单拓扑">
+        <div className="dispatch-panel-head"><strong>执行端</strong><span>{!loaded ? "正在加载…" : running ? `${running} 单运行中 · 3 个执行端` : visibleRuns.length ? "3 个执行端 · 最近结束" : "3 个执行端 · 全部空闲"}</span></div>
+        <DispatchTree groups={groups} title={title} model={model} highlighted={highlighted} now={now} />
+      </section>
+      {loaded && !error && !visibleRuns.length && <p className="dispatch-empty">现在没有派单</p>}
+      {highlighted.size > 0 && <p className="dispatch-note dispatch-highlight-note">已标出从会话跳转的 {highlighted.size} 张派单。</p>}
+      <DispatchHistory />
+    </section>
+  );
+}
+
+
+/** Kept separate so fixture rendering exercises the same topology as polling updates. */
+export function DispatchTree({ groups, title, model, highlighted = new Set<string>(), now = Date.now() }: {
+  groups: ReturnType<typeof groupDispatches>; title: string; model: string | null; highlighted?: ReadonlySet<string>; now?: number;
+}) {
+  const subagents = [...new Map(groups.filter((group) => group.tool === "codex").flatMap((group) =>
+    group.runs.flatMap((run) => run.subagents ?? [])).map((agent) => [agent.threadId, agent])).values()];
+  const firstLevel = subagents.filter((agent) => agent.depth === 1);
+  const parents = new Set(firstLevel.map((agent) => agent.threadId));
+  const levels = [firstLevel, subagents.filter((agent) => agent.depth === 2 && parents.has(agent.parentThreadId))];
+  const layoutKey = groups.map((group) => group.runs.map((run) => run.runId).join(",")).join(";")
+    + subagents.map((agent) => `${agent.threadId}:${agent.parentThreadId}:${agent.status}`).join(",");
   const tree = useRef<HTMLDivElement>(null);
-  const [geometry, setGeometry] = useState<{ width: number; height: number; paths: string[] }>({ width: 1, height: 1, paths: [] });
+  const [geometry, setGeometry] = useState<{ width: number; height: number; paths: string[]; subpaths: Record<string, string> }>({ width: 1, height: 1, paths: [], subpaths: {} });
   useLayoutEffect(() => {
     const element = tree.current;
     if (!element) return;
@@ -76,26 +105,30 @@ export function DispatchView({ terminalOpen = false }: { terminalOpen?: boolean 
       if (!box.width || !box.height || cards.length !== 3) return;
       const x = (source.left + source.right) / 2 - box.left;
       const y = source.bottom - box.top;
-      const spine = cards[0]!.left - box.left - 30;
-      const paths: string[] = [];
-      if (box.width < 720) {
-        const last = cards[2]!;
-        const lastY = (last.top + last.bottom) / 2 - box.top;
-        paths.push(`M ${x} ${y} V ${y + 12} Q ${x} ${y + 24} ${x - 12} ${y + 24} H ${spine + 12} Q ${spine} ${y + 24} ${spine} ${y + 36} V ${lastY - 12}`);
+      // 任何宽度都是从上往下的树（用户 10-01 定）：窄面板/手机只把卡片缩小，不改成竖排。
+      const paths = cards.map((card) => {
+        const endX = (card.left + card.right) / 2 - box.left;
+        const endY = card.top - box.top;
+        const bend = (endY - y) * .5;
+        return `M ${x} ${y} C ${x} ${y + bend} ${endX} ${endY - bend} ${endX} ${endY}`;
+      });
+      const codex = element.querySelector('.dispatch-executor[data-tool="codex"]')!;
+      const nodes = Array.from(element.querySelectorAll<HTMLElement>(".dispatch-subagent"));
+      const byThread = new Map(nodes.map((node) => [node.dataset.threadId, node]));
+      const subpaths: Record<string, string> = {};
+      for (const node of nodes) {
+        const parent = node.dataset.depth === "1" ? codex : byThread.get(node.dataset.parentId);
+        if (!parent) continue;
+        const from = parent.getBoundingClientRect();
+        const to = node.getBoundingClientRect();
+        const startX = (from.left + from.right) / 2 - box.left;
+        const startY = from.bottom - box.top;
+        const endX = (to.left + to.right) / 2 - box.left;
+        const endY = to.top - box.top;
+        const bend = (endY - startY) * .5;
+        subpaths[node.dataset.threadId!] = `M ${startX} ${startY} C ${startX} ${startY + bend} ${endX} ${endY - bend} ${endX} ${endY}`;
       }
-      for (const card of cards) {
-        if (box.width >= 720) {
-          const endX = (card.left + card.right) / 2 - box.left;
-          const endY = card.top - box.top;
-          const bend = (endY - y) * .5;
-          paths.push(`M ${x} ${y} C ${x} ${y + bend} ${endX} ${endY - bend} ${endX} ${endY}`);
-        } else {
-          const endX = card.left - box.left;
-          const endY = (card.top + card.bottom) / 2 - box.top;
-          paths.push(`M ${spine} ${endY - 12} V ${endY - 10} Q ${spine} ${endY} ${spine + 10} ${endY} H ${endX}`);
-        }
-      }
-      setGeometry({ width: box.width, height: box.height, paths });
+      setGeometry({ width: box.width, height: box.height, paths, subpaths });
     };
     draw();
     const observer = new ResizeObserver(draw);
@@ -103,20 +136,13 @@ export function DispatchView({ terminalOpen = false }: { terminalOpen?: boolean 
     // 行数变化时即使树总高不变，也要重算各卡片的中点。
     element.querySelectorAll(".dispatch-node").forEach((node) => observer.observe(node));
     return () => observer.disconnect();
-  }, [selectedId]);
-
-  if (selectedId) return <DispatchDetail key={selectedId} runId={selectedId} sessions={sessions} terminalOpen={terminalOpen} />;
+  }, [layoutKey]);
 
   return (
-    <section className="dispatch-view" aria-label="派单流程图">
-      <div className="dispatch-intro"><h1>谁在接力</h1><p>从派单会话，连到每个执行端。</p></div>
-      {error && <p className="dispatch-error" role="alert">派单加载失败：{error}（稍后自动重试）</p>}
-      <section className="dispatch-panel" aria-label="派单拓扑">
-        <div className="dispatch-panel-head"><strong>执行端</strong><span>{!loaded ? "正在加载…" : running ? `${running} 单运行中 · 3 个执行端` : visibleRuns.length ? "3 个执行端 · 最近结束" : "3 个执行端 · 全部空闲"}</span></div>
         <div className="dispatch-tree" ref={tree}>
           <svg className="dispatch-wires" viewBox={`0 0 ${geometry.width} ${geometry.height}`} preserveAspectRatio="none" aria-hidden="true">
-            {geometry.paths.length === 4 && <path className="dispatch-wire" d={geometry.paths[0]} vectorEffect="non-scaling-stroke" />}
-            {groups.map((group, index) => <path key={group.tool} className={`dispatch-wire ${group.wireState}`} d={geometry.paths[index + (geometry.paths.length === 4 ? 1 : 0)]} vectorEffect="non-scaling-stroke" style={{ "--wire-color": `var(--agent-${group.tool})` } as CSSProperties} />)}
+            {groups.map((group, index) => <path key={group.tool} className={`dispatch-wire ${group.wireState}`} d={geometry.paths[index]} vectorEffect="non-scaling-stroke" style={{ "--wire-color": `var(--agent-${group.tool})` } as CSSProperties} />)}
+            {levels.flat().map((agent) => <path key={agent.threadId} className={`dispatch-wire dispatch-subagent-wire ${agent.status === "running" ? "flow" : agent.status === "finished" ? "finish" : "idle"}`} d={geometry.subpaths[agent.threadId]} vectorEffect="non-scaling-stroke" style={{ "--wire-color": "var(--agent-codex)" } as CSSProperties} />)}
           </svg>
           <article className="dispatch-node dispatch-source">
             <div className="dispatch-source-head"><AgentIcon agent="claude" label="Claude Code" /><span>Claude Code</span><span className="dispatch-role">派单人</span></div>
@@ -144,11 +170,14 @@ export function DispatchView({ terminalOpen = false }: { terminalOpen?: boolean 
               </div>
             </article>)}
           </div>
+          {levels.map((agents, index) => agents.length > 0 && <div className="dispatch-subagents" aria-label={`Codex 子 agent 第 ${index + 1} 层`} key={index}>
+            {agents.map((agent) => <article className="dispatch-node dispatch-subagent" key={agent.threadId} data-thread-id={agent.threadId} data-parent-id={agent.parentThreadId} data-depth={agent.depth}>
+              <strong className="dispatch-subagent-name" title={agent.nickname}>{agent.nickname}</strong>
+              <p className="dispatch-model">{agent.role || "—"}</p>
+              <span className={`dispatch-status${agent.status === "finished" ? " finished" : ""}`}>{agent.status === "running" ? "运行中" : agent.status === "finished" ? "已完成" : "未知"}</span>
+              {agent.status === "running" && <p className="dispatch-activity" title={agent.activity || "执行中"}>{agent.activity || "执行中"}</p>}
+            </article>)}
+          </div>)}
         </div>
-      </section>
-      {loaded && !error && !visibleRuns.length && <p className="dispatch-empty">现在没有派单</p>}
-      {highlighted.size > 0 && <p className="dispatch-note dispatch-highlight-note">已标出从会话跳转的 {highlighted.size} 张派单。</p>}
-      <DispatchHistory />
-    </section>
   );
 }

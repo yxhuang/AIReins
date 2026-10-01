@@ -69,6 +69,23 @@ try {
   assert.equal(fallback.headers["content-encoding"], undefined); assert.equal(fallback.data.toString(), "body{}");
   const sessions = JSON.parse((await get("/api/sessions")).data.toString()).data.sessions;
   assert.equal(sessions[0].title, "测试标题"); assert.equal(sessions[0].pendingGateCount, 0);
+  const snapshots = await Promise.all(Array.from({ length: 3 }, () => get("/api/sessions/test/snapshot", "gzip")));
+  const requestIds = new Set<string>();
+  for (const result of snapshots) {
+    assert.equal(result.headers["content-encoding"], "gzip");
+    assert.equal(result.headers.vary, "accept-encoding");
+    assert.equal(result.headers["cache-control"], "no-store");
+    assert.equal(Number(result.headers["content-length"]), result.data.length);
+    const envelope = JSON.parse(gunzipSync(result.data).toString());
+    assert.equal(envelope.code, 0);
+    assert.equal(envelope.data.seq, 1002);
+    assert.deepEqual(envelope.data.events, events);
+    requestIds.add(envelope.request_id);
+  }
+  assert.equal(requestIds.size, 3, "并发压缩仍保留各自请求信封");
+  const plainSnapshot = await get("/api/sessions/test/snapshot");
+  assert.equal(plainSnapshot.headers["content-encoding"], undefined);
+  assert.equal(JSON.parse(plainSnapshot.data.toString()).data.seq, 1002);
   ws = new WebSocket(`ws://127.0.0.1:${port}/ws`);
   const frames: Record<string, any>[] = [];
   const waitFrame = (predicate: (frame: Record<string, any>) => boolean) => new Promise<void>((resolve) => {

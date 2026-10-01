@@ -32,6 +32,12 @@ export function UserBlockView({ item }: { item: UserBlock }) {
   return (
     <div className="user-block">
       <div className="user-block-body">
+        {item.steer && (
+          <span className="user-attach-tag" style={{ display: "inline-block", marginBottom: 4 }}
+            title={item.queued ? "Kimi 不支持运行中插话；此消息在当前回合结束后发送" : "已插入当前回合，不中断正在执行的工具"}>
+            {item.queued ? "排队（Kimi 不支持插话，回合结束后发送）" : "插话"}
+          </span>
+        )}
         <UserMessageText text={item.text} />
         {mentions.length > 0 && (
           <div className="user-attach-list">

@@ -52,6 +52,8 @@ class FakeClaudeDriver implements Driver {
   }
 
   async setConfig(config: SessionConfig): Promise<SessionConfig> {
+    // 此组保留原重启路径的验收：模拟不支持热切换的旧 CLI。
+    if (this.kind === "claude" && (config.model !== undefined || config.effort !== undefined)) throw new Error("hot switch unsupported");
     this.config = { ...this.config, ...config };
     return { ...this.config };
   }
@@ -166,8 +168,8 @@ manager.onEvent((event) => events.push(event));
 
 const modelOption = CLAUDE_CONFIG_SCHEMA.options.find((option) => option.id === "model");
 const effortOption = CLAUDE_CONFIG_SCHEMA.options.find((option) => option.id === "effort");
-assert.deepEqual([modelOption?.mutable, modelOption?.mutableVia], [true, "restart"]);
-assert.deepEqual([effortOption?.mutable, effortOption?.mutableVia], [true, "restart"]);
+assert.deepEqual([modelOption?.mutable, modelOption?.mutableVia], [true, "control"]);
+assert.deepEqual([effortOption?.mutable, effortOption?.mutableVia], [true, "control"]);
 
 const launchArgs = claudeLaunchArgs(
   { model: "sonnet", effort: "high", permissionMode: "manual" },

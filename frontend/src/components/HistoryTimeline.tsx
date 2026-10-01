@@ -1,5 +1,7 @@
+import { memo, useMemo } from "react";
 import type { AgentKind, HistoryMessage } from "../types";
-import { buildHistoryRenderItems, focusVisible, groupReadOnlyTools, type ExternalHistoryBlock } from "../render-items";
+import { focusVisible, type ExternalHistoryBlock } from "../render-items";
+import { historyRenderItems } from "../history-render-cache";
 import { MarkdownMessage } from "./MarkdownMessage";
 import { ReadOnlyToolGroup, ThoughtBlockView, ToolCard, UserBlockView } from "./StreamItems";
 import type { Store } from "../store";
@@ -7,11 +9,11 @@ import { useStore } from "../useStore";
 
 const selectFocusView = (value: Store) => value.focusView;
 
-export function HistoryTimeline({ messages: all, agent, cwd }: { messages: HistoryMessage[]; agent: AgentKind; cwd: string }) {
+export const HistoryTimeline = memo(function HistoryTimeline({ messages: all, agent, cwd }: { messages: HistoryMessage[]; agent: AgentKind; cwd: string }) {
   // Focus view：历史区同样只留用户与助手文字
   const focusView = useStore(selectFocusView);
-  const grouped = groupReadOnlyTools(buildHistoryRenderItems(all), agent, cwd);
-  const items = focusView ? grouped.filter(focusVisible) : grouped;
+  const grouped = useMemo(() => historyRenderItems(all, agent, cwd), [all, agent, cwd]);
+  const items = useMemo(() => focusView ? grouped.filter(focusVisible) : grouped, [grouped, focusView]);
   return <div className="history-timeline">{items.map((item, index) => {
     if (item.kind === "user") return <UserBlockView key={item.key} item={item} />;
     const next = items[index + 1];
@@ -23,7 +25,7 @@ export function HistoryTimeline({ messages: all, agent, cwd }: { messages: Histo
         : item.kind === "text" && <div className="text-block"><MarkdownMessage text={item.text} /></div>}
     </div>;
   })}</div>;
-}
+});
 
 export function ExternalHistoryView({ item, agent, cwd }: { item: ExternalHistoryBlock; agent: AgentKind; cwd: string }) {
   return <section className="session-history" aria-label="在别处继续的对话">

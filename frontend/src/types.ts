@@ -47,7 +47,7 @@ export interface DriverConfigOption {
    * （claude 的 model/effort：停 worker → --resume 同一原生会话 → 带新参数重启，
    * 期间后端先广播 config_update_started，初始化成功后才有 config_updated）。
    */
-  mutableVia?: "restart";
+  mutableVia?: "restart" | "control";
 }
 
 export interface UnifiedEvent {

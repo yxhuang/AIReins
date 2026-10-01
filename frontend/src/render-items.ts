@@ -27,6 +27,8 @@ export interface UserBlock {
   key: string;
   seq: number;
   text: string;
+  steer?: boolean;
+  queued?: boolean;
   /** 随消息下行的附件/引用（@ 文件引用、「+」附件）；旧事件缺省 */
   mentions?: Mention[];
 }
@@ -322,6 +324,8 @@ function abnormalTurnReason(payload: Record<string, unknown>, agent: AgentKind):
   return typeof payload.stopReason === "string" && payload.stopReason !== "end_turn" ? payload.stopReason : null;
 }
 
+const externalHistoryMessages = new WeakMap<object, HistoryMessage[]>();
+
 export function buildRenderItems(events: UnifiedEvent[], agent: AgentKind): RenderItem[] {
   const items: RenderItem[] = [];
   const tools = new Map<string, ToolView>();
@@ -362,20 +366,23 @@ export function buildRenderItems(events: UnifiedEvent[], agent: AgentKind): Rend
       }
       case "user_message": {
         breakRun();
-        turn++;
+        if (p.steer !== true) turn++;
         const mentions = mentionsFromPayload(p.mentions);
         items.push({
           kind: "user",
           key: `user:${event.seq}`,
           seq: event.seq,
           text: String(p.text ?? ""),
+          ...(p.steer === true ? { steer: true } : {}),
+          ...(p.queued === true ? { queued: true } : {}),
           ...(mentions.length > 0 ? { mentions } : {}),
         });
         break;
       }
       case "external_messages_added": {
         breakRun();
-        const messages: HistoryMessage[] = Array.isArray(p.messages)
+        const cached = Array.isArray(p.messages) ? externalHistoryMessages.get(p.messages) : undefined;
+        const messages: HistoryMessage[] = cached ?? (Array.isArray(p.messages)
           ? p.messages.flatMap<HistoryMessage>((raw) => {
               if (!raw || typeof raw !== "object") return [];
               const item = raw as Record<string, unknown>;
@@ -390,7 +397,8 @@ export function buildRenderItems(events: UnifiedEvent[], agent: AgentKind): Rend
               if ((item.role !== "user" && item.role !== "assistant" && item.role !== "thought") || typeof item.text !== "string") return [];
               return [{ role: item.role, text: item.text, timestamp: typeof item.timestamp === "string" ? item.timestamp : null }];
             })
-          : [];
+          : []);
+        if (Array.isArray(p.messages) && !cached) externalHistoryMessages.set(p.messages, messages);
         items.push({ kind: "external-history", key: `external:${event.seq}`, seq: event.seq, messages, truncated: p.truncated === true });
         break;
       }

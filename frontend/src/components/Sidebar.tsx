@@ -12,7 +12,6 @@ import { pillText } from "../config-view";
 import { DirectoryBrowser } from "./DirectoryBrowser";
 import { HistoryView } from "./HistoryView";
 import { PageView } from "./PageView";
-import { TerminalIcon } from "./TerminalIcon";
 
 const AGENT_LABELS: Record<AgentKind, string> = {
   claude: "claude",
@@ -72,14 +71,10 @@ interface SidebarProps {
   onToggle: () => void;
   newOpen: boolean;
   onNewOpenChange: (open: boolean) => void;
-  /** meta.capabilities.terminal === true 才显示终端入口（按请求入口由后端计算） */
-  terminalCapable: boolean;
-  termOpen: boolean;
-  onToggleTerm: () => void;
   returnToSession?: boolean;
 }
 
-export function Sidebar({ collapsed, onToggle, newOpen, onNewOpenChange, terminalCapable, termOpen, onToggleTerm, returnToSession = false }: SidebarProps) {
+export function Sidebar({ collapsed, onToggle, newOpen, onNewOpenChange, returnToSession = false }: SidebarProps) {
   const sessionRecords = useStore(selectSessions);
   const now = useStore(selectNow);
   const currentId = useStore(selectCurrentId);
@@ -242,7 +237,7 @@ export function Sidebar({ collapsed, onToggle, newOpen, onNewOpenChange, termina
                   </button>
                 </li>
               )}
-              {/* 已结束会话单独滚动：展开很多条时不把底部的历史/终端/设置挤出画面 */}
+              {/* 已结束会话单独滚动：展开很多条时不把底部的历史/页面/设置挤出画面 */}
               {deadExpanded && dead.length > 0 && (
                 <li className="session-dead-group">
                   <ul className="session-list">{dead.map(renderRow)}</ul>
@@ -260,53 +255,12 @@ export function Sidebar({ collapsed, onToggle, newOpen, onNewOpenChange, termina
           </section>
         )}
         <div className="sidebar-foot">
-          <DispatchNav collapsed={collapsed} />
           <HistoryNav collapsed={collapsed} onPrepare={preparePanel} onClose={closePanel} />
           <PageNav collapsed={collapsed} onPrepare={preparePanel} onClose={closePanel} />
-          {terminalCapable && (
-            <TerminalNav collapsed={collapsed} open={termOpen} onToggle={onToggleTerm} />
-          )}
           <SettingsMenu />
         </div>
       </div>
     </aside>
-  );
-}
-
-function DispatchNav({ collapsed }: { collapsed: boolean }) {
-  const open = useStore((value) => value.dispatchesOpen);
-  return <nav className="page-nav" aria-label="派单">
-    <button type="button" className={`page-nav-item${open ? " active" : ""}`} aria-label="派单" aria-pressed={open} title="派单：查看派单流程图；再次点击返回原视图" onClick={() => store.toggleDispatches()}>
-      <span className="page-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M4 5h7v6H4zM13 13h7v6h-7zM15 5h5M18 3l2 2-2 2M4 17h5M7 15l2 2-2 2" /></svg></span>
-      {!collapsed && <span className="page-nav-name">派单</span>}
-    </button>
-  </nav>;
-}
-
-/** 左栏底部「终端」入口（页面分区下方、齿轮上方，同一套分区语言；收起态只显图标）。 */
-function TerminalNav({
-  collapsed,
-  open,
-  onToggle,
-}: {
-  collapsed: boolean;
-  open: boolean;
-  onToggle: () => void;
-}) {
-  return (
-    <nav className="page-nav" aria-label="终端">
-      <button
-        type="button"
-        className={`page-nav-item${open ? " active" : ""}`}
-        title="终端（Ctrl+`）：工作区级内置终端，切会话不影响"
-        aria-label="终端"
-        aria-pressed={open}
-        onClick={onToggle}
-      >
-        <TerminalIcon />
-        {!collapsed && <span className="page-nav-name">终端</span>}
-      </button>
-    </nav>
   );
 }
 

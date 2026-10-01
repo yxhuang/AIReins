@@ -11,7 +11,10 @@ export function DispatchHistory() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [page, setPage] = useState(0);
+  // 平时折叠（用户 10-01 定）：主视图看委派关系，历史展开时才加载和轮询。
+  const [open, setOpen] = useState(false);
   useEffect(() => {
+    if (!open) return;
     const controller = new AbortController();
     let inFlight = false;
     let active = true;
@@ -35,9 +38,9 @@ export function DispatchHistory() {
     const timer = window.setInterval(() => void load(), 15000);
     document.addEventListener("visibilitychange", load);
     return () => { active = false; controller.abort(); window.clearInterval(timer); document.removeEventListener("visibilitychange", load); };
-  }, [page]);
-  return <section className="dispatch-history" aria-label="近 7 天历史派单">
-    <div className="dispatch-section-head"><h2>近 7 天历史</h2><span>{total} 单已结束</span></div>
+  }, [page, open]);
+  return <details className="dispatch-history" aria-label="近 7 天历史派单" open={open} onToggle={(event) => setOpen(event.currentTarget.open)}>
+    <summary className="dispatch-section-head"><h2>近 7 天历史</h2><span>{loaded ? `${total} 单已结束` : "展开查看"}</span></summary>
     {error && <p className="dispatch-error" role="alert">历史加载失败：{error}</p>}
     {!loaded ? <p className="dispatch-note">正在加载…</p> : !runs.length ? <p className="dispatch-note">近 7 天没有已结束派单</p> : <div className="dispatch-history-list">{runs.map((run) => <button className="dispatch-history-row" key={run.runId} onClick={() => store.navigateDispatches([run.runId])}>
       <span className="dispatch-history-name">{dispatchName(run)}<span className="dispatch-note">{run.tool} · {run.model || "模型未知"}</span></span>
@@ -47,5 +50,5 @@ export function DispatchHistory() {
       <span aria-hidden="true">›</span>
     </button>)}</div>}
     {next !== null && <button className="btn dispatch-history-more" disabled={busy} onClick={() => setPage((value) => value + 1)}>{busy ? "加载中…" : "加载更多"}</button>}
-  </section>;
+  </details>;
 }

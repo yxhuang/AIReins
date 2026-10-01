@@ -1,12 +1,13 @@
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { isTerminalToggleKey } from "./terminal";
 import { PageIcon, Sidebar } from "./components/Sidebar";
-import { TerminalIcon } from "./components/TerminalIcon";
+import { PanelActions } from "./components/PanelActions";
+import { DispatchPanel } from "./components/DispatchPanel";
+import { FilePanel } from "./components/FilePanel";
 import { SessionView } from "./components/SessionView";
 import { HistoryPreviewPane } from "./components/HistoryView";
 // xterm 体积大（~300KB），第一次打开终端才按需加载，别拖慢手机首屏
 const TerminalPanel = lazy(() => import("./components/TerminalPanel").then((m) => ({ default: m.TerminalPanel })));
-const DispatchView = lazy(() => import("./components/DispatchView").then((m) => ({ default: m.DispatchView })));
 import { sessionTitle } from "./format";
 import { store, type Store } from "./store";
 import { shallowEqual, useStore } from "./useStore";
@@ -41,7 +42,8 @@ export function App() {
   const [returnToSession, setReturnToSession] = useState(false);
   const usagePage = useStore((value) => value.pages.find((page) => page.id === "ai-usage"));
   // 终端面板：隐藏 = CSS display:none，组件一旦挂载就常驻（xterm 实例与 WS 连接不丢）
-  const [termOpen, setTermOpen] = useState(false);
+  const termOpen = useStore((value) => value.termOpen);
+  const filesOpen = useStore((value) => value.filesOpen);
   const [termMounted, setTermMounted] = useState(false);
   useEffect(() => {
     if (termOpen) setTermMounted(true);
@@ -53,7 +55,7 @@ export function App() {
     const onKeyDown = (event: KeyboardEvent) => {
       if (!isTerminalToggleKey(event)) return;
       event.preventDefault();
-      if (!event.repeat) setTermOpen((value) => !value);
+      if (!event.repeat) store.setTerminalOpen(!store.termOpen);
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
@@ -74,8 +76,8 @@ export function App() {
     shallowEqual,
   );
   const pendingTotal = useStore(selectPendingTotal);
-  // 手机窄屏下，面板就是主页；派单、历史预览或会话进入主区。
-  const hasMain = Boolean(dispatchesOpen || historySelection || (current && !historyOpen && !currentPageId));
+  // 手机主区是否有内容独立于右侧面板，关闭后回到原会话或主页。
+  const hasMain = Boolean(historySelection || (current && !historyOpen && !currentPageId));
   useEffect(() => {
     if (historyOpen || currentPageId) setCollapsed(false);
   }, [historyOpen, currentPageId]);
@@ -91,8 +93,9 @@ export function App() {
 
   return (
     <div
-      className={`app${collapsed ? " sidebar-collapsed" : ""}${hasMain ? " has-main" : ""}${termOpen ? " term-open" : ""}`}
+      className={`app${collapsed ? " sidebar-collapsed" : ""}${hasMain ? " has-main" : ""}${termOpen || dispatchesOpen || filesOpen ? " term-open" : ""}`}
     >
+      {!hasMain && <div className="mobile-topbar mobile-panel-launcher"><PanelActions /></div>}
       <Sidebar
         collapsed={collapsed}
         onToggle={() => {
@@ -101,51 +104,32 @@ export function App() {
         }}
         newOpen={newOpen}
         onNewOpenChange={setNewOpen}
-        terminalCapable={terminalCapable}
-        termOpen={termOpen}
-        onToggleTerm={() => setTermOpen((v) => !v)}
         returnToSession={returnToSession}
       />
-      {/* .workspace 只包一层：.main 内部规则不动；终端开启时右侧追加分隔条 + 面板 */}
-      <div className={`workspace${termOpen ? " term-open" : ""}`}>
+      {/* 主会话保持挂载，三个面板互斥占用右侧位置；窄屏沿用终端全屏规则。 */}
+      <div className={`workspace${termOpen || dispatchesOpen || filesOpen ? " term-open" : ""}`}>
         <main className="main">
-          {hasMain && (
+          {historySelection && (
             <div className="mobile-topbar">
-              <button type="button" className="btn" onClick={() => {
-                if (dispatchesOpen) { store.closeDispatches(true); setCollapsed(false); }
-                else if (historySelection) store.backToHistoryList();
-                else store.navigate(null);
-              }}>
-                {dispatchesOpen ? "‹ 返回侧栏" : historySelection ? "‹ 所有来源会话" : "‹ 会话列表"}
-              </button>
-              <div className="mobile-topbar-actions">
+              <button type="button" className="btn" onClick={() => store.backToHistoryList()}>‹ 所有来源会话</button>
               {pendingTotal > 0 && (
-                <span className="gate-badge" title={`${pendingTotal} 个闸门等待处理`}>
-                  {pendingTotal}
-                </span>
+                <span className="gate-badge" title={`${pendingTotal} 个闸门等待处理`}>{pendingTotal}</span>
               )}
-              {current && !dispatchesOpen && !historySelection && <>
-                {usagePage && <button type="button" className="btn mobile-shortcut" aria-label="AI 用量" title="AI 用量" onClick={() => {
-                  setReturnToSession(true);
-                  setCollapsed(false);
-                  store.navigatePage(usagePage.id);
-                }}><PageIcon icon={usagePage.icon} /><span>AI 用量</span></button>}
-                {terminalCapable && <button type="button" className="btn mobile-shortcut" aria-label="终端" title="终端" onClick={() => setTermOpen(true)}>
-                  <TerminalIcon /><span>终端</span>
-                </button>}
-              </>}
-              </div>
             </div>
           )}
-          {dispatchesOpen ? (
-            <Suspense fallback={<div className="empty-state" aria-label="派单流程图">正在加载派单…</div>}>
-              <DispatchView terminalOpen={termOpen} />
-            </Suspense>
-          ) : historySelection ? (
+          {historySelection ? (
             <HistoryPreviewPane item={historySelection} onBack={() => store.backToHistoryList()} />
           ) : current ? (
-            <SessionView key={current.id} session={current} />
+            <SessionView key={current.id} session={current} mobileTail={pendingTotal > 0 ? (
+              <span className="gate-badge" title={`${pendingTotal} 个闸门等待处理`}>{pendingTotal}</span>
+            ) : undefined} usage={usagePage && { icon: usagePage.icon, open: () => {
+              setReturnToSession(true);
+              setCollapsed(false);
+              store.navigatePage(usagePage.id);
+            } }} />
           ) : (
+            <section className="welcome-view">
+            <div className="view-panel-actions"><PanelActions /></div>
             <div className="empty-state">
               <h1>workbench</h1>
               <p>
@@ -167,11 +151,14 @@ export function App() {
                 新建会话
               </button>
             </div>
+            </section>
           )}
         </main>
+        {dispatchesOpen && <DispatchPanel onClose={() => store.closeDispatches()} />}
+        {filesOpen && <FilePanel key={`${current?.id ?? ""}:${current?.cwd ?? ""}`} onClose={() => store.setFilesOpen(false)} />}
         {terminalCapable && termMounted && (
           <Suspense fallback={null}>
-            <TerminalPanel open={termOpen} onClose={() => setTermOpen(false)} />
+            <TerminalPanel open={termOpen} onClose={() => store.setTerminalOpen(false)} />
           </Suspense>
         )}
       </div>

@@ -161,7 +161,7 @@ export const CLAUDE_CONFIG_SCHEMA: DriverConfigSchema = {
       ],
       default: null,
       mutable: true,
-      mutableVia: "restart",
+      mutableVia: "control",
     },
     {
       id: "effort",
@@ -172,7 +172,7 @@ export const CLAUDE_CONFIG_SCHEMA: DriverConfigSchema = {
       ],
       default: null,
       mutable: true,
-      mutableVia: "restart",
+      mutableVia: "control",
     },
     {
       id: "permissionMode",
@@ -287,9 +287,23 @@ export class ClaudeDriver extends BaseDriver {
   }
 
   async setConfig(config: SessionConfig): Promise<SessionConfig> {
-    if (config.model !== undefined || config.effort !== undefined) {
-      throw new Error("Claude 的 model 与 effort 由会话管理层重启 worker 后生效");
+    this.validateConfig({ ...this.config, ...config });
+    const updated = { ...config };
+    if (config.model !== undefined) {
+      await this.requestControl({ subtype: "set_model", model: config.model });
     }
+    if (config.effort !== undefined) {
+      await this.requestControl({ subtype: "apply_flag_settings", settings: { effortLevel: config.effort } });
+    }
+    if (config.permissionMode !== undefined) {
+      updated.permissionMode = (await this.setPermissionMode(config.permissionMode)).permissionMode;
+    }
+    this.config = { ...this.config, ...updated };
+    return updated;
+  }
+
+  private async setPermissionMode(mode: SessionConfig["permissionMode"]): Promise<SessionConfig> {
+    const config = { permissionMode: mode };
     if (!config.permissionMode) throw new Error("Claude set_config 缺少 permissionMode");
     const option = CLAUDE_CONFIG_SCHEMA.options.find((item) => item.id === "permissionMode");
     if (!option?.values.some((item) => item.value === config.permissionMode)) {

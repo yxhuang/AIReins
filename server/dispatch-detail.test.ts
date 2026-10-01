@@ -5,13 +5,19 @@ import { join } from "node:path";
 import { getDispatch, getDispatchMessages, listDispatchHistory, listParentDispatches, DispatchQueryError } from "./dispatches.js";
 import { NativeConversationReader } from "./native-conversation.js";
 
+const realNow = Date.now;
+let cacheNow = realNow();
+Date.now = () => cacheNow;
 const root = await mkdtemp(join(tmpdir(), "wb-dispatch-detail-"));
 const previous = process.env.WB_DELEGATE_DIR;
+const previousHistory = process.env.WORKBENCH_CODEX_HISTORY_DIR;
 process.env.WB_DELEGATE_DIR = root;
+process.env.WORKBENCH_CODEX_HISTORY_DIR = join(root, "codex-history");
 const now = Date.parse("2026-10-01T12:00:00Z");
 async function fixture(id: string, metadata: object, files: Record<string, string> = {}) {
   const directory = join(root, id);
   await mkdir(directory);
+  cacheNow += 2001;
   await writeFile(join(directory, "run.json"), JSON.stringify({ schema: 1, ...metadata }));
   for (const [name, value] of Object.entries(files)) await writeFile(join(directory, name), value);
   return directory;
@@ -90,6 +96,9 @@ try {
   assert.equal((await getDispatchMessages(id, null, root, reader))?.source, "stdout");
   console.log("✅ dispatch detail: history pagination, parent matching, native deltas/tool updates and path escapes");
 } finally {
+  Date.now = realNow;
   if (previous === undefined) delete process.env.WB_DELEGATE_DIR;
   else process.env.WB_DELEGATE_DIR = previous;
+  if (previousHistory === undefined) delete process.env.WORKBENCH_CODEX_HISTORY_DIR;
+  else process.env.WORKBENCH_CODEX_HISTORY_DIR = previousHistory;
 }

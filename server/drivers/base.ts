@@ -13,6 +13,8 @@ import type {
   SessionConfig,
   FileMention,
   UserMessageInput,
+  SendUserMessageOptions,
+  SendUserMessageReceipt,
 } from "../types.js";
 
 const MAX_EMBEDDED_MENTION_BYTES = 1024 * 1024;
@@ -38,7 +40,7 @@ export abstract class BaseDriver implements Driver {
   abstract start(): Promise<void>;
   abstract getConfigSchema(): DriverConfigSchema;
   abstract setConfig(config: SessionConfig): Promise<SessionConfig>;
-  abstract sendUserMessage(message: UserMessageInput): Promise<void>;
+  abstract sendUserMessage(message: UserMessageInput, options?: SendUserMessageOptions): Promise<void | SendUserMessageReceipt>;
   abstract resolvePermission(
     requestId: string,
     decision: PermissionDecision,
@@ -104,7 +106,10 @@ export abstract class BaseDriver implements Driver {
       child.once("close", finish);
       const timer = setTimeout(() => {
         if (child.exitCode === null && child.signalCode === null) child.kill("SIGTERM");
-        setTimeout(finish, 1_000).unref();
+        setTimeout(() => {
+          if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+          finish();
+        }, 1_000).unref();
       }, 1_000);
       timer.unref();
     });

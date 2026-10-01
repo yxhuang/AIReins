@@ -249,6 +249,11 @@ interface Dispatch {
   session: string | null;
   parent: {agent: string; sessionId: string | null; entrypoint: string | null; model: string | null; runId?: string} | null;
   promptHead: string | null;
+  subagents?: Array<{
+    threadId: string; nickname: string; role: string | null; depth: number; parentThreadId: string;
+    status: "running" | "finished" | "unknown";
+    startedAt: string | null; lastActivityAt: string; activity?: string;
+  }>;
 }
 interface DispatchDetail extends Dispatch {
   prompt: string | null; promptTruncated: boolean;
@@ -340,9 +345,9 @@ Promise。复制前先检查目标文件系统可用空间至少为扫描量的 
 及非真实目录。当前不提供自动恢复，也没有任何覆盖用户 cwd 的代码；`snapshotPath` 只供界面
 展示，恢复由用户自行复制。
 
-`GET /api/meta` 的 `data.drivers.<agent>.options` 是前端配置控件的唯一事实源。每项结构为 `{id,name,values,default,mutable,mutableVia?}`；`default` 可以是 `null`，对应 values 中“跟随 … 配置”的标签；`mutable:false` 表示只能建会话时设置。`mutableVia:"restart"` 表示界面上允许修改，但代价是停止并重启底层 worker。来源如下：
+`GET /api/meta` 的 `data.drivers.<agent>.options` 是前端配置控件的唯一事实源。每项结构为 `{id,name,values,default,mutable,mutableVia?}`；`default` 可以是 `null`，对应 values 中“跟随 … 配置”的标签；`mutable:false` 表示只能建会话时设置。`mutableVia:"control"` 表示优先通过控制协议热切换；`mutableVia:"restart"` 表示需要重启底层 worker。来源如下：
 
-- Claude：CLI 启动 flag 与 stream-json control protocol；审批模式原生活改。模型和推理强度的 schema 为 `mutable:true, mutableVia:"restart"`。首条消息前切换会直接启动新 worker；发过消息或从历史续接的会话在空闲且已有 `nativeSessionId` 时通过“停止 worker → `--resume` 同一原生会话 → 带新 `--model / --effort` 重启”。
+- Claude：CLI 启动 flag 与 stream-json control protocol；审批模式原生活改。模型和推理强度为 `mutable:true, mutableVia:"control"`。空闲且无待审批闸门时，模型发送 `set_model {model}`，推理强度发送 `apply_flag_settings {settings:{effortLevel}}`；success 后即时更新配置、有效值及前端。错误或 15 秒超时回落到原重启路径；释放的会话只保存新配置，下次拉起带入 `--model / --effort`。
 - Codex：模型选项来自 `model/list`；默认 model/effort 来自 `config/read(cwd)` 返回的有效合并配置，而不是模型内建默认。创建或续接线程后，再以 `thread/start` / `thread/resume` 返回的实际 `model / reasoningEffort` 和 `approvalPolicy + approvalsReviewer + sandbox` 更新 session；权限模式是三者的组合，不能只用 `approvalPolicy` 回填。若旧版 app-server 无法提供 `config/read`，schema 的 model/effort 默认值为 `null`，不会猜值。effort 可选覆盖仍限定为 `minimal / low / medium / high / xhigh`；三项活修改在下一次 `turn/start` 生效。
 - Kimi：三项和值全部从一次真实 `session/new` 返回的 `configOptions` 转换，不在 Workbench 手抄；三项均通过 `session/set_config_option` 活改。
 
@@ -604,7 +609,9 @@ Claude 的 `config_updated`（包括首轮 init 精度提升）还会带完整�
 
 Codex 的首次 `config_updated.effectiveFrom` 为 `next_turn`，Claude 与 Kimi 为 `immediate`。Codex 下一次 `turn/start` 接受该配置后还会广播第二个 `config_updated`：`effectiveFrom:"current_turn"` 表示已经在该轮生效，`effectiveConfig` 是该轮确认生效的完整配置，`appliedFields` 是本次由“待生效”转为“已生效”的字段，另带原生 `turnId`。清除 Codex model/effort 覆盖时，下一次 `turn/start` 显式发送对应的 `null` 来清除 app-server 的 sticky override；报告值则回到 `config/read(cwd)` 得到的有效默认值。
 
-Claude 的 model/effort 切换先广播 `config_update_started`，其 payload 含 `message:"正在切换模型…"`、`mutableVia:"restart"`、旧/新配置与 native ID；新 worker 的初始化 control request 成功后再广播 `config_updated`，并带 `mutableVia:"restart"`、`workerRestarted:true` 以及四个 `effective*` 字段。显式字符串覆盖的初始 source 是 `session`；清除为 `null` 时立即重新按该 session 的 cwd 合并 settings。下一轮 init 若给出更精确运行时值，随后再以 `source:"init"` 广播 `current_turn` 更新。同一个 Workbench session 不变，事件 `seq` 继续递增，原生会话仍是同一 ID。若续接 worker 初始化失败，会进入 `session_error`，并恢复切换前的覆盖值、有效值和来源，不会假装切换完成。若当前状态为 `running`，明确拒绝并返回“当前回合尚未结束，请等待或中断后再切换”，不会停止 worker；若首轮前尚无 `nativeSessionId`，也会明确拒绝。重启参数始终重新带上 `--permission-mode` 与 `--permission-prompt-tool stdio`，因此审批 control_request 边界不会因换模型丢失。Codex/Kimi 继续使用既有原生活改路径，不经过重启。
+Claude 的 model/effort 切换优先热切换：模型走 `set_model`，effort 走 `apply_flag_settings`，控制回应 success 后广播 `config_updated`，含 `mutableVia:"control"`、`workerRestarted:false`、`effectiveFrom:"immediate"` 与四个 `effective*` 字段。`model:null` 使用 CLI 的会话默认模型语义；`effort:null` 尝试清除 flag 覆盖，若 CLI 拒绝则回落到不带 `--effort` 的重启路径。显式覆盖的有效值来源为 `session`；清除覆盖时按 cwd settings 恢复展示，后续 `system/init` 的实际值仍可用 `source:"init"` 校准。释放后变更不启动进程，事件为 `next_turn`，下一次拉起使用新配置。
+
+控制请求报错或超时才沿用重启路径：先广播 `config_update_started`（`mutableVia:"restart"`、旧/新配置及 native ID），再停止 worker；首条消息前直接重建，发过消息或导入历史时用 `--resume` 同一原生 ID。成功广播 `config_updated`（`workerRestarted:true`）；失败恢复旧配置/有效值/来源并发 `session_error`。回合进行中、starting 或有待审批闸门时拒绝模型/effort 切换；切换期间发送、释放、移除等操作保持互斥。热切换无需原生 ID，重启回落的续接仍需原生 ID。审批协议与最终闸门保持原行为，重启仍带 `--permission-mode` 和 `--permission-prompt-tool stdio`。Codex/Kimi 的切换路径不变。
 
 ## 文件检索
 
@@ -804,7 +811,50 @@ Codex 输入框 `$` 在光标 token 处打开名称+描述面板，支持过滤�
 - `GET /api/sessions` 的每个列表项增加 `title: string` 与 `pendingGateCount: number`。标题取首条 `user_message.payload.text`，空白压成单空格，按显示宽度 30 截断（CJK/全角计 2，其余计 1，超出加 `…`）；首条为空或尚无消息时为“新会话”。前后端共用 `shared/session-title.ts`。审批数来自内存未决闸门集合；dead 会话固定为 0。新的 `user_message` 事件还带顶层 `title`，用于未加载会话的实时标题（包括首条为空的情况）。
 - 前端启动只取当前打开会话的 snapshot；未加载会话的标题和跨会话审批徽标以列表字段及 WS 实时事件维护，重连重新取列表校准。已加载会话在全局 `/ws` 上发送 `{type:"replay", sessionId, afterSeq}`，服务端补发 ring 内 `seq > afterSeq` 的持久事件，再发送 `{type:"replay_complete", sessionId, currentSeq}`；超出 ring 则发送 `resync_required`，客户端取 snapshot。旧 `/ws?sessionId=...&afterSeq=...` 连接补发仍可使用。
 - 首连与重连对齐期间的实时帧先缓存，补发完成后排序去重。snapshot 在途期间也缓存事件，落地后只追加大于 snapshot seq 的持久事件；普通 seq 缺口复用在途请求。仅显式强制刷新、`resync_required` 或 WS 重连可作废在途 snapshot。
-- Claude 只含 `toolCallId`、`partialInput` 的 `tool_call_updated` 标为顶层 `ephemeral:true`，`seq` 取当前持久游标，不写 transcript、不进 ring；仅 WS 实时发送，同一调用常规最多每 100ms 一次（保留最新值）。工具完成、最终 `inputComplete` 参数、审批、回合结束或错误前强制推出待发更新，该边界推出不受 100ms 限制。前端只更新实时卡片参数，跳过缺口检测且不推进游标。最终参数事件仍持久化；临时状态不支持回放或崩溃恢复。Codex/Kimi 更新保持原契约，旧 transcript 不迁移。
+- Claude 只含 `toolCallId`、`partialInput` 的 `tool_call_updated` 标为顶层 `ephemeral:true`，`seq` 取当前持久游标，不写 transcript、不进 ring；仅 WS 实时发送，同一调用常规最多每 100ms 一次（保留最新值）。工具完成、最终 `inputComplete` 参数、审批、回合结束或错误前强制推出待发更新，该边界推出不受 100ms 限制。前端只更新实时卡片参数，跳过缺口检测且不推进游标。最终参数事件仍持久化；临时状态不支持回放或崩溃恢复。Codex/Kimi 更新保持原契约；旧 Claude transcript 在本轮启动恢复前按下面规则清理。
 - `commands_updated` 对规范化命令表按内容去重；服务启动以 transcript 最后一条命令表为比较基线，实际内容变化仍持久化并广播。
 - `npm run build` 为 `frontend/dist/assets/` 的 JS/CSS 生成旁路 `.gz`。静态请求接受 gzip（且 q 非 0）并有对应文件时返回 gzip，带 `Content-Encoding: gzip` 和 `Vary: accept-encoding`；否则返回原文件，现有缓存策略不变。
 - 流式事件只标记会话登记表脏，最多每秒集中保存一次；创建、移除、释放、配置、状态变化及 shutdown 立即保存并刷出未写内容。transcript 仍逐条保存持久事件，恢复时以其末尾 seq 为准；未变化的 Claude 原生 session ID 元数据不触发重复保存。
+
+
+### 性能第二轮接口与恢复契约（2026-10-01）
+
+- 启动恢复前，仅清理登记为 Claude 的 `.ndjson` 副本：结构为 `type:"tool_call_updated"`、payload 自有 `partialInput` 且 `inputComplete !== true` 的遗留行。Codex/Kimi 整份保留，末尾有效行始终保留，不重编 seq。分块读取；只有有可删行的文件才写临时文件，保留权限并 fsync 后 rename。每次记录 files / rewrittenFiles / removedLines / removedBytes 汇总，第二次无变化不重写。
+- `getEventsAfter` 的待补发区间必须从 `afterSeq+1` 连续到当前 seq，否则 `requiresSnapshot:true` 且 `events:[]`；WS 发送 `resync_required`。snapshot 采用服务端 seq，允许事件有空号，未决审批照原事件重建。前端缺口处理不变。
+- 派单列表、详情、parent 与历史共享按 root 缓存的扫描（完成后 2 秒 TTL、并发复用同一 Promise）；详情附件仍按需读取，元数据最长约 2 秒延迟。历史多页并发刷新共用扫描。会话派单链接在 backgroundCount>0 或有链接时 3 秒刷新，否则 30 秒；重新可见立即查询。隐藏页停止列表/详情秒级时钟与链接定时器。
+- 大 JSON 响应保留原 gzip 判断、level 1、响应头及信封；gzip 使用异步 zlib，整个进程压缩并发为 1，失败不阻塞后续队列。transcript 读取与 JSON 处理仍同步。
+- 历史消息引用和派生条目按数组引用缓存，历史组件与 Markdown memo；新增历史、工具结果替换采用新数组，Focus view 更新过滤结果。文字、思考、tool_call_updated 与 raw_event 按帧合并通知，事件仍逐条应用且保留 seq；完成、审批、错误立即通知。
+
+
+### Codex 派单子 agent（2026-10-01）
+
+- 列表、parent 列表、历史和详情共用第二轮性能改的 2 秒扫描缓存。Codex 派单追加 `subagents`（无子 agent 为 `[]`），其他执行端不追加。`Dispatch.session` 对应父 rollout 的 `session_meta.payload.id`；子 rollout 的 `payload.id` 是 `threadId`，不能用可能继承父 ID 的 `payload.session_id`。
+- 从 `payload.parent_thread_id` 或 `source.subagent.thread_spawn.parent_thread_id` 建关系，昵称/角色也支持两种位置。按父线程递归，最多两层；`depth` 是相对本派单的深度 1/2，`parentThreadId` 保留真实直接父线程。循环、无关线程不挂入树。
+- 原生目录只读。默认 `~/.codex/sessions`，夹具复用 `WORKBENCH_CODEX_HISTORY_DIR`。仅枚举派单 `startedAt` 的本地/UTC 日期前后一天目录；目录名时区与元数据时区跨午夜可能不同，不递归扫描全历史。跨多日之后才创建的子线程超出本契约扫描窗口。
+- 每文件只解析首行 `session_meta`（上限 64 KiB）及最后 64 KiB，跳过窗口首残行、尾部未换行记录、坏行和非普通/软链文件。文件解析结果（含空结果）按路径 + mtime + size 缓存，最多 4096 项；缓存命中仍重新判断新鲜度，无磁盘缓存写入。
+- 真实 0.159.2 样本 `rollout-2026-10-01T01-30-52-00000000-0000-4000-8000-000000000061.jsonl`：Carver 的父线程是 `00000000-0000-4000-8000-000000000062`，事件为 `task_started → item_completed/token_count → task_complete`。`item_completed` 只是条目完成，不能判回合结束。
+- 顺序处理尾部事件：`task_complete` 判 `finished`；兼容 `turn_aborted`（已停）和 assistant `final_answer`/`final`。更晚的 `task_started`/用户消息/推理/工具调用恢复活跃。只有活跃证据且 mtime 在 5 分钟内才判 `running`；无生命周期证据或活跃文件陈旧判 `unknown`，不能由 mtime 推断完成。长工具无写入可能暂时为未知；回合完成不表示线程永久关闭。
+- `startedAt` 取元数据时间；`lastActivityAt` 取最后完整记录时间，缺失时用 mtime。`activity` 取最新助手动态或工具名，压缩空白并截 160 字符，前端只在运行态显示一行。子卡沿用 Codex 色与 SVG `.flow`，每层间距 84px（宽面板 130px），每行最多四个，超过后换行，子卡上限 150px、窄面板按剩余宽度收缩。没有子 agent 时维持原来两层。
+- 夹具回归：`server/dispatch-subagents.test.ts`；前端有/无子 agent、递归/状态/换行契约：`frontend/scripts/dispatch-flow.test.mjs`。浏览器的 440px 面板和 390px 手机截图由主会话验证。
+
+### 运行中插话与新建/移除时延（2026-10-01）
+插话的实测证据在 `spikes/PROTOCOL-NOTES.md` 和 `spikes/captures/2026-10-01-steer/`，工单与报告在 `.work-orders/2026-10-01-steer{,-report}.md`。
+
+**插话**
+- 会话运行中发送普通文本或附件，即为插话：`user_message.payload.steer=true`。空闲时发送仍走原通道，不带 `steer` 字段。
+- 三家的插话方式：
+  - **Claude**：沿用 stream-json 的默认 priority，CLI 会在当前回合的下一个工具间隙注入消息。
+  - **Codex**：用 `turn/steer{threadId,expectedTurnId,input}`。不得附带新回合配置，也不得回退到 `turn/start`。
+  - **Kimi**：不支持在当前回合内插话（运行中再发 `session/prompt` 会返回 `-32600 turn.agent_busy`）。插话消息进入 worker 的先进先出队列，事件带 `queued=true`，等原 `session/prompt` 响应后再按顺序发出；队列期间会话保持 running。
+- Kimi 队列只存在内存里，重启后不恢复。停止、进程退出或 RPC 失败时，剩余消息全部取消，并产生 `source=steer_queue` 的 `session_error`。
+- 有待审批闸门时，普通发送和插话一律拒绝：不调用 CLI，也不写 `user_message`。
+- CLI 拒绝插话，或当前回合已经结束时，错误返回给调用方，原回合状态不变，也不自动开新回合，用户可以重发。
+
+**新建与移除**
+- `POST /api/sessions` 建好会话记录、发出 `session_created`（`status:"starting"`）后立即返回，CLI 的启动和握手在后台进行。启动失败时广播 `session_error{source:"startup"}`，状态改为 `error`。
+- 带 `initialMessage` 时，这条消息在后台等启动完成后再发出，失败时广播 `session_error{source:"initial_message"}`。
+- 启动期间收到的发送请求，会等启动完成再发；启动失败时，把错误返回给发送方。
+- `DELETE /api/sessions/<id>` 立即删除会话、返回 `dead`，进程在后台停止（Claude 不响应 stdin 关闭，原来要等满 2 秒）。停止之后到达的回调，因为找不到会话而被忽略。
+- 启动期间被移除或遇到关停时，后台启动的收尾（成功或失败）都不再改动会话。续接会话的原生对话指纹在返回前取，新会话的指纹在启动后取。
+- 关停（shutdown）会等移除时在后台停止的进程。`worker.stop()` 关闭 stdin 后等 1 秒发 SIGTERM，再等 1 秒仍未退出就发 SIGKILL。
+- 测试：`server/create-remove-latency.test.ts`、`server/steer.test.ts`。

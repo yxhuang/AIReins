@@ -76,7 +76,7 @@ export interface DriverConfigOption {
   values: ConfigOptionValue[];
   default: string | null;
   mutable: boolean;
-  mutableVia?: "restart";
+  mutableVia?: "restart" | "control";
 }
 
 export interface DriverConfigSchema {
@@ -116,6 +116,16 @@ export interface UserMessageInput {
   text?: string;
   command?: CommandInvocation;
   mentions?: Mention[];
+}
+
+/** 由服务端状态决定，不能信任客户端传入的 steer。 */
+export interface SendUserMessageOptions {
+  steer: boolean;
+}
+
+export interface SendUserMessageReceipt {
+  /** Kimi 不支持当前回合插话：已接收至 worker 内存队列。 */
+  queued: true;
 }
 
 export interface UnifiedEvent {
@@ -217,7 +227,7 @@ export interface Driver {
   manageMcp?(action: import("./session-menu.js").McpAction): Promise<unknown>;
   /** 从磁盘刷新设置并重载插件，不重启 worker。 */
   reloadPlugins?(): Promise<void>;
-  sendUserMessage(message: UserMessageInput): Promise<void>;
+  sendUserMessage(message: UserMessageInput, options?: SendUserMessageOptions): Promise<void | SendUserMessageReceipt>;
   resolvePermission(
     requestId: string,
     decision: PermissionDecision,
