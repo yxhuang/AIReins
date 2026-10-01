@@ -940,7 +940,7 @@ export class Store {
   /**
    * 从工作台移除会话：DELETE 注册表条目 + 停 worker（原生 transcript 不动）。
    * 成功后清该会话全部本地状态；删的是当前会话时导航到左栏顺序的下一个会话
-   * （与左栏同序：有未决闸门的优先，其余按 createdAt 稳定序），无剩余则回空态。
+   * （与左栏同序：有未决闸门的优先，其余按最后活动时间倒序），无剩余则回空态。
    * 失败抛错由调用方展示。
    */
   async remove(id: string): Promise<void> {
@@ -967,9 +967,9 @@ export class Store {
     this.snapshotGen.set(id, ++this.nextSnapshotGen);
     this.snapshotInflight.delete(id);
     if (this.currentId === id) {
-      // 与左栏同序：有未决闸门的优先（createdAt 稳定序），其次普通会话，最后才是折叠区的 dead
+      // 与左栏同序：有未决闸门的优先（最后活动倒序），其次普通会话，最后才是折叠区的 dead
       const remaining = [...this.sessions].sort(
-        (a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt),
+        (a, b) => Date.parse(b.lastActivityAt) - Date.parse(a.lastActivityAt),
       );
       const next =
         remaining.filter((s) => this.pendingCount(s.id) > 0)[0] ??

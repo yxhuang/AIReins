@@ -105,18 +105,18 @@ export function Sidebar({ collapsed, onToggle, newOpen, onNewOpenChange, termina
   // pendingGates 是可变 Map；用可比较的原始字符串捕获“总数相同但分布换了会话”的变化。
   useStore(selectPendingSignature);
   const [deadExpanded, setDeadExpanded] = useState(false);
-  // 稳定排序：按 createdAt 倒序（最新建的在最上），行序不随事件流抖动（此前按 lastActivityAt，正要点的那行会被挤走）。
-  const byCreated = (a: SessionRecord, b: SessionRecord) =>
-    Date.parse(b.createdAt) - Date.parse(a.createdAt);
+  // 按最后活动时间倒序（2026-10-01 用户定）。代价：agent 跑动时行序会变，曾有正要点的那行被挤走的反馈。
+  const byActivity = (a: SessionRecord, b: SessionRecord) =>
+    Date.parse(b.lastActivityAt) - Date.parse(a.lastActivityAt);
   // 有未决闸门的会话抽到顶部「等待处理」区（天然总览）；dead 会话沉底折叠。
   // 防御性兜底：万一 dead 会话仍带未决计数，也只进等待处理区——未决闸门绝不许被折叠藏起。
-  const waiting = sessionRecords.filter((s) => store.pendingCount(s.id) > 0).sort(byCreated);
+  const waiting = sessionRecords.filter((s) => store.pendingCount(s.id) > 0).sort(byActivity);
   const active = sessionRecords
     .filter((s) => store.pendingCount(s.id) === 0 && s.status !== "dead")
-    .sort(byCreated);
+    .sort(byActivity);
   const dead = sessionRecords
     .filter((s) => store.pendingCount(s.id) === 0 && s.status === "dead")
-    .sort(byCreated);
+    .sort(byActivity);
   const totalSessions = sessionRecords.length;
   // 收起态仍要能看到全局待审批压力：全部会话未决闸门总数。
   const totalPending = sessionRecords.reduce(
