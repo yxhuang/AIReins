@@ -58,8 +58,11 @@ try {
   await manager.manageMcp(session.id, { action: "toggle", serverName: "fixture", enabled: false });
   assert.equal(actions.length, 1);
   options[0].callbacks.status("running");
-  await assert.rejects(manager.manageMcp(session.id, { action: "reconnect", serverName: "fixture" }), /回复与审批结束/);
-  assert.equal(actions.length, 1);
+  await manager.manageMcp(session.id, { action: "reconnect", serverName: "fixture" });
+  assert.equal(actions.length, 2, "回复中允许 MCP 开关与重连");
+  options[0].callbacks.emit("permission_request", { requestId: "fixture-gate" });
+  await assert.rejects(manager.manageMcp(session.id, { action: "reconnect", serverName: "fixture" }), /启动与审批结束/);
+  assert.equal(actions.length, 2);
   options[0].callbacks.exited({ code: 0, signal: null, expected: true });
   await manager.queryInfo(session.id, "settings");
   assert.equal(starts, 1, "设置文件链接不启动已结束的 worker");

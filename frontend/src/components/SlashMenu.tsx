@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { SessionRecord } from "../types";
-import { fetchSessionInfo, manageSessionMcp, setSessionPlugin, type SessionInfoKind } from "../api";
-import { ClaudeMenuPanel, SettingsFileLinks } from "./ClaudeMenuPanels";
+import { fetchClaudeCapabilities, fetchSessionInfo, manageSessionMcp, setSessionPlugin, setSessionThinking, type SessionInfoKind } from "../api";
+import { ClaudeMenuPanel, SettingsFileLinks, ClaudeTasksDialog, ClaudeSideQuestionDialog } from "./ClaudeMenuPanels";
 import { compactTokens } from "../format";
 import { store, type Store } from "../store";
 import { useStore } from "../useStore";
@@ -14,7 +14,7 @@ const INFO_LABELS: Record<SessionInfoKind, string> = {
   hooks: "Hooks",
   permissions: "权限规则",
   context: "上下文用量",
-  plugins: "插件",
+  plugins: "管理插件",
   status: "状态",
   usage: "账户与用量",
   memory: "Memory",
@@ -37,11 +37,36 @@ export function SlashMenu({ session, commandsSupported, onBrowseCommands, onCode
 }) {
   const [open, setOpen] = useState(false);
   const [info, setInfo] = useState<SessionInfoKind | null>(null);
+  const [panel, setPanel] = useState<"tasks" | "btw" | null>(null);
+  const [supportsFast, setSupportsFast] = useState(false);
+  const [thinkingPending, setThinkingPending] = useState(false);
+  const [thinkingError, setThinkingError] = useState("");
+  const [thinkingOverride, setThinkingOverride] = useState<{ id: string; value: boolean } | null>(null);
+  const thinkingBusy = useRef(false);
   const rootRef = useRef<HTMLSpanElement>(null);
   const focusView = useStore(selectFocusView);
   const claude = session.agent === "claude";
   const commands = useStore(value => value.commands.get(session.id));
   const workerReady = session.status !== "dead" && Boolean(session.processId || session.released);
+
+  const thinking = thinkingOverride?.id === session.id ? thinkingOverride.value : session.config.thinkingLevel !== "off";
+  useEffect(() => { setThinkingOverride(null); }, [session.id, session.config.thinkingLevel]);
+  useEffect(() => {
+    setSupportsFast(false);
+    if (!open || !claude || !workerReady || session.status === "starting") return;
+    let alive = true;
+    fetchClaudeCapabilities(session.id).then(value => { if (alive) setSupportsFast(value.supportsFastMode === true); }).catch(() => {});
+    return () => { alive = false; };
+  }, [open, claude, workerReady, session.id, session.model, session.config.model, session.status]);
+  const toggleThinking = async () => {
+    if (thinkingBusy.current) return;
+    thinkingBusy.current = true; setThinkingPending(true); setThinkingError("");
+    try {
+      const { session: updated } = await setSessionThinking(session.id, !thinking);
+      setThinkingOverride({ id: session.id, value: updated.config.thinkingLevel !== "off" });
+    } catch (error) { setThinkingError(error instanceof Error ? error.message : String(error)); }
+    finally { thinkingBusy.current = false; setThinkingPending(false); }
+  };
 
   // Esc 或点外部关闭（与「+」菜单同一纪律）
   useEffect(() => {
@@ -80,30 +105,57 @@ export function SlashMenu({ session, commandsSupported, onBrowseCommands, onCode
           </>}
           {claude && (
             <>
-              <div className="slash-group">查看</div>
-              {(Object.keys(INFO_LABELS) as SessionInfoKind[]).filter(kind => kind !== "export" && kind !== "settings").map((kind) => (
-                <button key={kind} type="button" className="attach-item" role="menuitem" disabled={!workerReady && kind !== "plugins"}
-                  title={workerReady || kind === "plugins" ? undefined : "会话已结束，查看不到"}
-                  onClick={() => { setOpen(false); setInfo(kind); }}>
-                  {INFO_LABELS[kind]}
-                </button>
-              ))}
-              <div className="slash-group">对话与配置</div>
+              <div className="slash-group">上下文</div>
+              <button type="button" className="attach-item" role="menuitem" disabled={!workerReady}
+                onClick={() => { setOpen(false); setInfo("context"); }}>上下文用量</button>
               <button type="button" className="attach-item" role="menuitem" disabled={!workerReady}
                 onClick={() => { setOpen(false); setInfo("export"); }}>导出对话</button>
-              <button type="button" className="attach-item" role="menuitem" onClick={() => { setOpen(false); setInfo("hooks"); }} disabled={!workerReady}>编辑 Hooks</button>
-              <button type="button" className="attach-item" role="menuitem" onClick={() => { setOpen(false); setInfo("settings"); }}>Claude 设置</button>
+              <button type="button" className="attach-item" role="menuitem"
+                onClick={() => { setOpen(false); setPanel("tasks"); }}>/tasks · 后台任务<span className="slash-subtitle">查看运行任务并停止</span></button>
+              <button type="button" className="attach-item" role="menuitem" disabled={!workerReady}
+                onClick={() => { setOpen(false); setPanel("btw"); }}>/btw · 侧问<span className="slash-subtitle">单独问答，不加入主对话</span></button>
+              <div className="slash-group">模型</div>
+              <button type="button" className="attach-item slash-toggle" role="switch" aria-label="Thinking" aria-checked={thinking}
+                disabled={!workerReady || thinkingPending || session.status === "starting"}
+                onClick={() => void toggleThinking()}>
+                <span>Thinking{thinkingPending && <span className="slash-subtitle">切换中…</span>}</span>
+                <span className={`slash-switch${thinking ? " on" : ""}`} aria-hidden="true" />
+              </button>
+              {thinkingError && <p className="new-error" role="alert">{thinkingError}</p>}
+              {supportsFast && <button type="button" className="attach-item" role="menuitem" disabled={!workerReady || !canInsertCommand || session.status === "starting"}
+                onClick={() => { if (store.sendUserMessage(session.id, "/fast")) setOpen(false); }}>切换 Fast mode<span className="slash-subtitle">/fast · 更快的模型回复</span></button>}
+              <button type="button" className="attach-item" role="menuitem" disabled={!workerReady}
+                onClick={() => { setOpen(false); setInfo("usage"); }}>账户与用量</button>
+              <div className="slash-group">自定义</div>
+              {(["plugins", "mcp", "instructions", "memory", "skills", "hooks", "output", "permissions", "sandbox", "status"] as SessionInfoKind[]).map(kind => (
+                <button key={kind} type="button" className="attach-item" role="menuitem" disabled={!workerReady && kind !== "plugins"}
+                  onClick={() => { setOpen(false); setInfo(kind); }}>{INFO_LABELS[kind]}
+                  {kind === "plugins" && <span className="slash-subtitle">启用、停用与重载</span>}
+                  {kind === "mcp" && <span className="slash-subtitle">开关、重连与连接状态</span>}
+                </button>
+              ))}
+              {commandsSupported && canInsertCommand && <button type="button" className="attach-item" role="menuitem"
+                onClick={() => { setOpen(false); onBrowseCommands(); }}>浏览斜杠命令</button>}
+              <div className="slash-group">设置</div>
+              <button type="button" className="attach-item" role="menuitem"
+                onClick={() => { setOpen(false); setInfo("settings"); }}>Claude 设置</button>
+              <button type="button" className="attach-item slash-toggle" role="menuitemcheckbox" aria-checked={focusView}
+                title="只显示你的输入和回复，隐藏工具、思考和调试行" onClick={() => store.setFocusView(!focusView)}>
+                <span>Focus view</span><span className={`slash-switch${focusView ? " on" : ""}`} aria-hidden="true" />
+              </button>
+              <div className="slash-group">支持</div>
               <a className="attach-item" role="menuitem" href="https://code.claude.com/docs/en/vs-code" target="_blank" rel="noreferrer"
                 onClick={() => setOpen(false)}>帮助文档</a>
             </>
           )}
-          {commandsSupported && canInsertCommand && (
+          {!claude && commandsSupported && canInsertCommand && (
             <>
               <div className="slash-group">斜杠命令</div>
               <button type="button" className="attach-item" role="menuitem"
                 onClick={() => { setOpen(false); onBrowseCommands(); }}>浏览斜杠命令</button>
             </>
           )}
+          {!claude && <>
           <div className="slash-group">设置</div>
           {/* 开关项点了不关菜单，与扩展 keepMenuOpen 一致 */}
           <button type="button" className="attach-item slash-toggle" role="menuitemcheckbox" aria-checked={focusView}
@@ -111,8 +163,11 @@ export function SlashMenu({ session, commandsSupported, onBrowseCommands, onCode
             <span>Focus view</span>
             <span className={`slash-switch${focusView ? " on" : ""}`} aria-hidden="true" />
           </button>
+          </>}
         </div>
       )}
+      {panel === "tasks" && <ClaudeTasksDialog key={session.id} session={session} onClose={() => setPanel(null)} />}
+      {panel === "btw" && <ClaudeSideQuestionDialog key={session.id} sessionId={session.id} onClose={() => setPanel(null)} />}
       {info && <InfoDialog key={`${session.id}:${info}`} session={session} kind={info} onClose={() => setInfo(null)} />}
     </span>
   );
@@ -214,7 +269,7 @@ function InfoDialog({ session, kind, onClose }: { session: SessionRecord; kind: 
           </>}
           {pluginNotice && <p className="new-hint" role="status">{pluginNotice}</p>}
           {kind === "mcp" && <>
-            <p className="new-hint">开关与重连用于当前会话；回复或审批期间不可操作。</p>
+            <p className="new-hint">开关与重连用于当前会话，回复中也可操作；启动或审批期间请稍候。</p>
             <button type="button" className="btn" disabled={pendingServer !== null || data === undefined}
               onClick={() => void updateMcp("refresh")}>刷新状态</button>
           </>}
@@ -222,7 +277,7 @@ function InfoDialog({ session, kind, onClose }: { session: SessionRecord; kind: 
             && <SettingsFileLinks files={rec(data).settingsFiles} hooks={kind === "hooks"} />}
           {data === undefined ? (!error && <p className="new-hint">正在读取…</p>)
             : <InfoBody kind={kind} data={data} onTogglePlugin={togglePlugin} pendingPlugin={pendingPlugin}
-                onMcpAction={updateMcp} pendingServer={pendingServer} mcpLocked={session.status === "running" || session.status === "starting"} />}
+                onMcpAction={updateMcp} pendingServer={pendingServer} mcpLockReason={session.status === "starting" ? "启动结束后可切换" : (session.pendingGateCount ?? 0) > 0 ? "审批结束后可切换" : session.status === "dead" ? "会话已结束" : ""} />}
         </div>
       </div>
     </div>
@@ -236,14 +291,14 @@ const str = (v: unknown) => (typeof v === "string" ? v : "");
 const pluginKey = (p: Rec) => `${str(p.id)}:${str(p.scope)}`;
 const pluginEnabled = (p: Rec) => p.enabled === true;
 
-function InfoBody({ kind, data, onTogglePlugin, pendingPlugin, onMcpAction, pendingServer, mcpLocked }: {
+function InfoBody({ kind, data, onTogglePlugin, pendingPlugin, onMcpAction, pendingServer, mcpLockReason }: {
   kind: SessionInfoKind;
   data: unknown;
   onTogglePlugin: (plugin: Rec) => void;
   pendingPlugin: string | null;
   onMcpAction: (action: "toggle" | "reconnect", server: Rec) => void;
   pendingServer: string | null;
-  mcpLocked: boolean;
+  mcpLockReason: string;
 }) {
   const d = rec(data);
   if (kind === "mcp") {
@@ -263,10 +318,15 @@ function InfoBody({ kind, data, onTogglePlugin, pendingPlugin, onMcpAction, pend
           </div>
           <div className="info-meta mono">{str(config.url) || [str(config.command), ...(Array.isArray(config.args) ? config.args.map(String) : [])].join(" ")}</div>
           <div className="info-actions">
-            <button type="button" className="btn" disabled={pendingServer !== null || mcpLocked}
-              onClick={() => onMcpAction("toggle", s)}>{pendingServer === str(s.name) ? "处理中…" : s.status === "disabled" ? "启用" : "停用"}</button>
-            <button type="button" className="btn" disabled={pendingServer !== null || mcpLocked || s.status === "disabled"}
+            <button type="button" className="btn slash-toggle" role="switch" aria-checked={s.status !== "disabled"}
+              aria-label={`${str(s.name)} MCP 开关`} disabled={pendingServer !== null || Boolean(mcpLockReason)}
+              onClick={() => onMcpAction("toggle", s)}>
+              <span>{pendingServer === str(s.name) ? "处理中…" : s.status === "disabled" ? "未启用" : "已启用"}</span>
+              <span className={`slash-switch${s.status !== "disabled" ? " on" : ""}`} aria-hidden="true" />
+            </button>
+            <button type="button" className="btn" disabled={pendingServer !== null || Boolean(mcpLockReason) || s.status === "disabled"}
               onClick={() => onMcpAction("reconnect", s)}>重连</button>
+            {mcpLockReason && <span className="info-meta">{mcpLockReason}</span>}
           </div>
         </div>
       );

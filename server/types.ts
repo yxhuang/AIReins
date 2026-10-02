@@ -47,6 +47,8 @@ export const CONFIG_OPTION_IDS = ["model", "effort", "permissionMode"] as const;
 export type ConfigOptionId = (typeof CONFIG_OPTION_IDS)[number];
 
 export interface SessionConfig {
+  /** Claude 会话级 Thinking；不写用户 settings。 */
+  thinkingLevel?: "off" | "default_on";
   model?: string | null;
   effort?: string | null;
   permissionMode?: string | null;
@@ -235,6 +237,8 @@ export interface Driver {
   executeCommand?(name: string, args?: string): Promise<unknown>;
   /** MCP 会话开关/重连；只操作 CLI 实际枚举出的服务器。 */
   manageMcp?(action: import("./session-menu.js").McpAction): Promise<unknown>;
+  stopTask?(taskId: string): Promise<void>;
+  askSideQuestion?(input: import("./session-menu.js").SideQuestionInput, signal: AbortSignal): Promise<unknown>;
   /** 从磁盘刷新设置并重载插件，不重启 worker。 */
   reloadPlugins?(): Promise<void>;
   sendUserMessage(message: UserMessageInput, options?: SendUserMessageOptions): Promise<void | SendUserMessageReceipt>;

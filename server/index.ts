@@ -20,7 +20,7 @@ import { isValidIdleReleaseMinutes, loadPrefs, savePrefs, type WorkbenchPrefs } 
 import { readClaudeStartupSettings, writeClaudeStartupSettings } from "./claude-settings.js";
 import { SessionManager } from "./session-manager.js";
 import { cleanStorage, getStorageStats, StorageInputError, validateStorageCleanInput } from "./storage.js";
-import { parseMcpAction } from "./session-menu.js";
+import { parseMcpAction, parseSideQuestion, parseTaskId } from "./session-menu.js";
 import { preflightSnapshot, SnapshotCwdError } from "./snapshot.js";
 import { InvalidEventPageCursor } from "./event-pages.js";
 import { TerminalError, TerminalRegistry, terminalEnabled, type TerminalEvent } from "./terminals.js";
@@ -577,6 +577,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       const infoMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/info\/([a-z]+)$/);
       const pluginMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/plugins$/);
       const mcpMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/mcp$/);
+      const claudeMenuMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/(thinking|tasks\/stop|side-question)$/);
       const detailMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)$/);
       const historyMessagesMatch = url.pathname.match(/^\/api\/history\/([^/]+)\/([^/]+)\/messages$/);
       const pageHealthMatch = url.pathname.match(/^\/api\/pages\/([^/]+)\/health$/);
@@ -636,6 +637,31 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
           await respond(response, 200, 0, "success", result, requestId);
         } catch (error) {
           throw new ApiError(400, 40060, error instanceof Error ? error.message : String(error));
+        }
+      } else if (claudeMenuMatch && ((method === "PUT" && claudeMenuMatch[2] === "thinking") || (method === "POST" && claudeMenuMatch[2] !== "thinking"))) {
+        const id = decodeURIComponent(claudeMenuMatch[1]);
+        if (!manager.get(id)) throw new ApiError(404, 40401, `会话不存在：${id}`);
+        const input = await readJson(request);
+        try {
+          if (claudeMenuMatch[2] === "thinking") {
+            if (!input || typeof input !== "object" || Array.isArray(input) || typeof (input as Record<string, unknown>).enabled !== "boolean") throw new Error("enabled 必须为布尔值");
+            const session = await manager.setThinking(id, (input as { enabled: boolean }).enabled);
+            await respond(response, 200, 0, "success", { session }, requestId);
+          } else if (claudeMenuMatch[2] === "tasks/stop") {
+            await manager.stopTask(id, parseTaskId(input));
+            await respond(response, 200, 0, "success", { stopped: true }, requestId);
+          } else {
+            const controller = new AbortController();
+            const cancel = () => { if (!response.writableEnded) controller.abort(); };
+            response.once("close", cancel);
+            if (response.destroyed) controller.abort();
+            try {
+              const result = await manager.askSideQuestion(id, parseSideQuestion(input), controller.signal);
+              if (!controller.signal.aborted) await respond(response, 200, 0, "success", result, requestId);
+            } finally { response.off("close", cancel); }
+          }
+        } catch (error) {
+          if (!response.destroyed) throw new ApiError(400, 40069, error instanceof Error ? error.message : String(error));
         }
       } else if (method === "POST" && mcpMatch) {
         const id = decodeURIComponent(mcpMatch[1]);

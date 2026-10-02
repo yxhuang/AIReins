@@ -1859,6 +1859,10 @@ body.resizing {
 /* 「/」菜单：分组小标题、Focus view 开关；查看弹窗复用 .dir-overlay / .dir-dialog */
 .slash-menu { min-width: 220px; max-height: min(68dvh, 540px); overflow-y: auto; }
 .slash-menu a.attach-item { text-decoration: none; }
+.slash-subtitle { display: block; font-size: 14px; color: var(--text-muted); margin-top: 2px; }
+.side-question-form { display: grid; gap: 8px; padding: 10px; font-size: 15px; }
+.side-question-form textarea { width: 100%; min-width: 0; resize: vertical; font: inherit; font-size: 16px; color: var(--text); background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 8px; }
+.side-answer { margin-top: 8px; }
 .slash-group { padding: 6px 8px 2px; font-size: 14px; color: var(--text-muted); }
 .slash-toggle { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .slash-switch {

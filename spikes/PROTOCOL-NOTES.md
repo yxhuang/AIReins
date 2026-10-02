@@ -711,3 +711,45 @@ Hooks 编辑在扩展实际通过 `claude edit-hook`（JSON stdin）后刷新 `g
 两者均收到对应 request_id 的 `control_response` / `response.subtype:"success"`。effort 约 9ms，之后 `get_settings.effective.effortLevel` 从 high 变成 low；model 约 0.92s，但 get_settings 的 model 仍为 settings 层 opus。`set_model` 修改运行时模型，不落 settings；不要用 get_settings.model 判断它是否成功。CLI 定义允许 model 为 null 或 "default"，回到会话默认模型；wb 使用 null。
 
 wb schema 对 model/effort 标为 `mutableVia:"control"`。仅空闲且无待审批闸门时发送控制请求；success 后发 config_updated 并更新 config/effectiveModel/effectiveEffort。控制报错或 15 秒超时回落到原重启路径，释放后仅保存配置，下一次 worker 启动带入 flags。effort:null 尝试 apply_flag_settings 清除覆盖，CLI 不支持时回落到省略 --effort 的重启；这个 null 协议行为尚待真机验证。仍拒绝进行中的回合；不放宽审批或最终闸门。切换期间与发送、释放、移除互斥。成功事件 mutableVia=control、workerRestarted=false；回落成功为 restart、workerRestarted=true。
+
+
+## 14. Claude 扩展菜单第二轮：Thinking、Fast、MCP busy、tasks、side_question（CLI 2.1.287，2026-10-02）
+
+只读参照扩展 `anthropic.claude-code-2.1.286-linux-x64`；探针本机 `claude -p --input-format stream-json --output-format stream-json --verbose --include-partial-messages --model haiku`，隔离 `CLAUDE_CONFIG_DIR=/tmp/wb-slash2-yLCQMt` 与 cwd，禁用 hooks、严格 MCP 配置，mock MCP 为本地 stdio Node，仅 initialize/tools/list。只复制认证凭据进临时配置目录，不打印凭据，不写用户配置。进程组由探针 finally SIGTERM 收掉，CLI exit 143。原始方向标记 wire 为 `/tmp/wb-slash2-yLCQMt/wire.ndjson`，摘要 `/tmp/wb-slash2-probe-result.txt`，临时文件未删除。
+
+### 扩展依据（0 起点字符偏移）
+
+- webview 字符 5430293：`toggle-thinking` 注册在 Model，`thinkingLevel !== "off"` 为开，`keepMenuOpen:true`，调用 `setThinkingLevel("off"|"default_on")`。字符 3421939 附近的计算属性优先 override，再读 connection.config.thinkingLevel；宿主 extension 字符 1445724 默认全局状态 `default_on`（不是 CLI 设置查询结果）。wb 使用会话配置，旧记录默认开启。
+- extension 字符 2848213：默认预算 `yt=31999`，`gt("off")` disabled，否则 enabled/budgetTokens 31999。字符 2967836：开启调用 `setMaxThinkingTokens(budget, display ?? null)`，关闭调用 `setMaxThinkingTokens(0)`。wb 开启下发 31999 + display:null，保持现有思考流呈现；启动/重启/续接每次重发会话覆盖。
+- webview 字符 5433783：Fast 只在 `currentModelSupportsFastMode` 时注册，在 Model 组，通过 send("/fast") 发用户命令。字符 3421939：能力取 currentModelInfo.supportsFastMode，按 models 的 value/resolvedModel 匹配，去除 `[1m]` 后缀，无字段为 false。wb 可拿到同一字段，因此接入。
+- MCP webview 字符 5074000 附近 Disable/Reconnect 的 disabled 只看该服务器管理动作 pending，无模型 busy 禁用；宿主字符 2917731 的 setMcpServerEnabled/reconnectMcpServer 直接 withChannel 转控制请求。真实 busy 实测如下，wb 去掉 running 限制，保留启动/审批提示。
+- extension 字符 2565898：stopTask 发送 `stop_task {task_id}`；字符 2586927：askSideQuestion 发送 `side_question {question,history?}`，回 payload.response/synthetic/refusal_fallback。webview 字符 3405858 的侧问用 AbortController，历史只取 answer；取消路径 extension request 字符 2588000 附近写 `control_cancel_request {request_id}`。wb 同样提供取消，答案仅保留在弹窗。
+
+### 实测请求回应
+
+公共请求为 `{type:"control_request",request_id,request}`；成功回应为 `{type:"control_response",response:{subtype:"success",request_id,response?}}`。以下 payload 是原样字段，省略公共封套。
+
+```json
+{"request_id":"probe-2","request":{"subtype":"set_max_thinking_tokens","max_thinking_tokens":0}}
+{"subtype":"success","request_id":"probe-2"}
+{"request_id":"probe-3","request":{"subtype":"set_max_thinking_tokens","max_thinking_tokens":31999,"thinking_display":null}}
+{"subtype":"success","request_id":"probe-3"}
+{"request_id":"probe-5","request":{"subtype":"mcp_toggle","serverName":"probe","enabled":false}}
+{"subtype":"success","request_id":"probe-5"}
+{"request_id":"probe-6","request":{"subtype":"mcp_toggle","serverName":"probe","enabled":true}}
+{"subtype":"success","request_id":"probe-6"}
+{"request_id":"probe-7","request":{"subtype":"mcp_reconnect","serverName":"probe"}}
+{"subtype":"success","request_id":"probe-7"}
+{"request_id":"probe-8","request":{"subtype":"side_question","question":"What is 2+2? Reply with one number."}}
+{"subtype":"success","request_id":"probe-8","response":{"response":"4","synthetic":false}}
+{"request_id":"probe-9","request":{"subtype":"stop_task","task_id":"nonexistent-probe"}}
+{"subtype":"success","request_id":"probe-9","response":{}}
+```
+
+MCP 初始 `mcp_status` 为 connected。wire 的第 13（0 起点）项为 stream_event/message_start，14–20 项是三次 MCP 请求回应，60 项才是主回复 result，证明确在回复期间执行且主回复成功（Haiku，80 个整数，is_error:false，费用 USD 0.054562）。这是无正在执行 MCP 工具的 smoke，不声称覆盖所有工具中途停用行为。
+
+`initialize.models` 的 default/opus 条目均有 `supportsFastMode:true`（resolvedModel `claude-opus-5-5`），Haiku 条目没有该字段；wb 不按模型名猜能力。没有发送 `/fast`，没有切换到 Opus，实际 Fast 收费/额度与切换由主会话在临时实例补验。
+
+side_question 前主回复已完成，回包前另有 `system/control_request_progress {request_id:"probe-8",status:"started"}`，随后只回控制答案，没有 assistant/user/result 主线消息。wb 抑制侧问的控制进度、忽略迟到控制响应，HTTP 断开或超时取消请求。并发主回复侧问、实际取消效果尚未用真实模型探针覆盖，已做打桩回归，主会话补验。
+
+不存在的 task ID 也返回 success/{}，所以 wb 必须先校验会话 backgroundTasks 名单，且不能根据 success 伪造任务已消失；真实后台任务停止需临时实例补验。

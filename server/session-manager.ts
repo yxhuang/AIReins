@@ -42,7 +42,7 @@ import type {
   UserMessageInput,
 } from "./types.js";
 import { ulid } from "./ulid.js";
-import { menuSettingsFiles, withMenuFileUris, type McpAction } from "./session-menu.js";
+import { menuSettingsFiles, withMenuFileUris, type McpAction, type SideQuestionInput } from "./session-menu.js";
 import { parseCodexCommand } from "./codex-commands.js";
 import { selectEventPage, snapshotState, type EventPage } from "./event-pages.js";
 
@@ -53,6 +53,7 @@ type SnapshotCreator = (cwd: string) => Promise<string | null>;
 
 /** GET /api/sessions/:id/info/:kind 的 kind → Claude control_request subtype */
 const SESSION_INFO_SUBTYPES: Record<string, string> = {
+  capabilities: "menu_capabilities",
   mcp: "mcp_status",
   hooks: "get_hooks_listing",
   permissions: "list_permission_rules",
@@ -68,6 +69,8 @@ const SESSION_INFO_SUBTYPES: Record<string, string> = {
 };
 
 export class SessionManager {
+  private readonly thinkingUpdates = new Set<string>();
+  private readonly sideQuestions = new Set<string>();
   private readonly sessions = new Map<string, SessionRecord>();
   private readonly workers = new Map<string, Driver>();
   private readonly rings = new Map<string, UnifiedEvent[]>();
@@ -449,12 +452,60 @@ export class SessionManager {
     const session = this.sessions.get(id);
     if (!session || session.agent !== "claude") throw new Error("仅 Claude 会话支持 MCP 管理");
     if (this.restartingSessions.has(id)) throw new Error("Claude worker 正在重启");
-    if (session.status === "running" || session.status === "starting" || this.pendingGates.get(id)?.size) {
-      throw new Error("请在当前回复与审批结束后操作 MCP 服务器");
+    if (session.status === "starting" || this.pendingGates.get(id)?.size) {
+      throw new Error("请在启动与审批结束后操作 MCP 服务器");
     }
     const worker = await this.ensureWorker(id);
     if (!worker.manageMcp) throw new Error("Claude driver 不支持 MCP 管理");
     return worker.manageMcp(action);
+  }
+
+  async setThinking(id: string, enabled: boolean): Promise<SessionRecord> {
+    const record = this.sessions.get(id);
+    if (!record || record.agent !== "claude") throw new Error("仅 Claude 会话支持 Thinking");
+    if (record.status === "dead") throw new Error("会话已结束");
+    if (this.restartingSessions.has(id) || this.checkingSessions.has(id) || this.thinkingUpdates.has(id)) throw new Error("会话正在切换配置，请稍候");
+    this.thinkingUpdates.add(id);
+    try {
+      await this.startups.get(id);
+      const update: SessionConfig = { thinkingLevel: enabled ? "default_on" : "off" };
+      // 已释放的会话只存覆盖，下一次续接初始化重发。
+      if (!record.released || this.workers.has(id)) {
+        const worker = await this.ensureWorker(id);
+        await worker.setConfig(update);
+      }
+      if (this.sessions.get(id) !== record) throw new Error("会话已移除");
+      this.applyConfig(record, update);
+      this.persistRegistry();
+      this.emit(id, "config_updated", this.configUpdatedPayload(record, { effectiveFrom: record.released ? "next_turn" : "immediate" }));
+      return cloneSession(record);
+    } finally { this.thinkingUpdates.delete(id); }
+  }
+
+  async stopTask(id: string, taskId: string): Promise<void> {
+    const session = this.sessions.get(id);
+    if (!session || session.agent !== "claude") throw new Error("仅 Claude 会话支持后台任务管理");
+    if (this.restartingSessions.has(id) || this.checkingSessions.has(id)) throw new Error("会话正在续接或重启");
+    if (!session.backgroundTasks?.some(task => task.id === taskId)) throw new Error("任务不在当前会话运行列表中");
+    this.requireLiveWorker(id);
+    const worker = this.requireWorker(id);
+    if (!worker.stopTask) throw new Error("Claude driver 不支持停止任务");
+    await worker.stopTask(taskId);
+    // 不伪造任务完成；清单由 background_tasks_changed 元数据更新。
+  }
+
+  async askSideQuestion(id: string, input: SideQuestionInput, signal: AbortSignal): Promise<unknown> {
+    if (this.sessions.get(id)?.agent !== "claude") throw new Error("仅 Claude 会话支持侧问");
+    if (this.sideQuestions.has(id)) throw new Error("当前侧问尚未结束");
+    if (this.restartingSessions.has(id) || this.checkingSessions.has(id)) throw new Error("会话正在续接或重启");
+    this.sideQuestions.add(id);
+    try {
+      await this.startups.get(id);
+      const worker = await this.ensureWorker(id);
+      if (signal.aborted) throw new Error("请求已取消");
+      if (!worker.askSideQuestion) throw new Error("Claude driver 不支持侧问");
+      return await worker.askSideQuestion(input, signal);
+    } finally { this.sideQuestions.delete(id); }
   }
 
   async setPluginEnabled(id: string, pluginId: string, enabled: boolean, scope?: unknown): Promise<{
@@ -500,6 +551,7 @@ export class SessionManager {
   }
 
   async setConfig(id: string, config: SessionConfig): Promise<SessionRecord> {
+    if (this.thinkingUpdates.has(id) || this.sideQuestions.has(id)) throw new Error("请等 Thinking 切换或侧问结束后再切换配置");
     const entries = Object.entries(config).filter((entry): entry is [keyof SessionConfig, string | null] => (
       entry[1] === null || (typeof entry[1] === "string" && entry[1].length > 0)
     ));
@@ -630,6 +682,7 @@ export class SessionManager {
 
   /** 自动释放跳过的原因；null 表示可以释放。手动释放把这些原因转成可读错误。 */
   private releaseBlocker(id: string, record: SessionRecord): string | null {
+    if (this.thinkingUpdates.has(id) || this.sideQuestions.has(id)) return "会话正在切换 Thinking 或进行侧问，请稍候";
     if (this.restartingSessions.has(id)) return "会话正在切换配置或续接，请稍候";
     if (this.checkingSessions.has(id)) return "会话正在检查原生会话，请稍候";
     if (record.status !== "idle") return `会话当前状态为 ${record.status}，空闲时才能释放`;
@@ -872,6 +925,7 @@ export class SessionManager {
       return;
     }
     const oldWorker = this.workers.get(id) ?? null;
+    this.assertNoMenuControl(id, oldWorker);
     this.restartingSessions.add(id);
     this.setStatus(id, "starting");
     this.workers.delete(id);
@@ -926,6 +980,11 @@ export class SessionManager {
     const record = this.sessions.get(id);
     if (!record) throw new Error(`会话不存在：${id}`);
     if (record.released) throw new Error("会话 worker 已释放；发送消息时会自动从磁盘续接");
+  }
+
+  /** 必须在摘掉 workers 注册项之前调用：之后再拒绝，旧 worker 既没停也不在注册表里。 */
+  private assertNoMenuControl(id: string, oldWorker: Driver | null): void {
+    if (this.thinkingUpdates.has(id) || (oldWorker && this.sideQuestions.has(id))) throw new Error("请等 Thinking 切换或侧问结束后再续接 worker");
   }
 
   private async replaceWorker(
@@ -985,6 +1044,7 @@ export class SessionManager {
     const targetConfig = mergeSessionConfig(previousConfig, update);
     const nativeSessionId = resume ? record.nativeSessionId : undefined;
     const oldWorker = this.requireWorker(id);
+    this.assertNoMenuControl(id, oldWorker);
     this.restartingSessions.add(id);
     this.emit(id, "config_update_started", {
       message: "正在切换模型…",

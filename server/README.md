@@ -133,7 +133,7 @@ webhook 地址就是密钥：文件权限设为 600，也不要写进日志或�
 - `GET /api/prefs` / `PUT /api/prefs`：服务端偏好，当前只有 `idleReleaseMinutes`（整数 0–1440 分钟，0 = 关闭空闲自动释放；校验失败 400）
 - `GET /api/claude/settings` / `PUT /api/claude/settings`：读取或保存用户级 `{remoteControlAtStartup:boolean}`（400 / 40064）。只改 `~/.claude/settings.json` 的这一键，关闭写 `false`，按 2 空格缩进保留其他键与顺序；直接写文件跟随软链接，不替换链接。仅影响之后新启动的 worker（新建、续接、释放后发送），项目级 `false` 仍可覆盖关闭，不改变当前连接的 RC。
 - `PUT /api/sessions/:id/plugins`：请求 `{id,enabled,scope?}`，仅 Claude；id 和 scope 必须匹配该 cwd 最近一次插件列表，scope 从列表取（缺失则不传）。通过 `execFile` 参数数组在会话 cwd 执行 `claude plugin enable|disable <id> --json [-s scope]`；返回 `{plugins,reloaded,reloadError?}`，重新运行列表刷新状态。已有 worker 依次发 `get_settings`、`reload_plugins` 并刷新斜杠命令；重载失败仍返回已保存状态及 `reloadError`。dead/released 会话不拉起 worker，`reloaded:false` 提示新会话或重新续接后生效。CLI 失败或参数非法为 400 / 40065，会话不存在为 404 / 40401；CLI 单次 15 秒、重载 30 秒，前端总请求上限 80 秒。协议证据见 §10。
-- `POST /api/sessions/:id/mcp`：仅 Claude，请求 `{action:"toggle",serverName,enabled:boolean}` 或 `{action:"reconnect",serverName}`。driver 先读 `mcp_status` 并核对服务器名，再发 `mcp_toggle {serverName,enabled}` / `mcp_reconnect {serverName}`，最后读回 `mcp_status`，`data` 为 `{mcpServers:[…]}`。操作成功但读回失败时返回旧列表及 `refreshError`，前端明确提示刷新；不能把已执行操作伪装成失败。开关只改变当前 worker，非持久配置。已释放会话先续接，dead、非 Claude、回复中、启动中、有未决审批、重启中、名称不存在或 CLI 错误为 400 / 40066，不存在为 404 / 40401。单次查询 15 秒、开关/重连 30 秒，前端总上限 80 秒；没有任意协议转发入口。
+- `POST /api/sessions/:id/mcp`：仅 Claude，请求 `{action:"toggle",serverName,enabled:boolean}` 或 `{action:"reconnect",serverName}`。driver 先读 `mcp_status` 并核对服务器名，再发 `mcp_toggle {serverName,enabled}` / `mcp_reconnect {serverName}`，最后读回 `mcp_status`，`data` 为 `{mcpServers:[…]}`。操作成功但读回失败时返回旧列表及 `refreshError`，前端明确提示刷新；不能把已执行操作伪装成失败。开关只改变当前 worker，非持久配置；回复中允许操作，与扩展一致（实测见 §14）。已释放会话先续接，dead、非 Claude、启动中、有未决审批、重启中、名称不存在或 CLI 错误为 400 / 40066，不存在为 404 / 40401。单次查询 15 秒、开关/重连 30 秒，前端总上限 80 秒；没有任意协议转发入口。
 - `GET /api/sessions/:id/info/:kind` 新增 `status` → `get_status`（`{sections:[{title,rows:[{label,value}]}]}`）；`usage` → `get_usage`（会话费用、订阅与额度）；`memory` / `instructions` → `get_memory_dialog`（files/folders/memories、自动记忆状态）；`skills` → `get_skills_dialog`；`sandbox` → `get_sandbox_dialog`；`export` → `export_conversation`（`{text,default_filename}`，纯文本，以 CLI 导出内容为准，不受前端事件窗口限制）；均为只读控制请求，错误沿用 400 / 40063。
 - `output` 先 `initialize` 获取 `available_output_styles`，再 `get_settings` 刷新磁盘设置，返回 `{outputStyle,availableStyles,settingsFiles}`，两次请求各 15 秒、前端总上限 40 秒。仅返回样式字段，不暴露整个 settings（可能含环境变量）。
 - `settings` 直接返回 `{settingsFiles:[{source,label,path,uri}]}`，无需 worker，dead 会话也可打开；三个范围为用户、项目、项目本地。用户路径尊重 `CLAUDE_CONFIG_DIR`，默认 `~/.claude/settings.json`。hooks/permissions/skills/sandbox/memory/output 查看也附带 `settingsFiles`；memory/instructions 的文件及目录行附带 `uri`。
@@ -147,6 +147,33 @@ webhook 地址就是密钥：文件权限设为 600，也不要写进日志或�
 - `POST /api/restart`：无请求体，返回 HTTP 202，信封 `{code:0,msg:"accepted",data:{restarting:true},request_id}`；表示已接受，不表示重启已完成。沿用两个入口的 Host / Origin 校验，远程入口还须 Tailscale 身份白名单；不新增豁免。同一进程内重复请求仍回 202，只启动一次重启。
 - `GET /api/pages`：启动时已注册的扩展页面列表
 - `GET /api/pages/:id/health`：限时探测一个扩展页面的目标服务
+
+### 斜杠菜单
+
+Claude 菜单按扩展分成「上下文 / 模型 / 自定义 / 设置 / 支持」。插件改名「管理插件」并标注启用、停用与重载；MCP 标注开关、重连与连接状态，两者均在「自定义」中。MCP 和插件都使用 `role="switch"`；MCP 回复中可用，启动、待审批或会话结束时在开关旁解释禁用原因。Codex 菜单保持原样。
+
+- `PUT /api/sessions/:id/thinking`：`{enabled:boolean}` → `{session}`。Claude 会话配置保存 `thinkingLevel:"off"|"default_on"`，默认 `default_on`；driver 发送 `set_max_thinking_tokens`，关闭为 0，开启为 31999 + `thinking_display:null`（与扩展默认预算一致，使用 wb 现有思考呈现）。请求成功才保存并广播 `config_updated`。已释放会话只保存，下一次续接生效；每次 worker 初始化（含重启、续接）重新下发。单次控制 15 秒，前端总上限 40 秒。不写用户 settings，不修改模型/effort。菜单开关点后保持展开，失败就地显示。
+- `GET /api/sessions/:id/info/capabilities`：只返回 `{supportsFastMode:boolean}`，匹配 `initialize.models[]` 的 `value / resolvedModel`（兼容 `[1m]`）；配置跟随时使用 CLI init 或有效设置模型，未知模型/缺失能力字段为 false。Fast 只在字段为 true 时显示，通过现有用户消息链路发 `/fast`，不绕过 CLI 的账户额度检查。
+- `POST /api/sessions/:id/tasks/stop`：`{taskId}` → `{stopped:true}`，只接受当前会话 `backgroundTasks` 中的任务，已有 live worker 发送 `stop_task {task_id}`。回复中可停止，前端先 `window.confirm`；成功只表示停止请求已接受，列表以 `background_tasks_changed` 的全量元数据为准，不提前删除任务。控制 15 秒，前端 20 秒；不拉起已释放 worker。
+- `POST /api/sessions/:id/side-question`：`{question,history?:[{question,response}]}` → `{response:string|null,synthetic?,error?,refusal_fallback?}`。问题及每个历史字段为 1–20000 字符，历史最多 20 轮；只转发 `side_question`，不调用主消息发送接口，不写主线事件。面板在内存保存独立历史，synthetic/null 不加入历史。每会话最多一个在途侧问，关闭/取消/HTTP 断开经 `control_cancel_request` 取消，迟到回复忽略；控制上限 60 秒，前端 80 秒。侧问/Thinking 在途时阻止配置切换与 worker 释放。以上三个写接口非法输入、非 Claude 或 CLI 错误为 400 / 40069；不存在为 404 / 40401，均沿用已有访问控制。
+
+2026-10-02 判定表（上一轮已接项目继续保留）：
+
+| 扩展功能 | wb 判定 | 依据 / 边界 |
+| --- | --- | --- |
+| MCP 开关、重连、刷新 | 已接，回复中解锁 | 流式回复开始后 3 次控制请求均 success；只对当前 worker 生效 |
+| 插件启停、重载 | 已接，入口可发现 | 「自定义 / 管理插件」，switch，操作后刷新 |
+| Thinking | 本轮已接 | 默认开启、31999 预算、会话保存及初始化重发 |
+| Fast | 本轮已接，按能力显示 | `models[].supportsFastMode === true`；发用户命令 `/fast` |
+| 后台任务 /tasks | 本轮已接 | 实时清单、确认停止、task ID 白名单；真实任务停止待临时实例补验 |
+| 侧问 /btw | 本轮已接 | stream-json 实测返回 `response:"4",synthetic:false`；独立历史、取消，不进主线 |
+| 状态、账户/用量、Memory、Instructions、Skills、Sandbox、输出样式、Hooks、设置文件、导出、帮助 | 保留已接 | 配置编辑仍走文件协议链接，导出以 CLI 文本为准 |
+| Rewind、Bookmarks | 不接 | 本单排除；Rewind 缺文件检查点与消息 UUID |
+| 插件安装/卸载/marketplace、MCP 添加/删除/OAuth | 不接 | 本单排除，避免扩大配置写入范围 |
+| 反馈上传、Chrome、Design、账号/登出、内部条目 | 不接 | 本单明确排除 |
+| switch-models-on-flag、Ultracode | 不接 | 实验 gate 控制，本单排除 |
+
+协议与实测报文见 `spikes/PROTOCOL-NOTES.md` §14。运行时没有新增依赖。
 
 ### 重启当前实例
 

@@ -3,7 +3,7 @@ import { strict as assert } from 'node:assert';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { readFileSync } from 'node:fs';
-import { groupDispatches, dispatchName, dispatchSeconds, dispatchTime, dispatchStatus, dispatcherTitle, dispatcherModel, RECENT_DISPATCH_MS } from '../src/dispatch-flow.ts';
+import { groupDispatches, dispatchName, dispatchSeconds, dispatchTime, dispatchStatus, dispatcherTitle, dispatcherSessions, dispatcherModel, subagentWireState, RECENT_DISPATCH_MS, FINISHED_WIRE_MS } from '../src/dispatch-flow.ts';
 import { startDispatchPolling } from '../src/dispatch-polling.ts';
 import { fetchDispatches } from '../src/api.ts';
 
@@ -13,6 +13,7 @@ globalThis.window = { location: { hash: '#/' }, innerWidth: 1280, addEventListen
 const { Store, store } = await import('../src/store.ts');
 const { App } = await import('../src/App.tsx');
 const { DispatchView, DispatchTree } = await import('../src/components/DispatchView.tsx');
+const { lastWindowsCwd, loadWindowsHistory } = await import('../src/components/DirectoryBrowser.tsx');
 let pass = 0;
 const t = async (name, fn) => { try { await fn(); pass++; } catch (e) { console.error(`❌ ${name}\n${e.stack}`); process.exitCode = 1; } };
 const now = Date.parse('2026-10-01T10:00:00Z');
@@ -30,7 +31,7 @@ await t('固定三端，按 tool 分组；运行中保留，结束 30 分钟边�
   ], now);
   assert.deepEqual(groups.map(g => g.tool), ['codex', 'kimi', 'copilot']);
   assert.deepEqual(groups.map(g => g.runs.length), [1, 1, 0]);
-  assert.deepEqual(groups.map(g => g.wireState), ['flow', 'finish', 'idle']);
+  assert.deepEqual(groups.map(g => g.wireState), ['flow', 'idle', 'idle']);
   assert.equal(groupDispatches([], now).length, 3);
 });
 await t('结束时间缺失可由 startedAt + elapsedS 推算；lost 从首次观察起算且会过期', () => {
@@ -65,9 +66,95 @@ await t('派单人标题：取 parent.sessionId（仅 claude）、工作台/原�
   assert.equal(dispatcherTitle([by('native')], titles), '工作台标题');
   assert.equal(dispatcherTitle([by('wb'), by('native')], titles), '工作台标题');
   assert.equal(dispatcherTitle([by('abcdefgh-123')], titles), 'Claude Code 会话 · abcdefgh');
-  assert.equal(dispatcherTitle([by('native'), by('other')], titles), '2 个会话在派单');
+  assert.equal(dispatcherTitle([by('native'), by('other')], titles), '工作台标题\nClaude Code 会话 · other');
   assert.equal(dispatcherTitle([by('native', 'codex')], titles), 'Claude Code 会话');
   assert.equal(dispatcherTitle([run({ session: 'native' })], titles), 'Claude Code 会话');
+});
+
+await t('多个派单会话逐行显示标题与运行数，别名去重，最多三行并显示 +N；单会话保持原样', () => {
+  const titles = Array.from({ length: 5 }, (_, i) => ({ id: `wb-${i}`, nativeSessionId: `native-${i}`, title: `派单会话 ${i}` }));
+  const by = (id, status = 'running') => run({ runId: id, status, endedAt: iso(now), parent: { agent: 'claude', sessionId: id, entrypoint: null } });
+  const runs = [...titles.map(s => by(s.nativeSessionId)), by('wb-0'), by('native-0', 'OK')];
+  const dispatchers = dispatcherSessions(runs, titles);
+  assert.deepEqual(dispatchers.map(s => s.title), titles.map(s => s.title));
+  assert.deepEqual(dispatchers.map(s => s.running), [2, 1, 1, 1, 1]);
+  const html = renderToStaticMarkup(React.createElement(DispatchTree, {
+    groups: groupDispatches(runs, now), title: dispatcherTitle(runs, titles), dispatchers, model: null, now,
+  }));
+  const source = html.match(/<article class="dispatch-node dispatch-source">([\s\S]*?)<\/article>/)[1];
+  assert.equal((source.match(/class="dispatch-session-title"/g) || []).length, 4);
+  for (const text of ['派单会话 0 · 2 单运行中', '派单会话 1 · 1 单运行中', '派单会话 2 · 1 单运行中', '>+2<']) assert.ok(source.includes(text));
+  assert.ok(!source.includes('派单会话 3')); assert.ok(!source.includes('派单会话 4'));
+  const single = renderToStaticMarkup(React.createElement(DispatchTree, {
+    groups: groupDispatches([runs[0]], now), title: dispatcherTitle([runs[0]], titles),
+    dispatchers: dispatcherSessions([runs[0]], titles), model: null, now,
+  }));
+  assert.ok(single.includes('title="派单会话 0">派单会话 0</p>'));
+});
+
+await t('工具组连线结束十分钟前/正好/之后变灰，卡片仍显示三十分钟；运行中始终 flow', () => {
+  for (const age of [FINISHED_WIRE_MS - 1, FINISHED_WIRE_MS, FINISHED_WIRE_MS + 1]) {
+    const g = groupDispatches([run({ status: 'OK', endedAt: iso(now - age) })], now)[0];
+    assert.equal(g.runs.length, 1);
+    assert.equal(g.wireState, age <= FINISHED_WIRE_MS ? 'finish' : 'idle');
+  }
+  const inferred = run({ status: 'OK', endedAt: null, startedAt: iso(now - FINISHED_WIRE_MS - 1001), elapsedS: 1 });
+  assert.equal(groupDispatches([inferred], now)[0].wireState, 'idle');
+  const lost = run({ status: 'lost', startedAt: null });
+  assert.equal(groupDispatches([lost], now, new Map([[lost.runId, now - FINISHED_WIRE_MS]]))[0].wireState, 'finish');
+  assert.equal(groupDispatches([lost], now, new Map([[lost.runId, now - FINISHED_WIRE_MS - 1]]))[0].wireState, 'idle');
+  assert.equal(groupDispatches([inferred, run({ startedAt: iso(now - 86400000) })], now)[0].wireState, 'flow');
+  assert.equal(groupDispatches([inferred, run({ status: 'OK', endedAt: iso(now - 1) })], now)[0].wireState, 'finish');
+});
+
+await t('子 agent 连线按自身 lastActivityAt，十分钟后变灰；运行中和未知日期处理独立', () => {
+  const agent = { threadId: 'child', nickname: 'child', role: 'sol', depth: 1, parentThreadId: 'parent',
+    status: 'finished', startedAt: iso(now), lastActivityAt: iso(now - FINISHED_WIRE_MS) };
+  assert.equal(subagentWireState(agent, now - 1), 'finish');
+  assert.equal(subagentWireState(agent, now), 'finish');
+  assert.equal(subagentWireState(agent, now + 1), 'idle');
+  assert.equal(subagentWireState({ ...agent, status: 'running', lastActivityAt: iso(now - 86400000) }, now), 'flow');
+  assert.equal(subagentWireState({ ...agent, lastActivityAt: 'bad' }, now), 'idle');
+  assert.equal(subagentWireState({ ...agent, status: 'unknown' }, now), 'idle');
+  const html = renderToStaticMarkup(React.createElement(DispatchTree, {
+    groups: groupDispatches([run({ subagents: [agent] })], now + 1), title: '派单人', model: null, now: now + 1,
+  }));
+  assert.ok(html.includes('dispatch-subagent-wire idle'));
+  assert.ok(html.includes('已完成')); assert.ok(html.includes('dispatch-wire flow'));
+});
+
+await t('Windows 目录比较三家历史与工作台时间，历史更新者胜出；历史失败回落', async () => {
+  const local = [{ cwd: '/mnt/c/Users/local', lastActivityAt: iso(now - 1000) }];
+  for (const agent of ['claude', 'codex', 'kimi']) {
+    const history = { agent, cwd: `/mnt/d/${agent}`, lastActivityAt: iso(now), title: agent };
+    globalThis.fetch = async url => {
+      assert.equal(url, '/api/history?q=%2Fmnt%2F&limit=1');
+      return { json: async () => ({ code: 0, data: { sessions: [history] } }) };
+    };
+    assert.equal(lastWindowsCwd(local, await loadWindowsHistory()), history.cwd);
+    assert.equal(lastWindowsCwd([{ ...local[0], lastActivityAt: iso(now + 1) }], [history]), local[0].cwd);
+  }
+  globalThis.fetch = async () => { throw new Error('历史接口失败'); };
+  assert.equal(lastWindowsCwd(local, await loadWindowsHistory()), local[0].cwd);
+  assert.equal(lastWindowsCwd([], await loadWindowsHistory()), '/mnt/c/Users');
+  assert.equal(lastWindowsCwd([{ cwd: '/home/repo', lastActivityAt: iso(now) }]), '/mnt/c/Users');
+  assert.equal(lastWindowsCwd([{ cwd: '/mnt/c/Users', lastActivityAt: iso(now) }], [{ cwd: '/mnt/d/older', lastActivityAt: iso(now - 1) }]), '/mnt/c/Users');
+});
+
+await t('历史关键词误匹配 Linux 会话标题时继续最小页；忽略无效时间，不修改输入', async () => {
+  let calls = 0;
+  globalThis.fetch = async url => {
+    calls++;
+    return { json: async () => ({ code: 0, data: calls === 1
+      ? { sessions: [{ cwd: '/home/repo', title: '/mnt/ 的说明', lastActivityAt: iso(now) }], nextCursor: 'next' }
+      : { sessions: [{ cwd: '/mnt/d/native', lastActivityAt: iso(now - 1) }] } }) };
+  };
+  const history = await loadWindowsHistory();
+  assert.equal(calls, 2); assert.equal(lastWindowsCwd([], history), '/mnt/d/native');
+  const local = [{ cwd: '/mnt/d/current', lastActivityAt: iso(now) }];
+  const before = JSON.stringify(local);
+  assert.equal(lastWindowsCwd(local, [{ cwd: '/mnt/c/bad-date', lastActivityAt: 'bad' }]), local[0].cwd);
+  assert.equal(JSON.stringify(local), before);
 });
 
 await t('简要：name 是执行端兜底时用派单首行', () => {

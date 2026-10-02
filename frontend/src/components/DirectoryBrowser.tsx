@@ -1,16 +1,47 @@
 import { useEffect, useRef, useState } from "react";
-import { fetchDirectories } from "../api";
+import { fetchDirectories, fetchHistory } from "../api";
 import { store } from "../store";
-import type { DirectoryListing } from "../types";
+import type { DirectoryListing, HistorySession } from "../types";
 
 const WINDOWS_FALLBACK = "/mnt/c/Users";
 
-/** 「Windows」按钮的落点：最近活跃的、工作目录在 /mnt/ 下的会话（服务端记录，电脑和手机一致）。 */
-function lastWindowsCwd(): string {
-  const latest = store.sessions
-    .filter((session) => session.cwd.startsWith("/mnt/"))
-    .sort((a, b) => Date.parse(b.lastActivityAt) - Date.parse(a.lastActivityAt))[0];
-  return latest?.cwd ?? WINDOWS_FALLBACK;
+/** 比较工作台与三家原生会话；无有效活动时间的记录不压过已有候选。 */
+export function lastWindowsCwd(
+  sessions: readonly { cwd: string; lastActivityAt: string }[],
+  history: readonly { cwd: string; lastActivityAt: string }[] = [],
+): string {
+  let cwd = WINDOWS_FALLBACK;
+  let latest = -Infinity;
+  let found = false;
+  for (const session of [...sessions, ...history]) {
+    if (!session.cwd.startsWith("/mnt/")) continue;
+    const time = Date.parse(session.lastActivityAt);
+    if (!found || time > latest) {
+      cwd = session.cwd;
+      latest = Number.isFinite(time) ? time : -Infinity;
+      found = true;
+    }
+  }
+  return cwd;
+}
+
+/** 预取不挡导航；最小页，三家一起按活动时间排序，失败仍用工作台。 */
+export async function loadWindowsHistory(): Promise<HistorySession[]> {
+  try {
+    const deadline = Date.now() + 1500;
+    let cursor: string | undefined;
+    do {
+      const result = await fetchHistory({ q: "/mnt/", limit: 1, cursor });
+      const matches = result.sessions.filter((session) => session.cwd.startsWith("/mnt/"));
+      if (matches.length) return matches;
+      // q 也匹配标题；只有误匹配时才继续最小页，且不无限扫描。
+      if (!result.nextCursor || result.nextCursor === cursor) break;
+      cursor = result.nextCursor;
+    } while (Date.now() < deadline);
+    return [];
+  } catch {
+    return [];
+  }
 }
 
 interface DirectoryBrowserProps {
@@ -53,6 +84,12 @@ export function DirectoryContents({ initialPath, includeFiles, onSelectFile, onS
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const requestId = useRef(0);
+  const [windowsHistory, setWindowsHistory] = useState<HistorySession[]>([]);
+  useEffect(() => {
+    let active = true;
+    void loadWindowsHistory().then((history) => { if (active) setWindowsHistory(history); });
+    return () => { active = false; };
+  }, []);
 
   /** fallback：path 读不了时改去哪（undefined = 不回退；"" = 主目录） */
   async function load(path?: string, fallback?: string) {
@@ -99,7 +136,7 @@ export function DirectoryContents({ initialPath, includeFiles, onSelectFile, onS
           <button className="btn" type="button" disabled={!listing?.parent || loading} onClick={() => { if (listing?.parent) void load(listing.parent); }}>上一级</button>
           <button className="btn" type="button" disabled={loading} onClick={() => void load()}>主目录</button>
           <button className="btn" type="button" disabled={loading} onClick={() => {
-            const target = lastWindowsCwd();
+            const target = lastWindowsCwd(store.sessions, windowsHistory);
             void load(target, target === WINDOWS_FALLBACK ? undefined : WINDOWS_FALLBACK);
           }}>Windows</button>
         </div>

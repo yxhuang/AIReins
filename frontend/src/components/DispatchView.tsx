@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 import { fetchDispatchDetail, fetchDispatches } from "../api";
-import { dispatchName, dispatcherTitle, dispatcherModel, dispatchSeconds, dispatchStatus, dispatchTime, groupDispatches, type DispatchRun } from "../dispatch-flow";
+import { dispatchName, dispatcherTitle, dispatcherSessions, dispatcherModel, dispatchSeconds, dispatchStatus, dispatchTime, groupDispatches, subagentWireState, type DispatchRun } from "../dispatch-flow";
 import { effectiveFor, modelShortName } from "../config-view";
 import { startDispatchPolling } from "../dispatch-polling";
 import { sessionTitle } from "../format";
@@ -62,6 +62,7 @@ export function DispatchView({ terminalOpen = false }: { terminalOpen?: boolean 
   const visibleRuns = groups.flatMap((group) => group.runs);
   const running = visibleRuns.filter((run) => run.status === "running").length;
   const title = dispatcherTitle(visibleRuns, sessions);
+  const dispatchers = dispatcherSessions(visibleRuns, sessions);
   const model = dispatcherModel(visibleRuns, sessions);
 
   if (selectedId) return <DispatchDetail key={selectedId} runId={selectedId} sessions={sessions} terminalOpen={terminalOpen} />;
@@ -71,7 +72,7 @@ export function DispatchView({ terminalOpen = false }: { terminalOpen?: boolean 
       {error && <p className="dispatch-error" role="alert">派单加载失败：{error}（稍后自动重试）</p>}
       <section className="dispatch-panel" aria-label="派单拓扑">
         <div className="dispatch-panel-head"><strong>执行端</strong><span>{!loaded ? "正在加载…" : running ? `${running} 单运行中 · 3 个执行端` : visibleRuns.length ? "3 个执行端 · 最近结束" : "3 个执行端 · 全部空闲"}</span></div>
-        <DispatchTree groups={groups} title={title} model={model} highlighted={highlighted} now={now} />
+        <DispatchTree groups={groups} title={title} dispatchers={dispatchers} model={model} highlighted={highlighted} now={now} />
       </section>
       {loaded && !error && !visibleRuns.length && <p className="dispatch-empty">现在没有派单</p>}
       {highlighted.size > 0 && <p className="dispatch-note dispatch-highlight-note">已标出从会话跳转的 {highlighted.size} 张派单。</p>}
@@ -82,8 +83,8 @@ export function DispatchView({ terminalOpen = false }: { terminalOpen?: boolean 
 
 
 /** Kept separate so fixture rendering exercises the same topology as polling updates. */
-export function DispatchTree({ groups, title, model, highlighted = new Set<string>(), now = Date.now() }: {
-  groups: ReturnType<typeof groupDispatches>; title: string; model: string | null; highlighted?: ReadonlySet<string>; now?: number;
+export function DispatchTree({ groups, title, dispatchers = [], model, highlighted = new Set<string>(), now = Date.now() }: {
+  groups: ReturnType<typeof groupDispatches>; title: string; dispatchers?: ReturnType<typeof dispatcherSessions>; model: string | null; highlighted?: ReadonlySet<string>; now?: number;
 }) {
   const subagents = [...new Map(groups.filter((group) => group.tool === "codex").flatMap((group) =>
     group.runs.flatMap((run) => run.subagents ?? [])).map((agent) => [agent.threadId, agent])).values()];
@@ -142,11 +143,16 @@ export function DispatchTree({ groups, title, model, highlighted = new Set<strin
         <div className="dispatch-tree" ref={tree}>
           <svg className="dispatch-wires" viewBox={`0 0 ${geometry.width} ${geometry.height}`} preserveAspectRatio="none" aria-hidden="true">
             {groups.map((group, index) => <path key={group.tool} className={`dispatch-wire ${group.wireState}`} d={geometry.paths[index]} vectorEffect="non-scaling-stroke" style={{ "--wire-color": `var(--agent-${group.tool})` } as CSSProperties} />)}
-            {levels.flat().map((agent) => <path key={agent.threadId} className={`dispatch-wire dispatch-subagent-wire ${agent.status === "running" ? "flow" : agent.status === "finished" ? "finish" : "idle"}`} d={geometry.subpaths[agent.threadId]} vectorEffect="non-scaling-stroke" style={{ "--wire-color": "var(--agent-codex)" } as CSSProperties} />)}
+            {levels.flat().map((agent) => <path key={agent.threadId} className={`dispatch-wire dispatch-subagent-wire ${subagentWireState(agent, now)}`} d={geometry.subpaths[agent.threadId]} vectorEffect="non-scaling-stroke" style={{ "--wire-color": "var(--agent-codex)" } as CSSProperties} />)}
           </svg>
           <article className="dispatch-node dispatch-source">
             <div className="dispatch-source-head"><AgentIcon agent="claude" label="Claude Code" /><span>Claude Code</span><span className="dispatch-role">派单人</span></div>
-            <p className="dispatch-session-title" title={title}>{title}</p>
+            {dispatchers.length > 1 ? <>
+              {dispatchers.slice(0, 3).map((source) => <p key={source.id} className="dispatch-session-title" title={source.title}>
+                {source.title}{source.running > 0 ? ` · ${source.running} 单运行中` : ""}
+              </p>)}
+              {dispatchers.length > 3 && <p className="dispatch-session-title">+{dispatchers.length - 3}</p>}
+            </> : <p className="dispatch-session-title" title={title}>{title}</p>}
             {model && <p className="dispatch-model">{model}</p>}
           </article>
           <div className="dispatch-executors">

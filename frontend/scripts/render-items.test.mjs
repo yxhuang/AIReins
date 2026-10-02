@@ -31,6 +31,62 @@ const ev = (seq, type, payload = {}) => ({
 const cmd = (name, description = "") => ({ name, description, source: "claude" });
 const names = (list) => list.map((c) => c.name);
 
+t("渲染层过滤已知无信息量 raw，不拆开文本；未知 method 仍可见", () => {
+  for (const [agent, methods] of [
+    ["codex", ["turn/diff/updated", "hook/started", "account/updated"]],
+    ["claude", ["tool_progress", "command_lifecycle"]],
+  ]) {
+    const raw = methods.map((method, index) => ev(index + 2, "raw_event", agent === "codex"
+      ? { source: agent, method, params: {} } : { source: agent, raw: { type: method } }));
+    const events = [ev(1, "agent_text_delta", { text: "前" }), ...raw, ev(8, "agent_text_delta", { text: "后" })];
+    const original = JSON.stringify(events);
+    const items = buildRenderItems(events, agent);
+    assert.deepEqual(items.map(item => item.kind), ["text"]);
+    assert.equal(items[0].text, "前后");
+    assert.equal(JSON.stringify(events), original, "原始事件不变");
+    const unknown = buildRenderItems([ev(1, "raw_event", { source: agent, method: "future/method", raw: { type: "future_event" } })], agent);
+    assert.equal(unknown[0].kind, "raw");
+  }
+});
+
+t("只隐藏明确成功的 hook；失败、错误条目、非零退出码和未知状态都保留", () => {
+  const hook = run => ev(1, "raw_event", { source: "codex", method: "hook/completed", params: { run } });
+  assert.deepEqual(buildRenderItems([hook({ status: "completed", entries: [] })], "codex"), []);
+  for (const run of [
+    { status: "failed" }, { status: "completed", error: { message: "失败" } },
+    { status: "completed", entries: [{ level: "error", message: "失败" }] },
+    { status: "completed", entries: [{ exitCode: 2 }] }, { status: "unknown" }, {},
+  ]) assert.equal(buildRenderItems([hook(run)], "codex")[0].kind, "raw");
+});
+
+t("outputDelta 仅在对应工具卡片已含相同输出时隐藏；实时/独有/缺卡片输出保留", () => {
+  const start = ev(1, "tool_call_started", { toolCallId: "cmd", toolName: "commandExecution", input: { command: "echo hello" } });
+  const delta = text => ev(2, "raw_event", { source: "codex", method: "item/commandExecution/outputDelta", params: { itemId: "cmd", delta: text } });
+  const done = ev(3, "tool_call_completed", { toolCallId: "cmd", result: { type: "commandExecution", aggregatedOutput: "hello\n", status: "completed" } });
+  const items = buildRenderItems([start, delta("hello\n"), done], "codex");
+  assert.deepEqual(items.map(item => item.kind), ["tool"]);
+  assert.ok(items[0].result.includes("hello"));
+  for (const events of [[start, delta("hello\n")], [start, delta("unique"), done], [delta("hello\n"), done]]) {
+    assert.ok(buildRenderItems(events, "codex").some(item => item.kind === "raw"));
+  }
+});
+
+t("Claude user 只过滤已显示文本回显；任务完成通知、跨会话回传及其他独有内容保留", () => {
+  const user = content => ev(2, "raw_event", { source: "claude", raw: { type: "user", message: { content } } });
+  const displayed = ev(1, "user_message", { text: "同一消息" });
+  for (const content of ["同一消息", [{ type: "text", text: "同一消息" }]]) {
+    assert.deepEqual(buildRenderItems([displayed, user(content)], "claude").map(item => item.kind), ["user"]);
+  }
+  for (const content of ["<task-notification><status>completed</status></task-notification>",
+    'Another Claude session sent a message: <agent-message>回传</agent-message>', "Print 2",
+    [{ type: "text", text: "同一消息" }, { type: "image", source: {} }]]) {
+    assert.ok(buildRenderItems([displayed, user(content)], "claude").some(item => item.kind === "raw"));
+  }
+  const later = { ...user("同一消息"), seq: 4 };
+  assert.ok(buildRenderItems([displayed, ev(3, "turn_completed"), later], "claude").some(item => item.kind === "raw"),
+    "前一回合出现过同样文本不能证明新消息是回显");
+});
+
 t("插话保留标记且不拆开当前工具回合，普通消息仍开始新回合", () => {
   const items = buildRenderItems([
     ev(1, "user_message", { text: "开始" }),

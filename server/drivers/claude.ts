@@ -14,7 +14,7 @@ import type {
 import { BaseDriver, mentionFallbackNote, parseJsonLine, tryReadMentionText, userMessageText, withTimeout } from "./base.js";
 import { readClaudeEffectiveSettings } from "../claude-settings.js";
 import type { RemoteControlState } from "../types.js";
-import type { McpAction } from "../session-menu.js";
+import { supportsClaudeFastMode, type McpAction, type SideQuestionInput } from "../session-menu.js";
 
 interface ClaudePermission {
   protocolRequestId: string;
@@ -224,9 +224,13 @@ export class ClaudeDriver extends BaseDriver {
   private steerEchoedSinceResult = false;
   private steerCarried = false;
   private turnActive = false;
+  private menuModels: unknown;
+  private menuReportedModel?: string;
+  private readonly sideRequestIds = new Set<string>();
 
   async start(): Promise<void> {
     this.config = {
+      thinkingLevel: this.config.thinkingLevel ?? "default_on",
       model: this.config.model ?? null,
       effort: this.config.effort ?? null,
       permissionMode: this.config.permissionMode ?? "auto",
@@ -253,6 +257,8 @@ export class ClaudeDriver extends BaseDriver {
       });
       if (this.resumeSessionId) throw new Error(`Claude 续接 worker 初始化失败：${message}`);
     }
+    // CLI 会话续接不会恢复 control_request 的覆盖；每次 worker 初始化都重发。
+    await this.setConfig({ thinkingLevel: this.config.thinkingLevel });
     this.callbacks.metadata({ config: { ...this.config } });
     this.callbacks.status("idle");
     if (readClaudeEffectiveSettings(this.cwd).remoteControlAtStartup) {
@@ -293,8 +299,13 @@ export class ClaudeDriver extends BaseDriver {
   async setConfig(config: SessionConfig): Promise<SessionConfig> {
     this.validateConfig({ ...this.config, ...config });
     const updated = { ...config };
+    if (config.thinkingLevel !== undefined) {
+      await this.requestControl({ subtype: "set_max_thinking_tokens", max_thinking_tokens: config.thinkingLevel === "off" ? 0 : 31999,
+        ...(config.thinkingLevel === "default_on" ? { thinking_display: null } : {}) });
+    }
     if (config.model !== undefined) {
       await this.requestControl({ subtype: "set_model", model: config.model });
+      this.menuReportedModel = undefined;
     }
     if (config.effort !== undefined) {
       await this.requestControl({ subtype: "apply_flag_settings", settings: { effortLevel: config.effort } });
@@ -446,12 +457,15 @@ export class ClaudeDriver extends BaseDriver {
       this.callbacks.emit("raw_event", { source: "stdout", raw: line });
       return;
     }
+    if (message.type === "system" && message.subtype === "control_request_progress"
+      && this.sideRequestIds.has(String(message.request_id))) return;
     if (typeof message.session_id === "string" && message.session_id !== this.reportedNativeSessionId) {
       this.reportedNativeSessionId = message.session_id;
       this.callbacks.metadata({ nativeSessionId: message.session_id });
     }
 
     if (message.type === "system" && message.subtype === "init") {
+      if (typeof message.model === "string") this.menuReportedModel = message.model;
       const effectiveConfig = {
         ...(typeof message.model === "string"
           ? { model: { value: message.model, source: "init" as const } }
@@ -720,6 +734,7 @@ export class ClaudeDriver extends BaseDriver {
   private validateConfig(config: SessionConfig): void {
     for (const [id, value] of Object.entries(config)) {
       if (value === undefined) continue;
+      if (id === "thinkingLevel" && (value === "off" || value === "default_on")) continue;
       const option = CLAUDE_CONFIG_SCHEMA.options.find((item) => item.id === id);
       if (!option?.values.some((item) => item.value === value)) {
         throw new Error(`Claude ${id} 不合法：${value}`);
@@ -729,21 +744,51 @@ export class ClaudeDriver extends BaseDriver {
 
   /** 「/」菜单的只读查看：与 VSCode 扩展同一批 control_request（2.1.285 实测，见 PROTOCOL-NOTES §10）。 */
   async queryInfo(subtype: string): Promise<unknown> {
+    if (subtype === "menu_capabilities") return { supportsFastMode: supportsClaudeFastMode(this.menuModels,
+      this.config.model ?? this.menuReportedModel ?? readClaudeEffectiveSettings(this.cwd).model) };
     return this.requestControl({ subtype });
   }
 
-  private async requestControl(request: { subtype: string; [key: string]: unknown }): Promise<unknown> {
+  private async requestControl(request: { subtype: string; [key: string]: unknown }, signal?: AbortSignal): Promise<unknown> {
+    if (signal?.aborted) throw new Error("请求已取消");
     const { subtype } = request;
     const requestId = randomUUID();
+    if (subtype === "side_question") {
+      this.sideRequestIds.add(requestId);
+      if (this.sideRequestIds.size > 32) this.sideRequestIds.delete(this.sideRequestIds.values().next().value!);
+    }
+    let abort: (() => void) | undefined;
     const result = new Promise<unknown>((resolve, reject) => {
       this.pendingCommandRequests.set(requestId, { resolve, reject });
       this.send({ type: "control_request", request_id: requestId, request });
+      abort = () => {
+        reject(new Error("请求已取消"));
+        this.cancelControl(requestId);
+      };
+      signal?.addEventListener("abort", abort, { once: true });
     });
     try {
-      return await withTimeout(result, ["reload_plugins", "mcp_reconnect", "mcp_toggle"].includes(subtype) ? 30_000 : 15_000, `Claude ${subtype}`);
+      return await withTimeout(result, subtype === "side_question" ? 60_000 : ["reload_plugins", "mcp_reconnect", "mcp_toggle"].includes(subtype) ? 30_000 : 15_000, `Claude ${subtype}`);
+    } catch (error) {
+      if (subtype === "side_question" && !signal?.aborted) this.cancelControl(requestId);
+      throw error;
     } finally {
+      if (abort) signal?.removeEventListener("abort", abort);
       this.pendingCommandRequests.delete(requestId);
     }
+  }
+
+  /** worker 已退出时 stdin 关闭，send 会同步抛错；取消是尽力而为，不能让异常逃出 abort 监听器。 */
+  private cancelControl(requestId: string): void {
+    try { this.send({ type: "control_cancel_request", request_id: requestId }); } catch { /* worker 已不在，无需取消 */ }
+  }
+
+  async stopTask(taskId: string): Promise<void> {
+    await this.requestControl({ subtype: "stop_task", task_id: taskId });
+  }
+
+  async askSideQuestion(input: SideQuestionInput, signal: AbortSignal): Promise<unknown> {
+    return this.requestControl({ subtype: "side_question", ...input }, signal);
   }
 
   async manageMcp(action: McpAction): Promise<unknown> {
@@ -784,6 +829,7 @@ export class ClaudeDriver extends BaseDriver {
       try {
         const response = await withTimeout(result, 15_000, "Claude command initialize") as Record<string, unknown> | undefined;
         updateClaudeModelLabels(response?.models);
+        this.menuModels = response?.models;
         this.updateCommands(response?.commands);
       } finally {
         this.pendingCommandRequests.delete(requestId);

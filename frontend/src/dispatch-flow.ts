@@ -25,6 +25,16 @@ interface DispatchSubagent {
 
 const DISPATCH_TOOLS = ["codex", "kimi", "copilot"] as const;
 export const RECENT_DISPATCH_MS = 30 * 60 * 1000;
+export const FINISHED_WIRE_MS = 10 * 60 * 1000;
+
+function recentWireEnd(end: number, now: number): boolean {
+  return Number.isFinite(end) && now - end >= 0 && now - end <= FINISHED_WIRE_MS;
+}
+
+export function subagentWireState(agent: DispatchSubagent, now: number): "flow" | "finish" | "idle" {
+  if (agent.status === "running") return "flow";
+  return agent.status === "finished" && recentWireEnd(timestamp(agent.lastActivityAt), now) ? "finish" : "idle";
+}
 
 function timestamp(value: string | null): number {
   return value ? Date.parse(value) : NaN;
@@ -52,7 +62,8 @@ export function groupDispatches(runs: readonly DispatchRun[], now: number, obser
       || (timestamp(b.startedAt) || 0) - (timestamp(a.startedAt) || 0));
     return {
       tool, runs: items, visible: items.slice(0, 3), more: Math.max(0, items.length - 3),
-      wireState: items.some((run) => run.status === "running") ? "flow" : items.length ? "finish" : "idle",
+      wireState: items.some((run) => run.status === "running") ? "flow"
+        : items.some((run) => recentWireEnd(dispatchEnd(run, observedEnds), now)) ? "finish" : "idle",
     };
   });
 }
@@ -101,15 +112,22 @@ export function dispatcherModel(runs: readonly DispatchRun[], sessions: readonly
   }
   return models.size ? [...models].join(" · ") : null;
 }
-export function dispatcherTitle(runs: readonly DispatchRun[], sessions: readonly DispatchSessionTitle[]): string {
+export function dispatcherSessions(runs: readonly DispatchRun[], sessions: readonly DispatchSessionTitle[]) {
   // run.session 是执行端自己的会话；派单人在 parent（只认 Claude 派出的）
-  const ids = [...new Set(runs.map((run) => run.parent?.agent === "claude" ? run.parent.sessionId?.trim() : null).filter((id): id is string => Boolean(id)))];
   // 同一会话可能同时以工作台 id 和原生 id 出现，按匹配后的 id 去重。
-  const sources = new Map<string, string>();
-  for (const id of ids) {
+  const sources = new Map<string, { id: string; title: string; running: number }>();
+  for (const run of runs) {
+    const id = run.parent?.agent === "claude" ? run.parent.sessionId?.trim() : null;
+    if (!id) continue;
     const session = sessions.find((item) => item.id === id || item.nativeSessionId === id);
-    sources.set(session?.id ?? id, session?.title || `Claude Code 会话 · ${id.slice(0, 8)}`);
+    const key = session?.id ?? id;
+    const source = sources.get(key) ?? { id: key, title: session?.title || `Claude Code 会话 · ${id.slice(0, 8)}`, running: 0 };
+    if (run.status === "running") source.running++;
+    sources.set(key, source);
   }
-  if (sources.size > 1) return `${sources.size} 个会话在派单`;
-  return sources.values().next().value ?? "Claude Code 会话";
+  return [...sources.values()];
+}
+
+export function dispatcherTitle(runs: readonly DispatchRun[], sessions: readonly DispatchSessionTitle[]): string {
+  return dispatcherSessions(runs, sessions).map((source) => source.title).join("\n") || "Claude Code 会话";
 }

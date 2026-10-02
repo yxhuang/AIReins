@@ -3,6 +3,23 @@ import { asRecord, stringifyBlock } from "./format";
 import { normalizeQuestions } from "./ask";
 import { summarizeTool, type ToolLocation, type ToolTerminalOutput } from "./tool-summary";
 
+/** 仅影响展示；条件项必须确认成功或已有对应内容，未知事件保留。 */
+export const RAW_EVENT_NOISE = {
+  codex: ["turn/diff/updated", "hook/started", "account/updated", "hook/completed", "item/commandExecution/outputDelta"],
+  claude: ["tool_progress", "command_lifecycle", "user"],
+} as const;
+
+function hookHasError(value: unknown): boolean {
+  if (Array.isArray(value)) return value.some(hookHasError);
+  if (!value || typeof value !== "object") return false;
+  const record = asRecord(value);
+  return Boolean(record.error) || record.isError === true || record.is_error === true || record.success === false
+    || [record.exitCode, record.exit_code].some((code) => typeof code === "number" && code !== 0)
+    || [record.status, record.type, record.kind, record.level].some((status) =>
+      typeof status === "string" && /^(failed|failure|error|errored|blocked|cancelled|canceled|timeout)$/i.test(status))
+    || Object.values(record).some(hookHasError);
+}
+
 // 把统一事件折叠成渲染条目：同一 turn 内的文本增量、思考增量合并成块；
 // 工具调用按 toolCallId 聚合三阶段；闸门按 requestId 聚合请求与结果。
 
@@ -330,6 +347,16 @@ export function buildRenderItems(events: UnifiedEvent[], agent: AgentKind): Rend
   const items: RenderItem[] = [];
   const tools = new Map<string, ToolView>();
   const gates = new Map<string, GateView>();
+  const commandOutputs = new Map<string, string>();
+  const startedTools = new Set<string>();
+  const userTexts = new Set<string>();
+  if (agent === "codex") for (const event of events) {
+    const p = event.payload;
+    if (event.type === "tool_call_started") startedTools.add(String(p.toolCallId ?? event.seq));
+    if (event.type === "tool_call_completed" && typeof asRecord(p.result).aggregatedOutput === "string") {
+      commandOutputs.set(String(p.toolCallId), asRecord(p.result).aggregatedOutput as string);
+    }
+  }
   let lastText: TextBlock | undefined;
   let lastThought: ThoughtBlock | undefined;
   let turn = 0;
@@ -366,6 +393,8 @@ export function buildRenderItems(events: UnifiedEvent[], agent: AgentKind): Rend
       }
       case "user_message": {
         breakRun();
+        if (p.steer !== true) userTexts.clear();
+        if (typeof p.text === "string" && p.text) userTexts.add(p.text);
         if (p.steer !== true) turn++;
         const mentions = mentionsFromPayload(p.mentions);
         items.push({
@@ -489,6 +518,7 @@ export function buildRenderItems(events: UnifiedEvent[], agent: AgentKind): Rend
         break;
       case "turn_completed": {
         breakRun();
+        userTexts.clear();
         turn++;
         const reason = abnormalTurnReason(p, agent);
         if (reason) items.push({
@@ -527,7 +557,28 @@ export function buildRenderItems(events: UnifiedEvent[], agent: AgentKind): Rend
           tone: "muted",
         });
         break;
-      case "raw_event":
+      case "raw_event": {
+        const source = p.source ?? agent;
+        const raw = asRecord(p.raw);
+        const method = source === "codex" ? p.method : raw.type;
+        if (source === "codex" && RAW_EVENT_NOISE.codex.includes(method as typeof RAW_EVENT_NOISE.codex[number])) {
+          const params = asRecord(p.params);
+          if (method === "hook/completed") {
+            if (asRecord(params.run).status === "completed" && !hookHasError(params)) break;
+          } else if (method === "item/commandExecution/outputDelta") {
+            const id = String(params.itemId ?? "");
+            if (startedTools.has(id) && typeof params.delta === "string"
+                && commandOutputs.get(id)?.includes(params.delta)) break;
+          } else break;
+        }
+        if (source === "claude" && RAW_EVENT_NOISE.claude.includes(method as typeof RAW_EVENT_NOISE.claude[number])) {
+          if (method !== "user") break;
+          const content = asRecord(raw.message).content;
+          const text = typeof content === "string" ? content : Array.isArray(content)
+            && content.every((block) => asRecord(block).type === "text" && typeof asRecord(block).text === "string")
+            ? content.map((block) => asRecord(block).text).join("\n") : null;
+          if (text && userTexts.has(text)) break;
+        }
         breakRun();
         items.push({
           kind: "raw",
@@ -536,6 +587,7 @@ export function buildRenderItems(events: UnifiedEvent[], agent: AgentKind): Rend
           text: stringifyBlock(p),
         });
         break;
+      }
       default:
         // usage_updated 等不在流内渲染（会话头单独展示）。
         break;

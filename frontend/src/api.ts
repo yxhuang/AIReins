@@ -236,6 +236,31 @@ export function manageSessionMcp(id: string, action: "toggle" | "reconnect", ser
   });
 }
 
+export function fetchClaudeCapabilities(id: string): Promise<{ supportsFastMode: boolean }> {
+  return call(`/api/sessions/${encodeURIComponent(id)}/info/capabilities`, { signal: AbortSignal.timeout(20_000) });
+}
+
+export function setSessionThinking(id: string, enabled: boolean): Promise<{ session: SessionRecord }> {
+  return call(`/api/sessions/${encodeURIComponent(id)}/thinking`, {
+    method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ enabled }), signal: AbortSignal.timeout(40_000),
+  });
+}
+
+export function stopSessionTask(id: string, taskId: string): Promise<{ stopped: boolean }> {
+  return call(`/api/sessions/${encodeURIComponent(id)}/tasks/stop`, {
+    method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ taskId }), signal: AbortSignal.timeout(20_000),
+  });
+}
+
+export interface SideQuestionTurn { question: string; response: string }
+export interface SideQuestionResult { response: string | null; synthetic?: boolean; error?: string; refusal_fallback?: { original_model: string; fallback_model: string; content: string } }
+export function askSessionSideQuestion(id: string, question: string, history: SideQuestionTurn[], signal: AbortSignal): Promise<SideQuestionResult> {
+  return call(`/api/sessions/${encodeURIComponent(id)}/side-question`, {
+    method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ question, history }),
+    signal: AbortSignal.any([signal, AbortSignal.timeout(80_000)]),
+  });
+}
+
 interface PluginToggleResult {
   plugins: unknown[];
   reloaded: boolean;

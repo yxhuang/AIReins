@@ -2,6 +2,7 @@ import type { CreateSessionInput, SessionConfig } from "./types.js";
 
 export function cleanSessionConfig(config: SessionConfig = {}): SessionConfig {
   const cleaned: SessionConfig = {};
+  if (config.thinkingLevel === "off" || config.thinkingLevel === "default_on") cleaned.thinkingLevel = config.thinkingLevel;
   if (config.model === null) cleaned.model = null;
   else if (typeof config.model === "string") cleaned.model = config.model.trim();
   if (config.effort === null) cleaned.effort = null;
@@ -13,6 +14,7 @@ export function cleanSessionConfig(config: SessionConfig = {}): SessionConfig {
 
 export function configFromCreateInput(input: CreateSessionInput): SessionConfig {
   return cleanSessionConfig({
+    thinkingLevel: input.agent === "claude" ? input.config?.thinkingLevel : undefined,
     model: input.config?.model ?? input.model,
     effort: input.config?.effort,
     permissionMode: input.config?.permissionMode

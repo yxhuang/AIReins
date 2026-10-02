@@ -52,6 +52,7 @@ export type EffectiveSource = "session" | "settings" | "init" | null;
 
 /** 会话级配置覆盖；字段为 null 表示不覆盖、跟随 CLI 有效配置。 */
 export interface SessionConfig {
+  thinkingLevel?: "off" | "default_on";
   model?: string | null;
   effort?: string | null;
   permissionMode?: string | null;

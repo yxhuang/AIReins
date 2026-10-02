@@ -1,5 +1,92 @@
-import { useState } from "react";
-import type { SessionInfoKind } from "../api";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { askSessionSideQuestion, stopSessionTask, type SessionInfoKind, type SideQuestionTurn } from "../api";
+import type { SessionRecord } from "../types";
+
+function MenuDialog({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
+  const close = useRef<HTMLButtonElement>(null);
+  useEffect(() => { close.current?.focus(); }, []);
+  return <div className="dir-overlay" onPointerDown={event => { if (event.target === event.currentTarget) onClose(); }}
+    onKeyDown={event => { if (event.key === "Escape") { event.stopPropagation(); onClose(); } }}>
+    <div className="dir-dialog info-dialog" role="dialog" aria-modal="true" aria-label={title}>
+      <div className="dir-heading"><h2>{title}</h2><button ref={close} type="button" className="btn" onClick={onClose}>关闭</button></div>
+      <div className="dir-list info-body">{children}</div>
+    </div>
+  </div>;
+}
+
+export function ClaudeTasksDialog({ session, onClose }: { session: SessionRecord; onClose: () => void }) {
+  const [pending, setPending] = useState<string | null>(null);
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  const busy = useRef(false);
+  const alive = useRef(true);
+  useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
+  const stop = async (taskId: string, description: string) => {
+    if (busy.current || !window.confirm(`停止后台任务「${description || taskId}」？`)) return;
+    busy.current = true; setPending(taskId); setError(""); setNotice("");
+    try {
+      await stopSessionTask(session.id, taskId);
+      if (alive.current) setNotice("已发送停止请求，列表将随任务状态更新。");
+    } catch (cause) { if (alive.current) setError(cause instanceof Error ? cause.message : String(cause)); }
+    finally { busy.current = false; if (alive.current) setPending(null); }
+  };
+  const locked = session.released || session.status === "dead" || session.status === "starting";
+  return <MenuDialog title="后台任务 · /tasks" onClose={onClose}>
+    {error && <p className="new-error" role="alert">{error}</p>}
+    {notice && <p className="new-hint" role="status">{notice}</p>}
+    {locked && <p className="new-hint">当前 worker 未就绪，无法停止任务。</p>}
+    {session.backgroundTasks?.length ? session.backgroundTasks.map(task => <div className="info-row" key={task.id}>
+      <div className="info-row-head"><span className="info-name">{task.description || task.id}</span>
+        <button type="button" className="btn" disabled={Boolean(locked) || pending !== null}
+          onClick={() => void stop(task.id, task.description)}>{pending === task.id ? "停止中…" : "停止"}</button></div>
+      <div className="info-meta">{task.type}</div>
+    </div>) : <p className="new-hint">没有正在运行的后台任务。</p>}
+  </MenuDialog>;
+}
+
+export function ClaudeSideQuestionDialog({ sessionId, onClose }: { sessionId: string; onClose: () => void }) {
+  const [question, setQuestion] = useState("");
+  const [thread, setThread] = useState<{ question: string; answer: string; synthetic?: boolean }[]>([]);
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState("");
+  const controller = useRef<AbortController | null>(null);
+  const history = useRef<SideQuestionTurn[]>([]);
+  useEffect(() => () => { controller.current?.abort(); controller.current = null; }, []);
+  const ask = async () => {
+    const text = question.trim();
+    if (!text || controller.current) return;
+    const request = new AbortController(); controller.current = request; setPending(true); setError("");
+    try {
+      const result = await askSessionSideQuestion(sessionId, text, history.current, request.signal);
+      if (request.signal.aborted) return;
+      if (result.error) throw new Error(result.error);
+      const answer = typeof result.response === "string" && result.response.trim() ? result.response : "没有返回答案。";
+      setThread(value => [...value, { question: text, answer, synthetic: result.synthetic }]);
+      // 服务端每个历史字段限 20000 字符；超长回答只显示不进历史，否则之后每次提问都会被拒
+      if (result.response && !result.synthetic && result.response.length <= 20000) history.current = [...history.current, { question: text, response: result.response }].slice(-20);
+      setQuestion("");
+    } catch (cause) { if (!request.signal.aborted) setError(cause instanceof Error ? cause.message : String(cause)); }
+    finally { if (controller.current === request) { controller.current = null; setPending(false); } }
+  };
+  const cancel = () => {
+    controller.current?.abort(); controller.current = null; setPending(false); setError("侧问已取消。");
+  };
+  return <MenuDialog title="侧问 · /btw" onClose={onClose}>
+    <p className="new-hint">单独问答，不加入主对话。关闭面板会取消在途侧问并清空这里的问答。</p>
+    {thread.map((turn, index) => <div className="info-row" key={index}>
+      <div className="info-name">{turn.question}</div><div className="info-code side-answer">{turn.answer}</div>
+      {turn.synthetic && <div className="info-meta">CLI 提示</div>}
+    </div>)}
+    <form className="side-question-form" onSubmit={event => { event.preventDefault(); void ask(); }}>
+      <label htmlFor={`side-question-${sessionId}`}>问题</label>
+      <textarea id={`side-question-${sessionId}`} value={question} onChange={event => setQuestion(event.target.value)} maxLength={20000}
+        rows={3} disabled={pending} placeholder="询问当前会话之外的小问题…" />
+      <div className="info-actions"><button type="submit" className="btn" disabled={pending || !question.trim()}>{pending ? "回答中…" : "提问"}</button>
+        {pending && <button type="button" className="btn" onClick={cancel}>取消</button>}</div>
+    </form>
+    {error && <p className="new-error" role="alert">{error}</p>}
+  </MenuDialog>;
+}
 
 type Rec = Record<string, unknown>;
 const rec = (value: unknown): Rec => value && typeof value === "object" && !Array.isArray(value) ? value as Rec : {};
