@@ -65,7 +65,7 @@ export function WorkbenchStorage({ dialogOpen, onDialogOpenChange }: {
     try {
       const cleaned = await cleanStorage(includeEnded);
       setStorage(cleaned.storage);
-      setResult(`已释放 ${formatBytes(cleaned.freedBytes)}`);
+      setResult(cleaned.freedBytes > 0 ? `已释放 ${formatBytes(cleaned.freedBytes)}` : "没有可清理的内容");
       await store.refreshSessions();
       closeDialog();
     } catch (reason) {
@@ -131,13 +131,13 @@ export function WorkbenchStorage({ dialogOpen, onDialogOpenChange }: {
                 onChange={(event) => setIncludeEnded(event.target.checked)} />
               <span>同时移除 {storage.cleanable.ended.sessions} 个已结束会话（{formatBytes(storage.cleanable.ended.bytes)}）</span>
             </label>
-            {noCleanableItems && <p className="settings-hint">当前无可清理项。</p>}
+            {noCleanableItems && <p className="settings-hint">当前无可清理项。占用来自左栏仍在的 {storage.categories.transcripts.sessions} 个会话的记录和附件，在左栏移除会话才会释放。</p>}
           </> : <p className="settings-hint">{loading ? "正在读取存储统计…" : "存储统计读取失败，请重试。"}</p>}
           <p className="settings-hint" id="storage-clean-description">只删工作台里的副本，CLI 原生记录保留，可在『所有来源会话』里续接。</p>
           {error && <p className="new-error" role="alert">{error}</p>}
           <div className="dir-actions">
             {!storage && <button type="button" className="btn" disabled={loading} onClick={() => void retry()}>重新读取</button>}
-            <button type="button" className="btn" disabled={!storage || cleaning} onClick={() => void clean()}>
+            <button type="button" className="btn" disabled={!storage || cleaning || Boolean(noCleanableItems)} onClick={() => void clean()}>
               {cleaning ? "清理中…" : "确认清理"}
             </button>
           </div>
