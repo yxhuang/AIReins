@@ -66,7 +66,7 @@ stop() {
 
 remote_status() {
   local cfg="${WORKBENCH_HOME:-$HOME/.workbench}/remote.json" port="" origin="" rpid=""
-  [[ -f "$cfg" ]] || { echo "  远程：未配置（见 ROADMAP.md §4）"; return 0; }
+  [[ -f "$cfg" ]] || { echo "  远程：未配置（见 server/README.md「远程入口配置」）"; return 0; }
   read -r port origin < <(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(d["port"], d["origin"])' "$cfg" 2>/dev/null)
   if [[ -z "$port" ]]; then echo "  远程：$cfg 解析失败"; return 0; fi
   rpid="$(ss -ltnp 2>/dev/null | grep -oP "127\.0\.0\.1:$port\b.*pid=\K[0-9]+" | head -1)"

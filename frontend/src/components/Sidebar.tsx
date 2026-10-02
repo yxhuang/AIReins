@@ -727,7 +727,7 @@ function NewSessionForm({ onDone }: { onDone: () => void }) {
     const config = Object.fromEntries(
       Object.entries(configSel).filter(([, value]) => value),
     );
-    // 不做建会话前快照（2026-09-30 用户定，ROADMAP P1-8）：显式 skip，后端默认值仍是 auto
+    // 不做建会话前快照（2026-09-30 用户定）：显式 skip；后端默认值 10-01 起也是 skip
     const input: CreateSessionInput = {
       snapshot: "skip",
       agent,

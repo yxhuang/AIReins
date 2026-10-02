@@ -227,7 +227,7 @@ Claude 额外固定返回四个字段；未显式覆盖时的初始形状如下�
 
 `riskyMode` 在 Claude 的 `bypassPermissions / dontAsk`、Codex 的 `never`、Kimi 的 `yolo` 下为 `true`。这是每会话标记，不存在全局 yolo 开关。
 
-### 派单只读接口（ROADMAP P1-14 数据层）
+### 派单只读接口
 
 实现在 `server/dispatches.ts`，路由在 `server/index.ts`。默认读取 `~/.cache/delegate`，可用
 `WB_DELEGATE_DIR` 覆盖；每次请求重新读取，不启动或控制派单进程，不写入数据源。
@@ -358,7 +358,7 @@ Codex 与 Kimi 的元数据探针失败时，对应 driver 返回 `options:[]` �
 
 Claude 的模型或推理强度不显式覆盖时，schema 默认值、`config` 和兼容字段 `model / effort` 的初始值均为 `null`，标签为“跟随 Claude 配置”。创建每个 worker 时，服务端只读并依次合并 `~/.claude/settings.json`、`<cwd>/.claude/settings.json`、`<cwd>/.claude/settings.local.json`，后层同名字符串覆盖前层；模型读取 `model`，推理强度读取 `effortLevel`。每个文件独立容错：缺失、无权限、坏 JSON、非对象或该项不是非空字符串时忽略该层的该项并保留上一层；三层都没有可用值才报告 `null`。合并 settings 时不启动 Claude 查询配置，不要求预热，也不在 `~/.claude`、`~/.codex` 或 `~/.kimi-code` 写缓存文件。
 
-Claude 在首轮 `system/init` 报出实际模型后，兼容字段 `model` 和 `effectiveModel` 都更新为完整模型名，`effectiveModelSource` 变为 `init`，并广播一条 `config_updated`。若未来 init 回报 effort，同样提升 effort；当前 Claude Code 2.1.238 的 init 不回报有效 effort，因此兼容字段 `effort` 保持 `null`，`effectiveEffort` 则继续使用 settings 合并值及 `settings` 来源，不会猜测精确模型侧 effort。审批模式缺省由 driver 明确传 `auto`（2026-09-30 起，此前为 `manual`；ROADMAP P1-10），用户选 `manual` 时 init 回报的协议值 `default` 会归一为 `manual`。
+Claude 在首轮 `system/init` 报出实际模型后，兼容字段 `model` 和 `effectiveModel` 都更新为完整模型名，`effectiveModelSource` 变为 `init`，并广播一条 `config_updated`。若未来 init 回报 effort，同样提升 effort；当前 Claude Code 2.1.238 的 init 不回报有效 effort，因此兼容字段 `effort` 保持 `null`，`effectiveEffort` 则继续使用 settings 合并值及 `settings` 来源，不会猜测精确模型侧 effort。审批模式缺省由 driver 明确传 `auto`（2026-09-30 起，此前为 `manual`），用户选 `manual` 时 init 回报的协议值 `default` 会归一为 `manual`。
 
 Codex 权限菜单已按当前官方三个常用预设更新（2026-10-01；本机 0.159.3 原生 `thread/start` 无模型请求实测通过）：
 

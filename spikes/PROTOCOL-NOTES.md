@@ -481,7 +481,6 @@ ACP 会话继承该默认值，因此不显式 `session/set_mode` 就没有标�
   1. 每个会话建好后**显式** `session/set_mode`，绝不读 `session/new` 的返回值就算数；
   2. `terminal/create` 与 `fs/write_text_file` 作为**不可绕过的最终闸门**再拦一道。
 
-参照笔记见 `docs/kimi-web-reference.md`。
 
 ### usage/token 样本
 
