@@ -197,18 +197,24 @@ export function Sidebar({ collapsed, onToggle, newOpen, onNewOpenChange, returnT
       </div>
       {!collapsed && (
         <>
-          <button
-            type="button"
-            className="btn btn-new"
-            aria-expanded={newOpen}
-            onClick={() => {
-              if (panelOpen) store.closeSidebarPanel(window.matchMedia("(max-width: 720px)").matches);
-              onNewOpenChange(!newOpen);
-            }}
-          >
-            {/* 收起即卸载表单、丢掉未提交的输入，所以叫「取消」而不是「收起」 */}
-            {newOpen ? "× 取消新建" : "+ 新建会话"}
-          </button>
+          <div className="sidebar-new-row">
+            <button
+              type="button"
+              className="btn btn-new"
+              aria-expanded={newOpen}
+              onClick={() => {
+                if (panelOpen) store.closeSidebarPanel(window.matchMedia("(max-width: 720px)").matches);
+                onNewOpenChange(!newOpen);
+              }}
+            >
+              {/* 收起即卸载表单、丢掉未提交的输入，所以叫「取消」而不是「收起」 */}
+              {newOpen ? "× 取消新建" : "+ 新建会话"}
+            </button>
+            {/* chatgpt.com 禁止 iframe（X-Frame-Options: SAMEORIGIN），只能开独立窗口；已开就切过去，不重载丢页面 */}
+            <button type="button" className="btn btn-new" title="打开 ChatGPT 网页版（独立窗口，再点切回该窗口）" onClick={openChatGPT}>
+              ChatGPT ↗
+            </button>
+          </div>
         </>
       )}
       <div className="sidebar-body">
@@ -675,6 +681,13 @@ function SessionRow({
       )}
     </div>
   );
+}
+
+let chatgptWin: Window | null = null;
+function openChatGPT() {
+  if (chatgptWin && !chatgptWin.closed) return chatgptWin.focus();
+  const w = Math.min(1100, screen.availWidth), h = screen.availHeight;
+  chatgptWin = window.open("https://chatgpt.com/", "wb-chatgpt", `popup,width=${w},height=${h},left=${screen.availWidth - w},top=0`);
 }
 
 function NewSessionForm({ onDone }: { onDone: () => void }) {

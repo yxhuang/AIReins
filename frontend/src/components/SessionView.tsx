@@ -649,8 +649,9 @@ function Composer({ session, dead, errored }: { session: SessionRecord; dead: bo
   });
   const table = commands ?? [];
 
-  // 仅行首 / 触发（整段文本即「/query」形态）；行中间的 /（如路径）是普通字符
-  const slashQuery = /^\/([^\s]*)$/.exec(text)?.[1] ?? null;
+  // 仅行首 / 触发（整段文本即「/query」形态）；行中间的 /（如路径）是普通字符。
+  // 中文输入法的中文标点模式下「/」键打出「、」，行首同样触发；选中命令后整段换成「/命令」。
+  const slashQuery = /^[\/、]([^\s]*)$/.exec(text)?.[1] ?? null;
   const slashOpen = commandsSupported && !dead && !composing && slashQuery !== null && !dismissed;
   // 最近使用（每 agent 独立记忆；localStorage 不可用时为空数组，静默降级）：
   // 面板打开期间读一次，空 query 置顶成「最近使用」段，有 query 时作排序加权。

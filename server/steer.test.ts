@@ -80,6 +80,8 @@ try {
       assert.equal(h.frames.at(-1).type, "user");
       assert.equal(h.frames.at(-1).priority, undefined, "保持 CLI 默认 next，不能误用 now");
       assert.equal(h.frames.some(frame => frame.request?.subtype === "interrupt"), false);
+      // 真实 CLI 注入插话时会回显（--replay-user-messages）；没回显的插话会在 result 后另起一轮。
+      h.receive({ type: "user", message: { role: "user", content: [{ type: "text", text: "只回复 OK" }] } });
     } else if (kind === "codex") {
       assert.deepEqual(h.frames.at(-1).params, { threadId: "thread-test", expectedTurnId: "turn-1", input: [{ type: "text", text: "只回复 OK", text_elements: [] }] });
       assert.equal(h.frames.at(-1).method, "turn/steer");

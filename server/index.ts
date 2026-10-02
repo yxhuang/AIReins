@@ -19,6 +19,7 @@ import { pruneStorage, workbenchHome } from "./persistence.js";
 import { isValidIdleReleaseMinutes, loadPrefs, savePrefs, type WorkbenchPrefs } from "./prefs.js";
 import { readClaudeStartupSettings, writeClaudeStartupSettings } from "./claude-settings.js";
 import { SessionManager } from "./session-manager.js";
+import { cleanStorage, getStorageStats, StorageInputError, validateStorageCleanInput } from "./storage.js";
 import { parseMcpAction } from "./session-menu.js";
 import { preflightSnapshot, SnapshotCwdError } from "./snapshot.js";
 import { TerminalError, TerminalRegistry, terminalEnabled, type TerminalEvent } from "./terminals.js";
@@ -368,6 +369,16 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
         ...meta,
         capabilities: { terminal: terminalEnabled(policy, REMOTE_CONFIG) },
       }, requestId);
+    } else if (method === "GET" && url.pathname === "/api/storage") {
+      await respond(response, 200, 0, "success", getStorageStats(manager), requestId);
+    } else if (method === "POST" && url.pathname === "/api/storage/clean") {
+      const input = await readJson(request);
+      let includeEnded: boolean;
+      try { includeEnded = validateStorageCleanInput(input); } catch (error) {
+        if (error instanceof StorageInputError) throw new ApiError(400, 40080, error.message);
+        throw error;
+      }
+      await respond(response, 200, 0, "success", await cleanStorage(manager, includeEnded), requestId);
     } else if (method === "POST" && url.pathname === "/api/restart") {
       if (!restartPending) {
         restartPending = true;

@@ -1,4 +1,4 @@
-import type { ApiEnvelope, CommandInfo, DirectoryListing, HistoryListData, HistoryMessagesPage, MetaInfo, PageHealth, PageManifest, SessionConfig, SessionRecord, ShellKind, Snapshot, SnapshotPreflight, TerminalInfo, WorkbenchPrefs } from "./types";
+import type { ApiEnvelope, CommandInfo, DirectoryListing, HistoryListData, HistoryMessagesPage, MetaInfo, PageHealth, PageManifest, SessionConfig, SessionRecord, ShellKind, Snapshot, SnapshotPreflight, StorageCleanResult, StorageStats, TerminalInfo, WorkbenchPrefs } from "./types";
 import type { AgentKind } from "./types";
 import { buildHistoryQuery, type HistoryQueryInput } from "./history";
 import type { DispatchRun } from "./dispatch-flow";
@@ -98,6 +98,19 @@ export function fetchSessions(): Promise<SessionRecord[]> {
 
 export function restartWorkbench(signal?: AbortSignal): Promise<{ restarting: boolean }> {
   return call("/api/restart", { method: "POST", signal });
+}
+
+export function fetchStorage(signal?: AbortSignal): Promise<StorageStats> {
+  return call("/api/storage", { signal });
+}
+
+export function cleanStorage(includeEnded: boolean): Promise<StorageCleanResult> {
+  return call("/api/storage/clean", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ includeEnded }),
+    signal: AbortSignal.timeout(60_000),
+  });
 }
 
 export function fetchSnapshot(id: string): Promise<Snapshot> {

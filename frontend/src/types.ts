@@ -3,6 +3,35 @@
 
 export type AgentKind = "claude" | "codex" | "kimi";
 export type SessionStatus = "starting" | "idle" | "running" | "dead" | "error";
+
+export interface StorageCategory {
+  bytes: number;
+  files: number;
+  sessions: number;
+}
+
+export interface StorageStats {
+  totalBytes: number;
+  categories: Record<"transcripts" | "uploads" | "logs" | "other", StorageCategory>;
+  cleanable: {
+    /** 默认清理的日志副本和孤儿文件，不含可选的已结束会话。 */
+    bytes: number;
+    rotatedLogs: { bytes: number; files: number };
+    orphans: { bytes: number; files: number; uploadDirs: number };
+    ended: { bytes: number; files: number; sessions: number };
+  };
+}
+
+export interface StorageCleanResult {
+  freedBytes: number;
+  removed: {
+    rotatedLogs: number;
+    orphanFiles: number;
+    orphanUploadDirs: number;
+    endedSessions: number;
+  };
+  storage: StorageStats;
+}
 export interface RemoteControlState {
   status: "disconnected" | "connecting" | "connected" | "reconnecting" | "disconnecting" | "error";
   sessionUrl?: string;

@@ -157,6 +157,13 @@ export class SessionManager {
     return session ? cloneSession(session) : undefined;
   }
 
+  /** 批量存储清理只移除真正结束、没有审批闸门或续接操作的会话。 */
+  isEndedSessionRemovable(id: string): boolean {
+    return this.sessions.get(id)?.status === "dead"
+      && !this.pendingGates.get(id)?.size
+      && !this.checkingSessions.has(id) && !this.restartingSessions.has(id);
+  }
+
   getCommands(id: string): UnifiedCommand[] | undefined {
     if (!this.sessions.has(id)) return undefined;
     return (this.commands.get(id) ?? []).map((command) => ({ ...command }));

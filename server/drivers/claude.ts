@@ -220,6 +220,11 @@ export class ClaudeDriver extends BaseDriver {
   private remoteControl: RemoteControlState = { status: "disconnected" };
   private remoteRequest?: { id: string; resolve: (state: RemoteControlState) => void; reject: (error: Error) => void };
   private readonly localUserEchoes: string[] = [];
+  /** 回合进行中发出、CLI 尚未回显的插话。赶不上当前回合的工具间隙时，CLI 会在 result 之后另起一轮处理它。 */
+  private readonly steersAwaitingEcho: string[] = [];
+  private steerEchoedSinceResult = false;
+  private steerCarried = false;
+  private turnActive = false;
 
   async start(): Promise<void> {
     this.config = {
@@ -367,6 +372,8 @@ export class ClaudeDriver extends BaseDriver {
     }
     if (text) content.push({ type: "text", text });
     content.push(...attachments);
+    if (this.turnActive && text) this.steersAwaitingEcho.push(text);
+    this.turnActive = true;
     this.callbacks.status("running");
     if (text) {
       this.localUserEchoes.push(text);
@@ -425,6 +432,8 @@ export class ClaudeDriver extends BaseDriver {
   }
 
   async interrupt(): Promise<void> {
+    this.steersAwaitingEcho.length = 0;
+    this.steerCarried = false;
     this.send({
       type: "control_request",
       request_id: randomUUID(),
@@ -603,9 +612,16 @@ export class ClaudeDriver extends BaseDriver {
         .map((item: Record<string, unknown>) => item.text as string).join("\n");
       if (userText && isHumanRemoteUser(message, userText)) {
         const index = this.localUserEchoes.indexOf(userText);
-        if (index >= 0) this.localUserEchoes.splice(index, 1);
-        else if (["connected", "reconnecting", "connecting"].includes(this.remoteControl.status)) {
+        if (index >= 0) {
+          this.localUserEchoes.splice(index, 1);
+          const steer = this.steersAwaitingEcho.indexOf(userText);
+          if (steer >= 0) {
+            this.steersAwaitingEcho.splice(steer, 1);
+            this.steerEchoedSinceResult = true;
+          }
+        } else if (["connected", "reconnecting", "connecting"].includes(this.remoteControl.status)) {
           this.callbacks.emit("user_message", { text: userText, source: "remote_control" });
+          this.turnActive = true;
           this.callbacks.status("running");
         }
       }
@@ -635,6 +651,19 @@ export class ClaudeDriver extends BaseDriver {
         isError: Boolean(message.is_error),
         stopReason: message.stop_reason,
       });
+      // 未回显的插话会由 CLI 紧接着另起一轮跑，保持 running：误判 idle 时下一次发送会走
+      // refreshBeforeSend，把 CLI 自己排队写入的消息当成别处续聊而重启 worker。
+      // 连续一整轮都没有插话被回显，视为回显不会来了（如被 CLI 改写的命令），放弃等待。
+      if (this.steersAwaitingEcho.length > 0 && (!this.steerCarried || this.steerEchoedSinceResult)) {
+        this.steerCarried = true;
+        this.steerEchoedSinceResult = false;
+        this.callbacks.status("running");
+        return;
+      }
+      this.steersAwaitingEcho.length = 0;
+      this.steerCarried = false;
+      this.steerEchoedSinceResult = false;
+      this.turnActive = false;
       this.callbacks.status(message.is_error ? "error" : "idle");
       return;
     }

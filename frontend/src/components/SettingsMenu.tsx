@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Segmented } from "./Segmented";
+import { WorkbenchStorage } from "./WorkbenchStorage";
 import { BODY_FONT_MAX, BODY_FONT_MIN, BODY_FONT_STEP, BODY_FONT_STORAGE_KEY, applyBodyFontSize, bodyFontSize, readBodyFontSize } from "../body-font";
 import { fetchClaudeStartupSettings, fetchPrefs, fetchSessions, restartWorkbench, saveClaudeStartupSettings, savePrefs } from "../api";
 import { restartAndReconnect, restartBusyCount } from "../restart";
@@ -113,6 +114,7 @@ function applyTheme(choice: ThemeChoice) {
 
 export function SettingsMenu() {
   const [open, setOpen] = useState(false);
+  const [storageDialogOpen, setStorageDialogOpen] = useState(false);
   const [theme, setTheme] = useState<ThemeChoice>(() => readTheme());
   const [scaleChoice, setScaleChoice] = useState<FontScaleChoice>(readFontScaleChoice);
   const [bodySize, setBodySize] = useState(readBodyFontSize);
@@ -191,6 +193,7 @@ export function SettingsMenu() {
   }, [open]);
 
   const close = (returnFocus: boolean) => {
+    setStorageDialogOpen(false);
     setOpen(false);
     if (returnFocus) gearRef.current?.focus();
   };
@@ -204,7 +207,7 @@ export function SettingsMenu() {
   // Esc 关闭；Tab/Shift+Tab 在面板内循环（focus trap）；点浮层外关闭
   // （齿轮按钮在 rootRef 内，自身 click 不会触发这条）
   useEffect(() => {
-    if (!open) return;
+    if (!open || storageDialogOpen) return;
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         close(true);
@@ -241,7 +244,7 @@ export function SettingsMenu() {
       document.removeEventListener("keydown", onKeyDown);
       document.removeEventListener("pointerdown", onPointerDown);
     };
-  }, [open]);
+  }, [open, storageDialogOpen]);
 
   const chooseTheme = (value: string) => {
     const next: ThemeChoice = value === "light" || value === "dark" ? value : "system";
@@ -319,7 +322,7 @@ export function SettingsMenu() {
   return (
     <div className="settings" ref={rootRef}>
       {open && (
-        <div className="settings-panel" ref={panelRef} role="dialog" aria-label="设置">
+        <div className="settings-panel" ref={panelRef} role="dialog" aria-label="设置" inert={storageDialogOpen}>
           {SETTING_GROUPS.map((group) => (
             <section className="settings-group" key={group.id}>
               <h3 className="settings-group-title">{group.label}</h3>
@@ -367,6 +370,7 @@ export function SettingsMenu() {
           ))}
           <section className="settings-group">
             <h3 className="settings-group-title">Workbench</h3>
+            <WorkbenchStorage dialogOpen={storageDialogOpen} onDialogOpenChange={setStorageDialogOpen} />
             <button type="button" className="settings-action" disabled={restartState !== "idle"}
               onClick={() => void restart()}>
               <span aria-hidden="true">↻</span>{restartState === "checking" ? "检查会话中…" : "重启 Workbench"}

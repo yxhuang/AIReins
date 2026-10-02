@@ -155,7 +155,9 @@ body {
   overflow: hidden;
 }
 
-.sidebar-head, .sidebar > .btn-new { flex-shrink: 0; }
+.sidebar-head, .sidebar > .sidebar-new-row { flex-shrink: 0; }
+.sidebar-new-row { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.sidebar-new-row > .btn { white-space: nowrap; padding-inline: 6px; }
 
 /* 正常列表与覆盖层共享这一块：起点始终在新建会话按钮下方。 */
 .sidebar-body {
@@ -2272,6 +2274,20 @@ body.resizing {
 .settings-action:hover:not(:disabled) { border-color: var(--border-strong); }
 .settings-action:disabled { cursor: default; opacity: 0.6; }
 
+.settings-storage { margin-bottom: 12px; }
+.settings-storage-breakdown { overflow-wrap: anywhere; }
+.storage-overlay { z-index: 100; }
+.storage-dialog { overflow-y: auto; }
+.storage-dialog p { margin: 0; overflow-wrap: anywhere; }
+.storage-clean-items { display: flex; flex-direction: column; gap: 6px; font-size: 15px; }
+.storage-ended-option { display: flex; align-items: flex-start; gap: 8px; font-size: 15px; line-height: 1.5; }
+.storage-ended-option input { flex: none; margin-top: 4px; accent-color: var(--busy); }
+.storage-ended-option span { min-width: 0; overflow-wrap: anywhere; }
+.storage-dialog .dir-heading { align-items: flex-start; }
+.storage-dialog .dir-heading h2 { min-width: 0; }
+.storage-dialog .dir-heading .btn { flex: none; }
+.storage-dialog .dir-actions { flex-wrap: wrap; }
+
 /* 减少动态：关光标闪烁、徽标脉冲与浮层动画 */
 @media (prefers-reduced-motion: reduce) {
   .cursor, .gate-badge, .settings-panel, .cmd-panel, .cfg-menu, .attach-menu, .timeline-item.timeline-running::before { animation: none; }
@@ -3053,7 +3069,7 @@ body.resizing {
   /* 顶部让出安全区后，把「workbench」并进「+ 新建会话」那一行，列表起点基本不下移 */
   .app:not(.sidebar-collapsed) .sidebar { display: grid; grid-template-columns: auto minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
   .app:not(.sidebar-collapsed) .sidebar > .sidebar-head { grid-area: 1 / 1; }
-  .app:not(.sidebar-collapsed) .sidebar > .btn-new { grid-area: 1 / 2; width: auto; }
+  .app:not(.sidebar-collapsed) .sidebar > .sidebar-new-row { grid-area: 1 / 2; }
   .app:not(.sidebar-collapsed) .sidebar > .sidebar-body { grid-area: 2 / 1 / 3 / 3; min-width: 0; }
   .sidebar,
   .app.sidebar-collapsed .sidebar { width: calc(100% / var(--font-scale)); border-right: none; }

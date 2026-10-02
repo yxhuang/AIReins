@@ -72,12 +72,16 @@ export function pruneStorage(retentionDays: number, now = Date.now()): { expired
  * 删除 uploads/<id> 目录。引用路径可以指向别的会话的附件，所以仍被 kept 中某会话 transcript
  * 提到的目录保留。返回实际删除的目录数。
  */
-function removeUploadDirs(ids: string[], kept: SessionRecord[]): number {
-  if (ids.length === 0) return 0;
-  const uploadsDir = join(workbenchHome, "uploads");
-  const referenced = kept.map((session) => {
+export function uploadDirReferences(kept: SessionRecord[]): string {
+  return kept.map((session) => {
     try { return readFileSync(session.transcriptPath, "utf8"); } catch { return ""; }
   }).join("\n");
+}
+
+export function removeUploadDirs(ids: string[], kept: SessionRecord[]): number {
+  if (ids.length === 0) return 0;
+  const uploadsDir = join(workbenchHome, "uploads");
+  const referenced = uploadDirReferences(kept);
   let removed = 0;
   for (const id of ids) {
     if (referenced.includes(join(uploadsDir, id))) continue;

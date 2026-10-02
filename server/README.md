@@ -858,3 +858,39 @@ Codex 输入框 `$` 在光标 token 处打开名称+描述面板，支持过滤�
 - 启动期间被移除或遇到关停时，后台启动的收尾（成功或失败）都不再改动会话。续接会话的原生对话指纹在返回前取，新会话的指纹在启动后取。
 - 关停（shutdown）会等移除时在后台停止的进程。`worker.stop()` 关闭 stdin 后等 1 秒发 SIGTERM，再等 1 秒仍未退出就发 SIGKILL。
 - 测试：`server/create-remove-latency.test.ts`、`server/steer.test.ts`。
+
+## Workbench 存储统计与清理接口
+
+两个接口使用现有 `{code,msg,data,request_id}` 信封和统一 access 策略；统计不读取磁盘会话登记表，而以 `SessionManager` 当前内存记录判断归属。
+
+`GET /api/storage` 返回以下 `data`：
+
+```ts
+{
+  totalBytes: number;
+  categories: {
+    transcripts: { bytes: number; files: number; sessions: number };
+    uploads: { bytes: number; files: number; sessions: number };
+    logs: { bytes: number; files: number; sessions: number };
+    other: { bytes: number; files: number; sessions: number };
+  };
+  cleanable: {
+    bytes: number;
+    rotatedLogs: { bytes: number; files: number };
+    orphans: { bytes: number; files: number; uploadDirs: number };
+    ended: { bytes: number; files: number; sessions: number };
+  };
+}
+```
+
+统计递归遍历 `WORKBENCH_HOME`（默认 `~/.workbench`），按文件逻辑长度计字节，不计目录元数据与文件系统分配块。符号链接仅计链接自身长度和一个文件，不跟随目标；清理不会把链接当成日志副本或孤儿 transcript / uploads 目录。分类分别为 `transcripts/`、`uploads/`、顶层 `server.log*`、其余全部。`sessions` 在 transcripts 中计顶层 `<id>.ndjson` 数，在 uploads 中计顶层真实目录数；logs/other 固定为 0。空目录没有字节或文件数，但孤儿 uploads 仍计目录数。
+
+默认 `cleanable.bytes` = 日志副本 + 孤儿的字节。日志副本仅为顶层普通文件 `server.log.*`，正在写的 `server.log` 保留。孤儿沿用 `pruneStorage` 的路径规则：顶层 `transcripts/<id>.ndjson` 和 `uploads/<id>/`，对应 id 不在内存会话中；属于内存记录的 transcript 路径同样保留。附件沿用 `removeUploadDirs` 的规则：任一保留会话 transcript 提及该 uploads 目录的完整路径时保留整个目录。
+
+`ended` 是额外可清理的会话数量、文件数和字节，不与默认项重复计算。仅 status 为 `dead`、没有真实未决审批闸门、没有续接操作的会话计入；其估计扣除仍被保留会话引用的附件，并包含结束会话移除后才成为孤儿的附件。
+
+`POST /api/storage/clean` 必须提供 JSON `{ "includeEnded": boolean }`；缺失或类型错误返回 HTTP 400 / code `40080`，非法 JSON 沿用 `40000`，access 拒绝沿用 HTTP 403 / code `40300`。`false` 只删除日志副本及孤儿；`true` 额外逐个重新检查结束状态并调用现有 `manager.remove(id)`，然后再按相同规则清理新产生的孤儿。运行中、idle、starting、error、有审批闸门及正在续接的会话均保留。CLI 原生记录和其他分类文件保留。
+
+成功返回 HTTP 200，`data` 为 `{ freedBytes, removed: { rotatedLogs, orphanFiles, orphanUploadDirs, endedSessions }, storage }`。计数为实际删除的日志文件、孤儿文件、孤儿附件目录及结束会话数；`freedBytes` 累加本次删除文件的逻辑长度，不把登记表重写或其他文件增长算作释放量；`storage` 是清理后的最新 GET 结构。并发清理串行执行；预估和执行之间状态可能变化，以实际结果为准。IO 错误沿用 HTTP 500 / code `50000`，已完成的删除不回滚。前端成功后调用现有会话列表刷新；已移除会话的 CLI 原生记录仍可从「所有来源会话」续接。
+
+覆盖测试：`server/storage.test.ts`，由 `npm test` 的 `server/*.test.ts` 测试入口自动执行；所有 fixture 使用临时 `WORKBENCH_HOME`。
