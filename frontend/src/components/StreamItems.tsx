@@ -114,8 +114,8 @@ export const ToolCard = memo(function ToolCard({ item, agent, cwd }: { item: Too
     <div className={`tool-card tool-${item.status}`}>
       <button type="button" className="tool-head" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
         <span className="chevron">{open ? "▾" : "▸"}</span>
-        <span className="tool-name" title={summary.verb}>{summary.verb}</span>
-        {summary.target && <span className="tool-summary mono">{summary.target}</span>}
+        <span className="tool-name" style={{ flexShrink: 0 }} title={summary.verb}>{summary.verb}</span>
+        {summary.target && <span className="tool-summary mono" style={{ flex: "1 1 0" }}>{summary.target}</span>}
         {summary.note && <span className="tool-note">{summary.note}</span>}
         <span className={`tool-status tool-status-${item.status}`}>{statusLabel}</span>
       </button>
@@ -180,6 +180,27 @@ function ToolBodyView({ body, status, showAll, onShowAll }: {
   onShowAll: () => void;
 }) {
   switch (body.type) {
+    case "exec":
+      return (
+        <>
+          {body.calls.map((call, index) => (
+            <div key={index}>
+              <div className="tool-result-label">{index + 1}. {call.verb}{call.target && ` · ${call.target}`}</div>
+              <pre className="code-block">{call.input}</pre>
+            </div>
+          ))}
+          <details>
+            <summary>原始 JS</summary>
+            <pre className="code-block">{body.input}</pre>
+          </details>
+          {body.result && (
+            <>
+              <div className="tool-result-label">{status === "error" ? "错误输出" : "结果"}</div>
+              <pre className="code-block">{body.result}</pre>
+            </>
+          )}
+        </>
+      );
     case "command": {
       const lines = body.output ? body.output.replace(/\n+$/, "").split("\n") : [];
       const collapsed = !showAll && lines.length > COMMAND_OUTPUT_PREVIEW_LINES;

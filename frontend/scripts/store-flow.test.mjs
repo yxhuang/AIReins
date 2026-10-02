@@ -48,7 +48,7 @@ function stubFetch(session, snapshotGate) {
     path = String(path);
     if (path === "/api/sessions" && init?.method === "POST") return Promise.resolve(envelope({ session }));
     if (path === "/api/sessions") return Promise.resolve(envelope({ sessions: [session] }));
-    if (path.endsWith("/snapshot")) {
+    if (path.endsWith("/snapshot?tail=1")) {
       if (snapshotGate) return new Promise((resolve) => snapshotGate.push(resolve));
       return Promise.resolve(envelope({ session, seq: 0, events: [] }));
     }
@@ -67,7 +67,7 @@ function stubFetchFull(session, { knownFiles = [], queries = null } = {}) {
     path = String(path);
     if (path === "/api/sessions" && init?.method === "POST") return Promise.resolve(envelope({ session }));
     if (path === "/api/sessions") return Promise.resolve(envelope({ sessions: [session] }));
-    if (path.endsWith("/snapshot")) return Promise.resolve(envelope({ session, seq: 0, events: [] }));
+    if (path.endsWith("/snapshot?tail=1")) return Promise.resolve(envelope({ session, seq: 0, events: [] }));
     if (path.endsWith("/commands")) return Promise.resolve(envelope({ commands: [] }));
     if (path.includes("/files?")) {
       const q = new URLSearchParams(path.slice(path.indexOf("?") + 1)).get("q") ?? "";
@@ -152,7 +152,7 @@ await t("WS open 对齐：已加载会话 afterSeq 补发，未加载会话只�
   globalThis.fetch = (path) => {
     path = String(path);
     if (path === "/api/sessions") return Promise.resolve(envelope({ sessions: [session, { ...makeSession("other"), pendingGateCount: 1, title: "未加载" }] }));
-    if (path.endsWith("/snapshot")) {
+    if (path.endsWith("/snapshot?tail=1")) {
       snapshotCalls++;
       return Promise.resolve(envelope({ session, seq: 0, events: [] }));
     }
@@ -236,13 +236,13 @@ await t("启动只加载当前会话的一份快照", async () => {
     if (path === "/api/meta") return envelope({});
     if (path === "/api/sessions") return envelope({ sessions });
     if (path === "/api/pages") return envelope({ pages: [] });
-    if (path.endsWith("/snapshot")) { snapshots.push(path); return envelope({ session: sessions[0], seq: 0, events: [] }); }
+    if (path.endsWith("/snapshot?tail=1")) { snapshots.push(path); return envelope({ session: sessions[0], seq: 0, events: [] }); }
     if (path.endsWith("/commands")) return envelope({ commands: [] });
     throw new Error(`未打桩 ${path}`);
   };
   const s = new Store(); s.connect = () => {};
   await s.init();
-  assert.deepEqual(snapshots, ["/api/sessions/active/snapshot"]);
+  assert.deepEqual(snapshots, ["/api/sessions/active/snapshot?tail=1"]);
   assert.equal(s.data.has("unopened"), false);
   clearTimeout(s.tickTimer);
 });
@@ -494,6 +494,7 @@ await t("socket 非 OPEN：resolvePermission 返回 false 且不上行；OPEN �
   assert.equal(sent[0].decision, "deny");
 });
 
+await import("./snapshot-paging.test.mjs");
 if (!process.exitCode) console.log(`✅ store 流程回归全过（${pass} 例）`);
 else console.error(`部分用例失败（通过 ${pass} 例）`);
 // store 内部有 2s 防抖计时器，直接退出不等它

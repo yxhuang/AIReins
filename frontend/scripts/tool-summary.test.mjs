@@ -6,8 +6,8 @@
 import { strict as assert } from "node:assert";
 import { readFileSync } from "node:fs";
 
-const { buildRenderItems } = await import("../src/render-items.ts");
-const { summarizeTool, relPath } = await import("../src/tool-summary.ts");
+const { buildRenderItems, buildHistoryRenderItems } = await import("../src/render-items.ts");
+const { summarizeTool, relPath, parseCodexExec } = await import("../src/tool-summary.ts");
 
 let pass = 0;
 const t = (name, fn) => { try { fn(); pass++; } catch (e) { console.error(`❌ ${name}\n   ${e.message}`); process.exitCode = 1; } };
@@ -449,6 +449,155 @@ t("lineDiff：未变行保留、改动行成对", () => {
   assert.deepEqual(lineDiff("x", ""), [["-", "x"]]);
   assert.deepEqual(lineDiff("a\nb", "a\nb\nc"), [[" ", "a"], [" ", "b"], ["+", "c"]]);
 });
+
+// 2026-10 rollout 原文；fixture 内保留来源路径/行号，测试不会执行源码中的任何命令。
+const execFixture = JSON.parse(readFileSync(new URL("./fixtures/tool-events/codex-exec.json", import.meta.url), "utf8"));
+const execSummary = (input, extra = {}) => summarizeTool("codex", {
+  toolName: "exec", input, result: "完整结果", status: "ok", ...extra,
+}, "/home/user/dev/workbench");
+
+t("exec 真实单命令：静态提取，展开保留原始 JS 与结果", () => {
+  const input = execFixture.single.input;
+  const s = execSummary(input);
+  assert.deepEqual([s.verb, s.target, s.note], ["运行", "sed -n '75,218p' report.md", ""]);
+  assert.equal(s.body.type, "exec");
+  assert.equal(s.body.calls[0].input, s.target);
+  assert.equal(s.body.input, input);
+  assert.equal(s.body.result, "完整结果");
+});
+
+t("exec 真实 Promise.allSettled：首条摘要、总数、全部命令顺序", () => {
+  const s = execSummary(execFixture.parallel.input);
+  assert.deepEqual([s.verb, s.target, s.note], ["运行", "npm run -s typecheck", "等 2 条命令"]);
+  assert.deepEqual(s.body.calls.map(c => c.input), ["npm run -s typecheck", "node --import tsx server/dispatches.test.ts"]);
+});
+
+t("exec 真实命令的引号、反斜杠转义不丢失", () => {
+  const cmd = parseCodexExec(execFixture.escaped.input)[0].command;
+  assert.equal(cmd, 'cat /tmp/wb-kimi-probe-FLIOpU/bin/kimi; printf \'%s\\n\' \'{"id":1,"method":"initialize"}\' | /tmp/wb-kimi-probe-FLIOpU/bin/kimi acp; ls -l /tmp/wb-kimi-probe-FLIOpU/bin/kimi');
+  assert.equal(execSummary(execFixture.escaped.input).body.calls[0].input, cmd);
+});
+
+t("exec 单引号、静态模板、Unicode/十六进制和续行转义", () => {
+  const sources = [
+    String.raw`tools.exec_command({cmd: 'printf \'hello\' \\"world\\"'})`,
+    'tools.exec_command({"cmd": `sed -n \'75,218p\' report.md`})',
+    String.raw`tools.exec_command({cmd: "echo \x41\u0042\u{1f34e}\t\n"})`,
+    'tools.exec_command({cmd: "pw\\\nd"})',
+  ];
+  assert.deepEqual(sources.map(s => parseCodexExec(s)[0].command), [
+    'printf \'hello\' \\"world\\"', "sed -n '75,218p' report.md", "echo AB🍎\t\n", "pwd",
+  ]);
+});
+
+t("exec 壳剥除复用普通 Codex 命令逻辑", () => {
+  const s = execSummary(`tools.exec_command({cmd: ${JSON.stringify("/bin/bash -lc 'pwd'")}})`);
+  assert.equal(s.target, "pwd");
+  assert.equal(s.body.calls[0].input, "pwd");
+});
+
+t("exec 真实 apply_patch 混合调用、write_stdin 与未知工具", () => {
+  const patch = execSummary(execFixture.patch.input);
+  assert.deepEqual([patch.verb, patch.target, patch.note], ["编辑", "server/steer.test.ts", "等 2 项调用"]);
+  assert.equal(patch.body.calls[1].verb, "运行");
+  assert.match(patch.body.calls[0].input, /^\*\*\* Begin Patch\n/);
+  const stdin = execSummary(execFixture.stdin.input);
+  assert.deepEqual([stdin.verb, stdin.target], ["运行", "终端 63224"]);
+  const unknown = execSummary(execFixture.unknown.input);
+  assert.equal(unknown.body.calls[1].verb, "clock__curr_time");
+  assert.equal(unknown.body.input, execFixture.unknown.input);
+  assert.equal(execSummary('tools.view_image({path: "/work/a.png"})').verb, "读取");
+  assert.equal(execSummary('tools.web__run({open: [{ref_id: "https://example.com"}]})').verb, "搜索");
+  assert.equal(execSummary('tools.view_image({path})').verb, "读取");
+  assert.equal(execSummary('tools.constructor({})').verb, "constructor");
+});
+
+t("exec 真实独立字符串 patch：单文件、多文件、展开原文", () => {
+  const cases = [
+    [execFixture.patchString, ".work-orders/2026-10-01-ui-polish-report.md"],
+    [execFixture.patchMultiString, "2 个文件"],
+  ];
+  for (const [fixture, target] of cases) {
+    const s = execSummary(fixture.input);
+    assert.deepEqual([s.verb, s.target, s.note], ["编辑", target, ""]);
+    assert.equal(s.body.type, "exec");
+    assert.equal(s.body.calls.length, 1);
+    assert.match(s.body.calls[0].input, /^\*\*\* Begin Patch\n/);
+    assert.match(s.body.calls[0].input, /\*\*\* End Patch$/);
+    assert.equal(s.body.input, fixture.input);
+  }
+});
+
+t("exec 直接字符串参数：末尾逗号、单双引号和模板、Add/Delete 文件", () => {
+  const patch = "*** Begin Patch\n*** Add File: /work/proj/new.txt\n+hello\n*** Delete File: /work/proj/old.txt\n*** End Patch";
+  for (const source of [
+    `tools.apply_patch(${JSON.stringify(patch)},)`,
+    `tools.apply_patch('${patch.replaceAll("\n", "\\n")}')`,
+    'tools.apply_patch(`' + patch + '`)',
+  ]) {
+    const s = execSummary(source);
+    assert.deepEqual([s.verb, s.target], ["编辑", "2 个文件"]);
+    assert.equal(s.body.calls[0].input, patch);
+  }
+  const unknown = execSummary('tools.mystery("payload\\nwith quotes: \\\"x\\\"",)');
+  assert.equal(unknown.verb, "mystery");
+  assert.equal(unknown.body.calls[0].input, 'payload\nwith quotes: "x"');
+  assert.equal(parseCodexExec('tools.mystery("a" + suffix)')[0].argument, '"a" + suffix');
+});
+
+const { parseHistoryMessages } = await import("../../server/history.ts");
+t("exec 真实长字符串 patch 经历史接口到预览/派单仍可摘要", () => {
+  const input = execFixture.patchLongString.input;
+  assert.ok(JSON.stringify(input).length > 4000, "复现历史输入截断阈值");
+  const messages = parseHistoryMessages("codex", [
+    { startOffset: 0, text: JSON.stringify({ type: "response_item", payload: { type: "custom_tool_call", name: "exec", call_id: "patch", input } }) },
+    { startOffset: 1, text: JSON.stringify({ type: "response_item", payload: { type: "custom_tool_call_output", call_id: "patch", output: "done" } }) },
+  ]);
+  const [view] = buildHistoryRenderItems(messages);
+  assert.equal(view.input, input);
+  const s = summarizeTool("codex", view, "/home/user/dev/workbench");
+  assert.deepEqual([s.verb, s.target], ["编辑", "/home/user/dev/demo-tool/bin/runner"]);
+  assert.match(s.body.calls[0].input, /\*\*\* End Patch$/);
+  assert.equal(s.body.result, "done");
+});
+
+t("exec 字符串与注释里的伪调用排除（含真实 patch 中的 tools.*）", () => {
+  const input = '// tools.exec_command({cmd: "bad"})\n/* tools.apply_patch("bad") */\n'
+    + 'text("tools.exec_command({cmd: \\\"bad\\\"})"); tools.exec_command({cmd: "pwd"});';
+  assert.deepEqual(parseCodexExec(input).map(c => c.command), ["pwd"]);
+});
+
+t("exec 无法解析整段回落，不丢原文、结果，不执行动态 JS", () => {
+  const sources = [
+    'text("hello")', 'tools.exec_command({cmd: "pwd"', 'tools.exec_command({cmd: cmd})',
+    'tools.exec_command({cmd: "pw" + "d"})', 'tools.exec_command({cmd: "pwd", ...args})',
+    'tools.exec_command({cmd: "pwd", cmd: "other"})', 'tools.exec_command({[key]: "pwd"})',
+    String.raw`tools.exec_command({cmd: "\uZZZZ"})`, '/* missing end',
+    'tools.exec_command({cmd: "pwd"}); tools.exec_command({cmd: cmd})',
+    execFixture.template.input,
+  ];
+  for (const input of sources) {
+    assert.equal(parseCodexExec(input), null, input);
+    const s = execSummary(input);
+    assert.equal(s.verb, "exec");
+    assert.deepEqual(s.body, { type: "raw", input, result: "完整结果" });
+  }
+  assert.equal(summarizeTool("claude", { toolName: "exec", input: execFixture.single.input, result: "", status: "ok" }, "").body.type, "raw");
+});
+
+t("exec 旧 transcript、原始字符串/对象、历史预览与派单详情的共同入口", () => {
+  const input = execFixture.single.input;
+  for (const rawInput of [undefined, input, { input }]) assert.equal(execSummary(input, { rawInput }).target, "sed -n '75,218p' report.md");
+  const [live] = summaries("codex", [
+    ev(1, "tool_call_started", { toolCallId: "exec1", toolName: "exec", input }),
+    ev(2, "tool_call_completed", { toolCallId: "exec1", result: "done" }),
+  ]);
+  assert.equal(live.s.verb, "运行");
+  const [history] = buildHistoryRenderItems([{ role: "tool", timestamp: null, tool: { id: "exec1", name: "exec", input, result: "done", status: "unknown" } }]);
+  assert.equal(summarizeTool("codex", history, "").target, live.s.target);
+});
+
+await import("./tool-card-title.test.mjs");
 
 if (!process.exitCode) console.log(`✅ tool-summary 单测全过（${pass} 例）`);
 else console.error(`部分用例失败（通过 ${pass} 例）`);

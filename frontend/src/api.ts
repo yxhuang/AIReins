@@ -113,9 +113,13 @@ export function cleanStorage(includeEnded: boolean): Promise<StorageCleanResult>
   });
 }
 
-export function fetchSnapshot(id: string): Promise<Snapshot> {
+export function fetchSnapshot(id: string, tail = false): Promise<Snapshot> {
   // 长会话快照很大，手机远程下载慢：放宽到 60 秒
-  return call<Snapshot>(`/api/sessions/${encodeURIComponent(id)}/snapshot`, { signal: AbortSignal.timeout(60_000) });
+  return call<Snapshot>(`/api/sessions/${encodeURIComponent(id)}/snapshot${tail ? "?tail=1" : ""}`, { signal: AbortSignal.timeout(60_000) });
+}
+
+export function fetchEarlierEvents(id: string, beforeSeq: number): Promise<import("./types").EventsPage> {
+  return call<import("./types").EventsPage>(`/api/sessions/${encodeURIComponent(id)}/events?beforeSeq=${beforeSeq}`, { signal: AbortSignal.timeout(60_000) });
 }
 
 export function fetchCommands(id: string): Promise<CommandInfo[]> {

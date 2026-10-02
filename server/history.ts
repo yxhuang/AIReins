@@ -740,7 +740,10 @@ export function parseHistoryMessages(agent: AgentKind, lines: OffsetLine[]): Off
     if (typeof id !== "string" || typeof name !== "string") return;
     const message: OffsetHistoryMessage & { role: "tool" } = {
       role: "tool", timestamp: historyTimestamp(time), startOffset,
-      tool: { id: id.slice(0, 256), name: name.slice(0, 256), input: boundedToolValue(input ?? null), status: "unknown" },
+      // exec 的 JS 必须完整才能在前端提取命令/patch；读取窗口仍由 4 MiB 页上限约束。
+      tool: { id: id.slice(0, 256), name: name.slice(0, 256),
+        input: agent === "codex" && name === "exec" && typeof input === "string" ? input : boundedToolValue(input ?? null),
+        status: "unknown" },
     };
     calls.set(id, message);
     messages.push(message);

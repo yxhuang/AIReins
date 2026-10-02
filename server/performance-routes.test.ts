@@ -22,7 +22,7 @@ mkdirSync(join(home, "transcripts"));
 const transcriptPath = join(home, "transcripts", "test.jsonl");
 const now = new Date().toISOString();
 const events = Array.from({ length: 1002 }, (_, index) => ({
-  type: index === 1001 ? "permission_request" : index === 0 ? "user_message" : "agent_text_delta",
+  type: index === 1001 ? "permission_request" : index % 25 === 0 ? "user_message" : "agent_text_delta",
   sessionId: "test", agentId: "main", seq: index + 1, timestamp: now,
   payload: index === 1001 ? { requestId: "gate" } : { text: "测试标题" },
 }));
@@ -86,6 +86,25 @@ try {
   const plainSnapshot = await get("/api/sessions/test/snapshot");
   assert.equal(plainSnapshot.headers["content-encoding"], undefined);
   assert.equal(JSON.parse(plainSnapshot.data.toString()).data.seq, 1002);
+  const full = JSON.parse(plainSnapshot.data.toString()).data;
+  assert.deepEqual(Object.keys(full).sort(), ["events", "seq", "session"]);
+  const tailResponse = await get("/api/sessions/test/snapshot?tail=1", "gzip");
+  const tail = JSON.parse(gunzipSync(tailResponse.data).toString()).data;
+  assert.equal(tail.seq, full.seq);
+  assert.equal(tail.hasMore, true);
+  assert.equal(tail.firstSeq, tail.events[0].seq);
+  assert.equal(tail.session.title, "测试标题");
+  assert(tail.session.snapshotState);
+  const previous = JSON.parse((await get(`/api/sessions/test/events?beforeSeq=${tail.firstSeq}`)).data.toString()).data;
+  assert.equal(previous.hasMore, false);
+  assert.equal(previous.firstSeq, 1);
+  assert(previous.events.every((event: { seq: number }) => event.seq < tail.firstSeq));
+  assert.deepEqual([...previous.events, ...tail.events], full.events);
+  const head = JSON.parse((await get("/api/sessions/test/events?beforeSeq=1")).data.toString()).data;
+  assert.deepEqual(head, { events: [], hasMore: false, firstSeq: 0 });
+  for (const cursor of ["", "0", "2", "1.5", "NaN", "9007199254740992"]) {
+    assert.equal(JSON.parse((await get(`/api/sessions/test/events?beforeSeq=${cursor}`)).data.toString()).code, 40068);
+  }
   ws = new WebSocket(`ws://127.0.0.1:${port}/ws`);
   const frames: Record<string, any>[] = [];
   const waitFrame = (predicate: (frame: Record<string, any>) => boolean) => new Promise<void>((resolve) => {

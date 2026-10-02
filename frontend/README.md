@@ -66,7 +66,7 @@ frontend/
 单一 `Store`（`src/store.ts`），React 通过 `useSyncExternalStore` 订阅 `version` 计数：
 
 - `sessions`：`GET /api/sessions` 初始加载；任何 WS 事件都本地刷新该会话的 `lastActivityAt` 并推断状态（`user_message`→running、`process_exited`→dead 等），另有 2 秒防抖的列表重拉对齐权威状态；列表刷新发现会话变 dead 时清空其未决闸门（进程已不在，闸门不可操作）；
-- `data: Map<sessionId, {events, seq, dropped, pendingGates, latestUsage}>`：进入会话时先 `GET /api/sessions/:id/snapshot` 拿全量 events + seq；`pendingGates` = permission_request − permission_resolved（按 requestId 匹配），既驱动闸门块状态也驱动左栏徽标；`events` 有 2000 条内存上限，超出丢弃最旧并计数（流顶部提示一行），快照重取即可恢复全量；
+- `data: Map<sessionId, {events, seq, dropped, pendingGates, latestUsage, hasMore, firstSeq, loadingOlder, olderError}>`：进入会话取 `snapshot?tail=1` 的最近完整段，向上滚动再取更早事件；`pendingGates` = permission_request − permission_resolved（按 requestId 匹配），既驱动闸门块状态也驱动左栏徽标；分页模式保留已加载完整段，旧服务端全量响应仍使用 2000 条窗口；
 - 启动时为列表里每个会话取一次快照——后端没有标题字段，左栏标题用该会话第一条 `user_message` 派生（空白压缩为单空格、按显示宽度截断，还没有首条消息时显示占位「新会话」），快照同时给出各会话的未决闸门数。
 
 ### 连接与恢复
@@ -123,7 +123,7 @@ frontend/
 - [x] **11. 移除「允许并记住」（B3）。** 后端把 updatedInput 直接采信为工具入参，前端传 suggestions[0] 会替换真实入参且无 suggestions 回传通道，故按钮整体移除，只留「允许」「拒绝」；suggestions 字段提取保留备用。证据：构建产物中已无该按钮；smoke 走「允许」闭环通过。
 - [x] **12. raw_event 合并错误（B4）。** raw_event 分支插入前补 `breakRun()`，「文本A → raw → 文本B」不再错误合并。证据：类型检查通过（纯顺序逻辑修复）。
 - [x] **13. Codex usage 路径（M1）。** detailed 分支可读 `usage.usage.total.*`，有 `modelContextWindow` 时显示「上下文 X / Y」分母；claude 顶层 `input_tokens/output_tokens/costUsd` 路径不变。证据：类型检查通过；字段形状对照 `spikes/PROTOCOL-NOTES.md` §2 实测样本。
-- [x] **14. 事件内存上限（M2）。** 每会话 2000 条上限，超出丢弃最旧并计数，流顶部显示一行省略提示；快照永远返回全量。证据：类型检查通过。
+- [x] **14. 事件内存上限（M2，现仅旧服务端兼容模式）。** 旧全量响应使用 2000 条窗口；当前分页模式保留完整已加载段，见文末长会话快照分页自查。
 - [x] **15. 审批 smoke 假阳性（M3）。** smoke 改用必然触发审批的消息（Shell 写 `smoke-<时间戳>.txt`），自动 allow 所有闸门，通过条件要求 `sawPermission && resolvedBroadcast && turn_completed && 文件落盘校验`，结尾只删除自己创建的文件。证据：本轮实测输出 `SMOKE_OK`（permission seq 12 → resolved seq 13 → turn_completed seq 17，文件内容逐字校验为 SMOKE，快照 18 条连续）。
 - [x] **16. 审批重复提交（M4）。** GateBlock 点击决策后进入提交中态，所有决策按钮禁用，直到 `permission_resolved` 到达。证据：类型检查通过。
 - [x] **17. 左栏收起总未决徽标（M5）。** 收起态在收起按钮旁显示全部会话未决闸门总数的暖色徽标（为 0 不显示），点击展开左栏。证据：类型检查 + 构建通过；视觉效果未在浏览器人工确认。
@@ -519,7 +519,7 @@ frontend/
 - 未引入 `@vitejs/plugin-react`：esbuild automatic JSX 够用，dev 下 HMR 退化为整页刷新。
 - 会话状态没有专属 WS 事件，左栏状态靠事件推断 + 2 秒防抖重拉列表对齐，可能有一拍延迟。
 - 「允许并记住」按钮已移除（M2 返工 B3）：后端把 `updatedInput` 直接采信为工具入参（`updatedInput ?? pending.input`），没有承载 `permissionSuggestions` 的通道，前端把 suggestions[0] 当 updatedInput 回传会把用户批准的写文件入参替换成 setMode 对象。在后端有正规通道之前只提供「允许」「拒绝」；`permissionSuggestions` 的提取逻辑保留在 `render-items.ts` 备用。
-- 每会话事件数组有 2000 条内存上限，超出丢弃最旧；快照接口永远返回全量 transcript，重进会话即恢复。
+- 分页快照保留已加载的完整事件段；仅旧服务端返回的全量快照继续使用原 2000 条窗口。全量接口不带 `tail=1` 时仍返回完整 transcript。
 
 
 ### M24 模型版本、终端字体与字号设置（2026-09-30）
@@ -625,3 +625,20 @@ Codex 的 `commands:true` 表示 wb 客户端按本机 app-server 协议提供�
 `$` 打开 Codex skill 面板：真实名称+描述、名称/描述过滤、上下键、Enter/Tab 插入、Esc 关闭、IME 组合保护。选择后保留 `$name` 文本；后端从真实 skills/list 获取路径并附结构化 skill input，完整契约见 server/README.md。不展示禁用项、不写全局配置、不在 Claude/Kimi 输入中触发该面板。正文与输入框 16px，菜单项 14px，分组/描述 13px，其余新增文字不小于 16px；中性/冷色样式，--gate 系仅闸门。
 
 验证入口：`node --import tsx frontend/scripts/codex-commands.test.mjs`（由现有 render-items 测试入口纳入 npm test）。真机脚本 `bash scratch/codex-commands/run-smoke.sh` 仅监听 127.0.0.1:18794，独立 WORKBENCH_HOME/CODEX_HOME，按端口反查进程组并 trap 收尾，保存 skills/slash 面板截图和协议报文。
+
+### 长会话快照分页（2026-10-02）
+
+打开会话与 `resync_required` 对齐使用 `GET /api/sessions/:id/snapshot?tail=1`。首屏按完整用户回合取最近一段，`seq` 仍是当前 replay 游标；向上滚动到流顶部附近（160px）自动用 `firstSeq` 请求 `GET /api/sessions/:id/events?beforeSeq=<firstSeq>`。顶部显示「加载更早的消息…」，失败显示可点击重试；失败后暂停自动重试，`hasMore=false` 后不再请求。
+
+prepend 前在实际响应落地时记录首个可见元素的位置，布局更新后恢复其位置；浏览器自动滚动锚定关闭，避免重复补偿。分页段保留完整事件，统一调用既有 `buildRenderItems` / `groupReadOnlyTools`。加载旧段不回退 `seq`，不重放旧用量、命令或配置事件覆盖当前状态；并发请求复用，resync 作废在途旧页。
+
+会话级标题、命令表、最新用量、配置切换态、缓存 TTL 与最近用量时间由 `session.snapshotState` / `session.title` 提供。工具、todo（工具输入/结果）、闸门和提问卡片依靠完整生命周期切点；外部消息块按自身事件完整渲染，较早块随翻页出现。状态、配置、Remote Control、后台任务仍来自 `session`；草稿和控件交互状态独立于历史分页。
+
+自查与验证：
+
+- [x] 服务端单测覆盖回合/steer边界、跨工具/闸门配对、单超大回合、无用户消息、UTF-8字节阈值、`hasMore/firstSeq` 与翻到头；legacy 全量接口形状不变。
+- [x] `npm run test:store` 聚合 `snapshot-paging.test.mjs`：两段拼出的事件与全量一致；首段和拼接后派生状态一致；分组、工具、todo、问答、外部区块一致。
+- [x] store 测试覆盖重复/并发去重、失败重试、加载途中的实时帧、旧分页响应被 resync 作废、分页模式超过 2000 条不裁剪；旧 store/reconnect 回归继续保留。
+- [ ] 浏览器实际触屏滚动、重试点击、长内容图片/Markdown 后续撑高时的阅读位置：本次未启动浏览器或服务，只有 DOM 接线复核；待部署后人工确认。
+
+阈值是 30 个非 steer 用户回合和事件数组未压缩 JSON 1.5 MiB，至少一个不可拆分段。超大回合或跨回合配对形成的不可拆段允许超阈值。`beforeSeq` 使用上一响应的 `firstSeq`；不安全游标返回 400。

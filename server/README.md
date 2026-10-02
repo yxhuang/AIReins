@@ -126,6 +126,7 @@ webhook 地址就是密钥：文件权限设为 600，也不要写进日志或�
 - `GET /api/sessions`
 - `GET /api/sessions/:id`
 - `GET /api/sessions/:id/snapshot`
+- `GET /api/sessions/:id/events?beforeSeq=<firstSeq>`
 - `GET /api/sessions/:id/commands`：当前活动会话的实时归一命令表
 - `POST /api/sessions/:id/release`：释放会话 worker（见「三家 CLI 原生历史」末尾「释放」小节）
 - `GET /api/sessions/:id/info/:kind`：输入框「/」菜单的只读查看，仅 Claude 会话。kind 为 `mcp` / `hooks` / `permissions` / `context`，分别转发 control_request `mcp_status` / `get_hooks_listing` / `list_permission_rules` / `get_context_usage`；`plugins` 没有对应 control_request，与 VSCode 扩展同样在会话 cwd 下跑 `claude plugin list --json`，`data` 为 `{plugins:[{id,version,scope,enabled,projectEnabled,installPath,…}]}`，不需要 worker（dead 会话也可查）；其余`data` 是 CLI 的 response 原样（`context` 只保留 categories、totalTokens、maxTokens、percentage、model、autoCompactThreshold、isAutoCompactEnabled，原样约 50KB）。已释放会话按 `ensureWorker` 先拉起；dead、非 Claude、未知 kind 或 CLI 报错返回 400 / 40063，15 秒超时。返回结构见 `spikes/PROTOCOL-NOTES.md` §10。
@@ -371,7 +372,13 @@ Codex 权限菜单已按当前官方三个常用预设更新（2026-10-01；本�
 
 旧会话续接仍接受原来保存的 `untrusted` 和 `never`，但菜单不再提供这两个旧值。旧 `never` 保留 `workspace-write` 沙盒，绝不自动升级为 Full access；旧值在前端作为当前值显示，可切换到新预设。新会话不得显式选择旧值。官方的 `Custom (config.toml)` 属于自定义权限组合，本菜单仅提供上述三个常用预设。协议回归在 `server/codex-permissions.test.ts`；运行 `node --import tsx server/codex-permissions.test.ts`。
 
-`snapshot` 的 `data` 为 `{session, seq, events}`。`events` 是重建会话视图所需的全量统一事件；单会话客户端可在快照后连接 `/ws?sessionId=<id>&afterSeq=<seq>`；当前前端使用全局 `/ws`，以 `replay` 消息传各已加载会话的 `afterSeq`（详见性能接口契约）。连接期间产生的缺口由每会话 1,000 条 ring buffer 补发；超出 ring 时服务端发送 `resync_required`，客户端重新取快照。
+`GET /api/sessions/:id/snapshot` 不带 `tail=1` 时，`data` 仍为 `{session, seq, events}`，返回全量统一事件（包括现有验证脚本的用法）。`?tail=1` 返回 `{session, seq, events, hasMore, firstSeq}`，`events` 只含最近一段；`seq` 始终为整个会话的当前游标，不能改成分页首尾游标。`session.snapshotState` 携带由全量事件计算的 `latestUsage`、`commands`、`configSwitching`、`promptCacheTtlMs` 和 `promptCacheUsageAt`，`session.title` 也由完整会话确定；未产生的用量和切换态字段可省略，缓存未知时为 `null`。
+
+`GET /api/sessions/:id/events?beforeSeq=<上一响应的 firstSeq>` 返回 `{events, hasMore, firstSeq}`，所有事件均满足 `seq < beforeSeq`。`beforeSeq` 必须为正安全整数，且在会话内必须对应可安全分页的用户回合起点，否则返回 400；小于等于第一条事件的 seq 返回空页，大于最后 seq 按完整前缀分页。空页为 `{events:[], hasMore:false, firstSeq:0}`。`hasMore=false` 后停止请求。
+
+分页阈值在 `server/event-pages.ts`：`EVENT_PAGE_MAX_TURNS = 30`，`EVENT_PAGE_MAX_JSON_BYTES = 1.5 * 1024 * 1024`（事件数组未压缩 JSON 的 UTF-8 字节数）。从末尾向前尽量累计完整回合，至少保留最后一个不可拆分段；只有 `user_message` 且 `steer !== true` 可作回合起点，首条用户消息之前的事件归第一段。切点不得穿过工具 started→最后 updated/completed 或审批 request→resolved 的区间，尚未完成的工具/闸门区间延伸至末尾；完成后再次更新工具也追溯原起点，`process_exited` 不截断工具区间。没有安全切点、单回合过大或跨回合配对形成超阈值不可拆段时，整段返回。分段 prepend 后统一重建渲染项，以保持工具配对和分组结果与全量一致。
+
+单会话客户端可在快照后连接 `/ws?sessionId=<id>&afterSeq=<seq>`；当前前端使用全局 `/ws`，以 `replay` 消息传各已加载会话的 `afterSeq`（详见性能接口契约）。连接期间产生的缺口由每会话 1,000 条 ring buffer 补发；超出 ring 时服务端发送 `resync_required`，客户端重新取 `tail=1` 快照。历史分页不会改变重连的 `seq`。
 
 ## 三家 CLI 原生历史
 
@@ -442,7 +449,7 @@ Claude 跳过 meta/sidechain，按 assistant 内容块顺序输出文字与 `too
 
 思考以 `role:"thought"` 进入数组（2026-10-01）：Claude 取 `thinking` 块（Opus 等多数块只存签名、正文为空，空的跳过），Codex 取 `response_item.reasoning` 的 `summary[].text`（段间 `\n\n`；实测近期文件 summary 全空、只有加密正文，所以 Codex 历史通常没有思考），Kimi 取 `content.part` 的 `think`。相邻思考与相邻助手文字一样按同一规则合并；`external_messages_added` 的 messages 同样可能含 thought。
 
-工具 input、result、rawResult 各自序列化后最多约 4000 字符，超出带 `[truncated]`；超长结构化对象回落成有截断标记的文本。缺结果或无法确认状态时为 unknown，前端不伪造成功或失败。limit 计入工具；不透明 cursor 支持同一 JSONL 行内的多个块，不漏块。只在当前读取窗口配对，较早页的调用若结果落在更新页，返回 unknown，不扩大窗口。历史页预览和导入历史共用 `/messages`，默认最新 50 条，向前翻页可一直到开头；旧文件头 preview 路由已移除。ID 校验和事实源候选查找保持不变。
+工具 input、result、rawResult 各自序列化后最多约 4000 字符，超出带 `[truncated]`；超长结构化对象回落成有截断标记的文本。Codex `exec` 的字符串 input 例外：完整保留 JS，仍受单页 4 MiB 原生读取窗口约束，字段形状不变；前端据此提取 `tools.exec_command` 和直接字符串参数的 `tools.apply_patch` 等调用，否则截断会破坏字符串/括号闭合，使长命令和 patch 无法摘要。多调用展开按源码顺序列出，保留 patch、原始 JS 与结果；未知工具保留名字，不支持的语法回落原显示。result / rawResult 的约 4000 字符上限继续生效。缺结果或无法确认状态时为 unknown，前端不伪造成功或失败。limit 计入工具；不透明 cursor 支持同一 JSONL 行内的多个块，不漏块。只在当前读取窗口配对，较早页的调用若结果落在更新页，返回 unknown，不扩大窗口。历史页预览和导入历史共用 `/messages`，默认最新 50 条，向前翻页可一直到开头；旧文件头 preview 路由已移除。ID 校验和事实源候选查找保持不变。
 
 历史列表本身严格只读；用户选择后，就地续接仍复用现有 `POST /api/sessions`，直接把列表项的 `nativeSessionId` 传为 `resumeSessionId`：
 

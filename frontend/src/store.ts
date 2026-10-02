@@ -12,7 +12,7 @@ import type {
   SessionStatus,
   UnifiedEvent,
 } from "./types";
-import { createSession, deleteSession, fetchCommands, fetchFiles, fetchMeta, fetchPages, fetchSessions, fetchSnapshot, releaseSession, type CreateSessionInput } from "./api";
+import { createSession, deleteSession, fetchCommands, fetchEarlierEvents, fetchFiles, fetchMeta, fetchPages, fetchSessions, fetchSnapshot, releaseSession, type CreateSessionInput } from "./api";
 import { sessionTitle } from "../../shared/session-title";
 import { extractMentionTokens, stripMentionCandidates } from "./mentions";
 import { partitionPages, type SkippedPage } from "./pages";
@@ -29,7 +29,7 @@ export interface LastError {
   sessionId?: string;
 }
 
-/** 每会话常规事件窗口上限；窗口外未决闸门请求是“不漏审批”的唯一保护项。 */
+/** 旧服务端全量快照的兼容窗口上限；分页模式保留已加载完整段。 */
 const MAX_EVENTS = 2000;
 
 /** 有活跃会话时保持用时读数秒级；全局空闲后把唤醒频率降到 30 秒。 */
@@ -51,6 +51,15 @@ interface SessionData {
   /** requestId → 请求事件 seq，用于闸门块定位与排序 */
   pendingGates: Map<string, number>;
   latestUsage?: Record<string, unknown>;
+  /** 分页模式保留已加载的完整段，不能再按事件数裁掉回合。 */
+  paged?: boolean;
+  hasMore?: boolean;
+  firstSeq?: number;
+  loadingOlder?: boolean;
+  olderError?: string;
+  prependVersion?: number;
+  promptCacheTtlMs?: number | null;
+  promptCacheUsageAt?: number | null;
 }
 
 const FOCUS_VIEW_STORAGE_KEY = "workbench-focus-view";
@@ -120,7 +129,7 @@ export class Store {
   private clockStarted = false;
   private tickTimer: ReturnType<typeof setTimeout> | undefined;
   private tickDelay: number | undefined;
-  /** 首次 open 可复用启动快照；此后每次 open 都是断线重连，必须全量对齐。 */
+  /** 首次 open 可复用启动快照；此后每次 open 都是断线重连，必须重新对齐。 */
   private hasOpenedSocket = false;
   /** 每会话快照版本戳：作废旧响应（值来自 nextSnapshotGen，每次请求唯一且写入 Map） */
   private snapshotGen = new Map<string, number>();
@@ -128,6 +137,7 @@ export class Store {
   private nextSnapshotGen = 0;
   /** 每会话 in-flight 快照请求：并发对齐复用同一 Promise */
   private snapshotInflight = new Map<string, Promise<void>>();
+  private olderInflight = new Map<string, Promise<void>>();
   private snapshotBuffers = new Map<string, UnifiedEvent[]>();
   private replayBuffers = new Map<string, UnifiedEvent[]>();
   private configHintTimers = new Map<string, ReturnType<typeof setTimeout>>();
@@ -383,7 +393,7 @@ export class Store {
       const data = this.data.get(session.id);
       if (session.status === "dead" && data && data.pendingGates.size > 0) {
         data.pendingGates.clear();
-        const retained = retainEventWindow(data.events, data.pendingGates);
+        const retained = data.paged ? { events: data.events, omitted: 0 } : retainEventWindow(data.events, data.pendingGates);
         data.events = retained.events;
         data.dropped += retained.omitted;
         // Map 本身可变；替换外层对象，selector 才能可靠观察到该会话数据变化。
@@ -412,25 +422,29 @@ export class Store {
     // 校验处取回的仍是 undefined，新会话首次快照必被误丢（界面永远空白的根因）。
     const gen = ++this.nextSnapshotGen;
     this.snapshotGen.set(id, gen);
+    this.olderInflight.delete(id);
     const buffered = this.snapshotBuffers.get(id) ?? [];
     this.snapshotBuffers.set(id, buffered);
     // 先声明再赋值（! 断言）：finally 里的所有权校验要引用 promise 自身，赋值在闭包执行前完成
     let promise!: Promise<void>;
     promise = (async () => {
       try {
-        const snapshot = await fetchSnapshot(id);
+        const snapshot = await fetchSnapshot(id, true);
         if (this.snapshotGen.get(id) === gen) {
-          this.applySnapshot(id, snapshot.session, snapshot.seq, snapshot.events);
+          this.applySnapshot(id, snapshot.session, snapshot.seq, snapshot.events, snapshot.hasMore, snapshot.firstSeq);
           this.snapshotBuffers.delete(id);
           // 先解除在途状态，缓存中的缺口才可发起下一次必要的快照。
           if (this.snapshotInflight.get(id) === promise) this.snapshotInflight.delete(id);
           for (const event of buffered.sort((a, b) => a.seq - b.seq || Number(!!a.ephemeral) - Number(!!b.ephemeral))) this.handleEvent(event);
         }
       } catch (error) {
-        if (this.snapshotGen.get(id) === gen) this.lastError = {
-          message: error instanceof Error ? error.message : String(error),
-          sessionId: id,
-        };
+        if (this.snapshotGen.get(id) === gen) {
+          const message = error instanceof Error ? error.message : String(error);
+          this.lastError = { message, sessionId: id };
+          const current = this.data.get(id);
+          // 对齐已作废旧页；对齐本身失败时，不能把旧窗口锁在 loadingOlder。
+          if (current?.loadingOlder) this.data.set(id, { ...current, loadingOlder: false, olderError: message });
+        }
       } finally {
         // 所有权校验：旧请求的 finally 不得误删新请求的 in-flight 条目
         if (this.snapshotInflight.get(id) === promise) this.snapshotInflight.delete(id);
@@ -459,6 +473,62 @@ export class Store {
     return this.alignSnapshot(id);
   }
 
+  /** 历史 prepend 不推进 replay 游标，也不回放旧事件覆盖当前派生状态。 */
+  loadOlder(id: string, beforePrepend?: () => void): Promise<void> {
+    const inflight = this.olderInflight.get(id);
+    if (inflight) return inflight;
+    const data = this.data.get(id);
+    if (!data?.hasMore || !data.firstSeq || data.loadingOlder || this.snapshotInflight.has(id) || this.removed.has(id)) return Promise.resolve();
+    const beforeSeq = data.firstSeq;
+    const gen = this.snapshotGen.get(id);
+    this.data.set(id, { ...data, loadingOlder: true, olderError: undefined });
+    this.notify();
+    let promise!: Promise<void>;
+    promise = (async () => {
+      try {
+        const page = await fetchEarlierEvents(id, beforeSeq);
+        const current = this.data.get(id);
+        if (!current || this.snapshotGen.get(id) !== gen || current.firstSeq !== beforeSeq || this.removed.has(id)) return;
+        // 服务端响应必须严格推进历史游标；异常保留旧窗口并提供重试。
+        if (page.events.some((event) => event.seq >= beforeSeq)
+          || (page.hasMore && (page.firstSeq <= 0 || page.firstSeq >= beforeSeq))
+          || page.firstSeq !== (page.events[0]?.seq ?? 0)) throw new Error("更早消息的分页游标无效");
+        const seen = new Set(current.events.filter((event) => !event.ephemeral).map((event) => event.seq));
+        const earlier = page.events.filter((event) => {
+          if (seen.has(event.seq)) return false;
+          seen.add(event.seq);
+          return true;
+        });
+        if (earlier.length > 0) beforePrepend?.();
+        this.data.set(id, {
+          ...current,
+          events: [...earlier, ...current.events].sort((a, b) => a.seq - b.seq || Number(!!a.ephemeral) - Number(!!b.ephemeral)),
+          firstSeq: page.firstSeq || current.firstSeq,
+          hasMore: page.hasMore,
+          loadingOlder: false,
+          olderError: undefined,
+          prependVersion: (current.prependVersion ?? 0) + Number(earlier.length > 0),
+        });
+      } catch (error) {
+        const current = this.data.get(id);
+        if (current && this.snapshotGen.get(id) === gen && current.firstSeq === beforeSeq) {
+          this.data.set(id, { ...current, loadingOlder: false, olderError: error instanceof Error ? error.message : String(error) });
+        }
+      } finally {
+        if (this.olderInflight.get(id) === promise) this.olderInflight.delete(id);
+        this.notify();
+      }
+    })();
+    this.olderInflight.set(id, promise);
+    return promise;
+  }
+
+  promptCacheExpiry(id: string): number | null {
+    const data = this.data.get(id);
+    return data?.promptCacheTtlMs != null && data.promptCacheUsageAt != null
+      ? data.promptCacheUsageAt + data.promptCacheTtlMs : null;
+  }
+
   /** 定位条发现未决闸门不在当前 DOM 时：明确提示并用权威快照恢复。 */
   recoverMissingPendingGate(id: string): Promise<void> {
     this.lastError = {
@@ -474,10 +544,13 @@ export class Store {
     session: SessionRecord,
     seq: number,
     events: UnifiedEvent[],
+    hasMore?: boolean,
+    firstSeq?: number,
   ): void {
     const pendingGates = new Map<string, number>();
-    let latestUsage: Record<string, unknown> | undefined;
-    let commands: CommandInfo[] | undefined;
+    let latestUsage = session.snapshotState?.latestUsage;
+    let commands = session.snapshotState?.commands;
+    const cache = { promptCacheTtlMs: session.snapshotState?.promptCacheTtlMs ?? null, promptCacheUsageAt: session.snapshotState?.promptCacheUsageAt ?? null };
     // dead 会话的 permission_request 不计入 pending：进程已不在，闸门不可操作。
     const dead = session.status === "dead";
     for (const event of events) {
@@ -489,13 +562,14 @@ export class Store {
         pendingGates.clear();
       } else if (event.type === "usage_updated") {
         latestUsage = event.payload;
+        updatePromptCache(cache, event);
       } else if (event.type === "commands_updated") {
         commands = commandsFromPayload(event.payload);
       }
     }
     // 快照内可能正好夹着一次未完成的重启切换（config_update_started 之后
     // 还没有 config_updated/session_error）：重建过渡态，切换中文案不丢。
-    let switching: string | undefined;
+    let switching = session.snapshotState?.configSwitching;
     for (const event of events) {
       if (event.type === "config_update_started") {
         switching = switchMessageFromPayload(event.payload);
@@ -507,15 +581,16 @@ export class Store {
     else this.configSwitching.delete(id);
     if (commands) this.commands.set(id, commands);
     const sorted = [...events].sort((a, b) => a.seq - b.seq);
-    const { events: retained, omitted: dropped } = retainEventWindow(sorted, pendingGates);
-    this.data.set(id, { events: retained, seq, dropped, pendingGates, latestUsage });
+    const paged = hasMore !== undefined;
+    const { events: retained, omitted: dropped } = paged ? { events: sorted, omitted: 0 } : retainEventWindow(sorted, pendingGates);
+    this.data.set(id, { events: retained, seq, dropped, pendingGates, latestUsage, paged, hasMore, firstSeq: firstSeq ?? sorted[0]?.seq ?? 0, ...cache });
     const index = this.sessions.findIndex((s) => s.id === id);
     if (index >= 0) {
       const next = [...this.sessions];
       next[index] = { ...session, title: session.title ?? sessionTitle({}, events), pendingGateCount: pendingGates.size };
       this.sessions = next;
     } else {
-      this.sessions = [...this.sessions, { ...session, title: sessionTitle({}, events), pendingGateCount: pendingGates.size }];
+      this.sessions = [...this.sessions, { ...session, title: session.title ?? sessionTitle({}, events), pendingGateCount: pendingGates.size }];
     }
   }
 
@@ -686,6 +761,7 @@ export class Store {
           data.pendingGates.clear();
         } else if (event.type === "usage_updated") {
           data.latestUsage = event.payload;
+          updatePromptCache(data, event);
         } else if (event.type === "commands_updated") {
           // 实时全量覆盖（装新 skill 后立即可见），不是一次性快照。
           this.commands.set(event.sessionId, commandsFromPayload(event.payload));
@@ -710,9 +786,8 @@ export class Store {
             );
           }
         }
-        // 默认只保留最近 2000 条，但任何仍未决的 permission_request 都是保护项：
-        // 即使它更老，也必须留在渲染窗口里，避免左栏有徽标而流内无闸门。
-        const retained = retainEventWindow(data.events, data.pendingGates);
+        // 分页不裁剪完整回合；旧服务端兼容窗口仍保护未决 permission_request。
+        const retained = data.paged ? { events: data.events, omitted: 0 } : retainEventWindow(data.events, data.pendingGates);
         data.events = retained.events;
         data.dropped += retained.omitted;
         // SessionData 内含可变数组/Map；每次有效增量替换外层引用，供 selector 正确比较。
@@ -1120,6 +1195,7 @@ export class Store {
     this.snapshotGen.set(id, ++this.nextSnapshotGen);
     this.snapshotInflight.delete(id);
     this.snapshotBuffers.delete(id);
+    this.olderInflight.delete(id);
     this.replayBuffers.delete(id);
     if (this.currentId === id) {
       // 与左栏同序：有未决闸门的优先（最后活动倒序），其次普通会话，最后才是折叠区的 dead
@@ -1183,6 +1259,19 @@ function retainEventWindow(
     .filter((event) => event.type === "permission_request" && pendingSeqs.has(event.seq));
   const retained = [...rescued, ...events.slice(recentStart)];
   return { events: retained, omitted: events.length - retained.length };
+}
+
+/** 缓存只读回合续期，TTL 沿用最近一次真实写缓存的回合。 */
+function updatePromptCache(
+  state: { promptCacheTtlMs?: number | null; promptCacheUsageAt?: number | null },
+  event: UnifiedEvent,
+): void {
+  const at = Date.parse(event.timestamp);
+  state.promptCacheUsageAt = Number.isNaN(at) ? null : at;
+  const usage = event.payload.usage as Record<string, unknown> | undefined;
+  const created = usage?.cache_creation as Record<string, unknown> | undefined;
+  if (Number(created?.ephemeral_1h_input_tokens) > 0) state.promptCacheTtlMs = 60 * 60_000;
+  else if (Number(created?.ephemeral_5m_input_tokens) > 0) state.promptCacheTtlMs = 5 * 60_000;
 }
 
 /** commands_updated 的 payload 是 {commands: UnifiedCommand[]}；取不出时按空表处理。 */

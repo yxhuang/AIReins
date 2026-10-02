@@ -1,7 +1,7 @@
 import { Fragment, type ReactNode, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import type { CommandInfo, DriverConfigOption, SessionRecord } from "../types";
 import { sessionTitle, truncateDisplayWidth } from "../format";
-import { buildRenderItems, focusVisible, groupReadOnlyTools, promptCacheExpiry } from "../render-items";
+import { buildRenderItems, focusVisible, groupReadOnlyTools } from "../render-items";
 import { filterCommands, noteCommandUsed, readRecentCommands, recentInTable } from "../commands";
 import { extractMentionTokens, mentionQueryAt, mentionTokenEnd } from "../mentions";
 import { needsRestartNote, effectiveFor, modelShortName, pillText, EFFECTIVE_SOURCE_LABELS, ALIAS_NOTE, RESTART_NOTE } from "../config-view";
@@ -14,7 +14,7 @@ import { shallowEqual, useStore } from "../useStore";
 import { GateBlock, QuestionBlock, RawLine, ReadOnlyToolGroup, SystemLine, TextBlockView, ThoughtBlockView, ToolCard, UserBlockView } from "./StreamItems";
 import { ExternalHistoryView } from "./HistoryTimeline";
 import { ResumedHistory } from "./ResumedHistory";
-import { ClockIcon, ConfigPills, SendIcon, StopIcon, type MenuGroup, type MenuItem } from "./ConfigMenu";
+import { ClockIcon, ConfigPills, PlusIcon, SendIcon, StopIcon, type MenuGroup, type MenuItem } from "./ConfigMenu";
 import { DirectoryBrowser } from "./DirectoryBrowser";
 import { insertFileMention, planFileMention } from "./FilePanel";
 import { SlashMenu } from "./SlashMenu";
@@ -52,6 +52,8 @@ export function SessionView({ session, mobileTail, usage }: { session: SessionRe
   }, [items, focusView, session.agent, session.cwd]);
 
   const streamRef = useRef<HTMLDivElement>(null);
+  const earlierRef = useRef<HTMLDivElement>(null);
+  const readingAnchor = useRef<{ element?: HTMLElement; top: number; height: number; scrollTop: number } | null>(null);
   const gateRefs = useRef(new Map<string, HTMLElement>());
   const [hiddenPending, setHiddenPending] = useState(0);
 
@@ -92,6 +94,17 @@ export function SessionView({ session, mobileTail, usage }: { session: SessionRe
   // 贴底跟随：是否贴底按用户最后一次滚动时的位置记，初始为贴底。
   // 不能在更新后再量——进会话、刷新、重连补齐时整批事件一次撑高，更新后量永远不在底部。
   const stickToBottom = useRef(true);
+  const loadEarlier = useCallback(() => {
+    void store.loadOlder(session.id, () => {
+      const container = streamRef.current;
+      if (!container) return;
+      const box = container.getBoundingClientRect();
+      const element = [...container.children].find((child) => child instanceof HTMLElement
+        && child !== earlierRef.current && child.getBoundingClientRect().bottom > box.top) as HTMLElement | undefined;
+      readingAnchor.current = { element, top: element?.getBoundingClientRect().top ?? 0, height: container.scrollHeight, scrollTop: container.scrollTop };
+      stickToBottom.current = false;
+    });
+  }, [session.id]);
   const onStreamScroll = useCallback(() => {
     const container = streamRef.current;
     if (container) {
@@ -102,8 +115,25 @@ export function SessionView({ session, mobileTail, usage }: { session: SessionRe
   }, [updateHiddenPending]);
   useLayoutEffect(() => {
     const container = streamRef.current;
-    if (container && stickToBottom.current) container.scrollTop = container.scrollHeight;
-  }, [items]);
+    const anchor = readingAnchor.current;
+    if (container && anchor) {
+      container.scrollTop = anchor.element?.isConnected
+        ? anchor.scrollTop + anchor.element.getBoundingClientRect().top - anchor.top
+        : anchor.scrollTop + container.scrollHeight - anchor.height;
+      readingAnchor.current = null;
+    } else if (container && stickToBottom.current) container.scrollTop = container.scrollHeight;
+  }, [items, data?.prependVersion]);
+
+  useEffect(() => {
+    const container = streamRef.current;
+    const sentinel = earlierRef.current;
+    if (!container || !sentinel || !data?.hasMore || data.loadingOlder || data.olderError) return;
+    const observer = new IntersectionObserver(([entry]) => {
+      if (entry?.isIntersecting) loadEarlier();
+    }, { root: container, rootMargin: "160px 0px 0px 0px" });
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [session.id, data?.hasMore, data?.firstSeq, data?.loadingOlder, data?.olderError, loadEarlier]);
 
   const scrollToFirstPending = () => {
     const firstRequestId = pendingGateIds[0];
@@ -149,9 +179,16 @@ export function SessionView({ session, mobileTail, usage }: { session: SessionRe
         </div>
       )}
 
-      <div className="stream" ref={streamRef} onScroll={onStreamScroll}>
+      <div className="stream" ref={streamRef} onScroll={onStreamScroll} style={{ overflowAnchor: "none" }}>
         {/* 续接会话：历史消息区在实时事件流上方，向上翻即可见（不默认折叠） */}
         {session.resumedFrom && <ResumedHistory session={session} streamRef={streamRef} />}
+        {data?.hasMore && (
+          <div className="earlier-messages" ref={earlierRef} role="status">
+            {data.olderError
+              ? <button type="button" onClick={loadEarlier} title={data.olderError}>加载更早的消息失败，点击重试</button>
+              : "加载更早的消息…"}
+          </div>
+        )}
         {!data && <p className="system-line">载入会话…</p>}
         {data && data.dropped > 0 && (
           <p className="system-line">有 {data.dropped} 条较早事件已省略（内存上限）；快照仍保留全量。</p>
@@ -480,7 +517,7 @@ function ConfigControls({ session }: { session: SessionRecord }) {
 // 回合进行中缓存随每次请求续期，不显示；判定不了 TTL（还没跑过回合）显示「—」，不猜。
 function CacheTimer({ session }: { session: SessionRecord }) {
   const selectExpiry = useCallback(
-    (value: Store) => promptCacheExpiry(value.data.get(session.id)?.events ?? []),
+    (value: Store) => value.promptCacheExpiry(session.id),
     [session.id],
   );
   const expiry = useStore(selectExpiry);
@@ -1302,7 +1339,7 @@ function Composer({ session, dead, errored }: { session: SessionRecord; dead: bo
               aria-expanded={attachMenuOpen}
               onClick={() => setAttachMenuOpen((v) => !v)}
             >
-              ＋
+              <PlusIcon />
             </button>
             {attachMenuOpen && (
               <div className="attach-menu" role="menu" aria-label="添加附件">

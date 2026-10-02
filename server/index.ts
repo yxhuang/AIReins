@@ -22,6 +22,7 @@ import { SessionManager } from "./session-manager.js";
 import { cleanStorage, getStorageStats, StorageInputError, validateStorageCleanInput } from "./storage.js";
 import { parseMcpAction } from "./session-menu.js";
 import { preflightSnapshot, SnapshotCwdError } from "./snapshot.js";
+import { InvalidEventPageCursor } from "./event-pages.js";
 import { TerminalError, TerminalRegistry, terminalEnabled, type TerminalEvent } from "./terminals.js";
 import { IMAGE_MENTION_MIME_TYPES, resolveUploadFile, saveUpload, UploadError } from "./uploads.js";
 import {
@@ -569,6 +570,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       await respond(response, 201, 0, "success", { session }, requestId);
     } else {
       const snapshotMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/snapshot$/);
+      const eventsMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/events$/);
       const commandsMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/commands$/);
       const codexCommandMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/codex\/command$/);
       const filesMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/files$/);
@@ -587,9 +589,24 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
         await respond(response, 200, 0, "success", await checkPageHealth(page), requestId);
       } else if (method === "GET" && snapshotMatch) {
         const id = decodeURIComponent(snapshotMatch[1]);
-        const snapshot = manager.getSnapshot(id);
+        const snapshot = manager.getSnapshot(id, url.searchParams.get("tail") === "1");
         if (!snapshot) throw new ApiError(404, 40401, `会话不存在：${id}`);
         await respond(response, 200, 0, "success", snapshot, requestId);
+      } else if (method === "GET" && eventsMatch) {
+        const id = decodeURIComponent(eventsMatch[1]);
+        const value = url.searchParams.get("beforeSeq");
+        const beforeSeq = Number(value);
+        if (value === null || !/^[1-9]\d*$/.test(value) || !Number.isSafeInteger(beforeSeq)) {
+          throw new ApiError(400, 40068, "beforeSeq 必须是正安全整数");
+        }
+        try {
+          const page = manager.getEventsBefore(id, beforeSeq);
+          if (!page) throw new ApiError(404, 40401, `会话不存在：${id}`);
+          await respond(response, 200, 0, "success", page, requestId);
+        } catch (error) {
+          if (error instanceof InvalidEventPageCursor) throw new ApiError(400, 40068, error.message);
+          throw error;
+        }
       } else if (method === "POST" && codexCommandMatch) {
         const id = decodeURIComponent(codexCommandMatch[1]);
         if (!manager.get(id)) throw new ApiError(404, 40401, `会话不存在：${id}`);

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { appendFile, mkdir, mkdtemp, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -336,6 +337,29 @@ assert.equal(codexTools[1].tool.name, "commandExecution");
 assert.equal(codexTools[1].tool.status, "error");
 assert.equal((codexTools[1].tool.input as { command: string }).command, "pwd");
 assert.equal(codexTools[2].tool.result, "done");
+// 真实 rollout 2026-10-01T09-50-29-00000000-0000-4000-8000-000000000019:72 的首条调用。
+// exec 保持现有 HistoryTool 字段形状；历史预览与派单详情在前端共用摘要器。
+const execInput = 'const results = await Promise.allSettled([tools.exec_command({cmd:"npm run -s typecheck",max_output_tokens:3000,yield_time_ms:1000})]); results.forEach(text);';
+const execTools = parse("codex", [
+  { type: "response_item", payload: { type: "custom_tool_call", call_id: "exec", name: "exec", input: execInput } },
+  { type: "response_item", payload: { type: "custom_tool_call_output", call_id: "exec", output: "完整结果" } },
+]);
+assert.equal(execTools.length, 1);
+assert.ok(execTools[0]?.role === "tool");
+assert.equal(execTools[0].tool.name, "exec");
+assert.equal(execTools[0].tool.input, execInput);
+assert.equal(execTools[0].tool.result, "完整结果");
+assert.equal(execTools[0].tool.status, "unknown");
+const longExecInput = JSON.parse(readFileSync(new URL("../frontend/scripts/fixtures/tool-events/codex-exec.json", import.meta.url), "utf8")).patchLongString.input as string;
+assert.ok(JSON.stringify(longExecInput).length > 4000);
+const [longExec] = parse("codex", [
+  { type: "response_item", payload: { type: "custom_tool_call", call_id: "long", name: "functions.exec", input: longExecInput } },
+  { type: "response_item", payload: { type: "custom_tool_call_output", call_id: "long", output: "x".repeat(10000) } },
+]);
+assert.ok(longExec?.role === "tool");
+assert.equal(longExec.tool.input, longExecInput, "exec 入参保留完整 JS，不破坏长 patch 的闭合");
+assert.ok(JSON.stringify(longExec.tool.result).length <= 4000, "exec 结果仍有界");
+assert.match(longExec.tool.result!, /truncated/);
 const kimiTools = parse("kimi", [
   { type: "context.append_loop_event", agentId: "main", event: { type: "tool.call", toolCallId: "k", name: "Read", args: { path: "a" } } },
   { type: "context.append_loop_event", agentId: "main", event: { type: "tool.result", toolCallId: "k", result: { output: "contents" } } },

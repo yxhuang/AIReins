@@ -114,6 +114,14 @@ export interface AskQuestion {
 export interface SessionRecord {
   title?: string;
   pendingGateCount?: number;
+  /** tail 快照从全量事件重建的会话级状态，避免旧段尚未加载时丢失。 */
+  snapshotState?: {
+    latestUsage?: Record<string, unknown>;
+    commands: CommandInfo[];
+    configSwitching?: string;
+    promptCacheTtlMs: number | null;
+    promptCacheUsageAt: number | null;
+  };
   id: string;
   agent: AgentKind;
   agentId: string;
@@ -208,6 +216,15 @@ export interface Snapshot {
   session: SessionRecord;
   seq: number;
   events: UnifiedEvent[];
+  hasMore?: boolean;
+  firstSeq?: number;
+}
+
+export interface EventsPage {
+  events: UnifiedEvent[];
+  hasMore: boolean;
+  /** 空段为 0；否则是本段第一条事件的 seq，作为下一次 beforeSeq。 */
+  firstSeq: number;
 }
 
 /** GET /api/pages 的页面 manifest（本轮只有 type:"iframe"；未知类型前端跳过并提示）。 */

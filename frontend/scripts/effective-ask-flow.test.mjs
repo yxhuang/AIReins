@@ -55,7 +55,7 @@ function stubFetch(session, snapshotEvents = []) {
   globalThis.fetch = (path) => {
     path = String(path);
     if (path === "/api/sessions") return Promise.resolve(envelope({ sessions: [session] }));
-    if (path.endsWith("/snapshot")) {
+    if (path.endsWith("/snapshot?tail=1")) {
       return Promise.resolve(envelope({ session, seq: snapshotEvents.length, events: snapshotEvents }));
     }
     if (path.endsWith("/commands")) return Promise.resolve(envelope({ commands: [] }));

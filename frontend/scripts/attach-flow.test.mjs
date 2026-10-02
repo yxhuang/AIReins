@@ -39,7 +39,7 @@ function stubFetch(session, { knownFiles = [] } = {}) {
   globalThis.fetch = (path) => {
     path = String(path);
     if (path === "/api/sessions") return Promise.resolve(envelope({ sessions: [session] }));
-    if (path.endsWith("/snapshot")) return Promise.resolve(envelope({ session, seq: 0, events: [] }));
+    if (path.endsWith("/snapshot?tail=1")) return Promise.resolve(envelope({ session, seq: 0, events: [] }));
     if (path.endsWith("/commands")) return Promise.resolve(envelope({ commands: [] }));
     if (path.includes("/files?")) {
       const q = new URLSearchParams(path.slice(path.indexOf("?") + 1)).get("q") ?? "";

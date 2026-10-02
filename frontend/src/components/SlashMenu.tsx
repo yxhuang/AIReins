@@ -350,8 +350,7 @@ function InfoBody({ kind, data, onTogglePlugin, pendingPlugin, onMcpAction, pend
 function SlashIcon() {
   return (
     <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" aria-hidden="true">
-      <rect x="4" y="4" width="16" height="16" rx="2.5" />
-      <path d="M14.5 8l-5 8" />
+      <path d="M15 4L9 20" />
     </svg>
   );
 }

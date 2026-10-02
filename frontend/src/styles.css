@@ -1570,7 +1570,7 @@ body.resizing {
   position: relative;
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 2px;
   padding: 2px 6px 6px;
 }
 
@@ -1590,11 +1590,11 @@ body.resizing {
   align-items: center;
   gap: 5px;
   max-width: 100%;
-  border: 1px solid transparent;
+  border: 0;
   border-radius: 6px;
-  background: var(--surface-sunk);
-  color: var(--text);
-  padding: 3px 8px;
+  background: transparent;
+  color: var(--text-muted);
+  padding: 3px 6px;
   font-size: 14px;
   font-family: inherit;
   white-space: nowrap;
@@ -1605,7 +1605,7 @@ body.resizing {
 .cfg-pill { min-width: 0; }
 .cfg-pill > span { overflow: hidden; text-overflow: ellipsis; }
 .cfg-pill > svg { color: var(--text-muted); flex: 0 0 auto; }
-.cfg-pill:hover:not(:disabled), .cfg-pill.open { border-color: var(--border-strong); }
+.cfg-pill:hover:not(:disabled), .cfg-pill.open { background: var(--surface-sunk); color: var(--text); }
 .cfg-pill:disabled { opacity: 0.55; cursor: not-allowed; }
 .cfg-pill-sub { color: var(--text-faint); text-transform: capitalize; }
 
@@ -1760,15 +1760,18 @@ body.resizing {
 .cache-timer.expired { color: var(--text-faint); }
 
 .rc-pill {
-  border: 1px solid var(--border-strong); border-radius: 6px; background: var(--surface-sunk);
-  color: var(--text-muted); padding: 3px 7px; font: inherit; font-size: 14px;
+  display: inline-flex; align-items: center; gap: 5px;
+  border: 0; border-radius: 6px; background: transparent;
+  color: var(--text-muted); padding: 3px 6px; font: inherit; font-size: 14px;
   white-space: nowrap; text-decoration: none;
 }
+.rc-pill:hover:not(:disabled) { background: var(--surface-sunk); color: var(--text); }
 .rc-pill { cursor: pointer; }
 .rc-pill:disabled { cursor: default; }
-.rc-connected { background: #2563b8; border-color: #2563b8; color: #fff; }
-.rc-connecting, .rc-reconnecting, .rc-disconnecting { border-color: var(--busy); color: var(--busy); }
-.rc-error { border-color: #c64c4c; color: #c64c4c; }
+/* 已连接：参照 VSCode 扩展，蓝色实心圆角胶囊 + 白字 */
+.rc-pill.rc-connected, .rc-pill.rc-connected:hover { background: #4a6bc4; color: #fff; border-radius: 999px; padding: 1px 10px; }
+.rc-pill.rc-connecting, .rc-pill.rc-reconnecting, .rc-pill.rc-disconnecting { color: var(--busy); }
+.rc-pill.rc-error { color: #c64c4c; }
 .rc-pill:focus-visible { outline: 2px solid var(--busy); outline-offset: 2px; }
 /* RC 胶囊在底栏靠右，菜单右对齐往左展开；链接项与按钮项同款 */
 .attach-menu.rc-menu { left: auto; right: 0; min-width: 170px; }
@@ -1801,18 +1804,18 @@ body.resizing {
 .attach-btn {
   display: inline-grid;
   place-items: center;
-  width: 28px;
-  height: 28px;
-  border: 1px solid var(--border);
+  width: 26px;
+  height: 26px;
+  border: 0;
   border-radius: 6px;
-  background: var(--surface-sunk);
+  background: transparent;
   color: var(--text-muted);
   font-size: 16px;
   line-height: 1;
   cursor: pointer;
 }
 
-.attach-btn:hover:not(:disabled) { border-color: var(--border-strong); color: var(--text); }
+.attach-btn:hover:not(:disabled), .attach-btn[aria-expanded="true"] { background: var(--surface-sunk); color: var(--text); }
 .attach-btn:disabled { opacity: 0.55; cursor: not-allowed; }
 
 /* 「+」弹出菜单：与 cfg-menu 同一浮层语言，锚定在按钮上方 */
@@ -3270,3 +3273,6 @@ body.resizing {
   .dispatch-history-row > span:last-child { display: none; }
   .dispatch-history { padding: 14px; }
 }
+
+.earlier-messages { padding: 12px; text-align: center; color: var(--text-muted); }
+.earlier-messages button { color: inherit; cursor: pointer; }

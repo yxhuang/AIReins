@@ -141,7 +141,17 @@ export interface UnifiedEvent {
   payload: Record<string, unknown>;
 }
 
+export interface SessionSnapshotState {
+  latestUsage?: Record<string, unknown>;
+  commands: UnifiedCommand[];
+  configSwitching?: string;
+  promptCacheTtlMs: number | null;
+  promptCacheUsageAt: number | null;
+}
+
 export interface SessionRecord {
+  /** Only tail snapshots carry reducers computed from the complete transcript. */
+  snapshotState?: SessionSnapshotState;
   title?: string;
   pendingGateCount?: number;
   id: string;

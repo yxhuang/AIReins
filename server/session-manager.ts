@@ -44,6 +44,7 @@ import type {
 import { ulid } from "./ulid.js";
 import { menuSettingsFiles, withMenuFileUris, type McpAction } from "./session-menu.js";
 import { parseCodexCommand } from "./codex-commands.js";
+import { selectEventPage, snapshotState, type EventPage } from "./event-pages.js";
 
 const RING_SIZE = 1_000;
 export type DriverFactory = typeof createDriver;
@@ -169,11 +170,21 @@ export class SessionManager {
     return (this.commands.get(id) ?? []).map((command) => ({ ...command }));
   }
 
-  getSnapshot(id: string): { session: SessionRecord; seq: number; events: UnifiedEvent[] } | undefined {
+  getSnapshot(id: string, tail = false): { session: SessionRecord; seq: number; events: UnifiedEvent[]; hasMore?: boolean; firstSeq?: number } | undefined {
     const session = this.sessions.get(id);
     if (!session) return undefined;
     const events = readTranscript(session.transcriptPath);
-    return { session: cloneSession(session), seq: session.seq, events };
+    if (!tail) return { session: cloneSession(session), seq: session.seq, events };
+    return {
+      session: { ...cloneSession(session), title: this.titles.get(id) ?? sessionTitle({}, events), snapshotState: snapshotState(events) },
+      seq: session.seq,
+      ...selectEventPage(events),
+    };
+  }
+
+  getEventsBefore(id: string, beforeSeq: number): EventPage | undefined {
+    const session = this.sessions.get(id);
+    return session ? selectEventPage(readTranscript(session.transcriptPath), beforeSeq) : undefined;
   }
 
   getEventsAfter(id: string, afterSeq: number): { events: UnifiedEvent[]; requiresSnapshot: boolean; currentSeq: number } | undefined {

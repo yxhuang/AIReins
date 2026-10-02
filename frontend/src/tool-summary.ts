@@ -46,6 +46,7 @@ export interface DiffBodyChunk {
 }
 
 export type ToolBody =
+  | { type: "exec"; calls: { verb: string; target: string; input: string }[]; input: string; result: string }
   | { type: "command"; command: string; output: string; exitCode: number | null; truncated: boolean; signal: string | null }
   | { type: "diff"; path: string; chunks: DiffBodyChunk[]; error?: string }
   | { type: "read"; path: string; lineCount: number | null; error?: string }
@@ -67,6 +68,32 @@ export function summarizeTool(agent: AgentKind, tool: ToolSummarySource, cwd: st
   const input = rawInputObject(tool);
   const resultItem = asRecord(tool.rawResult);
   const name = tool.baseToolName || tool.toolName || "tool";
+  if (agent === "codex" && name.replace(/^functions\./, "") === "exec") {
+    const source = typeof tool.rawInput === "string" ? tool.rawInput
+      : typeof input.input === "string" ? input.input : tool.input;
+    const calls = parseCodexExec(source);
+    if (calls) {
+      const summaries = calls.map((call) => {
+        if (call.name === "apply_patch") {
+          const paths = [...call.argument.matchAll(/^\*\*\* (?:Update|Add|Delete) File: (.+)$/gm)].map((m) => relPath(m[1]!, cwd));
+          return { verb: "编辑", target: paths.length === 1 ? paths[0]! : paths.length ? `${paths.length} 个文件` : "文件改动", input: call.argument };
+        }
+        const alias: Record<string, string> = { exec_command: "commandExecution", write_stdin: "commandExecution", web__run: "webSearch", view_image: "Read" };
+        const name = Object.hasOwn(alias, call.name) ? alias[call.name]! : call.name;
+        const args = { ...call.fields, ...(call.command !== undefined ? { command: call.command } : {}) };
+        if (call.name === "write_stdin") args.command = `终端 ${call.fields.session_id ?? ""}`.trim();
+        const summary = summarizeTool(agent, { ...tool, toolName: name, baseToolName: name,
+          toolKind: undefined, rawInput: args, rawResult: undefined, input: call.argument, result: "", status: "unknown" }, cwd);
+        return { verb: summary.verb, target: summary.target, input: call.command !== undefined ? stripShellWrapper(call.command) : call.argument };
+      });
+      const commands = calls.filter((call) => call.command !== undefined);
+      const first = summaries[0]!;
+      const allCommands = commands.length === calls.length;
+      return { verb: first.verb, target: first.target,
+        note: [calls.length > 1 ? `等 ${calls.length} ${allCommands ? "条命令" : "项调用"}` : "", tool.status === "error" ? firstLine(resultText(tool)) : ""].filter(Boolean).join(" · "),
+        body: { type: "exec", calls: summaries, input: source, result: resultText(tool) } };
+    }
+  }
   const { cls, titleArg } = classify(name, tool.toolName, tool.toolKind ?? "");
   const text = resultText(tool);
   const loc0 = tool.locations?.[0]?.path ?? "";
@@ -294,6 +321,122 @@ function parseHumanTitle(title: string): { cls: ToolClass; arg: string } {
 }
 
 // ── 命令提取与结果 ───────────────────────────────────
+
+export interface CodexExecCall {
+  name: string;
+  argument: string;
+  fields: Record<string, string>;
+  command?: string;
+}
+
+interface ExecToken { text: string; start: number; end: number; literal?: string }
+
+// 保守的词法扫描，不执行 JS。动态模板、正则字面量等不支持的语法整段 raw 回落。
+// 字符串/注释里的 tools.* 不当作调用；所有括号必须完整且配对。
+function execTokens(source: string): ExecToken[] | null {
+  const tokens: ExecToken[] = [];
+  for (let i = 0; i < source.length;) {
+    const start = i;
+    const c = source[i]!;
+    if (/\s/.test(c)) { i++; continue; }
+    if (source.startsWith("//", i)) {
+      const end = source.indexOf("\n", i + 2); i = end < 0 ? source.length : end; continue;
+    }
+    if (source.startsWith("/*", i)) {
+      const end = source.indexOf("*/", i + 2); if (end < 0) return null; i = end + 2; continue;
+    }
+    if (c === "/") return null;
+    if (c === '"' || c === "'" || c === "`") {
+      let value = ""; let closed = false; i++;
+      while (i < source.length) {
+        const ch = source[i++]!;
+        if (ch === c) { closed = true; break; }
+        if (c === "`" && ch === "$" && source[i] === "{") return null;
+        if (c !== "`" && /[\r\n\u2028\u2029]/.test(ch)) return null;
+        if (ch !== "\\") { value += ch; continue; }
+        if (i >= source.length) return null;
+        const escape = source[i++]!;
+        if (escape === "\n" || escape === "\u2028" || escape === "\u2029") continue;
+        if (escape === "\r") { if (source[i] === "\n") i++; continue; }
+        const simple: Record<string, string> = { n: "\n", r: "\r", t: "\t", b: "\b", f: "\f", v: "\v", "0": "\0" };
+        if (escape === "x" || escape === "u") {
+          let hex: string;
+          if (escape === "u" && source[i] === "{") {
+            const end = source.indexOf("}", ++i); if (end < 0) return null;
+            hex = source.slice(i, end); i = end + 1;
+            if (!/^[\da-fA-F]{1,6}$/.test(hex) || parseInt(hex, 16) > 0x10ffff) return null;
+          } else {
+            const size = escape === "x" ? 2 : 4; hex = source.slice(i, i + size); i += size;
+            if (hex.length !== size || !/^[\da-fA-F]+$/.test(hex)) return null;
+          }
+          value += String.fromCodePoint(parseInt(hex, 16));
+        } else {
+          if (/[1-9]/.test(escape) || (escape === "0" && /\d/.test(source[i] ?? ""))) return null;
+          value += simple[escape] ?? escape;
+        }
+      }
+      if (!closed) return null;
+      tokens.push({ text: source.slice(start, i), start, end: i, literal: value }); continue;
+    }
+    if (/[\w$]/.test(c)) {
+      while (i < source.length && /[\w$]/.test(source[i]!)) i++;
+    } else i++;
+    tokens.push({ text: source.slice(start, i), start, end: i });
+  }
+  return tokens;
+}
+
+/** 提取源码顺序中的直接 tools.name(...)。不能确定任何 cmd 时整段回落，避免部分漏报。 */
+export function parseCodexExec(source: string): CodexExecCall[] | null {
+  const tokens = execTokens(source);
+  if (!tokens) return null;
+  const pairs = new Map<number, number>(); const stack: number[] = [];
+  for (let i = 0; i < tokens.length; i++) {
+    const token = tokens[i]!;
+    if (token.literal !== undefined) continue;
+    if (["(", "[", "{"].includes(token.text)) stack.push(i);
+    else if ([")", "]", "}"].includes(token.text)) {
+      const open = stack.pop();
+      const expected: Record<string, string> = { ")": "(", "]": "[", "}": "{" };
+      if (open === undefined || tokens[open]!.text !== expected[token.text]) return null;
+      pairs.set(open, i);
+    }
+  }
+  if (stack.length) return null;
+  const calls: CodexExecCall[] = [];
+  for (let i = 0; i < tokens.length; i++) {
+    if (tokens[i]!.text !== "tools" || tokens[i]!.literal !== undefined || tokens[i - 1]?.text === ".") continue;
+    if (tokens[i + 1]?.text !== "." || !/^[A-Za-z_$][\w$]*$/.test(tokens[i + 2]?.text ?? "") || tokens[i + 3]?.text !== "(") return null;
+    const end = pairs.get(i + 3); if (end === undefined) return null;
+    const name = tokens[i + 2]!.text;
+    const argument = source.slice(tokens[i + 3]!.end, tokens[end]!.start).trim();
+    const fields: Record<string, string> = Object.create(null);
+    const open = i + 4;
+    if (tokens[open]?.text === "{") {
+      const close = pairs.get(open)!;
+      if (close >= end || (close + 1 !== end && !(tokens[close + 1]?.text === "," && close + 2 === end))) return null;
+      for (let k = open + 1; k < close;) {
+        const key = tokens[k]!.literal ?? tokens[k]!.text;
+        if (tokens[k + 1]?.text !== ":" || !/^[\w$]+$/.test(key)) {
+          if (name === "exec_command") return null;
+          break; // 其他工具仍能按名字归类；动态参数完整留在展开体。
+        }
+        const valueStart = k + 2; let valueEnd = valueStart;
+        while (valueEnd < close && tokens[valueEnd]!.text !== ",") valueEnd = (pairs.get(valueEnd) ?? valueEnd) + 1;
+        if (key === "cmd" && (Object.hasOwn(fields, key) || valueEnd !== valueStart + 1 || tokens[valueStart]?.literal === undefined)) return null;
+        if (valueEnd === valueStart + 1) fields[key] = tokens[valueStart]!.literal ?? tokens[valueStart]!.text;
+        k = valueEnd + 1;
+      }
+    }
+    if (name === "exec_command" && !Object.hasOwn(fields, "cmd")) return null;
+    const literal = tokens[open]?.literal;
+    // apply_patch 等可直接传字符串；末尾逗号不改变该参数，也不能误吞拼接表达式。
+    const onlyLiteral = literal !== undefined && (open + 1 === end || (tokens[open + 1]?.text === "," && open + 2 === end));
+    calls.push({ name, argument: onlyLiteral ? literal : argument, fields,
+      ...(name === "exec_command" ? { command: fields.cmd! } : {}) });
+  }
+  return calls.length ? calls : null;
+}
 
 // codex 命令常包成 /bin/bash -lc '…'，显示时剥掉这层外壳；命令可能是字符串或数组
 function commandText(command: unknown): string {

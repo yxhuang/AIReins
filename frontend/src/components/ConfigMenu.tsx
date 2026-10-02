@@ -268,7 +268,6 @@ export function ConfigPills({
     <div className="cfg-pills">
       {main.length > 0 && (
         <ConfigPill
-          icon={<SparkIcon />}
           title={main.map((m) => m.reason).find(Boolean) ?? main.map((m) => m.group.title).join(" · ")}
           placement={placement}
           label={
@@ -313,17 +312,12 @@ function CheckIcon() {
   return <svg {...svgProps}><path d="M20 6 9 17l-5-5" /></svg>;
 }
 
-function SparkIcon() {
-  return (
-    <svg {...svgProps}>
-      <path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z" />
-      <path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z" />
-    </svg>
-  );
-}
-
 export function ClockIcon() {
   return <svg {...svgProps}><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></svg>;
+}
+
+export function PlusIcon() {
+  return <svg {...svgProps} width={16} height={16}><path d="M12 5v14M5 12h14" /></svg>;
 }
 
 export function SendIcon() {
