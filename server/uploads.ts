@@ -4,7 +4,7 @@ import { basename, extname, join, resolve, sep } from "node:path";
 import type { Readable } from "node:stream";
 import { workbenchHome } from "./persistence.js";
 
-export const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
+const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
 /** 发送帧里 image mention 的上限（与各家 vision 输入的实用边界对齐） */
 export const MAX_IMAGE_MENTION_BYTES = 10 * 1024 * 1024;
 export const IMAGE_MENTION_MIME_TYPES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
@@ -85,7 +85,7 @@ function availablePath(dir: string, stamp: string, name: string): string {
   }
 }
 
-export interface SavedUpload {
+interface SavedUpload {
   path: string;
   name: string;
   size: number;

@@ -17,14 +17,13 @@ export interface DispatchRun {
   subagents?: DispatchSubagent[];
 }
 
-export interface DispatchSubagent {
+interface DispatchSubagent {
   threadId: string; nickname: string; role: string | null; depth: number; parentThreadId: string;
   status: "running" | "finished" | "unknown";
   startedAt: string | null; lastActivityAt: string; activity?: string;
 }
 
-export const DISPATCH_TOOLS = ["codex", "kimi", "copilot"] as const;
-export type DispatchTool = typeof DISPATCH_TOOLS[number];
+const DISPATCH_TOOLS = ["codex", "kimi", "copilot"] as const;
 export const RECENT_DISPATCH_MS = 30 * 60 * 1000;
 
 function timestamp(value: string | null): number {
@@ -32,7 +31,7 @@ function timestamp(value: string | null): number {
 }
 
 /** 缺失结束时间的 lost从首次观察到非运行态开始计窗口。 */
-export function dispatchEnd(run: DispatchRun, observedEnds: ReadonlyMap<string, number>): number {
+function dispatchEnd(run: DispatchRun, observedEnds: ReadonlyMap<string, number>): number {
   const end = timestamp(run.endedAt);
   if (Number.isFinite(end)) return end;
   const start = timestamp(run.startedAt);

@@ -236,7 +236,7 @@ export function manageSessionMcp(id: string, action: "toggle" | "reconnect", ser
   });
 }
 
-export interface PluginToggleResult {
+interface PluginToggleResult {
   plugins: unknown[];
   reloaded: boolean;
   reloadError?: string;

@@ -5,7 +5,6 @@ import { basename } from "node:path";
 import { createInterface } from "node:readline";
 import type {
   DriverConfigSchema,
-  DriverOptions,
   PermissionDecision,
   QuestionAnswers,
   SessionConfig,

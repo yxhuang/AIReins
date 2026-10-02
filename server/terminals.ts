@@ -5,8 +5,8 @@ import type { AccessPolicy, RemoteConfig } from "./access.js";
 import { ulid } from "./ulid.js";
 
 export const MAX_SCROLLBACK_BYTES = 256 * 1024;
-export const MAX_TERMINAL_COLS = 500;
-export const MAX_TERMINAL_ROWS = 300;
+const MAX_TERMINAL_COLS = 500;
+const MAX_TERMINAL_ROWS = 300;
 
 export type ShellKind = "bash" | "powershell";
 
@@ -47,7 +47,7 @@ export function terminalEnabled(policy: AccessPolicy, remoteConfig: RemoteConfig
   return policy.kind === "local" || remoteConfig?.terminal === true;
 }
 
-export function validateTerminalSize(cols: unknown, rows: unknown): { cols: number; rows: number } {
+function validateTerminalSize(cols: unknown, rows: unknown): { cols: number; rows: number } {
   if (!Number.isInteger(cols) || typeof cols !== "number" || cols < 1 || cols > MAX_TERMINAL_COLS) {
     throw new TerminalError("invalid", `cols 必须是 1 到 ${MAX_TERMINAL_COLS} 的整数`);
   }

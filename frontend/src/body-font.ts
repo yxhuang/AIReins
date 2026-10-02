@@ -2,7 +2,7 @@ export const BODY_FONT_STORAGE_KEY = "workbench-body-font";
 export const BODY_FONT_MIN = 14;
 export const BODY_FONT_MAX = 20;
 export const BODY_FONT_STEP = 0.5;
-export type BodyFontSize = number;
+type BodyFontSize = number;
 
 /** 14–20、0.5 一档；其他值（含旧版存的 22）一律回到默认 16。 */
 export function bodyFontSize(value: string | null): BodyFontSize {

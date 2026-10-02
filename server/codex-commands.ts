@@ -26,7 +26,7 @@ export function parseCodexCommand(input: unknown): { name: string; arguments?: s
   return { name: value.name, ...(args ? { arguments: args } : {}) };
 }
 
-export interface CodexSkill {
+interface CodexSkill {
   name: string;
   description: string;
   path: string;

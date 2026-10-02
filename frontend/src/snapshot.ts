@@ -4,7 +4,7 @@ import type { SnapshotPreflight } from "./types";
 // 组件（Sidebar 的新建表单）只负责把 confirm/create 接进来；分支规则全部在这里。
 
 /** 快照流程出口："proceed" = 直接建会话；"confirm" = 先弹确认框让用户拍板。 */
-export type SnapshotFlow = "proceed" | "confirm";
+type SnapshotFlow = "proceed" | "confirm";
 
 /** 确认框三个出口；"auto"/"skip" 原样成为 POST /api/sessions 的 snapshot 字段。 */
 export type SnapshotChoice = "auto" | "skip" | "cancel";
@@ -33,7 +33,7 @@ export function snapshotConfirmReasons(preflight: SnapshotPreflight): string[] {
   return reasons;
 }
 
-export interface CreateWithSnapshotDeps {
+interface CreateWithSnapshotDeps {
   /** POST /api/snapshot/preflight */
   preflight: (cwd: string) => Promise<SnapshotPreflight>;
   /** 实际建会话；snapshot 缺省 = 不传该字段（后端默认 "auto"） */

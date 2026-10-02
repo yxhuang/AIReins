@@ -2,7 +2,7 @@
 // 颜色一律走 --diff-* 令牌；闸门的琥珀金只留给闸门卡片本身，不进这里。
 import { Fragment } from "react";
 
-export interface DiffChunk {
+interface DiffChunk {
   /** 分组标题（如 MultiEdit 的「改动 #n」）；缺省时不渲染标题行 */
   title?: string;
   removed: string;
@@ -53,6 +53,6 @@ export function lineDiff(removed: string, added: string): [" " | "-" | "+", stri
   return out;
 }
 
-export function splitLines(text: string): string[] {
+function splitLines(text: string): string[] {
   return text.replace(/\n+$/, "").split("\n");
 }

@@ -56,7 +56,7 @@ export interface ToolView {
   terminalOutput?: ToolTerminalOutput;
 }
 
-export interface EditChunk {
+interface EditChunk {
   /** 「改动 #n」 */
   title: string;
   removed: string;
@@ -120,7 +120,7 @@ export interface ExternalHistoryBlock {
   truncated: boolean;
 }
 
-export type RenderItem =
+type RenderItem =
   | TextBlock
   | ThoughtBlock
   | UserBlock
@@ -140,7 +140,7 @@ export interface ToolGroupView {
   summaryParts: { verb: string; count: string }[];
 }
 
-export type StreamRenderItem = RenderItem | ToolGroupView;
+type StreamRenderItem = RenderItem | ToolGroupView;
 
 /** 摘要器的分类是私有实现：复用公开展示结果，不另建名字/ACP kind 分类表。
  * read 有专属 body；glob 独占「列出」；grep 与 websearch 共用「搜索」，需排除后者。

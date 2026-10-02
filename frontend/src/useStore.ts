@@ -1,8 +1,8 @@
 import { useCallback, useRef, useSyncExternalStore } from "react";
 import { store, type Store } from "./store";
 
-export type StoreSelector<T> = (value: Store) => T;
-export type EqualityFn<T> = (previous: T, next: T) => boolean;
+type StoreSelector<T> = (value: Store) => T;
+type EqualityFn<T> = (previous: T, next: T) => boolean;
 
 /** 小型 tuple / 派生对象的逐项比较；字段应只放原始值或稳定引用。 */
 export function shallowEqual<T>(previous: T, next: T): boolean {

@@ -21,7 +21,7 @@ export function clampPanelWidth(width: number, viewportWidth: number, minWidth =
 }
 
 /** 手机快捷键栏按键 → 发往终端的控制序列。 */
-export interface TermShortcutKey {
+interface TermShortcutKey {
   id: string;
   label: string;
   seq: string;
@@ -60,7 +60,7 @@ export function initialTermState(): TermSessionState {
 }
 
 /** 归约产生的副作用，由连接层应用到 xterm / React 状态。 */
-export type TermEffect =
+type TermEffect =
   | { type: "reset" }
   | { type: "write"; data: string }
   | { type: "exited"; exitCode: number | null }

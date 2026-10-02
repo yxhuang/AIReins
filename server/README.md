@@ -138,7 +138,7 @@ webhook 地址就是密钥：文件权限设为 600，也不要写进日志或�
 - `output` 先 `initialize` 获取 `available_output_styles`，再 `get_settings` 刷新磁盘设置，返回 `{outputStyle,availableStyles,settingsFiles}`，两次请求各 15 秒、前端总上限 40 秒。仅返回样式字段，不暴露整个 settings（可能含环境变量）。
 - `settings` 直接返回 `{settingsFiles:[{source,label,path,uri}]}`，无需 worker，dead 会话也可打开；三个范围为用户、项目、项目本地。用户路径尊重 `CLAUDE_CONFIG_DIR`，默认 `~/.claude/settings.json`。hooks/permissions/skills/sandbox/memory/output 查看也附带 `settingsFiles`；memory/instructions 的文件及目录行附带 `uri`。
 - `uri` 仅为协议链接：WSL 返回 `vscode://vscode-remote/wsl+<distro>/<encoded-path>`，其他 Linux 返回 `vscode://file/<encoded-path>`；路径分段编码，非绝对路径或控制字符返回 null。后端不启动 VSCode，不写 settings；文件可以尚未创建。Hooks 等在编辑器保存后重新打开面板查看，某些配置需下次续接。插件/策略提供的 Hooks 仍按原来源展示，不伪装成用户 settings 中的条目。
-- 新菜单只用于 Claude；Rewind 没有接入：虽然协议有 `rewind_files {user_message_id,dry_run}`，当前 worker 未启用 SDK 文件检查点且 wb 事件没有原生用户 UUID，实测 `canRewind:false,error:"File rewinding is not enabled."`，无法提供可信的文件/消息预览。扩展的会话回退另走宿主 fork + resume 截点，不能直接移植。调查表与冒烟证据见 `.work-orders/2026-10-01-slash-ext-report.md`、`scratch/slash-ext/`。
+- 新菜单只用于 Claude；Rewind 没有接入：虽然协议有 `rewind_files {user_message_id,dry_run}`，当前 worker 未启用 SDK 文件检查点且 wb 事件没有原生用户 UUID，实测 `canRewind:false,error:"File rewinding is not enabled."`，无法提供可信的文件/消息预览。扩展的会话回退另走宿主 fork + resume 截点，不能直接移植。调查表与冒烟证据已归档到 `~/dev/_notes/backups/workbench-local-docs-20261002.tgz`（`.work-orders/2026-10-01-slash-ext-report.md`、`scratch/slash-ext/`）。
 - `GET /api/sessions/:id/files?q=<关键词>&limit=<默认50>`：在会话 `cwd` 内检索可引用的普通文件
 - `DELETE /api/sessions/:id`：停止 worker 并移除注册表条目；不删除 Workbench 或原生 CLI transcript
 - `GET /api/history`：只读列出三家 CLI 自己保存的所有来源会话；没有用户消息的会话隐藏，`empty` 单独计数（分页为本页扫描计数），`skipped` 记录损坏/不可读候选。命中 delegate 元数据的条目附带 `dispatch:{runId,name}`，UUID 和 `session_...` 原样匹配；派单映射只读全部目录的 `run.json`/旧 `meta.json`，缓存 30 秒。
@@ -793,7 +793,7 @@ node server/scripts/verify-snapshot.mjs '<sessionId>' --probe-message "只回复
 
 ## Codex 命令与 skills（2026-10-01，CLI 0.159.3）
 
-能力依据：本机 `codex app-server generate-json-schema --out scratch/codex-commands/schema`；官方 [app-server](https://learn.chatgpt.com/docs/app-server) 的 Skills 与 Compaction 章节。旧版探针与验收记录是历史结果，当前能力以下表及本节为准。
+能力依据：本机 `codex app-server generate-json-schema --out <目录>`；官方 [app-server](https://learn.chatgpt.com/docs/app-server) 的 Skills 与 Compaction 章节。旧版探针与验收记录是历史结果，当前能力以下表及本节为准。
 
 | wb 命令 | app-server 方法 | 行为 |
 |---|---|---|
@@ -810,7 +810,7 @@ node server/scripts/verify-snapshot.mjs '<sessionId>' --probe-message "只回复
 
 Codex 输入框 `$` 在光标 token 处打开名称+描述面板，支持过滤、上下键、Enter/Tab 插入、Esc 关闭；IME 组合期间不触发。选中插入 `$name `，文本保留，后端按真实 `skills/list` 的启用清单附加 `{type:"skill",name,path}` 到 `turn/start.input`；不接受客户端提供 skill 文件路径、不读取/嵌入 skill 内容、不写 skills 配置。重复提及去重，同名不同文件报错而不猜路径；禁用 skill 不主动附加。列表来源覆盖用户、仓库与系统的实际发现结果；读取错误在面板提示并可在 `/skills` 查看。
 
-不接 `/init`、undo/revert、`/diff`、`/prompts:<name>`、thread/shellCommand 或 MCP 配置改写：写文件/不可逆、无直接对应方法、TUI 本地能力，或超出本单可逆能力范围。详情与真实报文见 `spikes/PROTOCOL-NOTES.md` §12 和 `.work-orders/2026-10-01-codex-commands-report.md`。生效需要后端重启（本单不执行 wb restart）；前端重新 build 后由静态文件服务读取。
+不接 `/init`、undo/revert、`/diff`、`/prompts:<name>`、thread/shellCommand 或 MCP 配置改写：写文件/不可逆、无直接对应方法、TUI 本地能力，或超出本单可逆能力范围。详情与真实报文见 `spikes/PROTOCOL-NOTES.md` §12（工单报告已归档到 `~/dev/_notes/backups/workbench-local-docs-20261002.tgz`）。生效需要后端重启（本单不执行 wb restart）；前端重新 build 后由静态文件服务读取。
 
 
 ### 性能接口契约（P0 / P1）
@@ -845,7 +845,7 @@ Codex 输入框 `$` 在光标 token 处打开名称+描述面板，支持过滤�
 - 夹具回归：`server/dispatch-subagents.test.ts`；前端有/无子 agent、递归/状态/换行契约：`frontend/scripts/dispatch-flow.test.mjs`。浏览器的 440px 面板和 390px 手机截图由主会话验证。
 
 ### 运行中插话与新建/移除时延（2026-10-01）
-插话的实测证据在 `spikes/PROTOCOL-NOTES.md` 和 `spikes/captures/2026-10-01-steer/`，工单与报告在 `.work-orders/2026-10-01-steer{,-report}.md`。
+插话的实测证据在 `spikes/PROTOCOL-NOTES.md` 和 `spikes/captures/2026-10-01-steer/`，工单与报告已归档到 `~/dev/_notes/backups/workbench-local-docs-20261002.tgz`。
 
 **插话**
 - 会话运行中发送普通文本或附件，即为插话：`user_message.payload.steer=true`。空闲时发送仍走原通道，不带 `steer` 字段。

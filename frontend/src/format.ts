@@ -1,4 +1,4 @@
-import type { AgentKind, SessionRecord, UnifiedEvent } from "./types";
+import type { AgentKind } from "./types";
 
 // 相对时间：左栏「刚刚 / N分钟前」等。
 export function relativeTime(iso: string, now: number): string {
@@ -28,19 +28,6 @@ const AGENT_NAMES: Record<AgentKind, string> = { claude: "Claude Code", codex: "
 export function messageRoleLabel(role: string, agent: AgentKind | undefined): string {
   if (role === "user") return "我";
   return agent ? AGENT_NAMES[agent] : "助手";
-}
-
-// 用时：1m12s / 2h03m 这种紧凑格式，等宽展示。
-export function duration(fromIso: string, toIso: string): string {
-  const ms = Math.max(0, Date.parse(toIso) - Date.parse(fromIso));
-  const totalSeconds = Math.floor(ms / 1000);
-  const hours = Math.floor(totalSeconds / 3600);
-  const minutes = Math.floor((totalSeconds % 3600) / 60);
-  const seconds = totalSeconds % 60;
-  const pad = (n: number) => String(n).padStart(2, "0");
-  if (hours > 0) return `${hours}h${pad(minutes)}m`;
-  if (minutes > 0) return `${minutes}m${pad(seconds)}s`;
-  return `${seconds}s`;
 }
 
 // token 数紧凑格式：25.4k。

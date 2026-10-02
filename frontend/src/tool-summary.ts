@@ -23,7 +23,7 @@ export interface ToolLocation {
 }
 
 /** 摘要器的输入：ToolView 的展示字段 + 原始数据。旧 transcript 只有前四个展示字段。 */
-export interface ToolSummarySource {
+interface ToolSummarySource {
   toolName: string;
   /** tool_call_started 时的最初短名（kimi 后来会把 toolName 改成人话标题） */
   baseToolName?: string;
@@ -38,14 +38,14 @@ export interface ToolSummarySource {
   terminalOutput?: ToolTerminalOutput;
 }
 
-export interface DiffBodyChunk {
+interface DiffBodyChunk {
   /** 所属文件（codex fileChange 一次改多个文件时每块标出）；单文件不缺省 */
   title?: string;
   removed: string;
   added: string;
 }
 
-export type ToolBody =
+type ToolBody =
   | { type: "exec"; calls: { verb: string; target: string; input: string }[]; input: string; result: string }
   | { type: "command"; command: string; output: string; exitCode: number | null; truncated: boolean; signal: string | null }
   | { type: "diff"; path: string; chunks: DiffBodyChunk[]; error?: string }
@@ -322,7 +322,7 @@ function parseHumanTitle(title: string): { cls: ToolClass; arg: string } {
 
 // ── 命令提取与结果 ───────────────────────────────────
 
-export interface CodexExecCall {
+interface CodexExecCall {
   name: string;
   argument: string;
   fields: Record<string, string>;

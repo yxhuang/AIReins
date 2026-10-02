@@ -9,8 +9,8 @@ export interface WorkbenchPrefs {
   retentionDays: number;
 }
 
-export const MAX_IDLE_RELEASE_MINUTES = 1_440;
-export const MAX_RETENTION_DAYS = 3_650;
+const MAX_IDLE_RELEASE_MINUTES = 1_440;
+const MAX_RETENTION_DAYS = 3_650;
 export const DEFAULT_PREFS: WorkbenchPrefs = { idleReleaseMinutes: 30, retentionDays: 30 };
 
 export function prefsPath(): string {
@@ -24,7 +24,7 @@ export function isValidIdleReleaseMinutes(value: unknown): value is number {
     && value <= MAX_IDLE_RELEASE_MINUTES;
 }
 
-export function isValidRetentionDays(value: unknown): value is number {
+function isValidRetentionDays(value: unknown): value is number {
   return typeof value === "number"
     && Number.isInteger(value)
     && value >= 0

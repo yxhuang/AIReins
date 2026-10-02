@@ -197,7 +197,7 @@ export interface DriverCapabilities {
 }
 
 /** meta.drivers.<agent> = 能力位 + 配置 schema（options 探针失败时为空数组并带 error） */
-export interface DriverMeta extends DriverCapabilities {
+interface DriverMeta extends DriverCapabilities {
   options?: DriverConfigOption[];
   source?: string;
   error?: string;

@@ -21,10 +21,10 @@ import { partitionPages, type SkippedPage } from "./pages";
 // 未加载会话只维护列表摘要；快照期间缓存事件，落地后追加更大的 seq。
 // 仅明确强制刷新、resync_required 或重连作废在途快照。
 
-export type WsState = "connecting" | "open" | "closed";
+type WsState = "connecting" | "open" | "closed";
 
 /** 全局错误条内容；带 sessionId 的错误在 App.tsx 渲染成可点击跳转（会话标题 + agent 名）。 */
-export interface LastError {
+interface LastError {
   message: string;
   sessionId?: string;
 }
@@ -33,8 +33,8 @@ export interface LastError {
 const MAX_EVENTS = 2000;
 
 /** 有活跃会话时保持用时读数秒级；全局空闲后把唤醒频率降到 30 秒。 */
-export const ACTIVE_TICK_MS = 1000;
-export const IDLE_TICK_MS = 30_000;
+const ACTIVE_TICK_MS = 1000;
+const IDLE_TICK_MS = 30_000;
 
 /** 单条消息的 mentions 上限（后端硬限制，超出截断并在预览条提示）。 */
 export const MAX_MENTIONS = 20;

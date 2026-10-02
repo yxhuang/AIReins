@@ -27,7 +27,7 @@ export interface MenuGroup {
   effective?: string;
 }
 
-export function ConfigPill({
+function ConfigPill({
   label,
   icon,
   groups,
@@ -245,7 +245,7 @@ function StepSlider({ group }: { group: MenuGroup }) {
   );
 }
 
-export interface BuiltPill {
+interface BuiltPill {
   group: MenuGroup;
   text: string;
   /** 禁用原因，作胶囊 title */

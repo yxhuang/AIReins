@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { isTerminalToggleKey } from "./terminal";
-import { PageIcon, Sidebar } from "./components/Sidebar";
+import { Sidebar } from "./components/Sidebar";
 import { PanelActions } from "./components/PanelActions";
 import { DispatchPanel } from "./components/DispatchPanel";
 import { FilePanel } from "./components/FilePanel";

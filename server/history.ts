@@ -24,14 +24,14 @@ export interface HistorySession {
   dispatch?: DispatchSession;
 }
 
-export interface HistoryListInput {
+interface HistoryListInput {
   agent?: AgentKind;
   q?: string;
   limit: number;
   cursor?: string;
 }
 
-export interface HistoryListResult {
+interface HistoryListResult {
   sessions: HistorySession[];
   nextCursor?: string;
   truncated: boolean;
@@ -48,7 +48,7 @@ export type HistoryMessage =
       status: "ok" | "error" | "unknown";
     } };
 
-export interface HistoryMessagesInput {
+interface HistoryMessagesInput {
   limit: number;
   cursor?: string;
 }
@@ -62,14 +62,14 @@ export interface HistoryMessagesPage {
   durationMs: number;
 }
 
-export interface HistoryRoots {
+interface HistoryRoots {
   claude: string;
   codex: string;
   kimi: string;
   workbenchRegistry: string;
 }
 
-export interface HistoryIndexOptions {
+interface HistoryIndexOptions {
   roots?: Partial<HistoryRoots>;
   timeoutMs?: number;
   maxDiscovered?: number;

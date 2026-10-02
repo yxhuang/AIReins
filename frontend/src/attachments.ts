@@ -7,12 +7,12 @@ import type { Mention } from "./types";
 const IMAGE_MENTION_TYPES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
 
 /** 超过该体积的图片先压缩再传（移动网络与 25MB 上限之间的经验阈值）。 */
-export const REENCODE_SIZE_THRESHOLD = 3.5 * 1024 * 1024;
+const REENCODE_SIZE_THRESHOLD = 3.5 * 1024 * 1024;
 
 /** 重编码后图片长边上限（px）。 */
 const REENCODE_MAX_EDGE = 2048;
 
-export interface PreparedFile {
+interface PreparedFile {
   blob: Blob;
   name: string;
   type: string;

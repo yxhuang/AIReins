@@ -32,7 +32,6 @@ import {
   type PermissionDecision,
   type QuestionAnswers,
   type SessionConfig,
-  type UnifiedEvent,
   type UserMessageInput,
 } from "./types.js";
 import { ulid } from "./ulid.js";

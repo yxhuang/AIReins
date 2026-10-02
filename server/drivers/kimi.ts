@@ -144,7 +144,7 @@ const CONFIG_NAMES: Record<ConfigOptionId, string> = {
   permissionMode: "审批模式",
 };
 
-export function kimiConfigSchemaFromOptions(configOptions: AcpConfigOption[]): DriverConfigSchema {
+function kimiConfigSchemaFromOptions(configOptions: AcpConfigOption[]): DriverConfigSchema {
   return {
     source: "Kimi ACP session/new.configOptions",
     options: configOptions.flatMap((option) => {
@@ -168,7 +168,7 @@ export function kimiConfigSchemaFromOptions(configOptions: AcpConfigOption[]): D
   };
 }
 
-export function kimiConfigFromOptions(configOptions: AcpConfigOption[]): SessionConfig {
+function kimiConfigFromOptions(configOptions: AcpConfigOption[]): SessionConfig {
   const config: SessionConfig = {};
   for (const option of configOptions) {
     const id = KIMI_UNIFIED_IDS[String(option.id ?? "")];

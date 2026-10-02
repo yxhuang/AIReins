@@ -42,7 +42,7 @@ export function partitionPages(list: PageManifest[]): {
 }
 
 /** 健康检查结论 → 渲染模式（见 pageRenderMode）。 */
-export type PageRenderMode = "iframe" | "fallback" | "blocked" | "uncertain";
+type PageRenderMode = "iframe" | "fallback" | "blocked" | "uncertain";
 
 /**
  * reachable 只表示服务在响应（收到任何 HTTP 响应即为 true），不代表允许被嵌入。

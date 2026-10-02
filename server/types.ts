@@ -3,7 +3,7 @@ import type { ChildProcessWithoutNullStreams } from "node:child_process";
 export const AGENTS = ["claude", "codex", "kimi"] as const;
 export type AgentKind = (typeof AGENTS)[number];
 
-export const EVENT_TYPES = [
+const EVENT_TYPES = [
   "session_created",
   "config_update_started",
   "user_message",
@@ -52,9 +52,9 @@ export interface SessionConfig {
   permissionMode?: string | null;
 }
 
-export type EffectiveConfigSource = "session" | "settings" | "init";
+type EffectiveConfigSource = "session" | "settings" | "init";
 
-export interface EffectiveConfigValue {
+interface EffectiveConfigValue {
   value: string | null;
   source: EffectiveConfigSource | null;
 }
@@ -107,7 +107,7 @@ export interface ImageMention {
 
 export type Mention = FileMention | ImageMention;
 
-export interface CommandInvocation {
+interface CommandInvocation {
   name: string;
   arguments?: string;
 }

@@ -19,7 +19,7 @@ const AGENT_LABELS: Record<AgentKind, string> = {
   kimi: "kimi",
 };
 
-export const STATUS_LABELS: Record<string, string> = {
+const STATUS_LABELS: Record<string, string> = {
   starting: "启动中",
   idle: "空闲",
   running: "忙",
@@ -28,7 +28,7 @@ export const STATUS_LABELS: Record<string, string> = {
 };
 
 /** 五状态一句「你现在可以……」说明：左栏状态文字的 hover title 用。 */
-export const STATUS_HINTS: Record<string, string> = {
+const STATUS_HINTS: Record<string, string> = {
   starting: "启动中：会话正在拉起 agent 进程。你现在可以等它就绪，或切去别的会话。",
   idle: "空闲：agent 就绪。你现在可以发消息、用 / 命令或 @ 引用文件。",
   running: "忙：agent 正在执行。你现在可以继续发消息，或点「中断」停掉当前执行。",

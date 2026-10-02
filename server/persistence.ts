@@ -21,9 +21,9 @@ import type { SessionRecord, UnifiedEvent } from "./types.js";
 
 export const workbenchHome = process.env.WORKBENCH_HOME || join(homedir(), ".workbench");
 export const registryPath = join(workbenchHome, "sessions.json");
-export const transcriptsDir = join(workbenchHome, "transcripts");
+const transcriptsDir = join(workbenchHome, "transcripts");
 
-export function ensureStorage(): void {
+function ensureStorage(): void {
   mkdirSync(transcriptsDir, { recursive: true });
 }
 

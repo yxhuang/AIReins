@@ -14,12 +14,12 @@ import {
 import { homedir } from "node:os";
 import { basename, dirname, isAbsolute, join, parse, relative, resolve } from "node:path";
 
-export const SNAPSHOT_MAX_BYTES = 500 * 1024 * 1024;
-export const SNAPSHOT_MAX_FILES = 20_000;
+const SNAPSHOT_MAX_BYTES = 500 * 1024 * 1024;
+const SNAPSHOT_MAX_FILES = 20_000;
 const SPACE_NUMERATOR = 11;
 const SPACE_DENOMINATOR = 10;
 
-export interface SnapshotScanResult {
+interface SnapshotScanResult {
   totalBytes: number;
   fileCount: number;
   exceeds: boolean;
@@ -34,7 +34,7 @@ export interface SnapshotPreflightResult {
   snapshotPath: string | null;
 }
 
-export interface SnapshotOptions {
+interface SnapshotOptions {
   snapshotRoot?: string;
   maxBytes?: number;
   maxFiles?: number;
@@ -50,7 +50,7 @@ export class SnapshotCwdError extends Error {
   }
 }
 
-export class SnapshotLimitError extends Error {
+class SnapshotLimitError extends Error {
   constructor(readonly scan: SnapshotScanResult) {
     super(`目录超过自动快照上限（${SNAPSHOT_MAX_BYTES} 字节或 ${SNAPSHOT_MAX_FILES} 个文件）`);
     this.name = "SnapshotLimitError";
@@ -73,7 +73,7 @@ export class SnapshotPathError extends Error {
 
 const inFlightSnapshots = new Map<string, Promise<string | null>>();
 
-export function defaultSnapshotRoot(): string {
+function defaultSnapshotRoot(): string {
   return join(homedir(), ".workbench", "snapshots");
 }
 
@@ -88,7 +88,7 @@ export function snapshotPathFor(cwd: string, snapshotRoot = defaultSnapshotRoot(
   return join(resolve(snapshotRoot), `${readableName}-${pathHash}`);
 }
 
-export async function isGitRepository(cwd: string): Promise<boolean> {
+async function isGitRepository(cwd: string): Promise<boolean> {
   let current = resolve(cwd);
   while (true) {
     if (await isGitMarker(join(current, ".git"))) return true;

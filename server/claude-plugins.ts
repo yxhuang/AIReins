@@ -8,7 +8,7 @@ export interface ClaudePlugin {
   [key: string]: unknown;
 }
 
-export type PluginRunner = (cwd: string, args: string[]) => Promise<unknown>;
+type PluginRunner = (cwd: string, args: string[]) => Promise<unknown>;
 
 const runPluginCommand: PluginRunner = (cwd, args) => new Promise((resolve, reject) => {
   execFile("claude", ["plugin", ...args], {

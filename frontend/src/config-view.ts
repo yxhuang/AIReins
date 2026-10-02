@@ -24,7 +24,7 @@ export const EFFECTIVE_SOURCE_LABELS: Record<Exclude<EffectiveSource, null>, str
 /** settings 来源的有效模型是别名（claude CLI 无枚举接口），不是精确 id。 */
 export const ALIAS_NOTE = "别名为 Claude 设置的最新该档位模型";
 
-export interface EffectiveValue {
+interface EffectiveValue {
   value: string;
   source: Exclude<EffectiveSource, null>;
 }

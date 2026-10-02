@@ -47,9 +47,9 @@ import { parseCodexCommand } from "./codex-commands.js";
 import { selectEventPage, snapshotState, type EventPage } from "./event-pages.js";
 
 const RING_SIZE = 1_000;
-export type DriverFactory = typeof createDriver;
-export type ClaudeSettingsResolver = (cwd: string) => ClaudeEffectiveSettings;
-export type SnapshotCreator = (cwd: string) => Promise<string | null>;
+type DriverFactory = typeof createDriver;
+type ClaudeSettingsResolver = (cwd: string) => ClaudeEffectiveSettings;
+type SnapshotCreator = (cwd: string) => Promise<string | null>;
 
 /** GET /api/sessions/:id/info/:kind 的 kind → Claude control_request subtype */
 const SESSION_INFO_SUBTYPES: Record<string, string> = {

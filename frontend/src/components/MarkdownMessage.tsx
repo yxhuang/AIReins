@@ -2,8 +2,6 @@ import React, { createContext, memo, isValidElement, useContext, useEffect, useS
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { mentionSegments } from "../mentions";
-import { messageRoleLabel } from "../format";
-import type { AgentKind, HistoryMessage } from "../types";
 import { highlightCode, highlightLanguage } from "../code-highlight";
 
 function codeText(node: ReactNode): string {
@@ -76,16 +74,4 @@ export function UserMessageText({ text }: { text: string }) {
   return <span className="user-text">{mentionSegments(text).map((part, index) =>
     part.mention ? <span className="mention-tag" key={index}>{part.text}</span> : part.text,
   )}</span>;
-}
-
-export function HistoryMessageView({ message, agent, showTime = false }: { message: Pick<Extract<HistoryMessage, { text: string }>, "role" | "text"> & { timestamp?: string | null }; agent: AgentKind; showTime?: boolean }) {
-  return (
-    <div className={`history-msg history-msg-${message.role}`}>
-      <span className="history-msg-role">{messageRoleLabel(message.role, agent)}</span>
-      {message.role === "user"
-        ? <div className="user-block"><UserMessageText text={message.text} /></div>
-        : <MarkdownMessage text={message.text} />}
-      {showTime && <span className="history-msg-time">{message.timestamp ? new Date(message.timestamp).toLocaleString() : "时间未知"}</span>}
-    </div>
-  );
 }

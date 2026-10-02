@@ -777,7 +777,7 @@ body.resizing {
   letter-spacing: 0.03em;
 }
 
-.agent-claude .agent-name, .session-title-line.agent-claude .agent-name { color: var(--agent-claude-ink); }
+.agent-claude .agent-name { color: var(--agent-claude-ink); }
 .agent-codex .agent-name { color: var(--agent-codex-ink); }
 .agent-kimi .agent-name { color: var(--agent-kimi-ink); }
 
@@ -1205,7 +1205,7 @@ body.resizing {
 }
 
 /* 不继承到工具行/展开内容、输入框、复制按钮或角色标签。历史续接区在消息流内同样生效。 */
-.stream .markdown-message, .stream .history-msg .markdown-message,
+.stream .markdown-message,
 .stream .user-text, .stream .thought-body { font-size: var(--body-font-size); }
 .stream .user-text .mention-tag { font-size: inherit; }
 .stream .markdown-message pre { font-size: var(--detail-font-size); }
@@ -2031,13 +2031,6 @@ body.resizing {
   color: var(--text-muted);
 }
 
-/* codex 无命令枚举协议的克制说明；title 带完整解释 */
-.composer-note {
-  font-size: 14px;
-  color: var(--text-faint);
-  cursor: help;
-}
-
 /* @ 引用预览条：实时反映当前文本会解析出的有效引用；
    未知路径用冷调 --danger 标注，不用暖色（暖色只给审批闸门） */
 .mention-preview {
@@ -2551,22 +2544,6 @@ body.resizing {
   flex-direction: column;
 }
 
-.history-head {
-  padding: 14px 16px 0;
-}
-
-.history-title {
-  margin: 0;
-  font-size: 16px;
-}
-
-.history-sub {
-  margin: 4px 0 0;
-  font-size: 16px;
-  color: var(--text-muted);
-  line-height: 1.6;
-}
-
 .history-filters {
   display: flex;
   flex-wrap: wrap;
@@ -2837,43 +2814,6 @@ body.resizing {
   background: var(--surface-sunk);
 }
 
-.history-messages {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.history-msg {
-  min-width: 0;
-  padding: 4px 0;
-}
-
-.history-msg-role {
-  display: block;
-  font-size: 14px;
-  color: var(--text-faint);
-  margin-bottom: 2px;
-}
-
-.history-msg-text {
-  display: block;
-  font-size: 15px;
-  line-height: 1.6;
-  color: var(--text);
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  /* 预览条目限高，避免单条长消息挤掉其余 */
-  max-height: 180px;
-  overflow-y: auto;
-}
-.history-msg .markdown-message { font-size: 15px; }
-.history-msg .user-block { margin: 0; }
-.history-preview-body .history-msg .markdown-message,
-.history-preview-body .history-msg .user-block { max-height: 180px; overflow-y: auto; }
-
 /* 中性说明（预览截断 / 导入代价 / 无可预览消息）：不是警告，不用暖色不用 --danger */
 .history-note {
   margin: 8px 0 0;
@@ -2922,28 +2862,6 @@ body.resizing {
   margin: 4px 0;
 }
 
-.session-history-list {
-  list-style: none;
-  margin: 6px 0 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-/* 历史区内的消息复用 .history-msg 基础样式，底色再压一层以示弱化 */
-.session-history-list .history-msg {
-  background: transparent;
-}
-
-/* timestamp：等宽小字 */
-.history-msg-time {
-  display: block;
-  font-size: 14px;
-  color: var(--text-faint);
-  margin-top: 3px;
-}
-
 @media (max-width: 640px) {
   .composer { padding-inline: 10px; }
   .stream { padding-inline: 10px; }
@@ -2959,7 +2877,6 @@ body.resizing {
   margin-top: 10px;
   border-top: 1px solid var(--border);
 }
-
 
 .history-actions {
   padding: 10px 16px 14px;
@@ -3049,8 +2966,6 @@ body.resizing {
    ≤720px 单栏：侧栏面板就是主页；会话 / 历史预览单独进入主区。
    历史预览返回时保留面板与筛选。顶栏徽标沿用 .gate-badge——暖色仍只用于闸门计数。 */
 .mobile-topbar { display: none; }
-.mobile-topbar-actions { display: flex; align-items: center; gap: 6px; margin-left: auto; }
-.mobile-shortcut { display: inline-flex; align-items: center; gap: 4px; min-height: 44px; padding: 4px 6px; font-size: 16px; white-space: nowrap; }
 
 @media (max-width: 720px) {
   /* dvh = 扣掉浏览器工具栏后的可见高度，避免底部输入框被 Safari 工具栏挡住 */
@@ -3157,7 +3072,7 @@ body.resizing {
   .dispatch-side-panel .dispatch-history-row > span:last-child { display: none; }
 }
 
-/* 派单流程图：几何与 scratch/mockups/dispatch-flow.html 对齐。 */
+/* 派单流程图 */
 .dispatch-view { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 0 max(0px, calc((100% - 1040px) / 2)); }
 .dispatch-panel { margin: 0 10px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); box-shadow: 0 16px 60px rgb(0 0 0 / .055); overflow: hidden; container: dispatch / inline-size; }
 .dispatch-panel-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 13px 16px 0; }

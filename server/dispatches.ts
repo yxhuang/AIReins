@@ -31,7 +31,7 @@ export interface Dispatch {
   subagents?: CodexSubagent[];
 }
 
-export interface CodexSubagent {
+interface CodexSubagent {
   threadId: string;
   nickname: string;
   role: string | null;

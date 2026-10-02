@@ -136,7 +136,7 @@ export function userMessageText(message: UserMessageInput): string {
   return `/${name}${args ? ` ${args}` : ""}`;
 }
 
-export function readMentionText(mention: FileMention): string {
+function readMentionText(mention: FileMention): string {
   const buffer = readFileSync(mention.path);
   if (buffer.byteLength > MAX_EMBEDDED_MENTION_BYTES) {
     throw new Error(`引用文件超过 1 MiB，无法嵌入：${mention.path}`);

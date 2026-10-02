@@ -9,7 +9,7 @@ import { log } from "./logger.js";
 const DEFAULT_PAGES_ROOT = resolve(fileURLToPath(new URL("../pages", import.meta.url)));
 const PAGE_ID_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const EMOJI_PATTERN = /\p{Extended_Pictographic}/u;
-export const PAGE_HEALTH_TIMEOUT_MS = 2_000;
+const PAGE_HEALTH_TIMEOUT_MS = 2_000;
 
 export interface IframePageManifest {
   id: string;
