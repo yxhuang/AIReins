@@ -56,7 +56,7 @@ Check '隐藏窗口显示' 'Show' (Get-ClickAction $true $false $false $false)
 Check '最小化窗口显示' 'Show' (Get-ClickAction $true $true $true $false)
 Check '窗口不存在时打开' 'Show' (Get-ClickAction $false $false $false $false)
 
-# 显示路径：最小化优先恢复；已显示但被遮挡才先隐藏再显示。
+# 显示路径：最小化优先恢复；已显示但被遮挡才抬 Z 序（置顶再取消置顶）。
 $showCases = @(
     @($false, $false, $false, 'Show'),
     @($false, $false, $true,  'Show'),
