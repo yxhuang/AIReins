@@ -3,6 +3,7 @@
 // 合并/去重/20 条截断/命令分支互斥/失败语义。浏览器依赖（WebSocket / fetch）全部打桩，
 // 不需要真实 server；用 tsx 跑：npm run test:attach
 import { strict as assert } from "node:assert";
+import { readFileSync } from "node:fs";
 
 // --- 浏览器全局打桩（须在 import store 之前） ---
 globalThis.WebSocket = { CONNECTING: 0, OPEN: 1, CLOSING: 2, CLOSED: 3 };
@@ -172,6 +173,14 @@ await t("mentions 能力位 false：不解析 @，extraMentions 截断后随文�
   const frame = sent.find((f) => f.type === "user_message");
   assert.deepEqual(frame.mentions, [{ type: "file", path: "/abs/x.txt", name: "x.txt" }],
     "能力位 false 时不做 @ 解析，附件 mention 原样带上");
+});
+
+// --- K12：发送成功只清本次提交的附件（组件源码断言，同 effective-ask-flow 的打法） ---
+// 背景缺陷：附件还在上传时发送，Composer 在成功后 setAttachments([]) 把上传中的也一起清掉。
+await t("Composer 发送成功不得整栏清空附件条：只移除本次提交的附件 id", async () => {
+  const source = readFileSync(new URL("../src/components/SessionView.tsx", import.meta.url), "utf8");
+  assert.ok(!source.includes("setAttachments([])"), "发送成功后不得 setAttachments([]) 整栏清空");
+  assert.ok(source.includes("submittedIds"), "应按本次提交的附件 id（submittedIds）过滤移除");
 });
 
 if (!process.exitCode) console.log(`✅ attach 流程回归全过（${pass} 例）`);

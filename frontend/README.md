@@ -23,6 +23,7 @@ node frontend/scripts/smoke-ws.mjs  # 需后端；会创建测试会话、批准
 ## 架构
 
 - [App.tsx](src/App.tsx) 管布局，hash 路由由 [store.ts](src/store.ts) 处理：`#/session/<id>`、`#/history`、`#/page/<id>`、`#/dispatches` 及派单详情/多单高亮链接。
+- 手机（≤720px）另有 `#/terminal`、`#/files`；会话与面板导航 push 完整视图及来源到 `history.state.workbenchNavigation`，系统后退/前进恢复对应会话和面板。返回/关闭按钮确认本次运行的上一条是来源时用 `history.back()`，冷启动或刷新后无法确认则 `replaceState` 回来源（无来源回会话/主页）；桌面仍沿用原 hash 语义，终端/文件开关不写 history。
 - [types.ts](src/types.ts) 对应后端类型，[api.ts](src/api.ts) 处理 REST 信封与错误；后端是会话记录、能力位、配置选项的事实源。
 - [render-items.ts](src/render-items.ts) 统一事件归一、工具配对/分组、闸门与提问；[StreamItems.tsx](src/components/StreamItems.tsx) 渲染实时块，[HistoryTimeline.tsx](src/components/HistoryTimeline.tsx) 复用到历史和外部续聊。
 - 终端和派单视图按需加载；主会话在右侧面板打开时保持挂载。终端、文件、派单互斥，窄屏 ≤720px 面板全屏；入口共用 [PanelActions.tsx](src/components/PanelActions.tsx)，手机会话入口在「更多」菜单。
@@ -57,8 +58,14 @@ node frontend/scripts/smoke-ws.mjs  # 需后端；会创建测试会话、批准
 
 ## 侧栏内面板
 
-- 「所有来源会话」及扩展页内容覆盖侧栏会话区，底部入口不重排，同刻只开一个；标题/收起/Esc 关闭。会话列表保持挂载但不可聚焦，关闭恢复滚动；见 [Sidebar.tsx](src/components/Sidebar.tsx)。
-- 桌面保留当前会话并恢复路由；手机历史面板为主页，点行进全屏预览，返回只清预览并保留筛选/分页。关闭历史或换页后再打开重新加载；旧 history/page hash 仍可进入。
+- 底栏第一行「历史会话 │ AI 用量等扩展页」（可换行），第二行「设置、直达」；直达复用设置浮层，打开时刷新 `/api/links`，按 `pages/links.json` 的 group 分组，以普通新标签链接打开。输入框有文字时，Claude/Codex 的 R 在末尾追加 `/refine-prompt` / `$refine-prompt` 并保留焦点；手机替换缓存时间槽位，Kimi 暂无确切 skill 语法而隐藏。
+
+- 主列表只放 `status !== "dead"` 且 `lastActivityAt` 距当前不超过 72 小时（含边界）的工作台会话，仍按活动时间倒序；`running` / `starting` 不限时间，未决闸门始终优先进「等待处理」。当前打开的旧非 dead 会话临时保留并显示选中项，切走后恢复时间筛选；消息事件更新活动时间后自然回列表。筛选见 [sidebar-sessions.ts](src/sidebar-sessions.ts)，复用 `store.now` 时钟，不另加轮询。
+- 「等待处理」之下按区块排列：**置顶** → **各用户分组**（可折叠标题，折叠状态按设备存 localStorage，标题行 ⋮ 可重命名分组/删除分组＝成员移回普通分区）→ **进行中**（running/starting 或最近 2 小时有活动，含恰好 2h 边界）→ **今天**（`lastActivityAt` 是本地时间今天）→ **更早**（仍受 72h 窗口约束）；空分区不显示标签，组内按最后活动倒序。置顶/分组会话不受 72h 限制、不在时间分区重复出现，dead 也保留显示（用户主动整理）。状态点：空闲绿点只给最近 2 小时内有活动的会话，「今天/更早」的空闲行只显示右侧时间；running/后台任务/未决闸门/error 在任何分区照常显示。分区与状态点规则是 [sidebar-sessions.ts](src/sidebar-sessions.ts) 的 `selectSidebarSections` / `sidebarStatusDot`，重新分组复用 `store.now` 时钟。
+- 会话行「⋮」菜单：**置顶 P**（已置顶显示「取消置顶」）/ **重命名 R** / **移到分组 ›** / **删除 D**（红色 `--danger`，走既有「从工作台移除」行内确认，原生记录不动）。桌面悬停或键盘聚焦行时右侧出 ⋮（暂时替换时间显示），右键弹同一菜单；手机 500ms 长按弹同一菜单，左滑 52px 露出 ⋮（方向锁定只响应行内向左滑动，不与 iOS 边缘后退冲突）。菜单与 `settings-pop`/`.cfg-menu` 同一浮层令牌，打开时快捷键字母生效，↑↓ 选择、Esc/点外部关闭。「移到分组」切到菜单内子屏：已有分组 + 「新建分组…」（输入名创建并移入）+ 已在分组时「移出分组」。重命名是行内输入框（Enter/失焦保存、Esc 取消、空串恢复自动标题、16px 防 iOS 放大）。滑动/快捷键纯函数在 [sidebar-menu.ts](src/sidebar-menu.ts)，菜单组件在 [SidebarActionMenu.tsx](src/components/SidebarActionMenu.tsx)；置顶/分组/自定义标题持久化在服务端，经 `session_organization_updated` 帧同步其他页面（见 server README）。
+- 已结束及超时会话从「历史会话」查找，工作台记录带「工作台」来源标签；已移除「N 个工作台会话」折叠。预览底部「打开会话」仍能进入主列表外会话：已释放的原会话可发送并原地续接，dead 显示「新建会话并续接」，不因当前打开而进入主列表；手机后退/前进仍恢复历史预览/列表。
+- 「历史会话」及扩展页内容覆盖侧栏会话区，底部入口不重排，同刻只开一个；标题/收起/Esc 关闭。会话列表保持挂载但不可聚焦，关闭恢复滚动；见 [Sidebar.tsx](src/components/Sidebar.tsx)。
+- 桌面保留当前会话并恢复路由；手机历史列表与全屏预览共用 `#/history`，由版本 1 的 `history.state.workbenchNavigation.route.historySelection` 区分。列表点行 push 预览，预览换选 replace 当前 state；系统后退回列表、前进恢复预览，列表再后退回进入列表前的来源。列表持续挂载，保留筛选/分页/滚动位置。刷新后仍恢复预览；主动返回只有确认本次运行的前条是列表才 back，否则 replace 回列表（无列表来源的旧 state 也只清预览）。桌面选择/返回仍不新增 history。关闭历史或换页后再打开重新加载；旧 history/page hash 仍可进入。
 - 历史列表每页 150 条，关键词 250ms 防抖，agent 由后端筛选；来源只过滤已加载条目并明示范围。空会话隐藏，`truncated/skipped` 为中性说明，导入对照 `agent + nativeSessionId`；见 [HistoryView.tsx](src/components/HistoryView.tsx)、[history.ts](src/history.ts)。
 - 扩展页只在启动取列表，未知类型跳过；只在打开/重试时查 health。不可达或 `embeddable:false` 不挂 iframe；true 正常嵌入，null/缺省保留空白提示与新标签出口；见 [PageView.tsx](src/components/PageView.tsx)、[pages.ts](src/pages.ts)。
 - iframe 使用 manifest URL，`proxy:true` 则走同源 `/pages/<id>/`；侧栏忽略主区 maxWidth，收起卸载。跨源 iframe 内 Esc 不可捕获；非代理 loopback 页面在远程入口显示电脑端提示，不能把手机的 localhost 当成服务端。
@@ -66,7 +73,7 @@ node frontend/scripts/smoke-ws.mjs  # 需后端；会创建测试会话、批准
 ## 派单面板
 
 - `#/dispatches` / `#/dispatches/<runId>` / `?runs=` 打开右侧只读面板，关闭恢复原会话或历史预览；与终端共用宽度记忆，拖拽、方向键、双击复位。入口与壳见 [DispatchPanel.tsx](src/components/DispatchPanel.tsx)、[SidePanelResize.tsx](src/components/SidePanelResize.tsx)。
-- 流程图展示 Claude → Codex/Kimi/Copilot，每端最多三单，其余 `+N`；容器 720px 切换连线布局。标题按 Claude `parent.sessionId` 匹配工作台/原生 id，模型优先匹配会话值、否则 `parent.model`；见 [dispatch-flow.ts](src/dispatch-flow.ts)。
+- 派单树数据由 [dispatch-flow.ts](src/dispatch-flow.ts) 的 `buildDispatchTree` 纯函数生成，节点分 executor/run/subagent，执行端分 idle/single/group：单派单直接显示执行 agent；同一执行端多单时上层每单一行摘要（默认最多三行，`+N` 展开；折叠只收摘要行，下层任务块和子代理始终完整画出），下层分别画任务块，连线按派单顺序从执行端卡片底边的独立锚点出发；Codex 子代理连接所属派单或父 thread 节点，递归不限层。DispatchView.tsx 只负责紧凑卡片渲染和 ResizeObserver 几何测量；每层节点最大 148px、派单人最大 208px，窄面板按可用宽度收窄，长文本保留在 title；模型显示短名（`sol · xhigh`）。空闲执行端只显示小胶囊；Claude 原生子代理用珊瑚橙身份色，只读展示，不打开 delegate 详情，无近期记录时隐藏。标题按 Claude `parent.sessionId` 匹配工作台/原生 id，模型优先匹配会话值、否则 `parent.model`。
 - 多个派单会话在派单人卡片逐行显示标题和各自运行单数，单行省略、最多三行，其余 `+N`；工作台/原生 id 别名去重，单会话保持原显示。
 - 列表只读 `/api/dispatches?limit=50`，可见每 3 秒刷新、每秒走时，隐藏暂停、恢复立即刷新，慢请求不重叠；关闭清理请求/计时器，失败保留旧数据并重试。会话内派单链接独立轮询；见 [dispatch-polling.ts](src/dispatch-polling.ts)。
 - 图中仅显示运行中及结束 30 分钟内派单；结束时间可由 startedAt + elapsedS 推算，lost 无结束时间用本次首次观察计时，其他结束时间不明者不显示。不读取或清理本机派单目录。
@@ -108,7 +115,7 @@ node frontend/scripts/smoke-ws.mjs  # 需后端；会创建测试会话、批准
 - 终端入口只认 `meta.capabilities.terminal`，Ctrl+` 切换且忽略自动重复；首次打开懒加载 xterm，隐藏仅 CSS，实例、连接、PTY 保留。bash/PowerShell 各自 attach 已存活终端，否则新建，切走继续后台；见 [TerminalPanel.tsx](src/components/TerminalPanel.tsx)。
 - 专用 `/ws/terminal` 每次 open 重新 attach，收到 attached 先 reset 再回放；省略输出给提示，resize 只在尺寸变化时发送。退避与回前台重连沿全局规则；kill 就地二次确认，exit 显示退出码、允许新建；见 [terminal.ts](src/terminal.ts)。
 - 终端/派单宽默认 480px，clamp 至 `[320, 视口−480]`，窄屏全屏；手机 Esc/Tab/Ctrl-C/Ctrl-D/方向键与粘贴，Clipboard 失败退回手动 prompt，经 xterm.paste 处理。终端主题读 CSS 令牌，随主题/系统变化；契约见 [terminal-panel-design.md](../docs/terminal-panel-design.md)。
-- 等宽字体优先本地 Maple Mono NF CN/Nerd Font，不下载字体；字体就绪或 1.5 秒超时重新度量 fit，不阻塞连接。终端字号按 13px × 整体比例单独调整，关闭尝试把焦点还给输入框。
+- 等宽字体优先本地 Maple Mono NF CN/Nerd Font，不下载字体；字体就绪或 1.5 秒超时重新度量 fit，不阻塞连接。终端字号默认按「宽屏 16 / 手机 13px × 整体比例」自动；设置里「终端字号」滑块（10–24px，localStorage `workbench-term-font`，按设备分开）设过就用设定值，见 `readTermFontSize`（[body-font.ts](src/body-font.ts)）。关闭尝试把焦点还给输入框。
 - 文件面板宽单独记忆（默认 280、最小 240），目录浏览与新建 cwd 选择共用 [DirectoryBrowser.tsx](src/components/DirectoryBrowser.tsx)。点文件复制完整路径，仅当前非 dead、支持 mentions、cwd 内且相对路径无空白时插入 `@`；不满足则说明只复制，见 [FilePanel.tsx](src/components/FilePanel.tsx)。
 - 目录浏览打开时后台预取三家原生历史 `q=/mnt/&limit=1`，Windows 按钮比较历史与工作台最近活动的 `/mnt/` 目录，无记录用 `/mnt/c/Users`。按钮不等待历史；慢请求/失败期间用本地结果，返回后仅供后续点击，不自动改变当前目录。关键词也匹配标题，仅遇到非 `/mnt/` 目录时继续最小页，1.5 秒后不再追加请求；接口自身超时仍由 `api.ts` 管理。历史列表会遍历目录和 stat，并按需读取文件头/检查用户消息，不预取完整历史消息。
 
@@ -122,7 +129,7 @@ node frontend/scripts/smoke-ws.mjs  # 需后端；会创建测试会话、批准
 ## 外观与通用边界
 
 - 配色裁决以 [styles.css 顶部注释](src/styles.css) 为准：`--gate` 系专属闸门/提问/待处理，消息与终端内容有明确例外；终端 chrome 中性/冷色，会话状态点红绿灯。浅色外框 chrome、画布 bg、浮起 surface 分层，别把旧“暖色只用于审批”当完整规则。
-- 主题三态、整体字号四档 0.9/1/1.15/1.3 保存本机，首屏内联恢复；localStorage 不可用回退默认。sidebar/main 使用 zoom，AI 用量 iframe 抵消 zoom，终端独立 fit；见 [font-scale.ts](src/font-scale.ts)、[index.html](index.html)。
+- 主题三态、整体字号四档 0.9/1/1.15/1.25 保存本机，首屏内联恢复；localStorage 不可用回退默认。sidebar/main 使用 zoom，AI 用量 iframe 抵消 zoom，终端独立 fit；见 [font-scale.ts](src/font-scale.ts)、[index.html](index.html)。
 - 正文字号 14–20px、步长 0.5、默认 16，旧 22/无效值回退；作用于 stream 用户/助手/思考正文，代码块和工具细节用 `max(14px, 正文−2px)`，与整体 zoom 叠加；见 [body-font.ts](src/body-font.ts)、[styles.css](src/styles.css)。
 - 主题与终端 shell 复用 [Segmented.tsx](src/components/Segmented.tsx)，保持单选/方向键和禁用语义，滑块按实际布局度量；减少动态偏好关闭动画。设置浮层限高滚动、focus trap、Esc/外点关闭并还焦点。
 - 会话移除行内二次确认，Esc 取消，成功清本地状态/草稿并作废旧请求；只移除工作台条目和停 worker，原生 transcript 保留。手机左滑 80px 露入口，10px 锁方向，纵向保留滚动，同刻只展开一行；见 [Sidebar.tsx](src/components/Sidebar.tsx)、[store.ts](src/store.ts)。

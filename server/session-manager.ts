@@ -17,9 +17,12 @@ import {
   appendTranscript,
   deleteSessionFiles,
   loadRegistry,
+  loadSessionGroups,
   readTranscript,
+  readTranscriptState,
   compactClaudeTranscripts,
   saveRegistry,
+  saveSessionGroups,
   transcriptPathFor,
 } from "./persistence.js";
 import { createSnapshotIfNeeded } from "./snapshot.js";
@@ -35,6 +38,7 @@ import type {
   QuestionAnswers,
   SessionConfig,
   SessionRecord,
+  SessionGroup,
   SessionStatus,
   RemoteControlState,
   UnifiedCommand,
@@ -45,6 +49,9 @@ import { ulid } from "./ulid.js";
 import { menuSettingsFiles, withMenuFileUris, type McpAction, type SideQuestionInput } from "./session-menu.js";
 import { parseCodexCommand } from "./codex-commands.js";
 import { selectEventPage, snapshotState, type EventPage } from "./event-pages.js";
+import { captureWorkerIdentity, oldWorkerGone, readSystemBootTime } from "./worker-process.js";
+import { hasTerminalWorkerEvidence, rebootProvesWorkerGone } from "./session-recovery.js";
+import { parseGroupName, parseOrganizationPatch, SessionOrganizationError, type SessionOrganizationFrame } from "./session-organization.js";
 
 const RING_SIZE = 1_000;
 type DriverFactory = typeof createDriver;
@@ -73,9 +80,13 @@ export class SessionManager {
   private readonly sideQuestions = new Set<string>();
   private readonly sessions = new Map<string, SessionRecord>();
   private readonly workers = new Map<string, Driver>();
+  private readonly damagedTranscripts = new Set<string>();
+  private readonly releases = new Map<string, Promise<unknown>>();
   private readonly rings = new Map<string, UnifiedEvent[]>();
   private readonly commands = new Map<string, UnifiedCommand[]>();
   private readonly listeners = new Set<(event: UnifiedEvent) => void>();
+  private readonly organizationListeners = new Set<(frame: SessionOrganizationFrame) => void>();
+  private readonly groups = new Map<string, SessionGroup>();
   private readonly restartingSessions = new Set<string>();
   /** 新建会话的后台启动：create 不等 CLI 握手（约 2–5 秒）就返回，发送消息时再等它。 */
   private readonly startups = new Map<string, Promise<void>>();
@@ -103,20 +114,36 @@ export class SessionManager {
     private readonly snapshotCreator: SnapshotCreator = createSnapshotIfNeeded,
     private readonly nativeReader: NativeConversationReader = new NativeConversationReader(),
     private readonly claudePlugins: ClaudePlugins = new ClaudePlugins(),
+    private readonly systemBootTimeResolver: () => number | undefined = readSystemBootTime,
   ) {
+    for (const group of loadSessionGroups()) this.groups.set(group.id, group);
+    const systemBootTime = this.systemBootTimeResolver();
     const loaded = loadRegistry();
     log("info", "legacy Claude transcript updates compacted", compactClaudeTranscripts(loaded));
     for (const stored of loaded) {
-      const events = readTranscript(stored.transcriptPath);
+      let recovered: ReturnType<typeof readTranscriptState>;
+      try { recovered = readTranscriptState(stored.transcriptPath); } catch (error) {
+        log("error", "transcript recovery failed", { sessionId: stored.id, file: stored.transcriptPath, message: String(error) });
+        recovered = { events: [], damaged: true, incompleteTail: false };
+      }
+      const { events } = recovered;
+      if (recovered.damaged) this.damagedTranscripts.add(stored.id);
       const seq = events.at(-1)?.seq ?? stored.seq ?? 0;
       const config = cleanSessionConfig(stored.config ?? {
         model: stored.model,
         effort: stored.effort,
         permissionMode: stored.permissionMode,
       });
-      // 正常退出时被释放的会话（见 shutdown）载入为 idle+released，下次发送原地续接；
-      // 其余（崩溃、kill -9、没有原生 id）一律 dead，只能新建续接
-      const revivable = stored.released === true && Boolean(stored.nativeSessionId);
+      const gates = pendingGatesFrom(events);
+      // 已释放记录沿用原行为。异常退出只有在 transcript 完整、存档可续接且旧 worker
+      // 确已退出时才能走同一路径；真实 CLI exited、未决审批与身份不明的记录保持 dead。
+      const crashRevivable = !stored.released && !recovered.damaged && !recovered.incompleteTail
+        && Boolean(stored.nativeSessionId) && gates.size === 0 && !hasTerminalWorkerEvidence(events)
+        && ((["idle", "running", "starting"].includes(stored.status) && oldWorkerGone(stored))
+          // 旧代码已把记录写成 dead 并清掉 PID 时，只有较晚的系统启动能证明全部旧进程消失。
+          || (stored.status === "dead" && rebootProvesWorkerGone(stored, events, systemBootTime)))
+        && this.nativeReader.hasArchive(stored);
+      const revivable = (stored.released === true && Boolean(stored.nativeSessionId)) || crashRevivable;
       if (revivable) {
         if (stored.releasedMark) this.nativeMarks.set(stored.id, stored.releasedMark);
         // 能被释放的 Claude 会话都已有原生存档（见 shutdown），切换配置时要按续接重启
@@ -124,12 +151,13 @@ export class SessionManager {
       }
       this.sessions.set(stored.id, {
         ...stored,
-        status: revivable ? "idle" : "dead",
+        status: recovered.damaged || recovered.incompleteTail ? "error" : revivable ? "idle" : "dead",
         released: revivable ? true : undefined,
         releasedMark: undefined,
         backgroundTasks: undefined,
         seq,
         processId: undefined,
+        processIdentity: undefined,
         ...(stored.agent === "claude" ? { remoteControl: { status: "disconnected" as const } } : {}),
         config,
         model: stored.agent === "claude" && stored.model !== undefined ? stored.model : config.model,
@@ -142,7 +170,7 @@ export class SessionManager {
       if (events.some((event) => event.type === "user_message")) this.titles.set(stored.id, sessionTitle({}, events));
       const lastCommands = [...events].reverse().find((event) => event.type === "commands_updated");
       this.commands.set(stored.id, (lastCommands?.payload.commands as UnifiedCommand[] | undefined) ?? []);
-      this.pendingGates.set(stored.id, pendingGatesFrom(events));
+      this.pendingGates.set(stored.id, gates);
     }
     if (loaded.length > 0) this.persistRegistry();
   }
@@ -150,7 +178,7 @@ export class SessionManager {
   list(): SessionRecord[] {
     return [...this.sessions.values()]
       .map((session) => ({ ...cloneSession(session),
-        title: this.titles.get(session.id) ?? "新会话",
+        title: sessionTitle({ ...session, title: this.titles.get(session.id) ?? "新会话" }, undefined),
         pendingGateCount: session.status === "dead" ? 0 : this.pendingGates.get(session.id)?.size ?? 0,
       }))
       .sort((left, right) => right.lastActivityAt.localeCompare(left.lastActivityAt));
@@ -158,7 +186,65 @@ export class SessionManager {
 
   get(id: string): SessionRecord | undefined {
     const session = this.sessions.get(id);
-    return session ? cloneSession(session) : undefined;
+    return session ? { ...cloneSession(session), title: sessionTitle({ ...session, title: this.titles.get(id) ?? "新会话" }, undefined) } : undefined;
+  }
+
+  listGroups(): SessionGroup[] { return [...this.groups.values()].map((group) => ({ ...group })); }
+
+  onOrganizationUpdated(listener: (frame: SessionOrganizationFrame) => void): () => void {
+    this.organizationListeners.add(listener);
+    return () => this.organizationListeners.delete(listener);
+  }
+
+  updateOrganization(id: string, value: unknown): SessionRecord {
+    const session = this.sessions.get(id);
+    if (!session) throw new SessionOrganizationError(`会话不存在：${id}`, 404, 40401);
+    const patch = parseOrganizationPatch(value);
+    if (patch.groupId && !this.groups.has(patch.groupId)) throw new SessionOrganizationError(`分组不存在：${patch.groupId}`);
+    if (patch.pinned !== undefined) session.pinned = patch.pinned;
+    if (patch.customTitle !== undefined) {
+      if (patch.customTitle) session.customTitle = patch.customTitle;
+      else delete session.customTitle;
+    }
+    if (patch.groupId !== undefined) {
+      if (patch.groupId) session.groupId = patch.groupId;
+      else delete session.groupId;
+    }
+    this.persistRegistry();
+    this.organizationUpdated();
+    return this.get(id)!;
+  }
+
+  createGroup(value: unknown): SessionGroup {
+    const group = { id: ulid(), name: parseGroupName(value), createdAt: new Date().toISOString() };
+    this.groups.set(group.id, group);
+    saveSessionGroups(this.listGroups());
+    this.organizationUpdated();
+    return { ...group };
+  }
+
+  renameGroup(id: string, value: unknown): SessionGroup {
+    const group = this.groups.get(id);
+    if (!group) throw new SessionOrganizationError(`分组不存在：${id}`, 404, 40471);
+    group.name = parseGroupName(value);
+    saveSessionGroups(this.listGroups());
+    this.organizationUpdated();
+    return { ...group };
+  }
+
+  removeGroup(id: string): void {
+    if (!this.groups.has(id)) throw new SessionOrganizationError(`分组不存在：${id}`, 404, 40471);
+    for (const session of this.sessions.values()) if (session.groupId === id) delete session.groupId;
+    // 先持久化成员回归，再删除分组；中途退出最多留下空组，不会留下未知 groupId。
+    this.persistRegistry();
+    this.groups.delete(id);
+    saveSessionGroups(this.listGroups());
+    this.organizationUpdated();
+  }
+
+  private organizationUpdated(): void {
+    const frame: SessionOrganizationFrame = { type: "session_organization_updated", sessions: this.list(), groups: this.listGroups() };
+    for (const listener of this.organizationListeners) listener(frame);
   }
 
   /** 批量存储清理只移除真正结束、没有审批闸门或续接操作的会话。 */
@@ -177,9 +263,9 @@ export class SessionManager {
     const session = this.sessions.get(id);
     if (!session) return undefined;
     const events = readTranscript(session.transcriptPath);
-    if (!tail) return { session: cloneSession(session), seq: session.seq, events };
+    if (!tail) return { session: this.get(id)!, seq: session.seq, events };
     return {
-      session: { ...cloneSession(session), title: this.titles.get(id) ?? sessionTitle({}, events), snapshotState: snapshotState(events) },
+      session: { ...cloneSession(session), title: sessionTitle({ ...session, title: this.titles.get(id) ?? sessionTitle({}, events) }, undefined), snapshotState: snapshotState(events) },
       seq: session.seq,
       ...selectEventPage(events),
     };
@@ -302,7 +388,7 @@ export class SessionManager {
       try {
         await worker.start();
         if (this.workers.get(id) !== worker) return; // 启动期间已被移除或关停，收尾交给它们
-        record.processId = worker.child?.pid;
+        this.trackWorkerProcess(record, worker);
         this.persistRegistry();
         if (!input.resumeSessionId) await this.captureNativeMark(id);
       } catch (error) {
@@ -333,6 +419,7 @@ export class SessionManager {
   }
 
   async sendUserMessage(id: string, input: UserMessageInput): Promise<void> {
+    this.assertWritableTranscript(id);
     if (this.sessions.get(id)?.agent === "codex" && input.command) {
       if (input.text || input.mentions?.length) throw new Error("Codex 命令不能附带文本或附件");
       const result = await this.executeCodexCommand(id, input.command);
@@ -350,7 +437,7 @@ export class SessionManager {
     this.checkingSessions.add(id);
     try {
       // idle 会话发送前：已释放的先拉起 worker，活着的比对原生指纹（详见 refreshBeforeSend）
-      if (record.status === "idle") await this.refreshBeforeSend(id);
+      if (record.status === "idle" || record.released) await this.refreshBeforeSend(id);
       const worker = this.requireWorker(id);
       const message = this.normalizeUserMessage(id, input);
       const steer = record.status === "running";
@@ -370,6 +457,7 @@ export class SessionManager {
   }
 
   async setRemoteControl(id: string, enabled: boolean): Promise<RemoteControlState> {
+    this.assertWritableTranscript(id);
     const session = this.sessions.get(id);
     if (!session || session.agent !== "claude") throw new Error("仅 Claude 会话支持 Remote Control");
     if (this.restartingSessions.has(id)) throw new Error("Claude worker 正在重启");
@@ -419,6 +507,7 @@ export class SessionManager {
   }
 
   async executeCodexCommand(id: string, input: unknown): Promise<unknown> {
+    this.assertWritableTranscript(id);
     const session = this.sessions.get(id);
     if (!session || session.agent !== "codex") throw new Error("仅 Codex 会话支持该命令");
     const command = parseCodexCommand(input);
@@ -449,6 +538,7 @@ export class SessionManager {
   }
 
   async manageMcp(id: string, action: McpAction): Promise<unknown> {
+    this.assertWritableTranscript(id);
     const session = this.sessions.get(id);
     if (!session || session.agent !== "claude") throw new Error("仅 Claude 会话支持 MCP 管理");
     if (this.restartingSessions.has(id)) throw new Error("Claude worker 正在重启");
@@ -461,6 +551,7 @@ export class SessionManager {
   }
 
   async setThinking(id: string, enabled: boolean): Promise<SessionRecord> {
+    this.assertWritableTranscript(id);
     const record = this.sessions.get(id);
     if (!record || record.agent !== "claude") throw new Error("仅 Claude 会话支持 Thinking");
     if (record.status === "dead") throw new Error("会话已结束");
@@ -483,6 +574,7 @@ export class SessionManager {
   }
 
   async stopTask(id: string, taskId: string): Promise<void> {
+    this.assertWritableTranscript(id);
     const session = this.sessions.get(id);
     if (!session || session.agent !== "claude") throw new Error("仅 Claude 会话支持后台任务管理");
     if (this.restartingSessions.has(id) || this.checkingSessions.has(id)) throw new Error("会话正在续接或重启");
@@ -495,6 +587,7 @@ export class SessionManager {
   }
 
   async askSideQuestion(id: string, input: SideQuestionInput, signal: AbortSignal): Promise<unknown> {
+    this.assertWritableTranscript(id);
     if (this.sessions.get(id)?.agent !== "claude") throw new Error("仅 Claude 会话支持侧问");
     if (this.sideQuestions.has(id)) throw new Error("当前侧问尚未结束");
     if (this.restartingSessions.has(id) || this.checkingSessions.has(id)) throw new Error("会话正在续接或重启");
@@ -513,6 +606,7 @@ export class SessionManager {
     reloaded: boolean;
     reloadError?: string;
   }> {
+    this.assertWritableTranscript(id);
     const session = this.sessions.get(id);
     if (!session || session.agent !== "claude") throw new Error("仅 Claude 会话支持插件切换");
     await this.claudePlugins.setEnabled(session.cwd, pluginId, enabled, scope);
@@ -539,6 +633,7 @@ export class SessionManager {
     updatedInput?: unknown,
     questionAnswers?: QuestionAnswers,
   ): Promise<void> {
+    this.assertWritableTranscript(id);
     this.requireLiveWorker(id);
     const worker = this.requireWorker(id);
     await worker.resolvePermission(requestId, decision, updatedInput, questionAnswers);
@@ -551,6 +646,7 @@ export class SessionManager {
   }
 
   async setConfig(id: string, config: SessionConfig): Promise<SessionRecord> {
+    this.assertWritableTranscript(id);
     if (this.thinkingUpdates.has(id) || this.sideQuestions.has(id)) throw new Error("请等 Thinking 切换或侧问结束后再切换配置");
     const entries = Object.entries(config).filter((entry): entry is [keyof SessionConfig, string | null] => (
       entry[1] === null || (typeof entry[1] === "string" && entry[1].length > 0)
@@ -607,11 +703,13 @@ export class SessionManager {
   }
 
   async interrupt(id: string): Promise<void> {
+    this.assertWritableTranscript(id);
     this.requireLiveWorker(id);
     await this.requireWorker(id).interrupt();
   }
 
   async remove(id: string): Promise<SessionRecord | undefined> {
+    this.assertWritableTranscript(id);
     if (this.checkingSessions.has(id) || this.restartingSessions.has(id)) {
       throw new Error("会话正在续接，请稍候再移除");
     }
@@ -653,6 +751,8 @@ export class SessionManager {
     reason: "manual" | "idle",
     context: { idleMinutes?: number } = {},
   ): Promise<{ session: SessionRecord; resumeCommand: string; vscodeUri: string | null }> {
+    if (this.stopping) throw new Error("Workbench 正在退出");
+    this.assertWritableTranscript(id);
     const record = this.sessions.get(id);
     if (!record) throw new Error(`会话不存在：${id}`);
     if (record.released) throw new Error("会话 worker 已释放；下次发送时会自动从磁盘续接");
@@ -660,28 +760,46 @@ export class SessionManager {
     if (blocker) throw new Error(blocker);
     const worker = this.workers.get(id)!;
     // 先从 workers 删除再 stop：stop 触发的 exited 回调因 current() 为假直接返回，不会把会话标成 dead
-    // 标记先于 await stop()：stop 期间到达的发送走已释放分支（从磁盘续接），而不是报「没有活动 worker」
+    // 标记先于 stop；续接入口等待完整释放操作，旧进程退出前不启动新代。
     this.workers.delete(id);
     record.released = true;
     record.processId = undefined;
-    await worker.stop();
-    this.setBackgroundTasks(id, []);
-    if (record.agent === "claude") {
-      record.remoteControl = { status: "disconnected" };
-      this.emit(id, "remote_control_updated", { status: "disconnected" });
+    record.processIdentity = undefined;
+    const releasing = (async () => {
+      try { await worker.stop(); } catch (error) {
+        if (this.sessions.get(id) === record && !this.workers.has(id)) {
+          this.workers.set(id, worker);
+          delete record.released;
+          this.trackWorkerProcess(record, worker);
+        }
+        throw error;
+      }
+      const resumeCommand = buildResumeCommand(record);
+      // 移除会话或新代已接管时，旧操作不得再改生命周期字段。
+      if (this.sessions.get(id) === record && !this.workers.has(id)) {
+        this.setBackgroundTasks(id, []);
+        if (record.agent === "claude") {
+          record.remoteControl = { status: "disconnected" };
+          this.emit(id, "remote_control_updated", { status: "disconnected" });
+        }
+        this.persistRegistry();
+        this.emit(id, "worker_released", {
+          reason, resumeCommand,
+          ...(reason === "idle" && context.idleMinutes !== undefined ? { idleMinutes: context.idleMinutes } : {}),
+        });
+      }
+      return { session: cloneSession(record), resumeCommand, vscodeUri: buildVSCodeUri(record) };
+    })();
+    this.releases.set(id, releasing);
+    try { return await releasing; } finally {
+      if (this.releases.get(id) === releasing) this.releases.delete(id);
     }
-    this.persistRegistry();
-    const resumeCommand = buildResumeCommand(record);
-    this.emit(id, "worker_released", {
-      reason,
-      resumeCommand,
-      ...(reason === "idle" && context.idleMinutes !== undefined ? { idleMinutes: context.idleMinutes } : {}),
-    });
-    return { session: cloneSession(record), resumeCommand, vscodeUri: buildVSCodeUri(record) };
   }
 
   /** 自动释放跳过的原因；null 表示可以释放。手动释放把这些原因转成可读错误。 */
   private releaseBlocker(id: string, record: SessionRecord): string | null {
+    if (this.stopping) return "Workbench 正在退出";
+    if (this.damagedTranscripts.has(id)) return "transcript 损坏，禁止释放";
     if (this.thinkingUpdates.has(id) || this.sideQuestions.has(id)) return "会话正在切换 Thinking 或进行侧问，请稍候";
     if (this.restartingSessions.has(id)) return "会话正在切换配置或续接，请稍候";
     if (this.checkingSessions.has(id)) return "会话正在检查原生会话，请稍候";
@@ -700,9 +818,11 @@ export class SessionManager {
    * （开 RC 就是要手机能随时找到它，释放会断开）。idleMinutes 为 0 时整体关闭。
    */
   async releaseIdleSessions(idleMinutes: number, now: Date = new Date()): Promise<void> {
-    if (!Number.isInteger(idleMinutes) || idleMinutes <= 0) return;
+    if (this.stopping || !Number.isInteger(idleMinutes) || idleMinutes <= 0) return;
     const thresholdMs = idleMinutes * 60_000;
     for (const record of [...this.sessions.values()]) {
+      // 前一个 release 的 await 期间可能开始 shutdown，不能再摘走下一个 worker。
+      if (this.stopping) return;
       if (record.released) continue;
       if (this.releaseBlocker(record.id, record)) continue;
       if (now.getTime() - Date.parse(record.lastActivityAt) < thresholdMs) continue;
@@ -727,6 +847,7 @@ export class SessionManager {
     this.stopping = true;
     for (const id of this.partialUpdates.keys()) this.flushPartialUpdates(id);
     await Promise.allSettled(this.pendingMarkReads.values());
+    await Promise.allSettled(this.releases.values());
     const running = [...this.workers.entries()];
     this.workers.clear();
     // 先停进程再写释放状态：停不下来的标 dead，免得重启后与旧进程同时续接同一原生会话
@@ -734,8 +855,9 @@ export class SessionManager {
     await Promise.allSettled([...this.backgroundStops]);
     running.forEach(([id], index) => {
       const record = this.sessions.get(id);
-      if (!record) return;
+      if (!record || this.damagedTranscripts.has(id)) return;
       record.processId = undefined;
+      record.processIdentity = undefined;
       // Claude 首条消息前就报 session_id，但原生存档还没落盘，续接必然失败（同 restartClaudeWorker）
       const hasArchive = record.agent !== "claude" || Boolean(record.resumedFrom) || this.promptedSessions.has(id);
       if (stopped[index]!.status === "fulfilled" && record.nativeSessionId && hasArchive
@@ -749,12 +871,13 @@ export class SessionManager {
       }
     });
     for (const record of this.sessions.values()) {
-      if (record.released) record.releasedMark = this.nativeMarks.get(record.id);
+      if (record.released && !this.damagedTranscripts.has(record.id)) record.releasedMark = this.nativeMarks.get(record.id);
     }
     this.persistRegistry();
   }
 
   private emit(id: string, type: EventType, payload: Record<string, unknown> = {}, ephemeral = false): UnifiedEvent | undefined {
+    this.assertWritableTranscript(id);
     const session = this.sessions.get(id);
     if (!session) return undefined;
     if (!ephemeral && (["tool_call_completed", "permission_request", "turn_completed", "session_error", "process_exited"].includes(type)
@@ -797,6 +920,7 @@ export class SessionManager {
 
   /** 后台任务清单变化时广播；worker 起停时清空（新 worker 不继承旧进程的后台任务）。 */
   private setBackgroundTasks(id: string, tasks: BackgroundTask[]): void {
+    this.assertWritableTranscript(id);
     const session = this.sessions.get(id);
     if (!session || (!session.backgroundTasks?.length && !tasks.length)) return;
     session.backgroundTasks = tasks;
@@ -804,14 +928,25 @@ export class SessionManager {
   }
 
   private setStatus(id: string, status: SessionStatus): void {
+    this.assertWritableTranscript(id);
     const session = this.sessions.get(id);
     if (!session) return;
     if (status === "starting" || status === "dead") this.setBackgroundTasks(id, []);
     session.status = status;
     session.lastActivityAt = new Date().toISOString();
-    const pid = this.workers.get(id)?.child?.pid;
-    session.processId = status === "dead" ? undefined : pid;
+    this.trackWorkerProcess(session, status === "dead" ? undefined : this.workers.get(id));
     this.persistRegistry();
+  }
+
+  private trackWorkerProcess(record: SessionRecord, worker?: Driver): void {
+    const pid = worker?.child?.pid;
+    if (record.processId !== pid || !pid) record.processIdentity = undefined;
+    record.processId = pid;
+    if (pid && !record.processIdentity?.bootId) {
+      // Distinguish a legacy record without identity from a new worker whose identity could not be read.
+      // The latter must remain dead after a crash even if its launcher PID has disappeared.
+      record.processIdentity = captureWorkerIdentity(pid) ?? { bootId: "", startTime: "" };
+    }
   }
 
   /** 释放前置条件要的未决闸门集合：请求进入、解决移除、进程退出清空。 */
@@ -830,6 +965,7 @@ export class SessionManager {
   }
 
   private applyConfig(session: SessionRecord, update: SessionConfig): void {
+    this.assertWritableTranscript(session.id);
     session.config = mergeSessionConfig(session.config, update);
     if (session.agent !== "claude") {
       session.model = session.config.model;
@@ -854,6 +990,7 @@ export class SessionManager {
   }
 
   private applyEffectiveConfig(session: SessionRecord, update: EffectiveConfigUpdate): void {
+    this.assertWritableTranscript(session.id);
     if (update.model) {
       session.effectiveModel = update.model.value;
       session.effectiveModelSource = update.model.source;
@@ -871,7 +1008,10 @@ export class SessionManager {
     if (!record) return;
     try {
       const mark = await this.nativeReader.capture(record);
-      if (mark) this.nativeMarks.set(id, mark);
+      if (mark) {
+        this.nativeMarks.set(id, mark);
+        this.markRegistryDirty();
+      }
       else this.warnMissingNativeMark(record, "没有可用的对话指纹");
     } catch (error) {
       this.warnMissingNativeMark(record, error instanceof Error ? error.message : String(error));
@@ -894,6 +1034,8 @@ export class SessionManager {
    * 已释放会话没有旧 worker 可停；指纹缺失/比对失败时活会话照常发送，已释放会话仍必须重建 worker。
    */
   private async refreshBeforeSend(id: string): Promise<void> {
+    this.assertWritableTranscript(id);
+    await this.releases.get(id);
     await this.pendingMarkReads.get(id);
     const record = this.sessions.get(id)!;
     const released = record.released === true;
@@ -915,6 +1057,7 @@ export class SessionManager {
       if (change.messages.length === 0) {
         // Only our previous assistant reply was flushed late. Keep the live worker.
         this.nativeMarks.set(id, change.mark);
+        this.markRegistryDirty();
         return;
       }
     }
@@ -931,7 +1074,7 @@ export class SessionManager {
     this.workers.delete(id);
     try {
       const replacement = await this.replaceWorker(id, oldWorker, record.config, nativeSessionId);
-      record.processId = replacement.child?.pid;
+      this.trackWorkerProcess(record, replacement);
       if (change) this.nativeMarks.set(id, change.mark);
       else await this.captureNativeMark(id);
       if (released) {
@@ -964,12 +1107,14 @@ export class SessionManager {
    * 活 worker 直接返回；已释放会话先按 refreshBeforeSend 的外部续接路径拉起再返回。
    */
   private async ensureWorker(id: string): Promise<Driver> {
+    this.assertWritableTranscript(id);
+    await this.releases.get(id);
     const existing = this.workers.get(id);
     if (existing) return existing;
     const record = this.sessions.get(id);
     if (!record) throw new Error(`会话不存在：${id}`);
     // 只有 idle 的 released 会话可以原地拉起；server 重启后载入的 dead 会话只能新建续接
-    if (!record.released || record.status !== "idle") return this.requireWorker(id);
+    if (!record.released || !["idle", "error"].includes(record.status)) return this.requireWorker(id);
     if (this.restartingSessions.has(id)) throw new Error("会话正在续接，请稍候");
     await this.refreshBeforeSend(id);
     return this.requireWorker(id);
@@ -1059,7 +1204,7 @@ export class SessionManager {
     try {
       if (!resume) record.nativeSessionId = undefined;
       const nextWorker = await this.replaceWorker(id, oldWorker, targetConfig, nativeSessionId);
-      record.processId = nextWorker.child?.pid;
+      this.trackWorkerProcess(record, nextWorker);
       this.persistRegistry();
       this.emit(id, "config_updated", this.configUpdatedPayload(record, {
         effectiveFrom: "immediate",
@@ -1079,6 +1224,7 @@ export class SessionManager {
       record.permissionMode = previousState.permissionMode;
       record.riskyMode = previousState.riskyMode;
       record.processId = undefined;
+      record.processIdentity = undefined;
       this.emit(id, "session_error", {
         message: error instanceof Error ? error.message : String(error),
         source: "config_restart",
@@ -1091,7 +1237,7 @@ export class SessionManager {
   }
 
   private driverCallbacks(id: string, worker: () => Driver): DriverCallbacks {
-    const current = () => this.workers.get(id) === worker();
+    const current = () => !this.damagedTranscripts.has(id) && this.workers.get(id) === worker();
     return {
       emit: (type, payload = {}) => {
         if (!current()) return undefined;
@@ -1124,8 +1270,7 @@ export class SessionManager {
           this.emit(id, "remote_control_updated", { ...metadata.remoteControl });
         }
         if (metadata.backgroundTasks && JSON.stringify(session.backgroundTasks ?? []) !== JSON.stringify(metadata.backgroundTasks)) this.setBackgroundTasks(id, metadata.backgroundTasks);
-        const pid = worker().child?.pid;
-        if (pid) session.processId = pid;
+        this.trackWorkerProcess(session, worker());
         if (JSON.stringify(session) !== before) this.persistRegistry();
       },
       commands: (commands) => {
@@ -1157,10 +1302,15 @@ export class SessionManager {
   }
 
   private requireWorker(id: string): Driver {
+    this.assertWritableTranscript(id);
     if (!this.sessions.has(id)) throw new Error(`会话不存在：${id}`);
     const worker = this.workers.get(id);
     if (!worker) throw new Error(`会话 ${id} 没有活动 worker；请用原生 session id 手动重开`);
     return worker;
+  }
+
+  private assertWritableTranscript(id: string): void {
+    if (this.damagedTranscripts.has(id)) throw new Error(`transcript 损坏，禁止继续写入：${this.sessions.get(id)?.transcriptPath}`);
   }
 
   private validateCwd(cwd: string): void {
@@ -1271,7 +1421,10 @@ export class SessionManager {
   private persistRegistry(): void {
     if (this.registryTimer) clearTimeout(this.registryTimer);
     this.registryTimer = undefined;
-    saveRegistry([...this.sessions.values()]);
+    saveRegistry([...this.sessions.values()].map((session) => ({
+      ...session,
+      releasedMark: this.nativeMarks.get(session.id) ?? session.releasedMark,
+    })));
     this.registryDirty = false;
   }
 
@@ -1337,8 +1490,9 @@ function applyClaudeConfigValue(
 }
 
 function cloneSession(session: SessionRecord): SessionRecord {
+  const { processIdentity: _identity, releasedMark: _mark, ...visible } = session;
   return {
-    ...session,
+    ...visible,
     config: { ...session.config },
     ...(session.resumedFrom ? { resumedFrom: { ...session.resumedFrom } } : {}),
   };

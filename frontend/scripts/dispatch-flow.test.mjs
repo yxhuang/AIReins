@@ -4,6 +4,7 @@ import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { readFileSync } from 'node:fs';
 import { groupDispatches, dispatchName, dispatchSeconds, dispatchTime, dispatchStatus, dispatcherTitle, dispatcherSessions, dispatcherModel, subagentWireState, RECENT_DISPATCH_MS, FINISHED_WIRE_MS } from '../src/dispatch-flow.ts';
+import * as flow from '../src/dispatch-flow.ts';
 import { startDispatchPolling } from '../src/dispatch-polling.ts';
 import { fetchDispatches } from '../src/api.ts';
 
@@ -19,6 +20,102 @@ const t = async (name, fn) => { try { await fn(); pass++; } catch (e) { console.
 const now = Date.parse('2026-10-01T10:00:00Z');
 const iso = ms => new Date(ms).toISOString();
 const run = (over = {}) => ({ runId: '20261001-100000-codex-task-name', tool: 'codex', name: '任务', model: 'gpt-test', effort: 'high', status: 'running', startedAt: iso(now - 61000), endedAt: null, elapsedS: null, session: null, parent: null, ...over });
+
+const child = (threadId, parentThreadId, depth = 1) => ({ threadId, parentThreadId, depth,
+  nickname: threadId, role: 'sol', status: 'running', startedAt: iso(now - 1000), lastActivityAt: iso(now) });
+const treeFor = (runs, expanded = new Set()) => flow.buildDispatchTree(groupDispatches(runs, now), now, expanded);
+await t('连线：底边按行序均分起点，独立平滑曲线无侧边折线或共享总线', () => {
+  const from = { left: 10, right: 150, top: 20, bottom: 110 };
+  for (const count of [2, 3, 5]) {
+    const starts = [];
+    for (let index = 0; index < count; index++) {
+      const to = { left: index * 100, right: index * 100 + 80, top: 166, bottom: 250 };
+      const path = flow.dispatchWirePath(from, to, { index, count });
+      assert.match(path, /^M [-\d.]+ 110 C /);
+      assert.ok(!/[HLV]/.test(path), '没有侧边竖线或横向总线');
+      const values = path.match(/-?\d+(?:\.\d+)?/g).map(Number);
+      assert.equal(values[0], from.left + (from.right - from.left) * (index + 1) / (count + 1));
+      assert.deepEqual(values.slice(-2), [(to.left + to.right) / 2, to.top]);
+      assert.equal(values[2], values[0]); assert.equal(values[4], values[6]);
+      starts.push(values[0]);
+    }
+    assert.equal(new Set(starts).size, count);
+    assert.ok(starts.every((x, index) => x > from.left && x < from.right && (!index || x > starts[index - 1])));
+  }
+  assert.equal(flow.dispatchWirePath(from, { left: 60, right: 100, top: 166, bottom: 250 }), 'M 80 110 C 80 138 80 138 80 166');
+});
+await t('模型：Sol/Luna/Astra 紧凑短名，其他模型沿用现有短名', () => {
+  for (const [model, short] of [['gpt-6.1-sol', 'sol'], ['gpt-6-sol', 'sol'], ['gpt-6-luna', 'luna'],
+    ['gpt-6-astra', 'astra'], ['claude-sonnet-5-5', 'sonnet-5.5'], ['claude-opus-5-5-20261001', 'opus-5.5'], ['gpt-test', 'gpt-test']]) {
+    assert.equal(flow.dispatchModelName(model), short);
+  }
+});
+await t('模型渲染：第二层单单与第三层任务显示 sol · xhigh，完整模型/档位留在 title', () => {
+  const sol = run({ model: 'gpt-6.1-sol', effort: 'xhigh' });
+  for (const runs of [[sol], [sol, run({ runId: 'two', model: 'gpt-6-luna', effort: 'max' })]]) {
+    const html = renderToStaticMarkup(React.createElement(DispatchTree, { groups: groupDispatches(runs, now), title: '派单人', model: null, now }));
+    assert.ok(html.includes('class="dispatch-model-name">sol</span><span class="dispatch-model-effort"> · xhigh</span>'));
+    assert.ok(html.includes('gpt-6.1-sol / xhigh'));
+    assert.ok(!html.includes('class="dispatch-model-name">gpt-6.1-sol'));
+  }
+  const css = readFileSync(new URL('../src/styles.css', import.meta.url), 'utf8');
+  assert.match(css, /\.dispatch-model-effort \{[^}]*flex: 0 0 auto/);
+});
+await t('树：单 agent 无子直接占第二层，空闲端只有紧凑态', () => {
+  const tree = treeFor([run()]);
+  const codex = tree.executors.find(node => node.tool === 'codex');
+  assert.equal(codex.mode, 'single'); assert.equal(codex.run.runId, run().runId);
+  assert.equal(codex.depth, 2); assert.equal(codex.rows.length, 0);
+  assert.equal(tree.levels.length, 1);
+  assert.equal(tree.executors.filter(node => node.mode === 'idle').length, 2);
+});
+await t('树：双 agent 一行一单，第三层两个块的父指向各自摘要行', () => {
+  const tree = treeFor([run({ runId: 'one' }), run({ runId: 'two' })]);
+  const executor = tree.executors[0];
+  assert.equal(executor.mode, 'group'); assert.equal(executor.rows.length, 2);
+  assert.deepEqual(tree.levels[1].map(node => node.run.runId), ['one', 'two']);
+  for (const node of tree.levels[1]) {
+    const edge = tree.edges.find(edge => edge.to === node.id);
+    assert.equal(edge.from, executor.rows.find(row => row.run.runId === node.run.runId).id);
+    assert.equal(node.parentId, edge.from);
+  }
+});
+await t('树：子 agent 按派单根和 parentThreadId 递归，乱序/重名/孤儿/环不串单', () => {
+  const one = run({ runId: 'one', session: 'root-one', subagents: [
+    child('deep', 'nested', 3), child('nested', 'shared', 2), child('shared', 'root-one'),
+    child('orphan', 'missing', 2), child('cycle-a', 'cycle-b', 1), child('cycle-b', 'cycle-a', 2),
+  ] });
+  const two = run({ runId: 'two', session: 'root-two', subagents: [child('shared', 'root-two')] });
+  const before = JSON.stringify([one, two]);
+  const tree = treeFor([one, two]);
+  const agents = tree.levels.flat().filter(node => node.subagent);
+  assert.equal(agents.length, 4); assert.equal(new Set(agents.map(node => node.id)).size, 4);
+  const nested = agents.find(node => node.subagent.threadId === 'nested');
+  const deep = agents.find(node => node.subagent.threadId === 'deep');
+  assert.equal(deep.parentId, nested.id); assert.equal(deep.depth, 6);
+  assert.equal(agents.find(node => node.runId === 'two').parentId, tree.levels[1].find(node => node.run.runId === 'two').id);
+  assert.equal(JSON.stringify([one, two]), before);
+  const single = treeFor([one]);
+  assert.equal(single.levels[1][0].parentId, single.executors[0].id);
+  assert.equal(single.levels[1][0].depth, 3);
+});
+await t('树：Claude 子代理独立成组，空闲时隐藏；+N 只折叠摘要行，第三层始终完整', () => {
+  assert.equal(treeFor([]).executors.some(node => node.tool === 'claude'), false);
+  const runs = Array.from({ length: 5 }, (_, i) => run({ tool: 'claude', runId: `claude-${i}`, name: `检查 ${i}`, model: 'claude-sonnet-5-5' }));
+  runs[4].session = 'thread-4';
+  runs[4].subagents = [{ threadId: 'child-4', nickname: 'Luna', role: null, depth: 1, parentThreadId: 'thread-4', status: 'running', startedAt: null, lastActivityAt: iso(now) }];
+  const tree = treeFor(runs); const group = tree.executors.find(node => node.tool === 'claude');
+  assert.equal(group.mode, 'group'); assert.equal(group.rows.length, 3); assert.equal(group.more, 2);
+  assert.equal(tree.levels[1].length, 5, '折叠的第二层摘要行对应的第三层块仍在');
+  const folded = tree.levels[1].find(node => node.run.runId === runs[4].runId);
+  assert.equal(folded.parentId, group.id, '折叠行的块从执行端卡片连出');
+  assert.equal(tree.levels[2].length, 1, '折叠行的子代理也在');
+  const ports = tree.edges.filter(edge => edge.kind === 'run').map(edge => edge.port);
+  assert.deepEqual(ports.map(port => port.index), [0, 1, 2, 3, 4]); assert.ok(ports.every(port => port.count === 5));
+  const expanded = treeFor(runs, new Set(['claude']));
+  assert.equal(expanded.executors.find(node => node.tool === 'claude').rows.length, 5);
+  assert.equal(expanded.levels[1].length, 5);
+});
 
 await t('固定三端，按 tool 分组；运行中保留，结束 30 分钟边界，未知日期不冒充近期单', () => {
   const groups = groupDispatches([
@@ -71,7 +168,7 @@ await t('派单人标题：取 parent.sessionId（仅 claude）、工作台/原�
   assert.equal(dispatcherTitle([run({ session: 'native' })], titles), 'Claude Code 会话');
 });
 
-await t('多个派单会话逐行显示标题与运行数，别名去重，最多三行并显示 +N；单会话保持原样', () => {
+await t('派单人保持窄块：多会话压成一行摘要，完整标题保留 title，别名去重', () => {
   const titles = Array.from({ length: 5 }, (_, i) => ({ id: `wb-${i}`, nativeSessionId: `native-${i}`, title: `派单会话 ${i}` }));
   const by = (id, status = 'running') => run({ runId: id, status, endedAt: iso(now), parent: { agent: 'claude', sessionId: id, entrypoint: null } });
   const runs = [...titles.map(s => by(s.nativeSessionId)), by('wb-0'), by('native-0', 'OK')];
@@ -81,10 +178,10 @@ await t('多个派单会话逐行显示标题与运行数，别名去重，最�
   const html = renderToStaticMarkup(React.createElement(DispatchTree, {
     groups: groupDispatches(runs, now), title: dispatcherTitle(runs, titles), dispatchers, model: null, now,
   }));
-  const source = html.match(/<article class="dispatch-node dispatch-source">([\s\S]*?)<\/article>/)[1];
-  assert.equal((source.match(/class="dispatch-session-title"/g) || []).length, 4);
-  for (const text of ['派单会话 0 · 2 单运行中', '派单会话 1 · 1 单运行中', '派单会话 2 · 1 单运行中', '>+2<']) assert.ok(source.includes(text));
-  assert.ok(!source.includes('派单会话 3')); assert.ok(!source.includes('派单会话 4'));
+  const source = html.match(/<article class="dispatch-node dispatch-source"[^>]*>([\s\S]*?)<\/article>/)[1];
+  assert.equal((source.match(/class="dispatch-session-title"/g) || []).length, 1);
+  for (const text of ['派单会话 0 · 2 单运行中', '派单会话 1 · 1 单运行中', '派单会话 2 · 1 单运行中', '派单会话 4 · 1 单运行中']) assert.ok(source.includes(text));
+  assert.ok(source.includes('title="派单会话 0\n派单会话 1\n派单会话 2\n派单会话 3\n派单会话 4"'));
   const single = renderToStaticMarkup(React.createElement(DispatchTree, {
     groups: groupDispatches([runs[0]], now), title: dispatcherTitle([runs[0]], titles),
     dispatchers: dispatcherSessions([runs[0]], titles), model: null, now,
@@ -263,32 +360,51 @@ await t('派单与主区并列，当前会话仍有输入框；主页仍可打�
   assert.match(css, /\.app.term-open \.main \{\s*display: none/);
   assert.match(css, /\.workspace.term-open \.term-panel \{[\s\S]*?width: auto !important/);
 });
-await t('子 agent 两层递归卡片、昵称/档位/状态、动态一行与 Codex 连线；超过四个换行', () => {
-  const agent = (threadId, over = {}) => ({ threadId, nickname: threadId, role: 'sol', depth: 1,
-    parentThreadId: 'parent', status: 'running', startedAt: iso(now), lastActivityAt: iso(now),
-    activity: '正在核对夹具', ...over });
-  const subagents = [agent('Carver'), agent('Luna', { role: 'luna', status: 'finished', activity: '已结束不显示的动态' }),
-    agent('Unknown', { status: 'unknown' }), ...Array.from({ length: 3 }, (_, i) => agent(`Child${i}`)),
-    agent('Nested', { depth: 2, parentThreadId: 'Carver' }),
-    agent('TooDeep', { depth: 3, parentThreadId: 'Nested' }), agent('Orphan', { depth: 2, parentThreadId: 'missing' })];
+await t('小块渲染：多层递归、正确父块、三行内容与身份色；四列以上换行', () => {
+  const subagents = [child('Carver', 'parent'), child('Luna', 'parent'), child('Unknown', 'parent'),
+    ...Array.from({ length: 3 }, (_, i) => child(`Child${i}`, 'parent')),
+    child('Nested', 'Carver', 2), child('Deeper', 'Nested', 3), child('Orphan', 'missing', 2)];
+  subagents[0].activity = '正在核对夹具'; subagents[1].role = 'luna'; subagents[1].status = 'finished';
+  subagents[2].status = 'unknown';
   const groups = groupDispatches([run({ session: 'parent', subagents })], now);
   const html = renderToStaticMarkup(React.createElement(DispatchTree, { groups, title: '派单人', model: null, now }));
-  assert.equal((html.match(/class="dispatch-node dispatch-subagent"/g) || []).length, 7);
-  assert.equal((html.match(/class="dispatch-subagents"/g) || []).length, 2);
-  assert.ok(html.includes('Codex 子 agent 第 1 层')); assert.ok(html.includes('Codex 子 agent 第 2 层'));
-  for (const text of ['Carver', 'luna', 'sol', '运行中', '已完成', '未知', '正在核对夹具']) assert.ok(html.includes(text));
-  assert.ok(html.includes('data-parent-id="Carver" data-depth="2"'));
-  assert.ok(!html.includes('TooDeep')); assert.ok(!html.includes('Orphan')); assert.ok(!html.includes('已结束不显示的动态'));
-  assert.equal((html.match(/dispatch-subagent-wire flow/g) || []).length, 5);
+  assert.equal((html.match(/class="dispatch-node dispatch-subagent"/g) || []).length, 8);
+  assert.equal((html.match(/class="dispatch-level/g) || []).length, 4);
+  assert.ok(html.includes('执行树第 5 层'));
+  for (const text of ['Carver', 'luna', 'sol', '运行中', '已完成', '未知', '正在核对夹具', 'Deeper']) assert.ok(html.includes(text));
+  assert.ok(html.includes('data-parent-id="Carver"')); assert.ok(!html.includes('Orphan'));
+  assert.equal((html.match(/dispatch-subagent-wire flow/g) || []).length, 6);
   assert.ok(html.includes('dispatch-subagent-wire finish')); assert.ok(html.includes('dispatch-subagent-wire idle'));
   assert.ok(html.includes('--wire-color:var(--agent-codex)'));
   const css = readFileSync(new URL('../src/styles.css', import.meta.url), 'utf8');
-  assert.match(css, /\.dispatch-subagents \{ margin-top: 84px;[^{]*repeat\(4, minmax\(0, 1fr\)\)/);
-  assert.match(css, /\.dispatch-subagent \{[^}]*width: min\(100%, 150px\)/);
-  assert.match(css, /\.dispatch-subagents \{ margin-top: 130px/);
-  assert.match(css, /\.dispatch-subagent \{[^}]*border-top: 3px solid var\(--agent-codex\)/);
-  assert.match(css, /\.dispatch-executors \{ margin: 84px/);
-  assert.match(css, /\.dispatch-source \{ width: min\(260px, 72%\); min-height: 112px/);
+  assert.match(css, /\.dispatch-level \{[^}]*flex-wrap: wrap/);
+  assert.match(css, /\.dispatch-node \{[^}]*width: min\(148px,/);
+  assert.match(css, /\.dispatch-source \{ width: min\(208px, 76%\)/);
+  assert.match(css, /\.dispatch-executor.idle \{ width: min\(90px,/);
+  assert.ok(!css.includes('min-height: 210px')); assert.ok(!css.includes('min-height: calc((100cqi'));
+});
+await t('渲染：单 agent 无内嵌块，双 agent 行锚点独立，Claude 只读展示使用珊瑚橙', () => {
+  const render = runs => renderToStaticMarkup(React.createElement(DispatchTree, { groups: groupDispatches(runs, now), title: '派单人', model: null, now }));
+  const single = render([run()]);
+  assert.ok(!single.includes('dispatch-jobs')); assert.ok(!single.includes('dispatch-job-link'));
+  assert.equal((single.match(/class="dispatch-job-meta"/g) || []).length, 1);
+  const double = render([run({ runId: 'one' }), run({ runId: 'two' })]);
+  assert.equal((double.match(/class="dispatch-summary-row/g) || []).length, 2);
+  assert.equal((double.match(/class="dispatch-node dispatch-run"/g) || []).length, 2);
+  assert.ok(double.includes('data-from="row:'));
+  const claude = render([run({ tool: 'claude', model: 'claude-sonnet-5-5' })]);
+  assert.ok(claude.includes('data-tool="claude"')); assert.ok(claude.includes('sonnet-5.5'));
+  assert.ok(claude.includes('--wire-color:var(--agent-claude)'));
+  assert.ok(!claude.match(/<button[^>]*data-tool="claude"/));
+});
+await t('树：每单独立计算十分钟连线，lost 观察时间传给第三层', () => {
+  const lost = run({ runId: 'lost', status: 'lost', startedAt: null });
+  const groups = groupDispatches([lost, run({ runId: 'active' })], now, new Map([['lost', now]]));
+  const tree = flow.buildDispatchTree(groups, now, new Set(), new Map([['lost', now]]));
+  assert.equal(tree.edges.find(edge => edge.to === tree.levels[1].find(node => node.run.runId === 'lost').id).state, 'finish');
+  const old = run({ runId: 'old', status: 'OK', endedAt: iso(now - FINISHED_WIRE_MS - 1) });
+  const mixed = treeFor([old, run({ runId: 'active' })]);
+  assert.equal(mixed.edges.find(edge => edge.to === mixed.levels[1].find(node => node.run.runId === 'old').id).state, 'idle');
 });
 await t('无子 agent 不新增层/连线；空数组和旧列表都保持原来三端布局', () => {
   for (const subagents of [undefined, []]) {

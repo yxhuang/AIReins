@@ -23,6 +23,9 @@ const PAGE_SIZE = 150;
 /** 关键词搜索防抖（spec：~250ms）。 */
 const SEARCH_DEBOUNCE_MS = 250;
 
+// 代价说明在桌面完整展示；手机折叠两行，但详情里必须保留全文。
+const IMPORT_NOTE = "这是就地续接，不是分叉：导入后，工作台里跑的新回合会追写进这个原生会话文件；工作台里跑的 Claude 回合以 VSCode 扩展身份落盘；工作台新建的 Claude 会话可在 VSCode/CLI 的 resume 列表里找到。";
+
 /** 历史行无需跟随别处 running 会话的秒级 tick；30 秒粒度足够表达相对时间。 */
 const selectHistoryNow = (value: Store) => Math.floor(value.now / 30_000) * 30_000;
 const selectImportedSessionKeys = (value: Store) =>
@@ -46,9 +49,9 @@ interface ListState {
 type ListPhase = "loading" | "ready" | "error";
 
 /**
- * 侧栏历史列表（#/history）：只读列出三家 CLI 自己保存的所有来源会话，
+ * 侧栏历史列表（#/history）：只读列出三家 CLI 自己保存的历史会话，
  * 预览确认后「导入并续接」（就地续接，不是分叉——代价写在按钮上方）。
- * 分页用 nextCursor +「加载更多」；truncated/skipped 都渲染成中性小字说明，不当错误。
+ * 分页用 nextCursor +「加载更多」；扫描未完成时提示并沿游标重试，不当错误。
  */
 export function HistoryView() {
   const importedSessionKeys = useStore(selectImportedSessionKeys, shallowEqual);
@@ -85,6 +88,7 @@ export function HistoryView() {
       else {
         setPhase("loading");
         setListError(null);
+        setLoadingMore(false); // 旧查询的翻页作废，别让按钮一直禁用
       }
       try {
         const data = await fetchHistory({
@@ -140,7 +144,7 @@ export function HistoryView() {
 
   return (
     <div className="history-view history-sidebar-list">
-      <section className="history-list-pane" aria-label="所有来源会话">
+      <section className="history-list-pane" aria-label="历史会话">
         <div className="history-filters">
           <div className="history-filter-group" role="group" aria-label="按 agent 筛选">
             <button
@@ -176,22 +180,38 @@ export function HistoryView() {
               </button>
             ))}
           </div>
+          {/* 「加载更多」放在筛选右侧（跨两行），不必滚到列表底（用户 10-02） */}
+          {/* 只在当前查询首屏就绪后出现：重拉期间旧 nextCursor 属于旧查询，不能点 */}
+          {list.nextCursor && phase === "ready" && (
+            <button
+              type="button"
+              className="btn history-load-more"
+              aria-label={loadingMore ? "加载中" : "加载更多"}
+              disabled={loadingMore}
+              onClick={() => void load(list.nextCursor)}
+            >
+              {loadingMore ? <>加载<br />中…</> : <>加载<br />更多</>}
+            </button>
+          )}
           <input
             type="search"
             className="history-search"
             value={qInput}
             onChange={(e) => setQInput(e.target.value)}
             placeholder="搜索标题或目录…"
-            aria-label="搜索所有来源会话"
+            aria-label="搜索历史会话"
           />
         </div>
-        <p className="history-meta">
-          已加载 {list.items.length} 条 · 共发现 {list.discovered} 个候选
-          {list.skipped > 0 && ` · ${list.skipped} 个损坏或不可读的候选已跳过`}
-          {list.empty > 0 && ` · ${list.empty} 个空会话已隐藏`}
-          {list.truncated && " · 扫描达到时间/数量上限，结果可能不完整，可用关键词缩小范围"}
-          {sourceFilter !== "all" && " · 来源筛选只作用于已加载的条目"}
-        </p>
+        {phase === "ready" && list.truncated && (
+          <p className="history-meta" style={{ fontSize: "var(--detail-font-size)" }}>
+            扫描未完成，可<button
+              type="button"
+              style={{ font: "inherit", color: "inherit", border: 0, padding: 0, background: "none", textDecoration: "underline", cursor: "pointer" }}
+              disabled={loadingMore}
+              onClick={() => void load(list.nextCursor)}
+            >重试</button>
+          </p>
+        )}
         {phase === "error" ? (
           <div className="history-list-status">
             <p className="history-error" role="alert">
@@ -215,27 +235,15 @@ export function HistoryView() {
                   />
                 </li>
               ))}
-              {phase === "ready" && visible.length === 0 && (
+              {phase === "ready" && !list.truncated && visible.length === 0 && (
                 <li className="history-list-empty">
-                  {list.items.length === 0 ? "没有匹配的所有来源会话" : "已加载条目里没有该来源的会话"}
+                  {list.items.length === 0 ? "没有匹配的历史会话" : "已加载条目里没有该来源的会话"}
                 </li>
               )}
               {phase === "loading" && <li className="history-list-empty">加载中…</li>}
             </ul>
             <div className="history-more">
-              {list.nextCursor ? (
-                <button
-                  type="button"
-                  className="btn"
-                  disabled={loadingMore}
-                  onClick={() => void load(list.nextCursor)}
-                >
-                  {loadingMore ? "加载中…" : "加载更多"}
-                </button>
-              ) : (
-                phase === "ready" &&
-                list.items.length > 0 && <span className="history-meta">没有更多了</span>
-              )}
+              {!list.nextCursor && !list.truncated && phase === "ready" && list.items.length > 0 && <span className="history-meta">没有更多了</span>}
               {listError && phase === "ready" && (
                 <span className="history-error" role="alert">
                   {listError}
@@ -310,7 +318,7 @@ export function HistoryPreviewPane({ item, onBack }: { item: HistorySession | un
   }, [item]);
 
   const toolbar = <div className="view-panel-actions">
-    {item && <button type="button" className="btn history-back" onClick={onBack}>‹ 所有来源会话</button>}
+    {item && <button type="button" className="btn history-back" onClick={onBack}>‹ 历史会话</button>}
     <PanelActions />
   </div>;
 
@@ -344,7 +352,7 @@ export function HistoryPreviewPane({ item, onBack }: { item: HistorySession | un
     <aside className="history-preview-pane" aria-label="会话预览" aria-live="polite">
       {toolbar}
       <div className="history-preview-head">
-        <h2 className="history-preview-title">{item.title}</h2>
+        <h2 className="history-preview-title" title={`${item.title} · ${item.nativeSessionId}`}>{item.title}</h2>
         <p className="history-preview-meta">
           {item.agent} · {SOURCE_LABELS[item.source]} ·{" "}
           {relativeTime(item.lastActivityAt, now)}
@@ -363,22 +371,26 @@ export function HistoryPreviewPane({ item, onBack }: { item: HistorySession | un
       <div className="history-actions">
         {importedId ? (
           <>
-            <p className="history-note">该会话已在工作台中，无需重复导入。</p>
+            <p className="history-note">已在工作台中</p>
             <button
               type="button"
               className="btn btn-primary"
               onClick={() => store.navigate(importedId)}
             >
-              跳转过去
+              打开会话
             </button>
           </>
         ) : (
           <>
             {/* 代价说明不能省：就地续接，不是分叉；措辞中性如实 */}
-            <p className="history-note">
-              这是就地续接，不是分叉：导入后，工作台里跑的新回合会追写进这个原生会话文件；
-              工作台里跑的 Claude 回合以 VSCode 扩展身份落盘；工作台新建的 Claude 会话可在 VSCode/CLI 的 resume 列表里找到。
-            </p>
+            <p className="history-note history-import-note">{IMPORT_NOTE}</p>
+            <details className="history-import-details" key={`${item.agent}:${item.nativeSessionId}`}>
+              <summary>
+                <span className="history-note">{IMPORT_NOTE}</span>
+                <span className="history-details-show">详情</span>
+                <span className="history-details-hide">收起</span>
+              </summary>
+            </details>
             {importError && (
               <p className="history-error" role="alert">
                 导入失败：{importError}

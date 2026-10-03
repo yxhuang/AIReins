@@ -8,6 +8,7 @@ import { strict as assert } from "node:assert";
 globalThis.WebSocket = { CONNECTING: 0, OPEN: 1, CLOSING: 2, CLOSED: 3 };
 
 const { Store } = await import("../src/store.ts");
+const { SIDEBAR_RECENT_WINDOW_MS, selectSidebarSessions } = await import("../src/sidebar-sessions.ts");
 
 let pass = 0;
 const t = async (name, fn) => {
@@ -245,6 +246,300 @@ await t("启动只加载当前会话的一份快照", async () => {
   assert.deepEqual(snapshots, ["/api/sessions/active/snapshot?tail=1"]);
   assert.equal(s.data.has("unopened"), false);
   clearTimeout(s.tickTimer);
+});
+
+await t("手机 init 无 hash 恢复上次会话（replace），真实注册的 popstate 可恢复面板", async () => {
+  const previousWindow = globalThis.window;
+  const previousStorage = globalThis.localStorage;
+  const session = makeSession("restored");
+  const listeners = new Map();
+  const stored = new Map([["workbench-last-session", session.id]]);
+  let pushes = 0;
+  const entries = [{ hash: "", state: null }];
+  let index = 0;
+  const pending = [];
+  const location = { get hash() { return entries[index].hash; } };
+  const history = {
+    get state() { return entries[index].state; },
+    get length() { return entries.length; },
+    replaceState(state, _title, hash) { entries[index] = { hash, state: structuredClone(state) }; },
+    pushState(state, _title, hash) {
+      pushes++; entries.splice(index + 1); entries.push({ hash, state: structuredClone(state) }); index++;
+    },
+    back() { pending.push(() => {
+      if (!index) return;
+      const hash = location.hash; index--; listeners.get("popstate")();
+      if (hash !== location.hash) pending.unshift(() => listeners.get("hashchange")());
+    }); },
+  };
+  globalThis.window = {
+    location, history, matchMedia: () => ({ matches: true }),
+    addEventListener(name, listener) { listeners.set(name, listener); },
+  };
+  globalThis.localStorage = {
+    getItem(key) { return stored.get(key) ?? null; },
+    setItem(key, value) { stored.set(key, value); }, removeItem(key) { stored.delete(key); },
+  };
+  globalThis.fetch = async (path) => {
+    if (path === "/api/meta") return envelope({});
+    if (path === "/api/sessions") return envelope({ sessions: [session] });
+    if (path === "/api/pages") return envelope({ pages: [] });
+    if (path.endsWith("/snapshot?tail=1")) return envelope({ session, seq: 0, events: [] });
+    if (path.endsWith("/commands")) return envelope({ commands: [] });
+    throw new Error(`未打桩 ${path}`);
+  };
+  const s = new Store(); s.connect = () => {};
+  try {
+    await s.init();
+    assert.equal(s.currentId, session.id);
+    assert.equal(location.hash, "#/session/restored"); assert.equal(pushes, 0);
+    assert.ok(listeners.has("popstate")); assert.ok(listeners.has("hashchange"));
+    s.setFilesOpen(true);
+    s.sessions.push(makeSession("new-session")); // 新建后 refreshSessions 已包含目的会话
+    s.navigate("new-session"); assert.equal(pushes, 2); assert.equal(s.filesOpen, false);
+    assert.equal(history.length, 3); history.back();
+    assert.equal(s.currentId, "new-session", "back 必须异步");
+    while (pending.length) pending.shift()();
+    assert.ok(s.filesOpen); assert.equal(s.currentId, session.id);
+    assert.equal(stored.get("workbench-last-session"), session.id);
+  } finally {
+    clearTimeout(s.tickTimer);
+    globalThis.window = previousWindow;
+    globalThis.localStorage = previousStorage;
+  }
+});
+
+/** 历史入口使用完整注册表；假 history 保留同 hash 预览条目并异步触发导航事件。 */
+async function withHistoryNavigation(sessions, mobile, run) {
+  const previous = {
+    window: globalThis.window, document: globalThis.document,
+    localStorage: globalThis.localStorage, fetch: globalThis.fetch,
+  };
+  const listeners = new Map();
+  const entries = [{ hash: "#/", state: null }];
+  const pending = [];
+  const requests = [];
+  const sent = [];
+  const stored = new Map();
+  let index = 0;
+  const location = {
+    get hash() { return entries[index].hash; },
+    set hash(hash) { entries[index].hash = hash; },
+  };
+  const travel = (offset) => pending.push(() => {
+    const next = index + offset;
+    if (next < 0 || next >= entries.length) return;
+    const oldHash = location.hash;
+    index = next;
+    listeners.get("popstate")();
+    if (oldHash !== location.hash) pending.unshift(() => listeners.get("hashchange")());
+  });
+  const history = {
+    get state() { return entries[index].state; },
+    get length() { return entries.length; },
+    replaceState(state, _title, hash) { entries[index] = { hash, state: structuredClone(state) }; },
+    pushState(state, _title, hash) {
+      entries.splice(index + 1);
+      entries.push({ hash, state: structuredClone(state) });
+      index++;
+    },
+    back() { travel(-1); }, forward() { travel(1); },
+  };
+  globalThis.window = {
+    location, history, matchMedia: () => ({ matches: mobile }),
+    addEventListener(name, listener) { listeners.set(name, listener); },
+  };
+  globalThis.document = { addEventListener() {} };
+  globalThis.localStorage = {
+    getItem(key) { return stored.get(key) ?? null; },
+    setItem(key, value) { stored.set(key, value); }, removeItem(key) { stored.delete(key); },
+  };
+  globalThis.fetch = async (path, init) => {
+    path = String(path);
+    requests.push({ path, method: init?.method ?? "GET", body: init?.body });
+    if (path === "/api/meta") return envelope({});
+    if (path === "/api/pages") return envelope({ pages: [] });
+    if (path === "/api/sessions" && init?.method === "POST") {
+      const input = JSON.parse(init.body);
+      const next = {
+        ...makeSession("history-resumed"), agent: input.agent, cwd: input.cwd,
+        nativeSessionId: input.resumeSessionId,
+      };
+      sessions.push(next);
+      return envelope({ session: next });
+    }
+    if (path === "/api/sessions") return envelope({ sessions });
+    const snapshot = path.match(/^\/api\/sessions\/([^/]+)\/snapshot\?tail=1$/);
+    if (snapshot) {
+      const session = sessions.find((item) => item.id === decodeURIComponent(snapshot[1]));
+      assert.ok(session, "历史打开必须请求原会话快照");
+      const event = { ...makeEvent(session.id, 1, "agent_text", { text: "旧会话内容" }), timestamp: session.lastActivityAt };
+      return envelope({ session, seq: 1, events: [event] });
+    }
+    if (path.endsWith("/commands")) return envelope({ commands: [] });
+    throw new Error(`未打桩 ${path}`);
+  };
+  const s = new Store();
+  s.connect = () => {};
+  try {
+    await s.init();
+    s.socket = fakeSocket(sent);
+    await run({
+      s, location, history, requests, sent, stored,
+      async flushNavigation() {
+        while (pending.length) pending.shift()();
+        if (s.currentId) await s.ensureLoaded(s.currentId);
+      },
+    });
+  } finally {
+    clearTimeout(s.tickTimer);
+    clearTimeout(s.listRefreshTimer);
+    Object.assign(globalThis, previous);
+  }
+}
+
+function oldHistorySession(id, extra = {}) {
+  const old = "2026-01-01T00:00:00.000Z";
+  return { ...makeSession(id), nativeSessionId: `${id}-native`, createdAt: old, lastActivityAt: old, seq: 1, ...extra };
+}
+
+function historyItem(session) {
+  return {
+    agent: session.agent, nativeSessionId: session.nativeSessionId,
+    cwd: session.cwd, title: "旧会话", lastActivityAt: session.lastActivityAt,
+    source: "workbench", filePath: session.transcriptPath,
+  };
+}
+
+await t("历史入口：主列表外旧 idle、已释放和 dead 会话均可打开原快照", async () => {
+  const sessions = [
+    oldHistorySession("history-old"),
+    oldHistorySession("history-released", { released: true }),
+    oldHistorySession("history-dead", { status: "dead" }),
+  ];
+  await withHistoryNavigation(sessions, false, async ({ s, location, requests }) => {
+    assert.deepEqual(selectSidebarSessions(s), { waiting: [], active: [] });
+    for (const session of sessions) {
+      assert.ok(s.now - Date.parse(session.lastActivityAt) > SIDEBAR_RECENT_WINDOW_MS);
+      s.navigateHistory();
+      s.selectHistory(historyItem(session));
+      s.navigate(session.id); // HistoryView 已导入预览的「打开会话」入口
+      await s.ensureLoaded(session.id);
+      assert.equal(s.currentId, session.id);
+      assert.equal(location.hash, `#/session/${session.id}`);
+      assert.equal(s.historyOpen, false);
+      assert.equal(s.historySelection, null);
+      assert.equal(s.data.get(session.id).events[0].payload.text, "旧会话内容");
+      assert.equal(s.session(session.id).status, session.status);
+      assert.deepEqual(selectSidebarSessions(s).active.map((item) => item.id), session.status === "dead" ? [] : [session.id],
+        "当前非 dead 旧会话应临时回到侧栏，dead 打开后仍留在历史入口");
+      s.navigate(null);
+      assert.deepEqual(selectSidebarSessions(s), { waiting: [], active: [] }, "切走后，未新增活动的旧会话再次隐藏");
+    }
+    assert.equal(s.sessions.length, 3, "侧栏筛选不得删掉完整注册表中的旧会话");
+    assert.equal(requests.filter((request) => request.method === "POST").length, 0, "打开旧会话不得重建或重新导入");
+  });
+});
+
+await t("历史已释放会话：发送沿用原 id，回显与助手事件刷新 lastActivityAt", async () => {
+  const session = oldHistorySession("history-released-send", { released: true });
+  await withHistoryNavigation([session], false, async ({ s, requests, sent }) => {
+    assert.equal(selectSidebarSessions(s).active.length, 0);
+    s.navigateHistory(); s.selectHistory(historyItem(session)); s.navigate(session.id);
+    await s.ensureLoaded(session.id);
+    assert.deepEqual(selectSidebarSessions(s).active.map((item) => item.id), [session.id]);
+    assert.equal(s.sendUserMessage(session.id, "继续旧会话"), true);
+    assert.equal(sent.length, 1);
+    assert.equal(sent[0].sessionId, session.id);
+    assert.equal(sent[0].text, "继续旧会话");
+    assert.equal(requests.filter((request) => request.method === "POST").length, 0, "已释放续接应由发送唤醒原 worker");
+    const userAt = new Date(s.now).toISOString();
+    const assistantAt = new Date(s.now + 1000).toISOString();
+    s.handleFrame({
+      ...makeEvent(session.id, 2, "user_message", { text: "继续旧会话", clientRequestId: sent[0].clientRequestId }),
+      timestamp: userAt,
+    });
+    assert.equal(s.session(session.id).lastActivityAt, userAt);
+    s.handleFrame({ ...makeEvent(session.id, 3, "agent_text", { text: "已续接" }), timestamp: assistantAt });
+    assert.equal(s.session(session.id).lastActivityAt, assistantAt);
+    assert.deepEqual(s.sessions.map((item) => item.id), [session.id]);
+    assert.equal(s.data.get(session.id).seq, 3);
+    assert.equal(s.sendStash.size, 0, "原 id 回显应确认发送");
+    // 模拟回合完成后的权威摘要，排除 running 和 currentId 两个保留例外。
+    Object.assign(session, { status: "idle", released: false, seq: 3, lastActivityAt: assistantAt });
+    await s.refreshSessions();
+    s.navigate(null);
+    assert.equal(s.session(session.id).status, "idle");
+    assert.deepEqual(selectSidebarSessions(s).active.map((item) => item.id), [session.id], "有新活动的旧会话切走后仍常规显示");
+  });
+});
+
+await t("手机历史导航：旧 dead 会话打开后，后退前进完整恢复预览与历史列表", async () => {
+  const session = oldHistorySession("history-mobile-dead", { status: "dead" });
+  const item = historyItem(session);
+  await withHistoryNavigation([session], true, async ({ s, location, history, requests, flushNavigation }) => {
+    assert.deepEqual(selectSidebarSessions(s), { waiting: [], active: [] });
+    s.navigateHistory();
+    const listEntryId = history.state.workbenchNavigation.id;
+    s.selectHistory(item);
+    const previewEntry = structuredClone(history.state.workbenchNavigation);
+    assert.equal(previewEntry.version, 1);
+    assert.equal(previewEntry.route.hash, "#/history");
+    assert.deepEqual(previewEntry.route.historySelection, item);
+    assert.equal(previewEntry.source.id, listEntryId);
+    assert.equal(previewEntry.source.route.historySelection, null);
+    s.navigate(session.id);
+    await s.ensureLoaded(session.id);
+    assert.equal(s.currentId, session.id);
+    assert.equal(s.session(session.id).status, "dead");
+    assert.deepEqual(selectSidebarSessions(s), { waiting: [], active: [] }, "手机当前打开的 dead 会话也不得进入主列表");
+    assert.equal(history.state.workbenchNavigation.route.historyOpen, false);
+    assert.equal(history.state.workbenchNavigation.source.id, previewEntry.id);
+    assert.deepEqual(history.state.workbenchNavigation.source.route.historySelection, item);
+    history.back();
+    assert.equal(s.currentId, session.id, "浏览器后退保持异步");
+    await flushNavigation();
+    assert.equal(location.hash, "#/history");
+    assert.equal(s.currentId, null);
+    assert.deepEqual(s.historySelection, item);
+    assert.equal(history.state.workbenchNavigation.id, previewEntry.id);
+    s.backToHistoryList(); await flushNavigation();
+    assert.equal(location.hash, "#/history", "列表与预览共享 hash，由 state 区分");
+    assert.equal(s.historyOpen, true); assert.equal(s.historySelection, null);
+    assert.equal(history.state.workbenchNavigation.id, listEntryId);
+    s.historySelection = { ...item, title: "故意清空来源以外的残留状态" };
+    history.forward(); await flushNavigation();
+    assert.deepEqual(s.historySelection, item, "前进应从 history.state 恢复完整预览");
+    history.forward(); await flushNavigation();
+    assert.equal(s.currentId, session.id); assert.equal(s.historyOpen, false);
+    assert.equal(s.historySelection, null); assert.equal(location.hash, `#/session/${session.id}`);
+    assert.deepEqual(selectSidebarSessions(s), { waiting: [], active: [] });
+    s.backFromSession(); await flushNavigation();
+    assert.deepEqual(s.historySelection, item, "会话内后退也应返回来源预览");
+    s.backToHistoryList(); await flushNavigation();
+    s.closeSidebarPanel(); await flushNavigation();
+    assert.equal(location.hash, "#/"); assert.equal(s.historyOpen, false);
+    history.forward(); await flushNavigation();
+    assert.equal(s.historyOpen, true); assert.equal(s.historySelection, null);
+    assert.equal(requests.filter((request) => request.method === "POST").length, 0, "dead 打开不得自动重建");
+  });
+});
+
+await t("历史 dead 会话：显式新建续接保留 agent、cwd 和原生会话 id", async () => {
+  const session = oldHistorySession("history-dead-resume", { status: "dead" });
+  await withHistoryNavigation([session], true, async ({ s, requests }) => {
+    s.navigateHistory(); s.selectHistory(historyItem(session)); s.navigate(session.id);
+    await s.ensureLoaded(session.id);
+    const next = await s.create({ agent: session.agent, cwd: session.cwd, resumeSessionId: session.nativeSessionId });
+    s.navigate(next.id); // SessionView 现有「新建会话并续接」入口
+    const request = requests.find((item) => item.method === "POST");
+    assert.deepEqual(JSON.parse(request.body), { agent: session.agent, cwd: session.cwd, resumeSessionId: session.nativeSessionId });
+    assert.equal(s.currentId, next.id);
+    assert.equal(s.session(session.id).status, "dead", "显式续接不能覆盖原 dead 记录");
+    assert.equal(s.session(next.id).nativeSessionId, session.nativeSessionId);
+    assert.ok(s.data.has(next.id), "新建续接返回前快照已就绪");
+    assert.deepEqual(selectSidebarSessions(s).active.map((item) => item.id), [next.id], "侧栏只显示新续接会话，原 dead 记录仍可从历史打开");
+  });
 });
 
 await t("新建会话后立即发送：data 建起、事件按 seq 累积、上行帧写出", async () => {
@@ -494,7 +789,354 @@ await t("socket 非 OPEN：resolvePermission 返回 false 且不上行；OPEN �
   assert.equal(sent[0].decision, "deny");
 });
 
+// --- K13：删除会话后，旧的列表请求不得把它复活成打不开的残行 ---
+await t("refreshSessions 过滤 removed：已删会话不被列表刷新复活", async () => {
+  const session = makeSession("s-removed");
+  stubFetchFull(session); // /api/sessions 仍返回它（删除前的旧响应 / 服务端尚未生效）
+  const s = new Store();
+  s.sessions = [session];
+  s.socket = fakeSocket([]);
+  await s.remove(session.id);
+  assert.equal(s.session(session.id), undefined, "remove 后会话应已不在列表");
+  await s.refreshSessions();
+  assert.equal(s.session(session.id), undefined, "已删会话不得被列表刷新复活");
+  assert.equal(s.sessions.length, 0, "列表里不应留下打不开的残行");
+});
+
+// --- K15：RC / 后台任务事件只写一遍，且不是原地改旧对象 ---
+await t("remote_control_updated / background_tasks_updated：替换列表项，不原地改旧对象", async () => {
+  const session = makeSession("s-rc-immutable");
+  const s = new Store();
+  s.sessions = [session];
+  s.data.set(session.id, { events: [makeEvent(session.id, 1)], seq: 1, dropped: 0, pendingGates: new Map() });
+
+  const beforeRc = s.session(session.id);
+  s.handleEvent(makeEvent(session.id, 2, "remote_control_updated", { status: "connected", sessionUrl: "https://example.invalid" }));
+  const afterRc = s.session(session.id);
+  assert.notEqual(afterRc, beforeRc, "RC 事件后应替换列表项引用（selector 才能观察到）");
+  assert.equal(beforeRc.remoteControl, undefined, "旧列表项不得被原地改写");
+  assert.equal(afterRc.remoteControl?.status, "connected", "RC 状态未落列表项");
+
+  const beforeTasks = s.session(session.id);
+  s.handleEvent(makeEvent(session.id, 3, "background_tasks_updated", { tasks: [{ taskId: "t1", status: "running" }] }));
+  const afterTasks = s.session(session.id);
+  assert.notEqual(afterTasks, beforeTasks, "后台任务事件后应替换列表项引用");
+  assert.equal(beforeTasks.backgroundTasks, undefined, "旧列表项不得被原地改写");
+  assert.equal(afterTasks.backgroundTasks?.length, 1, "后台任务列表未落列表项");
+});
+
+// --- K11①：本地拦掉服务端必拒的发送（有待决闸门 / 配置切换中），文字保留、就地提示 ---
+await t("有待决闸门时发送被本地拦下：零上行帧、就地提示、不污染全局错误条", async () => {
+  const session = makeSession("s-block-gate");
+  stubFetchFull(session);
+  const sent = [];
+  const s = new Store();
+  s.socket = fakeSocket(sent);
+  s.sessions = [session];
+  s.meta = { drivers: { kimi: { commands: false, mentions: false } } };
+  s.data.set(session.id, {
+    events: [makeEvent(session.id, 1, "permission_request", { requestId: "g1" })],
+    seq: 1, dropped: 0, pendingGates: new Map([["g1", 1]]),
+  });
+  s.lastError = null;
+  assert.equal(await s.sendComposerInput(session.id, "闸门还开着"), false, "有待决闸门时本地应拦下");
+  assert.equal(sent.length, 0, "被拦时不应有任何上行帧");
+  assert.match(s.sendNotices.get(session.id) ?? "", /闸门/, "拦下原因应就地提示");
+  assert.equal(s.lastError, null, "本地拦截不应污染全局错误条");
+  assert.equal(s.sendCommand(session.id, "help", ""), false, "结构化命令同样应被拦下");
+  assert.equal(sent.length, 0, "被拦时命令帧也不应上行");
+  // 闸门处理完（permission_resolved）后同一文本可正常发出
+  s.handleEvent(makeEvent(session.id, 2, "permission_resolved", { requestId: "g1" }));
+  assert.equal(await s.sendComposerInput(session.id, "闸门还开着"), true, "闸门解除后应能发送");
+  assert.equal(sent.length, 1, "解除后上行帧应写出");
+  assert.equal(s.sendNotices.has(session.id), false, "再次发送后上一次的拦截提示应清除");
+});
+
+await t("配置切换中发送被本地拦下；新建会话启动等待不拦", async () => {
+  const session = makeSession("s-block-switch");
+  stubFetchFull(session);
+  const sent = [];
+  const s = new Store();
+  s.socket = fakeSocket(sent);
+  s.sessions = [session];
+  s.meta = { drivers: { kimi: { commands: false, mentions: false } } };
+  s.data.set(session.id, { events: [], seq: 0, dropped: 0, pendingGates: new Map() });
+  s.configSwitching.set(session.id, "正在切换模型…");
+  assert.equal(await s.sendComposerInput(session.id, "切换中别发"), false, "配置切换中本地应拦下");
+  assert.equal(sent.length, 0, "被拦时不应有上行帧");
+  assert.match(s.sendNotices.get(session.id) ?? "", /切换/, "拦下原因应就地提示");
+
+  // 新建会话启动等待不是拒因（服务端会等启动完成再发），本地不得拦
+  const starting = { ...makeSession("s-block-starting"), status: "starting" };
+  const s2 = new Store();
+  const sent2 = [];
+  s2.socket = fakeSocket(sent2);
+  s2.sessions = [starting];
+  s2.meta = { drivers: { kimi: { commands: false, mentions: false } } };
+  s2.data.set(starting.id, { events: [], seq: 0, dropped: 0, pendingGates: new Map() });
+  assert.equal(await s2.sendComposerInput(starting.id, "首发"), true, "启动等待不应被本地拦截");
+  assert.equal(sent2.length, 1, "启动等待时上行帧应写出");
+});
+
+// --- K11②：user_message 带 clientRequestId 暂存；ack 丢弃；error 还回；回显兜底丢弃 ---
+await t("上行帧带 clientRequestId 并暂存；ack 回执丢弃暂存", async () => {
+  const session = makeSession("s-crid-ack");
+  stubFetchFull(session);
+  const sent = [];
+  const s = new Store();
+  s.socket = fakeSocket(sent);
+  s.sessions = [session];
+  assert.equal(s.sendUserMessage(session.id, "hello"), true);
+  const frame = sent.find((f) => f.type === "user_message");
+  assert.ok(typeof frame.clientRequestId === "string" && frame.clientRequestId, "上行帧必须带 clientRequestId");
+  assert.equal(s.sendStash.size, 1, "发送后应有一条暂存");
+  s.handleFrame({ type: "ack", sessionId: session.id, action: "user_message", clientRequestId: frame.clientRequestId });
+  assert.equal(s.sendStash.size, 0, "ack 回执应丢弃对应暂存");
+  // 未知 id 的 ack / 重复 ack：静默忽略不抛错
+  s.handleFrame({ type: "ack", sessionId: session.id, action: "user_message", clientRequestId: "no-such-id" });
+});
+
+await t("服务端带 id 的 error：文字写回草稿并发布还回请求，错误仍告知用户", async () => {
+  const session = makeSession("s-crid-error");
+  stubFetchFull(session);
+  const sent = [];
+  const s = new Store();
+  s.socket = fakeSocket(sent);
+  s.sessions = [session];
+  s.sendUserMessage(session.id, "别丢我");
+  const { clientRequestId } = sent[0];
+  assert.equal(s.getDraft(session.id), "", "发送后草稿本已清空");
+  s.handleFrame({
+    type: "error", code: 40003, sessionId: session.id, action: "user_message",
+    msg: "会话有待处理的审批闸门，处理后才能发送或插话", clientRequestId,
+  });
+  assert.equal(s.sendStash.size, 0, "error 后暂存应丢弃");
+  assert.equal(s.getDraft(session.id), "别丢我", "被拒文本应写回草稿");
+  assert.equal(s.sendTextRestore?.sessionId, session.id, "应发布输入框还回请求");
+  assert.equal(s.sendTextRestore?.text, "别丢我", "还回文本应为被拒原文");
+  assert.equal(s.lastError?.message, "会话有待处理的审批闸门，处理后才能发送或插话", "拒绝原因仍应告知用户");
+  assert.equal(s.lastError?.sessionId, session.id, "错误应带会话上下文");
+  const { version } = s.sendTextRestore;
+  assert.deepEqual(s.consumeSendTextRestore(version), { text: "别丢我", mentions: [] }, "Composer 应能消费完整还回请求");
+  assert.equal(s.consumeSendTextRestore(version), null, "还回请求只能消费一次");
+  assert.equal(s.sendTextRestore, null, "消费后还回请求应清空");
+});
+
+await t("发送间隙用户新打的字不被覆盖：草稿不动、不发布还回", async () => {
+  const session = makeSession("s-crid-race");
+  stubFetchFull(session);
+  const sent = [];
+  const s = new Store();
+  s.socket = fakeSocket(sent);
+  s.sessions = [session];
+  s.sendUserMessage(session.id, "旧文本", [{ type: "image", path: "/uploads/old.png", mimeType: "image/png", name: "旧附件.png" }]);
+  const { clientRequestId } = sent[0];
+  s.setDraft(session.id, "间隙新打的");
+  s.handleFrame({ type: "error", code: 40003, sessionId: session.id, action: "user_message", msg: "boom", clientRequestId });
+  assert.equal(s.getDraft(session.id), "间隙新打的", "间隙新草稿不得被被拒原文覆盖");
+  assert.equal(s.sendTextRestore, null, "间隙有输入时不应发布还回请求");
+  assert.equal(s.sendStash.size, 0, "error 后暂存仍应丢弃");
+  assert.equal(s.lastError?.message, "boom", "拒绝原因仍应告知用户");
+});
+
+await t("同会话 user_message 回显只按请求 id 丢弃暂存，无 id 的同文本不能确认", async () => {
+  const session = makeSession("s-crid-echo");
+  stubFetchFull(session);
+  const sent = [];
+  const s = new Store();
+  s.socket = fakeSocket(sent);
+  s.sessions = [session];
+  s.sendUserMessage(session.id, "回显我");
+  s.sendUserMessage(session.id, "回显我"); // 同文本第二条：只许丢弃最早一条
+  assert.equal(s.sendStash.size, 2);
+  s.handleFrame(makeEvent(session.id, 1, "user_message", { text: "回显我" }));
+  assert.equal(s.sendStash.size, 2, "无请求 id 的回显不能按相同文本清暂存");
+  s.handleFrame(makeEvent(session.id, 2, "user_message", { text: "回显我", clientRequestId: sent[0].clientRequestId }));
+  assert.equal(s.sendStash.size, 1, "只应丢弃 id 匹配的暂存");
+  const firstAck = { type: "ack", sessionId: session.id, action: "user_message", clientRequestId: sent[0].clientRequestId };
+  s.handleFrame(firstAck); // 迟到/重复的 ack：暂存已被回显收走，静默忽略
+  // 剩下的那条被 error 拒掉：仍能按 id 还回
+  s.handleFrame({ type: "error", code: 40003, sessionId: session.id, action: "user_message", msg: "x", clientRequestId: sent[1].clientRequestId });
+  assert.equal(s.getDraft(session.id), "回显我", "剩余暂存被拒后应写回草稿");
+  // 已被回显收走的暂存再被拒：不还回（服务端已受理过）
+  s.clearDraft(session.id);
+  s.handleFrame({ type: "error", code: 40003, sessionId: session.id, action: "user_message", msg: "x", clientRequestId: sent[0].clientRequestId });
+  assert.equal(s.getDraft(session.id), "", "已受理消息的迟到 error 不应还回文本");
+});
+
+await t("按 action 归因：set_config 失败仍归配置控件，user_message 错误进全局条", async () => {
+  const session = makeSession("s-crid-config");
+  stubFetchFull(session);
+  const s = new Store();
+  s.socket = fakeSocket([]);
+  s.sessions = [session];
+  s.configPending.set(session.id, new Set(["model"]));
+  s.handleFrame({ type: "error", sessionId: session.id, action: "set_config", msg: "bad config" });
+  assert.equal(s.configErrors.get(session.id), "bad config", "配置失败应落在配置控件旁");
+  assert.equal(s.lastError, null, "配置失败不应进全局错误条");
+  assert.equal(s.sendTextRestore, null, "配置失败不应触发文本还回");
+  // configPending 挂起期间，别的动作的报错不得再误归配置控件
+  s.clearConfigError(session.id);
+  s.configPending.set(session.id, new Set(["model"]));
+  s.handleFrame({ type: "error", sessionId: session.id, action: "user_message", msg: "会话有待处理的审批闸门" });
+  assert.equal(s.configErrors.has(session.id), false, "user_message 错误不得落配置控件");
+  assert.equal(s.lastError?.message, "会话有待处理的审批闸门", "user_message 错误应进全局错误条");
+  assert.equal(s.configPending.has(session.id), true, "非配置错误不应解除配置发送中状态");
+});
+
+await t("remove 清空该会话的发送暂存与就地提示", async () => {
+  const session = makeSession("s-crid-remove");
+  stubFetchFull(session);
+  const sent = [];
+  const s = new Store();
+  s.socket = fakeSocket(sent);
+  s.sessions = [session];
+  s.sendUserMessage(session.id, "将随会话删除");
+  s.sendNotices.set(session.id, "x");
+  await s.remove(session.id);
+  assert.equal(s.sendStash.size, 0, "remove 后发送暂存应清空");
+  assert.equal(s.sendNotices.has(session.id), false, "remove 后就地提示应清空");
+  // 迟到的拒绝帧：会话已删，静默忽略（不还原、不报错）
+  s.handleFrame({ type: "error", code: 40003, sessionId: session.id, action: "user_message", msg: "x", clientRequestId: sent[0].clientRequestId });
+  assert.equal(s.getDraft(session.id), "", "已删会话的迟到 error 不应还回文本");
+});
+
+// --- 返工 2：逐条复现 R-review-findings 第 5–7 项 ---
+await t("K11复核5：结构化 /compact note 被拒后恢复原命令草稿", async () => {
+  const session = makeSession("s-review-command");
+  stubFetchFull(session);
+  const sent = [];
+  const s = new Store();
+  s.socket = fakeSocket(sent);
+  s.sessions = [session];
+  s.meta = { drivers: { kimi: { commands: true, mentions: false } } };
+  s.commands.set(session.id, [{ name: "compact", description: "", source: "kimi" }]);
+  const original = "/compact   note  ";
+  s.setDraft(session.id, original);
+  assert.equal(await s.sendComposerInput(session.id, original), true);
+  assert.deepEqual(sent[0].command, { name: "compact", arguments: "note" });
+  assert.equal(s.getDraft(session.id), "", "上行后原草稿已清空");
+  s.handleFrame({ type: "error", sessionId: session.id, action: "user_message", clientRequestId: sent[0].clientRequestId, msg: "原生检查中" });
+  assert.equal(s.getDraft(session.id), original, "拒绝后应恢复包括原空格在内的命令输入");
+  assert.ok(sent[0].clientRequestId);
+  assert.equal(s.sendTextRestore?.text, original);
+  assert.equal(sent.length, 1, "恢复不能自动重发");
+});
+
+await t("K11复核6：同文本历史重复帧不能误删待确认的新发送", async () => {
+  const session = makeSession("s-review-old-echo");
+  stubFetchFull(session);
+  const sent = [];
+  const s = new Store();
+  s.socket = fakeSocket(sent);
+  const old = makeEvent(session.id, 1, "user_message", { text: "重复发送的文字" });
+  s.applySnapshot(session.id, session, 1, [old]);
+  assert.equal(s.sendUserMessage(session.id, old.payload.text), true);
+  s.handleFrame(old);
+  assert.equal(s.data.get(session.id).seq, 1, "旧帧应被 seq 去重");
+  s.handleFrame({ type: "error", sessionId: session.id, action: "user_message", clientRequestId: sent[0].clientRequestId, msg: "发送被拒" });
+  assert.equal(s.getDraft(session.id), old.payload.text, "旧帧不应阻断新发送的拒绝恢复");
+  assert.equal(s.sendTextRestore?.text, old.payload.text);
+  assert.equal(sent.length, 1);
+});
+
+await t("K11复核7：纯图片与文件引用被拒后完整交还 mentions，不自动重发", async () => {
+  for (const [suffix, text, mentions] of [
+    ["image", "", [{ type: "image", path: "/uploads/picture.png", mimeType: "image/png", name: "截图.png" }]],
+    ["files", "看看 @notes.txt", [{ type: "file", path: "notes.txt" }, { type: "file", path: "/uploads/report.pdf", name: "报告.pdf" }]],
+  ]) {
+    const session = makeSession(`s-review-mentions-${suffix}`);
+    stubFetchFull(session, { knownFiles: ["notes.txt"] });
+    const sent = [];
+    const s = new Store();
+    s.socket = fakeSocket(sent);
+    s.sessions = [session];
+    s.meta = { drivers: { kimi: { commands: false, mentions: true } } };
+    s.setDraft(session.id, text);
+    assert.equal(await s.sendComposerInput(session.id, text, mentions), true);
+    const frame = sent[0];
+    assert.deepEqual(frame.mentions, mentions);
+    s.handleFrame({ type: "error", sessionId: session.id, action: "user_message", clientRequestId: frame.clientRequestId, msg: "拒绝附件发送" });
+    assert.deepEqual(s.sendTextRestore?.mentions, mentions, "暂存引用不能在发布恢复时丢失");
+    const version = s.sendTextRestore.version;
+    assert.deepEqual(s.consumeSendTextRestore(version), { text, mentions });
+    assert.equal(s.consumeSendTextRestore(version), null, "附件恢复只能消费一次");
+    assert.equal(sent.length, 1, "纯图片恢复也不能自动发送");
+  }
+});
+
+await t("K11复核7：输入框恢复引用为 ready 附件，保留上传中附件且不覆盖新文字", async () => {
+  globalThis.React = (await import("react")).default;
+  const { restoreComposerInput } = await import("../src/components/SessionView.tsx");
+  assert.equal(typeof restoreComposerInput, "function", "输入框应有可核验的完整恢复入口");
+  const current = [
+    { id: "uploading", source: "upload", name: "还在上传.pdf", status: "uploading" },
+    { id: "existing", source: "local", name: "已有.pdf", status: "ready", path: "/uploads/existing.pdf" },
+  ];
+  const restore = { version: 3, text: "被拒原文", mentions: [
+    { type: "file", path: "/uploads/existing.pdf", name: "已有.pdf" },
+    { type: "image", path: "/uploads/screenshot.png", mimeType: "image/png", name: "截图.png" },
+    { type: "file", path: "notes.txt" },
+  ] };
+  const plan = restoreComposerInput("", current, restore);
+  assert.equal(plan.text, restore.text);
+  assert.deepEqual(plan.attachments.slice(0, 2), current, "原上传中和已有附件不能丢失");
+  assert.equal(plan.attachments.length, 4, "相同路径去重");
+  assert.equal(plan.attachments[2].status, "ready");
+  assert.equal(plan.attachments[2].path, restore.mentions[1].path);
+  assert.equal(plan.attachments[2].mimeType, "image/png");
+  const { attachmentMention } = await import("../src/attachments.ts");
+  assert.deepEqual(attachmentMention(plan.attachments[2]), restore.mentions[1], "恢复的图片引用仍可再次手动发送");
+  assert.equal(restoreComposerInput("新打的内容", current, restore), null, "输入框已有文字时附件与文字都不写回");
+  const imageOnly = restoreComposerInput("", [], { ...restore, text: "", mentions: [restore.mentions[1]] });
+  assert.equal(imageOnly.text, "");
+  assert.deepEqual(attachmentMention(imageOnly.attachments[0]), restore.mentions[1]);
+});
+
+await t("K11复核：重复文本只确认指定请求，旧 seq 与其他会话不能清暂存", async () => {
+  const session = makeSession("s-review-exact-echo");
+  stubFetchFull(session);
+  const sent = [];
+  const s = new Store();
+  s.socket = fakeSocket(sent);
+  s.applySnapshot(session.id, session, 1, [makeEvent(session.id, 1, "user_message", { text: "相同" })]);
+  s.sendUserMessage(session.id, "相同");
+  s.sendUserMessage(session.id, "相同");
+  const first = sent[0].clientRequestId, second = sent[1].clientRequestId;
+  s.handleFrame(makeEvent(session.id, 1, "user_message", { text: "相同", clientRequestId: second }));
+  assert.equal(s.sendStash.size, 2, "旧 seq 即便带 id 也不能确认当前发送");
+  s.handleFrame(makeEvent("other-session", 1, "user_message", { text: "相同", clientRequestId: second }));
+  assert.equal(s.sendStash.size, 2, "别的会话不能清理当前会话暂存");
+  s.handleFrame(makeEvent(session.id, 2, "user_message", { text: "相同", clientRequestId: second }));
+  assert.equal(s.sendStash.has(second), false);
+  assert.equal(s.sendStash.has(first), true, "不能因为同文本误删更早的另一条暂存");
+  s.handleFrame({ type: "ack", sessionId: "other-session", action: "user_message", clientRequestId: first });
+  s.handleFrame({ type: "ack", sessionId: session.id, action: "set_config", clientRequestId: first });
+  assert.equal(s.sendStash.has(first), true, "非本会话或非发送动作的回执不能确认");
+  s.handleFrame({ type: "ack", sessionId: session.id, action: "user_message", clientRequestId: first });
+  assert.equal(s.sendStash.size, 0);
+});
+
+await t("K11复核：直接发送命令被拒可恢复，断线失败不暂存", async () => {
+  const session = makeSession("s-review-direct-command");
+  stubFetchFull(session);
+  const sent = [];
+  const s = new Store();
+  s.socket = fakeSocket(sent);
+  s.sessions = [session];
+  assert.equal(s.sendCommand(session.id, "compact", "note"), true);
+  s.handleFrame({ type: "error", sessionId: session.id, action: "user_message", clientRequestId: sent[0].clientRequestId, msg: "启动失败" });
+  assert.equal(s.getDraft(session.id), "/compact note");
+  assert.equal(s.sendStash.size, 0);
+  s.clearDraft(session.id);
+  s.socket.readyState = WebSocket.CLOSED;
+  assert.equal(s.sendCommand(session.id, "compact", "again"), false);
+  assert.equal(s.sendStash.size, 0, "socket 未接收的命令没有待确认暂存");
+  assert.equal(sent.length, 1, "被拒或断线都不能自动重发");
+});
+
 await import("./snapshot-paging.test.mjs");
+await import("./session-organization-flow.test.mjs");
 if (!process.exitCode) console.log(`✅ store 流程回归全过（${pass} 例）`);
 else console.error(`部分用例失败（通过 ${pass} 例）`);
 // store 内部有 2s 防抖计时器，直接退出不等它

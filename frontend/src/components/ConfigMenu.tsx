@@ -34,7 +34,11 @@ function ConfigPill({
   title,
   align = "left",
   placement = "up",
+  kind,
+  cwd,
 }: {
+  kind: "main" | "perm";
+  cwd?: string;
   label: ReactNode;
   icon?: ReactNode;
   groups: MenuGroup[];
@@ -91,7 +95,7 @@ function ConfigPill({
   }, [disabled]);
 
   return (
-    <span className="cfg-pill-wrap" ref={rootRef}>
+    <span className={`cfg-pill-wrap cfg-pill-${kind}`} ref={rootRef}>
       <button
         type="button"
         ref={triggerRef}
@@ -107,6 +111,7 @@ function ConfigPill({
       </button>
       {open && (
         <div className={`cfg-menu cfg-menu-${align} cfg-menu-${placement}`} role="menu" ref={panelRef}>
+          {cwd && <div className="cfg-menu-cwd mono" title={cwd}>工作目录：{cwd}</div>}
           {groups.map((group) => (
             <div className="cfg-group" role="group" aria-label={group.title} key={group.id}>
               {groups.length > 1 && !group.slider && <div className="cfg-group-title">{group.title}</div>}
@@ -248,6 +253,7 @@ function StepSlider({ group }: { group: MenuGroup }) {
 interface BuiltPill {
   group: MenuGroup;
   text: string;
+  fullText?: string;
   /** 禁用原因，作胶囊 title */
   reason?: string;
 }
@@ -257,22 +263,26 @@ export function ConfigPills({
   main,
   perm,
   permMode,
+  cwd,
   placement = "up",
 }: {
   main: BuiltPill[];
   perm: BuiltPill | null;
   permMode: string;
+  cwd?: string;
   placement?: "up" | "down";
 }) {
   return (
     <div className="cfg-pills">
       {main.length > 0 && (
         <ConfigPill
-          title={main.map((m) => m.reason).find(Boolean) ?? main.map((m) => m.group.title).join(" · ")}
+          kind="main"
+          cwd={cwd}
+          title={[main.map((m) => m.fullText ?? m.text).join(" · "), main.map((m) => m.reason).find(Boolean)].filter(Boolean).join("；")}
           placement={placement}
           label={
             <>
-              <span>{main[0]!.text}</span>
+              <span className="cfg-pill-model">{main[0]!.text}</span>
               {/* 推理强度跟随配置且无从得知实际值时不显示，免得出现「默认 默认」 */}
               {main[1] && main[1].text !== "默认" && <span className="cfg-pill-sub">{main[1].text}</span>}
             </>
@@ -282,6 +292,7 @@ export function ConfigPills({
       )}
       {perm && (
         <ConfigPill
+          kind="perm"
           icon={<PermissionIcon mode={permMode} />}
           title={perm.reason ?? perm.group.title}
           placement={placement}
@@ -325,7 +336,7 @@ export function SendIcon() {
 }
 
 export function StopIcon() {
-  return <svg {...svgProps} width={16} height={16}><rect x="7" y="7" width="10" height="10" rx="1.5" fill="currentColor" /></svg>;
+  return <svg {...svgProps} width={16} height={16}><rect x="6" y="6" width="12" height="12" rx="2" fill="currentColor" /></svg>;
 }
 
 /** 审批模式按「放权程度」配图标：盾=逐项审批，笔=放行编辑，清单=只规划，闪电=自动放行。 */

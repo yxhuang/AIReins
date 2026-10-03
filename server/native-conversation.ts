@@ -1,7 +1,8 @@
 import { createHash } from "node:crypto";
-import { open, readdir, realpath, stat } from "node:fs/promises";
+import { open } from "node:fs/promises";
+import { closeSync, fstatSync, openSync, readSync, readdirSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
-import { isAbsolute, join, relative, resolve, sep } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { mergeHistoryMessages, parseHistoryMessages, type HistoryMessage } from "./history.js";
 import type { AgentKind, SessionRecord } from "./types.js";
 
@@ -42,6 +43,50 @@ export class NativeConversationReader {
     return snapshot?.mark;
   }
 
+  /** Startup readiness only: bounded native headers, not a full archive integrity audit. */
+  hasArchive(session: SessionRecord): boolean {
+    try {
+      const path = this.pathFor(session);
+      const id = session.nativeSessionId;
+      if (!path || !id || !nativePathMatches(session.agent, id, path)) return false;
+      if (session.agent === "kimi") {
+        // session/resume needs the original workspace; wire can still be empty before the first prompt.
+        const statePath = safeNativeFile(this.roots.kimi, join(dirname(dirname(dirname(path))), "state.json"));
+        if (!statePath) return false;
+        const header = nativeHeader(statePath);
+        if (header.truncated) return false;
+        const state = JSON.parse(header.text) as Record<string, unknown>;
+        const cwd = typeof state.cwd === "string" ? state.cwd : state.workDir;
+        if (!state || typeof cwd !== "string" || resolve(cwd) !== resolve(session.cwd)
+          || (state.id !== undefined && state.id !== id)) return false;
+        nativeHeader(path); // Check that the located wire file can actually be opened/read.
+        return true;
+      }
+      const { text, truncated } = nativeHeader(path);
+      const lines = text.split("\n");
+      // A bounded head may stop within a record; that unseen remainder is not corruption evidence.
+      if (truncated) lines.pop();
+      let resumable = false;
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        const record = JSON.parse(line) as Record<string, any>;
+        if (!record || typeof record !== "object" || Array.isArray(record)) return false;
+        if (session.agent === "codex") {
+          if (record.type === "session_meta") {
+            if (record.payload?.id !== id) return false;
+            resumable = true;
+          }
+        } else {
+          if (record.sessionId !== undefined && record.sessionId !== id) return false;
+          if ((record.type === "user" || record.type === "assistant")
+            && record.message?.role === record.type
+            && (typeof record.message.content === "string" || Array.isArray(record.message.content))) resumable = true;
+        }
+      }
+      return resumable;
+    } catch { return false; }
+  }
+
   async changed(session: SessionRecord, previous: NativeConversationMark): Promise<NativeConversationChange | undefined> {
     const snapshot = await this.read(session);
     if (!snapshot) throw new Error("原生会话记录不可读");
@@ -70,7 +115,7 @@ export class NativeConversationReader {
     truncated: boolean;
   } | undefined> {
     if (!session.nativeSessionId) return undefined;
-    const path = await this.pathFor(session);
+    const path = this.pathFor(session);
     if (!path) return undefined;
     const file = await open(path, "r");
     try {
@@ -118,14 +163,14 @@ export class NativeConversationReader {
     }
   }
 
-  private async pathFor(session: SessionRecord): Promise<string | undefined> {
+  private pathFor(session: SessionRecord): string | undefined {
     const root = this.roots[session.agent];
     const id = session.nativeSessionId;
     if (!id || !/^[A-Za-z0-9_-]{1,128}$/.test(id)) return undefined;
     const key = `${session.agent}:${id}`;
     const cached = this.located.get(key);
     if (cached) {
-      const safeCached = await safeNativeFile(root, cached);
+      const safeCached = safeNativeFile(root, cached);
       if (safeCached) return safeCached;
       this.located.delete(key);
     }
@@ -134,38 +179,38 @@ export class NativeConversationReader {
       return path;
     };
     const hint = session.nativeTranscriptPath;
-    if (hint && isAbsolute(hint)) {
-      const safeHint = await safeNativeFile(root, hint);
+    if (hint && isAbsolute(hint) && nativePathMatches(session.agent, id, hint)) {
+      const safeHint = safeNativeFile(root, hint);
       if (safeHint) return remember(safeHint);
     }
     if (session.agent === "claude") {
-      for (const project of await safeDirs(root)) {
+      for (const project of safeDirs(root)) {
         const path = join(root, project, `${id}.jsonl`);
-        const safePath = await safeNativeFile(root, path);
+        const safePath = safeNativeFile(root, path);
         if (safePath) return remember(safePath);
       }
       return undefined;
     }
     if (session.agent === "kimi") {
-      for (const workspace of await safeDirs(root)) {
+      for (const workspace of safeDirs(root)) {
         const path = join(root, workspace, id, "agents", "main", "wire.jsonl");
-        const safePath = await safeNativeFile(root, path);
+        const safePath = safeNativeFile(root, path);
         if (safePath) return remember(safePath);
       }
       return undefined;
     }
     // Older Codex app-server versions may omit thread.path. Search only dated session dirs.
     let inspected = 0;
-    for (const year of await safeDirs(root)) {
-      for (const month of await safeDirs(join(root, year))) {
-        for (const day of await safeDirs(join(root, year, month))) {
+    for (const year of safeDirs(root)) {
+      for (const month of safeDirs(join(root, year))) {
+        for (const day of safeDirs(join(root, year, month))) {
           const directory = join(root, year, month, day);
-          const entries = await safeFiles(directory);
+          const entries = safeFiles(directory);
           inspected += entries.length;
           if (inspected > MAX_DISCOVERY_ENTRIES) return undefined;
           const name = entries.find((entry) => entry.startsWith("rollout-") && entry.endsWith(`-${id}.jsonl`));
           if (name) {
-            const safePath = await safeNativeFile(root, join(directory, name));
+            const safePath = safeNativeFile(root, join(directory, name));
             if (safePath) return remember(safePath);
           }
         }
@@ -180,22 +225,45 @@ function within(root: string, path: string): boolean {
   return rel !== "" && rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel);
 }
 
-async function safeNativeFile(root: string, path: string): Promise<string | undefined> {
+function safeNativeFile(root: string, path: string): string | undefined {
   if (!within(root, path)) return undefined;
   try {
-    const [realRoot, realPath] = await Promise.all([realpath(root), realpath(path)]);
-    return within(realRoot, realPath) && (await stat(realPath)).isFile() ? realPath : undefined;
+    const realRoot = realpathSync(root), realPath = realpathSync(path);
+    return within(realRoot, realPath) && statSync(realPath).isFile() ? realPath : undefined;
   } catch { return undefined; }
 }
 
-async function safeDirs(path: string): Promise<string[]> {
-  try { return (await readdir(path, { withFileTypes: true })).filter((item) => item.isDirectory()).map((item) => item.name); }
+function safeDirs(path: string): string[] {
+  try { return readdirSync(path, { withFileTypes: true }).filter((item) => item.isDirectory()).map((item) => item.name); }
   catch { return []; }
 }
 
-async function safeFiles(path: string): Promise<string[]> {
-  try { return (await readdir(path, { withFileTypes: true })).filter((item) => item.isFile()).map((item) => item.name); }
+function safeFiles(path: string): string[] {
+  try { return readdirSync(path, { withFileTypes: true }).filter((item) => item.isFile()).map((item) => item.name); }
   catch { return []; }
+}
+
+function nativePathMatches(agent: AgentKind, id: string, path: string): boolean {
+  if (agent === "claude") return basename(path) === `${id}.jsonl`;
+  if (agent === "codex") return basename(path).startsWith("rollout-") && basename(path).endsWith(`-${id}.jsonl`);
+  return basename(path) === "wire.jsonl" && basename(dirname(path)) === "main"
+    && basename(dirname(dirname(path))) === "agents" && basename(dirname(dirname(dirname(path)))) === id;
+}
+
+function nativeHeader(path: string): { text: string; truncated: boolean } {
+  const fd = openSync(path, "r");
+  try {
+    const size = fstatSync(fd).size;
+    const buffer = Buffer.alloc(Math.min(size, MAX_TAIL_BYTES));
+    let bytes = 0;
+    while (bytes < buffer.length) {
+      const read = readSync(fd, buffer, bytes, buffer.length - bytes, bytes);
+      if (!read) break;
+      bytes += read;
+    }
+    if (bytes < buffer.length) throw new Error("原生存档读取不完整");
+    return { text: buffer.toString("utf8"), truncated: size > MAX_TAIL_BYTES };
+  } finally { closeSync(fd); }
 }
 
 /** Bound the self-contained event, counting UTF-8 bytes including JSON escaping. */

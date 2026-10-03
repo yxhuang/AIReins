@@ -29,6 +29,7 @@ export interface Dispatch {
   parent: { agent: string; sessionId: string | null; entrypoint: string | null; model: string | null; runId?: string } | null;
   promptHead: string | null;
   subagents?: CodexSubagent[];
+  agentType?: string | null;
 }
 
 interface CodexSubagent {
@@ -170,7 +171,7 @@ export function createCodexSubagentReader(read = readCodexSubagent) {
     for (const run of codex) {
       let parents = new Set(run.session ? [run.session] : []);
       const seen = new Set(parents);
-      for (let depth = 1; depth <= 2; depth++) {
+      for (let depth = 1; parents.size; depth++) {
         const children = [...agents.values()].filter((agent) => parents.has(agent.parentThreadId) && !seen.has(agent.threadId))
           .sort((a, b) => (a.startedAt ?? "").localeCompare(b.startedAt ?? "") || a.threadId.localeCompare(b.threadId));
         parents = new Set(children.map((agent) => agent.threadId));
@@ -181,6 +182,215 @@ export function createCodexSubagentReader(read = readCodexSubagent) {
 }
 
 const attachCodexSubagents = createCodexSubagentReader();
+
+const CLAUDE_WINDOW_MS = 30 * 60_000;
+const CLAUDE_READ_BYTES = 1024 * 1024;
+const NATIVE_ID = /^[A-Za-z0-9_-]{1,128}$/u;
+
+interface ClaudeSubagentSnapshot {
+  agent: {
+    agentId: string;
+    parentSessionId: string;
+    cwd: string | null;
+    model: string | null;
+    agentType: string | null;
+    name: string;
+    promptHead: string | null;
+    startedAt: string | null;
+    lastActivityAt: string;
+  };
+  lifecycle: "active" | "finished" | "failed" | "unknown";
+  mtimeMs: number;
+}
+
+function claudeMessageText(content: unknown): string | null {
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return null;
+  const text = content.filter((part) => part?.type === "text" && typeof part.text === "string").map((part) => part.text).join("\n");
+  return text || null;
+}
+
+/** Bounded head/tail reads; incomplete JSONL writes are never treated as a final answer. */
+async function claudeRows(path: string) {
+  const file = await openFile(dirname(path), basename(path));
+  if (!file) return null;
+  try {
+    const info = await file.stat();
+    const headBytes = await readBytes(file, 0, Math.min(info.size, CLAUDE_READ_BYTES));
+    const parse = (bytes: Buffer, partialHead = false) => {
+      const lines = bytes.toString("utf8").split("\n");
+      if (partialHead) lines.shift();
+      lines.pop(); // Consume only newline-terminated records, including the head boundary.
+      const rows: Record<string, any>[] = [];
+      for (const line of lines) {
+        try { const row = JSON.parse(line); if (row && typeof row === "object") rows.push(row); }
+        catch { /* Bad lines are local to the record. */ }
+      }
+      return rows;
+    };
+    const head = parse(headBytes);
+    const tailOffset = Math.max(0, info.size - CLAUDE_READ_BYTES);
+    const tail = tailOffset ? parse(await readBytes(file, tailOffset, info.size - tailOffset), true) : head;
+    return { head, tail, mtimeMs: info.mtimeMs };
+  } finally { await file.close(); }
+}
+
+export async function readClaudeSubagent(path: string): Promise<ClaudeSubagentSnapshot | null> {
+  try {
+    const rows = await claudeRows(path);
+    const first = rows?.head[0];
+    if (!rows || first?.isSidechain !== true || !NATIVE_ID.test(first.agentId ?? "") || !NATIVE_ID.test(first.sessionId ?? "")
+      || basename(path) !== `agent-${first.agentId}.jsonl`) return null;
+    let metadata: Record<string, unknown> | null = null;
+    try { metadata = await readJson(dirname(path), basename(path).replace(/\.jsonl$/u, ".meta.json")); }
+    catch { /* Optional metadata is not authoritative for lifecycle/model. */ }
+    const user = rows.head.find((row) => row.type === "user");
+    const prompt = claudeMessageText(user?.message?.content);
+    const promptHead = prompt?.split(/\r?\n/u).find((line) => line.trim())?.trim().slice(0, 160) ?? null;
+    let model: string | null = null;
+    let lifecycle: ClaudeSubagentSnapshot["lifecycle"] = "unknown";
+    let lastActivityAt = stringValue(first.timestamp) ?? new Date(rows.mtimeMs).toISOString();
+    for (const row of [...rows.head, ...(rows.tail === rows.head ? [] : rows.tail)]) {
+      if (Number.isFinite(Date.parse(row.timestamp))) lastActivityAt = row.timestamp;
+      if (row.type === "assistant") {
+        model = stringValue(row.message?.model) ?? model;
+        if (row.isApiErrorMessage === true) lifecycle = "failed";
+        else if (["end_turn", "stop_sequence"].includes(row.message?.stop_reason)) lifecycle = "finished";
+        else lifecycle = "active";
+      } else if (row.type === "user") lifecycle = "active";
+    }
+    return { lifecycle, mtimeMs: rows.mtimeMs, agent: {
+      agentId: first.agentId, parentSessionId: first.sessionId, cwd: stringValue(first.cwd),
+      model: model?.replace(/^claude-/u, "").replace(/-(\d{8})$/u, "").replace(/(\d)-(\d)(?=-|$)/u, "$1.$2") ?? null,
+      agentType: stringValue(metadata?.agentType), name: stringValue(metadata?.description) ?? promptHead ?? first.agentId,
+      promptHead, startedAt: stringValue(first.timestamp), lastActivityAt,
+    } };
+  } catch { return null; }
+}
+
+export interface ClaudeParentSession { cwd: string | null; nativeSessionId?: string }
+export type ClaudeSessionProvider = () => readonly ClaudeParentSession[] | Promise<readonly ClaudeParentSession[]>;
+
+/** Only registered/delegate parent IDs; snapshots cache JSONL/meta path/mtime/size. */
+export function createClaudeSubagentReader(read = readClaudeSubagent,
+  listDirectory = (path: string) => readdir(path, { withFileTypes: true })) {
+  const cache = new Map<string, { fingerprint: string; value: Promise<ClaudeSubagentSnapshot | null> }>();
+  const parentCache = new Map<string, { fingerprint: string; value: Promise<{ cwd: string | null; model: string | null; entrypoint: string | null } | null> }>();
+  const locations = new Map<string, { expires: number; directories: string[] }>();
+  return async (runs: Dispatch[], projectsRoot: string, now = Date.now(), sessions: readonly ClaudeParentSession[] = []): Promise<Dispatch[]> => {
+    let canonicalRoot: string;
+    try { canonicalRoot = await realpath(projectsRoot); } catch { return []; }
+    const candidates = new Map<string, string | null>();
+    for (const session of sessions) {
+      if (session.nativeSessionId && NATIVE_ID.test(session.nativeSessionId)) {
+        const cwd = stringValue(session.cwd);
+        if (cwd || !candidates.has(session.nativeSessionId)) candidates.set(session.nativeSessionId, cwd);
+      }
+    }
+    for (const run of runs) {
+      const id = run.parent?.agent === "claude" ? run.parent.sessionId : null;
+      if (id && NATIVE_ID.test(id) && !candidates.has(id)) candidates.set(id, null);
+    }
+    // A delegate executor's cwd need not equal its Claude parent's cwd. For an ID-only
+    // parent, inspect just <project>/<id>.jsonl; never list other projects' contents.
+    let projectNames: Promise<Awaited<ReturnType<typeof listDirectory>>> | undefined;
+    const locate = async (id: string): Promise<string[]> => {
+      const key = `${canonicalRoot}/${id}`;
+      const existing = locations.get(key);
+      if (existing && existing.expires > now) return existing.directories;
+      const directories: string[] = [];
+      projectNames ??= listDirectory(canonicalRoot);
+      for (const project of await projectNames) {
+        if (!project.isDirectory()) continue;
+        const directory = join(canonicalRoot, project.name);
+        try { if ((await stat(join(directory, `${id}.jsonl`))).isFile()) directories.push(directory); }
+        catch { /* Only this candidate filename is checked. */ }
+      }
+      locations.delete(key);
+      if (locations.size >= 256) locations.delete(locations.keys().next().value!);
+      locations.set(key, { expires: now + 30_000, directories });
+      return directories;
+    };
+    const output = new Map<string, Dispatch>();
+    for (const [parentSessionId, expectedCwd] of candidates) {
+      let directories: string[];
+      try { directories = expectedCwd ? [join(canonicalRoot, expectedCwd.replace(/[^A-Za-z0-9]/gu, "-"))] : await locate(parentSessionId); }
+      catch { continue; }
+      for (const directory of directories) {
+        const sessionDirectory = join(directory, parentSessionId);
+        const childDirectory = join(sessionDirectory, "subagents");
+        const parentPath = join(directory, `${parentSessionId}.jsonl`);
+        try {
+          if (await realpath(directory) !== directory || await realpath(sessionDirectory) !== sessionDirectory
+            || await realpath(childDirectory) !== childDirectory || await realpath(parentPath) !== parentPath) continue;
+          // Child appends do not update parent directory mtime; inspect candidate children.
+          const children = [];
+          for (const child of await listDirectory(childDirectory)) {
+            if (!child.isFile() || !/^agent-[A-Za-z0-9_-]+\.jsonl$/u.test(child.name)) continue;
+            const path = join(childDirectory, child.name);
+            try {
+              const info = await stat(path);
+              if (info.mtimeMs >= now - CLAUDE_WINDOW_MS) children.push({ path, info });
+            } catch { /* A native writer may replace the file. */ }
+          }
+          if (!children.length) continue;
+          const parentInfo = await stat(parentPath);
+          const parentFingerprint = `${parentInfo.mtimeMs}:${parentInfo.size}`;
+          let parentSnapshot = parentCache.get(parentPath);
+          if (!parentSnapshot || parentSnapshot.fingerprint !== parentFingerprint) {
+            const value = (async () => {
+              const rows = await claudeRows(parentPath);
+              const identity = rows?.head.find((row) => row.sessionId === parentSessionId && row.isSidechain !== true && stringValue(row.cwd));
+              const cwd = stringValue(identity?.cwd);
+              if (!identity || !cwd || cwd.replace(/[^A-Za-z0-9]/gu, "-") !== basename(directory)) return null;
+              return { cwd, model: await readClaudeTranscriptModel(parentPath), entrypoint: stringValue(identity.entrypoint) };
+            })();
+            parentSnapshot = { fingerprint: parentFingerprint, value };
+            parentCache.delete(parentPath);
+            if (parentCache.size >= 256) parentCache.delete(parentCache.keys().next().value!);
+            parentCache.set(parentPath, parentSnapshot);
+          }
+          const parent = await parentSnapshot.value;
+          if (!parent || !parent.cwd || (expectedCwd && parent.cwd !== expectedCwd)) continue;
+          const cwd = parent.cwd;
+          for (const { path, info } of children) {
+            try {
+              let metaFingerprint = "missing";
+              try { const meta = await stat(path.replace(/\.jsonl$/u, ".meta.json")); metaFingerprint = `${meta.mtimeMs}:${meta.size}`; } catch { /* Optional. */ }
+              const fingerprint = `${info.mtimeMs}:${info.size}:${metaFingerprint}`;
+              let snapshot = cache.get(path);
+              if (!snapshot || snapshot.fingerprint !== fingerprint) {
+                snapshot = { fingerprint, value: read(path) };
+                cache.delete(path);
+                if (cache.size >= 4096) cache.delete(cache.keys().next().value!);
+                cache.set(path, snapshot);
+              }
+              const value = await snapshot.value;
+              if (!value || value.agent.parentSessionId !== parentSessionId || value.agent.cwd !== cwd) continue;
+              const agent = value.agent;
+              const last = Date.parse(agent.lastActivityAt);
+              if (!Number.isFinite(last) || last > now || last < now - CLAUDE_WINDOW_MS) continue;
+              const status = value.lifecycle === "finished" ? "OK" : value.lifecycle === "failed" ? "TOOL_FAIL"
+                : value.lifecycle === "active" && now - value.mtimeMs <= 300_000 ? "running" : "unknown";
+              const runId = `claude-agent-${parentSessionId}-${agent.agentId}`;
+              const started = Date.parse(agent.startedAt ?? "");
+              output.set(runId, {
+                runId, tool: "claude", name: agent.name, cwd, model: agent.model, effort: null, agentType: agent.agentType,
+                status, startedAt: agent.startedAt, endedAt: status === "OK" || status === "TOOL_FAIL" ? agent.lastActivityAt : null,
+                elapsedS: Number.isFinite(started) ? Math.max(0, ((status === "running" ? now : last) - started) / 1000) : null,
+                exit: null, files: null, session: agent.agentId, promptHead: agent.promptHead,
+                parent: { agent: "claude", sessionId: parentSessionId, entrypoint: parent.entrypoint, model: parent.model },
+              });
+            } catch { /* Isolate inaccessible or concurrent writes. */ }
+          }
+        } catch { /* No readable candidate native parent/subagents directory. */ }
+      }
+    }
+    return [...output.values()];
+  };
+}
+
+const readClaudeSubagents = createClaudeSubagentReader();
 
 export interface DispatchDetail extends Dispatch {
   prompt: string | null;
@@ -464,15 +674,23 @@ async function readDispatch(runId: string, directory: string, includePrompt = tr
   return result;
 }
 
-export async function listDispatches(limit: string | number | null = null, root = rootDirectory()): Promise<Dispatch[]> {
+export async function listDispatches(limit: string | number | null = null, root = rootDirectory(),
+  listClaudeSessions: ClaudeSessionProvider = () => []): Promise<Dispatch[]> {
   const raw = limit === null ? 50 : Number(limit);
   const count = Number.isFinite(raw) && raw >= 1 ? Math.min(200, Math.floor(raw)) : 50;
-  const dispatches = (await allDispatches(root)).sort((a, b) => a.runId < b.runId ? 1 : a.runId > b.runId ? -1 : 0).slice(0, count);
+  const nativeRuns = await allDispatches(root);
+  const dispatches = nativeRuns.sort((a, b) => a.runId < b.runId ? 1 : a.runId > b.runId ? -1 : 0).slice(0, count);
   await Promise.all(dispatches.map(async (run) => {
     const directory = await resolveRun(run.runId, root);
     try { if (directory) run.promptHead = await promptHead(directory); } catch { run.status = "unknown"; }
   }));
-  return dispatches;
+  const claude = await allClaudeSubagents(root, await listClaudeSessions());
+  // Preserve delegate's existing run-ID ordering; insert native Claude records by time.
+  for (const agent of claude.sort((a, b) => Date.parse(b.startedAt ?? "") - Date.parse(a.startedAt ?? ""))) {
+    const index = dispatches.findIndex((run) => Date.parse(run.startedAt ?? "") < Date.parse(agent.startedAt ?? ""));
+    dispatches.splice(index < 0 ? dispatches.length : index, 0, agent);
+  }
+  return dispatches.slice(0, count);
 }
 
 export async function getDispatch(runId: string, root = rootDirectory()): Promise<DispatchDetail | null> {
@@ -542,6 +760,28 @@ export function createDispatchScanCache(scan: (root: string) => Promise<Dispatch
 }
 
 const allDispatches = createDispatchScanCache(scanDispatches, () => Date.now());
+// Claude's native-only records never enter delegate history, details, or parent badge APIs.
+const claudeScans = new Map<string, { fingerprint: string; list: ReturnType<typeof createDispatchScanCache> }>();
+async function allClaudeSubagents(root: string, sessions: readonly ClaudeParentSession[]): Promise<Dispatch[]> {
+  const projectsRoot = process.env.WORKBENCH_CLAUDE_PROJECTS_DIR || join(homedir(), ".claude", "projects");
+  const unique = new Map<string, ClaudeParentSession>();
+  for (const session of sessions) {
+    if (!session.nativeSessionId || !NATIVE_ID.test(session.nativeSessionId)) continue;
+    const value = { cwd: stringValue(session.cwd), nativeSessionId: session.nativeSessionId };
+    unique.set(JSON.stringify(value), value);
+  }
+  const candidates = [...unique.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([, value]) => value);
+  const fingerprint = JSON.stringify([projectsRoot, candidates]);
+  let entry = claudeScans.get(root);
+  if (!entry || entry.fingerprint !== fingerprint) {
+    entry = { fingerprint, list: createDispatchScanCache(async (directory) => readClaudeSubagents(await allDispatches(directory),
+      projectsRoot, Date.now(), candidates), () => Date.now()) };
+    claudeScans.delete(root);
+    if (claudeScans.size >= 256) claudeScans.delete(claudeScans.keys().next().value!);
+    claudeScans.set(root, entry);
+  }
+  return entry.list(root);
+}
 
 export async function listParentDispatches(parent: string, root = rootDirectory()): Promise<Dispatch[]> {
   if (!/^[A-Za-z0-9_-]{1,128}$/.test(parent)) throw new DispatchQueryError("parent 必须是原生会话 ID");

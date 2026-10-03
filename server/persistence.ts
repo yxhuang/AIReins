@@ -17,10 +17,13 @@ import {
 } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
-import type { SessionRecord, UnifiedEvent } from "./types.js";
+import { createHash } from "node:crypto";
+import { log } from "./logger.js";
+import type { SessionGroup, SessionRecord, UnifiedEvent } from "./types.js";
 
 export const workbenchHome = process.env.WORKBENCH_HOME || join(homedir(), ".workbench");
 export const registryPath = join(workbenchHome, "sessions.json");
+export const sessionGroupsPath = join(workbenchHome, "session-groups.json");
 const transcriptsDir = join(workbenchHome, "transcripts");
 
 function ensureStorage(): void {
@@ -42,6 +45,24 @@ export function saveRegistry(sessions: SessionRecord[]): void {
   renameSync(temporary, registryPath);
 }
 
+export function loadSessionGroups(): SessionGroup[] {
+  ensureStorage();
+  if (!existsSync(sessionGroupsPath)) return [];
+  const parsed: unknown = JSON.parse(readFileSync(sessionGroupsPath, "utf8"));
+  if (!Array.isArray(parsed) || parsed.some((group) => !group || typeof group !== "object"
+    || typeof group.id !== "string" || typeof group.name !== "string" || typeof group.createdAt !== "string")) {
+    throw new Error(`${sessionGroupsPath} 必须是分组 JSON 数组`);
+  }
+  return parsed as SessionGroup[];
+}
+
+export function saveSessionGroups(groups: SessionGroup[]): void {
+  ensureStorage();
+  const temporary = `${sessionGroupsPath}.tmp`;
+  writeFileSync(temporary, `${JSON.stringify(groups, null, 2)}\n`, { mode: 0o600 });
+  renameSync(temporary, sessionGroupsPath);
+}
+
 /**
  * 启动时清理（对标 Claude 的 cleanupPeriodDays）：最后活动早于 retentionDays 天的会话移出登记表；
  * 不在登记表里的 transcript 与 uploads/<id>（含 UI 里移除过的会话）一并删除。只删 wb 自己的副本，
@@ -52,7 +73,7 @@ export function pruneStorage(retentionDays: number, now = Date.now()): { expired
   const cutoff = now - retentionDays * 86_400_000;
   // 时间戳解析不了的一律保留，宁可少删
   const kept = retentionDays > 0
-    ? sessions.filter((session) => !(Date.parse(session.lastActivityAt) < cutoff))
+    ? sessions.filter((session) => session.pinned || session.groupId || !(Date.parse(session.lastActivityAt) < cutoff))
     : sessions;
   if (kept.length !== sessions.length) saveRegistry(kept);
   const keep = new Set(kept.map((session) => session.id));
@@ -72,19 +93,36 @@ export function pruneStorage(retentionDays: number, now = Date.now()): { expired
  * 删除 uploads/<id> 目录。引用路径可以指向别的会话的附件，所以仍被 kept 中某会话 transcript
  * 提到的目录保留。返回实际删除的目录数。
  */
-export function uploadDirReferences(kept: SessionRecord[]): string {
-  return kept.map((session) => {
-    try { return readFileSync(session.transcriptPath, "utf8"); } catch { return ""; }
-  }).join("\n");
+export function uploadDirReferences(kept: SessionRecord[]): Map<string, Set<string>> {
+  const uploadsDir = join(workbenchHome, "uploads");
+  const ids = existsSync(uploadsDir) ? readdirSync(uploadsDir) : [];
+  const byPath = new Map<string, Set<string>>();
+  return new Map(kept.map((session) => {
+    const cached = byPath.get(session.transcriptPath);
+    if (cached) return [session.id, cached];
+    let text: string;
+    try { text = readFileSync(session.transcriptPath, "utf8"); } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      text = "";
+    }
+    const references = new Set(ids.filter((id) => text.includes(join(uploadsDir, id))));
+    byPath.set(session.transcriptPath, references);
+    return [session.id, references];
+  }));
 }
 
 export function removeUploadDirs(ids: string[], kept: SessionRecord[]): number {
   if (ids.length === 0) return 0;
   const uploadsDir = join(workbenchHome, "uploads");
-  const referenced = uploadDirReferences(kept);
+  let references: Map<string, Set<string>>;
+  try { references = uploadDirReferences(kept); } catch (error) {
+    log("error", "upload deletion abandoned: transcript unreadable", { message: String(error) });
+    return 0;
+  }
+  const referenced = new Set([...references.values()].flatMap((ids) => [...ids]));
   let removed = 0;
   for (const id of ids) {
-    if (referenced.includes(join(uploadsDir, id))) continue;
+    if (referenced.has(id)) continue;
     rmSync(join(uploadsDir, id), { recursive: true, force: true });
     removed += 1;
   }
@@ -103,21 +141,94 @@ export function transcriptPathFor(sessionId: string): string {
 
 export function appendTranscript(path: string, event: UnifiedEvent): void {
   mkdirSync(dirname(path), { recursive: true });
-  appendFileSync(path, `${JSON.stringify(event)}\n`, { mode: 0o600 });
+  if (!transcriptHealth.has(path)) readTranscriptState(path);
+  const health = transcriptHealth.get(path)!;
+  if (health.readOnly) throw new Error(`transcript 损坏，禁止追加：${path}`);
+  // 只追加：用带字节校验的标记隔离原残行，重启后仍能区分它与真正的中间损坏。
+  const repair = health.tail ? `\n${JSON.stringify({ _wbSkippedTail: health.tail })}\n` : "";
+  try { appendFileSync(path, `${repair}${JSON.stringify(event)}\n`, { mode: 0o600 }); } catch (error) {
+    // 写入可能只完成一部分；下次必须从真实字节重判，不能复用旧尾段边界。
+    transcriptHealth.delete(path);
+    throw error;
+  }
+  health.tail = undefined;
+}
+
+interface TailBoundary { offset: number; bytes: number; sha256: string }
+const transcriptHealth = new Map<string, { readOnly: boolean; tail?: TailBoundary }>();
+const tailMarkerPrefix = Buffer.from('{"_wbSkippedTail":');
+const tailBoundary = (bytes: Buffer, offset: number): TailBoundary => ({ offset, bytes: bytes.length,
+  sha256: createHash("sha256").update(bytes).digest("hex") });
+
+function transcriptEvent(parsed: any): UnifiedEvent {
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed) || typeof parsed.seq !== "number"
+    || typeof parsed.type !== "string" || !parsed.payload || typeof parsed.payload !== "object") throw new Error("无效事件对象");
+  return parsed as UnifiedEvent;
+}
+
+export function readTranscriptState(path: string): { events: UnifiedEvent[]; damaged: boolean; incompleteTail: boolean } {
+  let content: Buffer;
+  try { content = readFileSync(path); } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+      transcriptHealth.set(path, { readOnly: true });
+      throw error;
+    }
+    transcriptHealth.set(path, { readOnly: false });
+    return { events: [], damaged: false, incompleteTail: false };
+  }
+  const events: UnifiedEvent[] = [];
+  let offset = 0, lineNumber = 0;
+  let damaged = false;
+  let tail: TailBoundary | undefined;
+  let previous: { bytes: Buffer; offset: number } | undefined;
+  for (; offset < content.length;) {
+    lineNumber++;
+    const end = content.indexOf(10, offset);
+    if (end === -1) {
+      tail = tailBoundary(content.subarray(offset), offset);
+      log("warn", "transcript incomplete tail skipped", { file: path, line: lineNumber });
+      break;
+    }
+    const bytes = content.subarray(offset, end);
+    const line = bytes.toString("utf8");
+    // 即使原尾段恰好是完整 JSON，也按启动时的跳过语义保持隔离。
+    let isolatedTail = false;
+    const nextEnd = content.indexOf(10, end + 1);
+    if (nextEnd !== -1 && content.subarray(end + 1, end + 1 + tailMarkerPrefix.length).equals(tailMarkerPrefix)) {
+      try {
+        const marker = JSON.parse(content.subarray(end + 1, nextEnd).toString("utf8"))._wbSkippedTail;
+        if (marker) {
+          const boundary = tailBoundary(bytes, offset);
+          isolatedTail = marker.offset === boundary.offset && marker.bytes === boundary.bytes && marker.sha256 === boundary.sha256;
+        }
+      } catch { /* 下一行不是恢复标记 */ }
+    }
+    try {
+      if (!isolatedTail && line.trim()) {
+        const parsed = JSON.parse(line);
+        const marker = parsed?._wbSkippedTail;
+        if (marker) {
+          const boundary = previous && tailBoundary(previous.bytes, previous.offset);
+          if (!boundary || marker.offset !== boundary.offset || marker.bytes !== boundary.bytes || marker.sha256 !== boundary.sha256) {
+            throw new Error("尾行隔离标记不匹配");
+          }
+        } else {
+          events.push(transcriptEvent(parsed));
+        }
+      }
+    } catch (error) {
+      damaged = true;
+      log("error", "transcript invalid line", { file: path, line: lineNumber, message: String(error) });
+    }
+    previous = { bytes, offset };
+    offset = end + 1;
+  }
+  transcriptHealth.set(path, { readOnly: damaged, tail });
+  return { events, damaged, incompleteTail: Boolean(tail) };
 }
 
 export function readTranscript(path: string): UnifiedEvent[] {
-  if (!existsSync(path)) return [];
-  const events: UnifiedEvent[] = [];
-  for (const line of readFileSync(path, "utf8").split("\n")) {
-    if (!line.trim()) continue;
-    try {
-      events.push(JSON.parse(line) as UnifiedEvent);
-    } catch (error) {
-      throw new Error(`transcript 存在无效 NDJSON 行：${path}: ${String(error)}`);
-    }
-  }
-  return events;
+  return readTranscriptState(path).events;
 }
 
 /** 有界分块读取，保留原始行字节（含换行），不把整个 transcript 留在内存中。 */
@@ -148,7 +259,9 @@ function* transcriptLines(fd: number): Generator<{ bytes: Buffer; offset: number
 function legacyPartial(bytes: Buffer): boolean | undefined {
   const text = bytes.toString("utf8");
   if (!text.trim()) return undefined;
-  const event = JSON.parse(text);
+  const parsed = JSON.parse(text);
+  if (parsed?._wbSkippedTail) throw new Error("含尾行恢复标记的文件禁止压缩改写");
+  const event = transcriptEvent(parsed);
   return event.type === "tool_call_updated" && event.payload !== null
     && typeof event.payload === "object" && Object.hasOwn(event.payload, "partialInput")
     && event.payload.inputComplete !== true;
@@ -161,21 +274,36 @@ export function compactClaudeTranscripts(sessions: SessionRecord[]): { files: nu
   for (const name of readdirSync(transcriptsDir)) {
     if (!name.endsWith(".ndjson") || !claudeIds.has(name.slice(0, -7))) continue;
     const path = join(transcriptsDir, name);
-    const fd = openSync(path, "r");
+    let fd: number | undefined;
     let output: number | undefined;
     try {
+      fd = openSync(path, "r");
       result.files++;
       let lines = 0;
       let bytes = 0;
       let lastOffset = -1;
       let lastRemovedBytes = 0;
+      let lineNumber = 0;
+      let invalid = false;
       for (const line of transcriptLines(fd)) {
-        const removable = legacyPartial(line.bytes);
+        lineNumber++;
+        if (line.bytes.at(-1) !== 10) {
+          log("warn", "transcript compaction skipped incomplete tail", { file: path, line: lineNumber });
+          invalid = true;
+          break;
+        }
+        let removable;
+        try { removable = legacyPartial(line.bytes); } catch (error) {
+          log("error", "transcript compaction skipped invalid line", { file: path, line: lineNumber, message: String(error) });
+          invalid = true;
+          break;
+        }
         if (removable === undefined) continue;
         lastOffset = line.offset;
         lastRemovedBytes = removable ? line.bytes.length : 0;
         if (lastRemovedBytes) { lines++; bytes += lastRemovedBytes; }
       }
+      if (invalid) continue;
       // 末尾有效行是恢复 seq 的依据；即使它也是旧 partialInput，也必须保留。
       if (lastRemovedBytes) { lines--; bytes -= lastRemovedBytes; }
       if (!lines) continue; // 幂等：无可删行时不创建临时文件、不触碰 inode/mtime。
@@ -194,9 +322,11 @@ export function compactClaudeTranscripts(sessions: SessionRecord[]): { files: nu
       result.rewrittenFiles++;
       result.removedLines += lines;
       result.removedBytes += bytes;
+    } catch (error) {
+      log("error", "transcript compaction failed", { file: path, message: String(error) });
     } finally {
       if (output !== undefined) closeSync(output);
-      closeSync(fd);
+      if (fd !== undefined) closeSync(fd);
     }
   }
   return result;

@@ -9,10 +9,13 @@ import type {
   PermissionDecision,
   SessionConfig,
   SessionRecord,
+  SessionGroup,
+  SessionOrganizationPatch,
   SessionStatus,
   UnifiedEvent,
 } from "./types";
 import { createSession, deleteSession, fetchCommands, fetchEarlierEvents, fetchFiles, fetchMeta, fetchPages, fetchSessions, fetchSnapshot, releaseSession, type CreateSessionInput } from "./api";
+import { createSessionGroup, deleteSessionGroup, fetchSessionGroups, patchSession, renameSessionGroup } from "./api";
 import { sessionTitle } from "../../shared/session-title";
 import { extractMentionTokens, stripMentionCandidates } from "./mentions";
 import { partitionPages, type SkippedPage } from "./pages";
@@ -29,6 +32,14 @@ interface LastError {
   sessionId?: string;
 }
 
+/** 发送被拒后的完整输入内容；由输入框一次性消费，不自动重发。 */
+export interface ComposerSendRestore {
+  sessionId: string;
+  text: string;
+  mentions: Mention[];
+  version: number;
+}
+
 /** 旧服务端全量快照的兼容窗口上限；分页模式保留已加载完整段。 */
 const MAX_EVENTS = 2000;
 
@@ -42,6 +53,30 @@ export const MAX_MENTIONS = 20;
 /** 草稿在 localStorage 的 key 前缀：workbench-draft-<sessionId>。 */
 const DRAFT_STORAGE_PREFIX = "workbench-draft-";
 const LAST_SESSION_KEY = "workbench-last-session";
+
+/** 手机的一个 history 条目包含完整视图，面板前进时无需借用当前 store 的残留状态。 */
+interface MobileRoute {
+  hash: string;
+  currentId: string | null;
+  currentPageId: string | null;
+  historyOpen: boolean;
+  historySelection: HistorySession | null;
+  dispatchesOpen: boolean;
+  termOpen: boolean;
+  filesOpen: boolean;
+}
+interface MobileSource {
+  id: string;
+  route: MobileRoute;
+  source?: MobileSource;
+}
+interface MobileEntry extends MobileSource {
+  version: 1;
+}
+function mobileEntryId(): string {
+  // HTTP 局域网入口也可用，不依赖仅安全上下文提供的 crypto.randomUUID。
+  return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
 
 interface SessionData {
   events: UnifiedEvent[];
@@ -69,6 +104,9 @@ function readFocusView(): boolean {
 
 export class Store {
   sessions: SessionRecord[] = [];
+  sessionGroups: SessionGroup[] = [];
+  /** 组织更改不推进会话 seq；防止在途旧 REST 响应撤销已收到的广播。 */
+  private organizationVersion = 0;
   meta: MetaInfo | null = null;
   currentId: string | null = null;
   /** 扩展页面列表（仅 type:"iframe"；未知类型进 skippedPages）与当前打开的页面 id */
@@ -85,6 +123,10 @@ export class Store {
   fileMentionRequest: { sessionId: string; path: string; version: number } | null = null;
   private fileMentionSequence = 0;
   private beforeDispatches: { hash: string; currentId: string | null; selection: HistorySession | null } | null = null;
+  /** 只相信本次运行亲自 push 的相邻关系；刷新后的来源仍可 replace，但不盲目 back。 */
+  private mobilePredecessors = new Map<string, string>();
+  private mobileBackPending: string | null = null;
+  private sessionsLoaded = false;
   data = new Map<string, SessionData>();
   wsState: WsState = "closed";
   /** Focus view：只显示用户输入与助手回复（闸门/提问照常），按浏览器记忆 */
@@ -111,6 +153,14 @@ export class Store {
   mentionPaths = new Map<string, Map<string, string | null>>();
   /** 每会话输入框草稿：内存 + localStorage 持久化（刷新不丢），remove 时两处都清 */
   drafts = new Map<string, string>();
+  /** 发送被本地拦下的原因（sessionId → 文案：有待决闸门 / 配置切换中）：显示在输入框上方，× 或下次发送尝试清除 */
+  sendNotices = new Map<string, string>();
+  /** 服务端拒绝后还回输入框的一次性请求（Composer 消费，语义同 fileMentionRequest）；只在草稿仍为空时发布 */
+  sendTextRestore: ComposerSendRestore | null = null;
+  private sendRestoreSequence = 0;
+  /** clientRequestId → 暂存的发送内容：同 id ack / user_message 回显丢弃，同 id error 还回文本与引用；不自动重发 */
+  private sendStash = new Map<string, { sessionId: string; text: string; mentions?: Mention[] }>();
+  private nextClientRequestId = 0;
   /** 全局时钟：有 running/starting 会话时每秒 tick，否则每 30 秒 tick。 */
   now = Date.now();
   /** @ 路径结论版本；嵌套 Map 原地更新时供 selector 取得可比较的原始值。 */
@@ -206,14 +256,19 @@ export class Store {
 
   async init(): Promise<void> {
     window.addEventListener("hashchange", this.onHashChange);
+    // 同 hash 的 state 条目也会触发 popstate（例如面板从不同会话打开）。
+    window.addEventListener("popstate", this.onPopState);
     // 手机锁屏 / 切后台回来、网络恢复：立即重连，不等退避计时器（最长 15 秒）。
     document.addEventListener("visibilitychange", this.onVisibilityChange);
     window.addEventListener("online", this.onOnline);
     // 无 hash 进入（托盘 / 快捷方式 / PWA 冷启动）时回到上次打开的会话
     let restored: string | null = null;
-    if (!window.location.hash) {
+    // 桌面派单/历史/页面面板的 hash 不带会话 ID，刷新时同样把上次的会话放回主区
+    const panelRestore = /^#\/(?:dispatches|history$|page\/)/.test(window.location.hash)
+      && !this.isMobileNavigation() && !this.readMobileEntry();
+    if (!window.location.hash || panelRestore) {
       try { restored = localStorage.getItem(LAST_SESSION_KEY); } catch { /* 存储不可用就停在主页 */ }
-      if (restored) history.replaceState(null, "", `#/session/${encodeURIComponent(restored)}`);
+      if (restored && !panelRestore) window.history.replaceState(null, "", `#/session/${encodeURIComponent(restored)}`);
     }
     this.onHashChange();
     try {
@@ -221,8 +276,16 @@ export class Store {
     } catch (error) {
       this.lastError = { message: error instanceof Error ? error.message : String(error) };
     }
-    await this.refreshSessions();
-    if (restored && this.currentId === restored && !this.sessions.some((x) => x.id === restored)) this.navigate(null);
+    // 路由先于 meta 到达；能力确认后不能留下一个无法挂载的终端全屏。
+    if (this.isMobileNavigation() || this.readMobileEntry()) this.onHashChange();
+    await Promise.all([this.refreshSessions(), this.refreshSessionGroups()]);
+    if (panelRestore) {
+      if (restored && !this.currentId && this.sessions.some((x) => x.id === restored)) {
+        this.currentId = restored;
+        // 关闭派单面板时回到这个会话，而不是冷启动时记下的主页
+        if (this.beforeDispatches) this.beforeDispatches = { ...this.beforeDispatches, hash: `#/session/${encodeURIComponent(restored)}`, currentId: restored };
+      }
+    } else if (restored && this.currentId === restored && !this.sessions.some((x) => x.id === restored)) this.navigate(null);
     this.startClock();
     await this.refreshPages();
     if (this.currentId) await this.ensureLoaded(this.currentId);
@@ -231,6 +294,22 @@ export class Store {
   }
 
   private onHashChange = (): void => {
+    const saved = this.readMobileEntry();
+    // 以实际离开来源条目为准；延迟 hashchange 不应解除下一次 back 的锁。
+    if (this.mobileBackPending && saved?.id !== this.mobileBackPending) this.mobileBackPending = null;
+    // 手机创建的条目跨到桌面后也按完整快照恢复；原生桌面条目仍走旧分支。
+    if (this.isMobileNavigation() || saved) {
+      let entry = saved ?? this.replaceMobileEntry(this.mobileRouteFromHash(window.location.hash || "#/"));
+      if (entry.route.termOpen && this.meta?.capabilities.terminal === false) {
+        let source = entry.source;
+        while (source?.route.termOpen) source = source.source;
+        entry = this.replaceMobileEntry(source?.route ?? this.mobileRouteFromHash(
+          entry.route.currentId ? `#/session/${encodeURIComponent(entry.route.currentId)}` : "#/",
+        ), source?.source);
+      }
+      this.applyMobileRoute(entry.route);
+      return;
+    }
     if (/^#\/dispatches(?:\/[^?]+)?(?:\?runs=.*)?$/.test(window.location.hash)) {
       if (!this.dispatchesOpen) {
         this.beforeDispatches = {
@@ -277,17 +356,159 @@ export class Store {
     this.notify();
   };
 
+  private isMobileNavigation(): boolean {
+    return typeof window !== "undefined" && window.matchMedia?.("(max-width: 720px)").matches === true;
+  }
+
+  private onPopState = (): void => {
+    if (this.mobileBackPending && this.readMobileEntry()?.id !== this.mobileBackPending) this.mobileBackPending = null;
+    if (this.isMobileNavigation() || this.readMobileEntry()) this.onHashChange();
+  };
+
+  private mobileRouteFromHash(hash: string): MobileRoute {
+    const session = hash.match(/^#\/session\/([^/]+)$/)?.[1];
+    const page = hash.match(/^#\/page\/([^/]+)$/)?.[1];
+    const dispatchesOpen = /^#\/dispatches(?:\/[^?]+)?(?:\?runs=.*)?$/.test(hash);
+    const termOpen = hash === "#/terminal";
+    const filesOpen = hash === "#/files";
+    const historyOpen = hash === "#/history";
+    const panel = dispatchesOpen || termOpen || filesOpen;
+    return {
+      hash,
+      currentId: session ? decodeURIComponent(session) : panel || page || historyOpen ? this.currentId : null,
+      currentPageId: page ? decodeURIComponent(page) : panel ? this.currentPageId : null,
+      historyOpen: historyOpen || (panel && this.historyOpen),
+      historySelection: historyOpen || (panel && this.historyOpen) ? this.historySelection : null,
+      dispatchesOpen, termOpen, filesOpen,
+    };
+  }
+
+  private captureMobileRoute(): MobileRoute {
+    return {
+      hash: window.location.hash || "#/", currentId: this.currentId,
+      currentPageId: this.currentPageId, historyOpen: this.historyOpen,
+      historySelection: this.historySelection, dispatchesOpen: this.dispatchesOpen,
+      termOpen: this.termOpen, filesOpen: this.filesOpen,
+    };
+  }
+
+  private readMobileEntry(): MobileEntry | null {
+    const entry = window.history?.state?.workbenchNavigation;
+    const validRoute = (route: MobileRoute | undefined): route is MobileRoute => Boolean(route
+      && typeof route.hash === "string"
+      && (route.currentId === null || typeof route.currentId === "string")
+      && (route.currentPageId === null || typeof route.currentPageId === "string")
+      && (route.historySelection === null || typeof route.historySelection === "object")
+      && [route.historyOpen, route.dispatchesOpen, route.termOpen, route.filesOpen].every((flag) => typeof flag === "boolean"));
+    if (entry?.version !== 1 || entry.route?.hash !== (window.location.hash || "#/")) return null;
+    const seen = new Set<MobileSource>();
+    for (let source: MobileSource | undefined = entry; source; source = source.source) {
+      if (seen.has(source) || typeof source.id !== "string" || !validRoute(source.route)) return null;
+      seen.add(source);
+    }
+    return entry;
+  }
+
+  private writeMobileEntry(entry: MobileEntry): void {
+    window.history.replaceState({ ...window.history.state, workbenchNavigation: entry }, "", entry.route.hash);
+  }
+
+  private replaceMobileEntry(route: MobileRoute, source?: MobileSource): MobileEntry {
+    const entry: MobileEntry = { version: 1, id: mobileEntryId(), route, source };
+    this.writeMobileEntry(entry);
+    return entry;
+  }
+
+  private syncMobileRoute(): void {
+    const entry = this.readMobileEntry();
+    if (entry) this.writeMobileEntry({ ...entry, route: this.captureMobileRoute() });
+  }
+
+  private syncDesktopMobilePanel(): void {
+    const entry = this.readMobileEntry();
+    if (!entry || !(entry.route.termOpen || entry.route.filesOpen)) return;
+    // 桌面开关不 push/back；只修正继承自手机的 URL/state，避免缩回或刷新时复活。
+    const route = this.captureMobileRoute();
+    route.hash = this.termOpen ? "#/terminal" : this.filesOpen ? "#/files"
+      : this.historyOpen ? "#/history" : this.currentPageId ? `#/page/${encodeURIComponent(this.currentPageId)}`
+      : this.currentId ? `#/session/${encodeURIComponent(this.currentId)}` : "#/";
+    this.writeMobileEntry({ ...entry, route });
+  }
+
+  private applyMobileRoute(route: MobileRoute): void {
+    if (route.currentId && (this.removed.has(route.currentId) || (this.sessionsLoaded && !this.session(route.currentId)))) {
+      route = { ...route, currentId: null, hash: route.hash.startsWith("#/session/") ? "#/" : route.hash };
+      const entry = this.readMobileEntry();
+      if (entry) this.writeMobileEntry({ ...entry, route });
+    }
+    this.currentId = route.currentId;
+    this.currentPageId = route.currentPageId;
+    this.historyOpen = route.historyOpen;
+    this.historySelection = route.historySelection;
+    this.dispatchesOpen = route.dispatchesOpen;
+    this.termOpen = route.termOpen;
+    this.filesOpen = route.filesOpen;
+    this.beforeDispatches = null;
+    if (this.fileMentionRequest?.sessionId !== this.currentId) this.fileMentionRequest = null;
+    if (this.currentId) void this.ensureLoaded(this.currentId);
+    try {
+      if (this.currentId) localStorage.setItem(LAST_SESSION_KEY, this.currentId);
+      else localStorage.removeItem(LAST_SESSION_KEY);
+    } catch { /* 忽略 */ }
+    this.notify();
+  }
+
+  private pushMobileRoute(hash: string, destination?: MobileRoute): void {
+    // 列表与预览共用 hash；显式目的视图允许为首次预览压入同 hash 的 state 条目。
+    if (this.mobileBackPending || (window.location.hash === hash && !destination)) return;
+    const route = this.captureMobileRoute();
+    const previous = this.readMobileEntry() ?? this.replaceMobileEntry(route);
+    // 历史预览等非 URL 状态可能刚刚改变，也一并保存在来源条目。
+    window.history.replaceState({ ...window.history.state, workbenchNavigation: { ...previous, route } }, "", route.hash);
+    const entry: MobileEntry = {
+      version: 1, id: mobileEntryId(), route: destination ?? this.mobileRouteFromHash(hash),
+      source: { id: previous.id, route, source: previous.source },
+    };
+    this.mobilePredecessors.set(entry.id, previous.id);
+    window.history.pushState({ workbenchNavigation: entry }, "", hash);
+    this.onHashChange();
+  }
+
+  private returnMobileRoute(fallbackHash: string): void {
+    if (this.mobileBackPending) return;
+    const entry = this.readMobileEntry();
+    if (entry?.source && this.mobilePredecessors.get(entry.id) === entry.source.id) {
+      this.mobileBackPending = entry.id;
+      window.history.back();
+      return;
+    }
+    // 冷启动/刷新/外部链接不能证明上一条是来源，不退出应用，也不再压一个条目。
+    const route = entry?.source?.route ?? this.mobileRouteFromHash(fallbackHash);
+    this.replaceMobileEntry(route, entry?.source?.source);
+    this.applyMobileRoute(route);
+  }
+
+  backFromSession(): void {
+    if (this.isMobileNavigation()) this.returnMobileRoute("#/");
+    else this.navigate(null);
+  }
+
   navigate(id: string | null): void {
-    window.location.hash = id ? `#/session/${encodeURIComponent(id)}` : "#/";
+    const hash = id ? `#/session/${encodeURIComponent(id)}` : "#/";
+    if (this.isMobileNavigation()) { this.pushMobileRoute(hash); return; }
+    window.location.hash = hash;
     this.onHashChange();
   }
 
   navigatePage(id: string): void {
-    window.location.hash = `#/page/${encodeURIComponent(id)}`;
+    const hash = `#/page/${encodeURIComponent(id)}`;
+    if (this.isMobileNavigation()) { this.pushMobileRoute(hash); return; }
+    window.location.hash = hash;
     this.onHashChange();
   }
 
   navigateHistory(): void {
+    if (this.isMobileNavigation()) { this.pushMobileRoute("#/history"); return; }
     window.location.hash = "#/history";
     this.onHashChange();
   }
@@ -295,18 +516,26 @@ export class Store {
   toggleDispatches(): void {
     if (this.dispatchesOpen) this.closeDispatches();
     else {
+      if (this.isMobileNavigation()) { this.pushMobileRoute("#/dispatches"); return; }
       window.location.hash = "#/dispatches";
       this.onHashChange();
     }
   }
 
   navigateDispatches(runIds: string[] = []): void {
-    window.location.hash = runIds.length === 1 ? `#/dispatches/${encodeURIComponent(runIds[0]!)}`
+    const hash = runIds.length === 1 ? `#/dispatches/${encodeURIComponent(runIds[0]!)}`
       : runIds.length ? `#/dispatches?runs=${runIds.map(encodeURIComponent).join(",")}` : "#/dispatches";
+    if (this.isMobileNavigation()) {
+      if (!runIds.length && this.dispatchesOpen && window.location.hash !== hash) this.returnMobileRoute(hash);
+      else this.pushMobileRoute(hash);
+      return;
+    }
+    window.location.hash = hash;
     this.onHashChange();
   }
 
   closeDispatches(): void {
+    if (this.isMobileNavigation()) { this.returnMobileRoute(this.currentId ? `#/session/${encodeURIComponent(this.currentId)}` : "#/"); return; }
     const previous = this.beforeDispatches;
     this.currentId = previous?.currentId ?? null;
     window.location.hash = previous?.hash ?? "#/";
@@ -316,16 +545,28 @@ export class Store {
   }
 
   setTerminalOpen(open: boolean): void {
+    if (this.isMobileNavigation()) {
+      if (open) this.pushMobileRoute("#/terminal");
+      else if (this.termOpen) this.returnMobileRoute(this.currentId ? `#/session/${encodeURIComponent(this.currentId)}` : "#/");
+      return;
+    }
     if (open && this.dispatchesOpen) this.closeDispatches();
     if (open) this.filesOpen = false;
     this.termOpen = open;
+    this.syncDesktopMobilePanel();
     this.notify();
   }
 
   setFilesOpen(open: boolean): void {
+    if (this.isMobileNavigation()) {
+      if (open) this.pushMobileRoute("#/files");
+      else if (this.filesOpen) this.returnMobileRoute(this.currentId ? `#/session/${encodeURIComponent(this.currentId)}` : "#/");
+      return;
+    }
     if (open && this.dispatchesOpen) this.closeDispatches();
     if (open) this.termOpen = false;
     this.filesOpen = open;
+    this.syncDesktopMobilePanel();
     this.notify();
   }
 
@@ -342,17 +583,41 @@ export class Store {
   }
 
   closeSidebarPanel(returnToList = false): void {
+    if (this.isMobileNavigation()) { this.returnMobileRoute(this.currentId ? `#/session/${encodeURIComponent(this.currentId)}` : "#/"); return; }
     this.navigate(returnToList ? null : this.currentId);
   }
 
   selectHistory(item: HistorySession): void {
     if (!this.historyOpen) return;
+    if (this.isMobileNavigation()) {
+      if (this.mobileBackPending) return;
+      if (!this.historySelection) {
+        this.pushMobileRoute("#/history", { ...this.captureMobileRoute(), hash: "#/history", historySelection: item });
+        return;
+      }
+      // 在预览中换选只更新当前条目，保留列表来源，避免堆叠预览。
+    }
     this.historySelection = item;
+    this.syncMobileRoute();
     this.notify();
   }
 
   backToHistoryList(): void {
+    if (this.isMobileNavigation()) {
+      if (this.mobileBackPending) return;
+      const entry = this.readMobileEntry();
+      if (entry?.source?.route.historyOpen && !entry.source.route.historySelection) {
+        this.returnMobileRoute("#/history");
+      } else {
+        // 兼容旧版 replace 预览与无来源的冷启动 state：只清预览，不退到外部页面。
+        const route = { ...this.captureMobileRoute(), historySelection: null };
+        this.replaceMobileEntry(route, entry?.source);
+        this.applyMobileRoute(route);
+      }
+      return;
+    }
     this.historySelection = null;
+    this.syncMobileRoute();
     this.notify();
   }
 
@@ -378,13 +643,17 @@ export class Store {
   }
 
   async refreshSessions(): Promise<void> {
+    const organizationVersion = this.organizationVersion;
     try {
       const sessions = await fetchSessions();
       // REST 请求途中收到的较新 WS 摘要不能被旧列表覆盖。
-      this.sessions = sessions.map((session) => {
+      // 已 DELETE 的会话同理：旧的列表响应不得把它复活成打不开的残行。
+      this.sessions = sessions.filter((session) => !this.removed.has(session.id)).map((session) => {
         const live = this.session(session.id);
-        return live && live.seq > session.seq ? live : session;
+        return this.mergeSessionSummary(session, live, organizationVersion !== this.organizationVersion);
       });
+      this.sessionsLoaded = true;
+      if (this.isMobileNavigation() && this.currentId && !this.session(this.currentId)) this.onHashChange();
     } catch (error) {
       this.lastError = { message: error instanceof Error ? error.message : String(error) };
     }
@@ -422,6 +691,7 @@ export class Store {
     // 校验处取回的仍是 undefined，新会话首次快照必被误丢（界面永远空白的根因）。
     const gen = ++this.nextSnapshotGen;
     this.snapshotGen.set(id, gen);
+    const organizationVersion = this.organizationVersion;
     this.olderInflight.delete(id);
     const buffered = this.snapshotBuffers.get(id) ?? [];
     this.snapshotBuffers.set(id, buffered);
@@ -431,7 +701,11 @@ export class Store {
       try {
         const snapshot = await fetchSnapshot(id, true);
         if (this.snapshotGen.get(id) === gen) {
-          this.applySnapshot(id, snapshot.session, snapshot.seq, snapshot.events, snapshot.hasMore, snapshot.firstSeq);
+          const live = this.session(id);
+          const session = organizationVersion !== this.organizationVersion && live
+            ? { ...snapshot.session, pinned: live.pinned, customTitle: live.customTitle, groupId: live.groupId }
+            : snapshot.session;
+          this.applySnapshot(id, session, snapshot.seq, snapshot.events, snapshot.hasMore, snapshot.firstSeq);
           this.snapshotBuffers.delete(id);
           // 先解除在途状态，缓存中的缺口才可发起下一次必要的快照。
           if (this.snapshotInflight.get(id) === promise) this.snapshotInflight.delete(id);
@@ -658,7 +932,7 @@ export class Store {
   }
 
   private async alignAfterSocketOpen(reconnected: boolean, socket = this.socket): Promise<void> {
-    await this.refreshSessions();
+    await Promise.all([this.refreshSessions(), this.refreshSessionGroups()]);
     if (this.socket !== socket) return;
     // 列表恢复未加载会话的审批数；已加载会话通过同一条全局连接按各自游标补发。
     for (const [id, data] of this.data) {
@@ -680,6 +954,15 @@ export class Store {
 
   private handleFrame(frame: Record<string, unknown>): void {
     const type = String(frame.type ?? "");
+    if (type === "session_organization_updated") {
+      if (!Array.isArray(frame.sessions) || !Array.isArray(frame.groups)) return;
+      this.organizationVersion++;
+      this.sessions = (frame.sessions as SessionRecord[]).filter((session) => !this.removed.has(session.id))
+        .map((session) => this.mergeSessionSummary(session, this.session(session.id)));
+      this.sessionGroups = frame.groups as SessionGroup[];
+      this.notify();
+      return;
+    }
     if (type === "ready") return;
     if (type === "replay_complete") {
       const id = String(frame.sessionId ?? "");
@@ -688,7 +971,14 @@ export class Store {
       for (const event of buffered.sort((a, b) => a.seq - b.seq || Number(!!a.ephemeral) - Number(!!b.ephemeral))) this.handleEvent(event);
       return;
     }
-    if (type === "ack") return;
+    if (type === "ack") {
+      // 服务端受理回执：丢弃对应发送暂存（回显随后到，或已先到）
+      const requestId = typeof frame.clientRequestId === "string" ? frame.clientRequestId : "";
+      const stashed = this.sendStash.get(requestId);
+      if (stashed && (frame.sessionId === undefined || frame.sessionId === stashed.sessionId)
+        && (frame.action === undefined || frame.action === "user_message")) this.sendStash.delete(requestId);
+      return;
+    }
     if (type === "resync_required") {
       const id = String(frame.sessionId ?? "");
       if (id) { this.replayBuffers.delete(id); void this.resync(id); }
@@ -697,10 +987,25 @@ export class Store {
     if (type === "error") {
       const msg = String(frame.msg ?? "未知错误");
       const sid = typeof frame.sessionId === "string" ? frame.sessionId : "";
+      // 带 clientRequestId 的发送拒绝：按 id 归因（不进 configPending 的配置错误路径），
+      // 暂存丢弃、错误照告；仅当草稿仍为空（发送间隙没有新输入）才把文本写回草稿并请 Composer 还回文本与引用。
+      const requestId = typeof frame.clientRequestId === "string" ? frame.clientRequestId : "";
+      const stashed = requestId ? this.sendStash.get(requestId) : undefined;
+      if (stashed) {
+        this.sendStash.delete(requestId);
+        if (this.getDraft(stashed.sessionId).trim() === "") {
+          this.setDraft(stashed.sessionId, stashed.text);
+          this.sendTextRestore = { sessionId: stashed.sessionId, text: stashed.text, mentions: stashed.mentions ?? [], version: ++this.sendRestoreSequence };
+        }
+        this.lastError = { message: msg, sessionId: stashed.sessionId };
+        this.notify();
+        return;
+      }
       // 补发失败：放掉补发缓存（否则该会话事件永远卡在缓存里），退回快照对齐
       if (sid && frame.action === "replay" && this.replayBuffers.delete(sid)) void this.resync(sid);
-      // 有 set_config 在等结果的会话：错误归到配置控件旁，不进全局提示条。
-      if (sid && this.configPending.has(sid)) {
+      // set_config 在等结果的会话：配置相关错误归到配置控件旁，不进全局提示条；
+      // user_message 等其他动作的报错按 action 归因进全局条，不再误落配置控件。
+      if (sid && this.configPending.has(sid) && frame.action !== "user_message") {
         this.configPending.delete(sid);
         this.configErrors.set(sid, msg);
       } else {
@@ -769,12 +1074,6 @@ export class Store {
           // claude model/effort 重启切换开始：控件禁用 + 就地显示后端给的过渡文案，
           // config_updated / session_error 到达才解除（见下方两处）。
           this.configSwitching.set(event.sessionId, switchMessageFromPayload(event.payload));
-        } else if (event.type === "remote_control_updated") {
-          const current = this.sessions.find((item) => item.id === event.sessionId);
-          if (current) current.remoteControl = event.payload as unknown as SessionRecord["remoteControl"];
-        } else if (event.type === "background_tasks_updated") {
-          const current = this.sessions.find((item) => item.id === event.sessionId);
-          if (current) current.backgroundTasks = event.payload.tasks as SessionRecord["backgroundTasks"];
         } else if (event.type === "session_error") {
           // 切换中途失败（续接 worker 初始化失败等）：解除过渡态，错误就地显示在控件旁，
           // 不渲染成全局故障。
@@ -796,6 +1095,15 @@ export class Store {
       else return; // event.seq <= data.seq：补发重复帧，忽略。
     } else {
       // 未加载会话只维护列表摘要，打开时再取快照。
+    }
+
+    // 去重和补发缓存处理之后才确认回显；不以相同文本猜测是哪一次发送。
+    // 当前服务端的受理确认走 ack；若回显也带请求 id，只清掉同会话同 id 暂存。
+    if (event.type === "user_message") {
+      const requestId = event.payload.clientRequestId ?? (event as UnifiedEvent & { clientRequestId?: unknown }).clientRequestId;
+      if (typeof requestId === "string" && this.sendStash.get(requestId)?.sessionId === event.sessionId) {
+        this.sendStash.delete(requestId);
+      }
     }
 
     // 任何事件都刷新该会话的本地视图（lastActivityAt / 状态推断）。
@@ -908,19 +1216,57 @@ export class Store {
     return false;
   }
 
-  /** 上行失败（socket 非 OPEN）返回 false 并置 lastError，调用方据此把文本还回输入框。 */
-  sendUserMessage(sessionId: string, text: string, mentions?: Mention[]): boolean {
-    return this.send({
-      type: "user_message",
-      sessionId,
-      text,
-      ...(mentions && mentions.length > 0 ? { mentions } : {}),
+  /** 文本和结构化命令共用请求 id 与完整输入暂存；断线失败不暂存。 */
+  private sendTrackedMessage(sessionId: string, text: string, content: Record<string, unknown>, mentions?: Mention[]): boolean {
+    const clientRequestId = `wb-${Date.now()}-${++this.nextClientRequestId}`;
+    const sent = this.send({ type: "user_message", sessionId, ...content, clientRequestId });
+    if (sent) this.sendStash.set(clientRequestId, {
+      sessionId, text,
+      ...(mentions?.length ? { mentions: mentions.map((mention) => ({ ...mention })) } : {}),
     });
+    return sent;
   }
 
-  /** 结构化斜杠命令上行：command 与 text 互斥（后端对不支持的 driver 明确报错）。 */
-  sendCommand(sessionId: string, name: string, args: string): boolean {
-    return this.send({ type: "user_message", sessionId, command: { name, arguments: args } });
+  /** 上行失败（socket 非 OPEN）返回 false 并置 lastError，调用方据此把文本还回输入框。 */
+  sendUserMessage(sessionId: string, text: string, mentions?: Mention[]): boolean {
+    return this.sendTrackedMessage(sessionId, text, {
+      text, ...(mentions?.length ? { mentions } : {}),
+    }, mentions);
+  }
+
+  /** 结构化斜杠命令上行：command 与 text 互斥，暂存保留输入框中的原命令。 */
+  sendCommand(sessionId: string, name: string, args: string, originalText = `/${name}${args ? ` ${args}` : ""}`): boolean {
+    this.clearSendNotice(sessionId);
+    if (this.sendBlockReason(sessionId)) return false;
+    return this.sendTrackedMessage(sessionId, originalText, { command: { name, arguments: args } });
+  }
+
+  /** 本地拦下服务端必拒的发送（有待决闸门 / 配置切换中）：返回拦下原因并就地提示；启动等待不拦。 */
+  private sendBlockReason(sessionId: string): string | null {
+    const pending = this.pendingCount(sessionId);
+    const reason = pending > 0
+      ? `有 ${pending} 个待处理的审批闸门，处理后才能发送或插话`
+      : this.configSwitching.has(sessionId)
+        ? "正在切换配置，请稍候再发送"
+        : null;
+    if (reason) {
+      this.sendNotices.set(sessionId, reason);
+      this.notify();
+    }
+    return reason;
+  }
+
+  clearSendNotice(sessionId: string): void {
+    if (this.sendNotices.delete(sessionId)) this.notify();
+  }
+
+  /** 消费一次性完整还回请求；过期/已消费返回 null，纯图片的空文本仍是有效结果。 */
+  consumeSendTextRestore(version: number): Pick<ComposerSendRestore, "text" | "mentions"> | null {
+    if (this.sendTextRestore?.version !== version) return null;
+    const { text, mentions } = this.sendTextRestore;
+    this.sendTextRestore = null;
+    this.notify();
+    return { text, mentions };
   }
 
   /**
@@ -940,6 +1286,9 @@ export class Store {
   }
 
   private dispatchComposerInput(sessionId: string, text: string, extraMentions?: Mention[]): Promise<boolean> {
+    // 新的发送尝试清掉上一次的拦截提示；服务端必拒的（有待决闸门 / 配置切换中）本地直接拦下
+    this.clearSendNotice(sessionId);
+    if (this.sendBlockReason(sessionId)) return Promise.resolve(false);
     const session = this.session(sessionId);
     const caps = session ? this.meta?.drivers[session.agent] : undefined;
     const extras = extraMentions ?? [];
@@ -949,7 +1298,7 @@ export class Store {
       if (match) {
         const hit = (this.commands.get(sessionId) ?? []).find((c) => c.name === match[1]);
         if (hit) {
-          return Promise.resolve(this.sendCommand(sessionId, hit.name, (match[2] ?? "").trim()));
+          return Promise.resolve(this.sendCommand(sessionId, hit.name, (match[2] ?? "").trim(), text));
         }
       }
     }
@@ -1165,6 +1514,59 @@ export class Store {
     return session;
   }
 
+  private mergeSessionSummary(incoming: SessionRecord, live?: SessionRecord, preserveOrganization = false): SessionRecord {
+    const summary = live && live.seq > incoming.seq ? live : incoming;
+    const organization = preserveOrganization && live ? live : incoming;
+    return { ...summary, pinned: organization.pinned, customTitle: organization.customTitle, groupId: organization.groupId };
+  }
+
+  async refreshSessionGroups(): Promise<void> {
+    const version = this.organizationVersion;
+    try {
+      const groups = await fetchSessionGroups();
+      if (version === this.organizationVersion) this.sessionGroups = groups;
+    } catch (error) {
+      this.lastError = { message: error instanceof Error ? error.message : String(error) };
+    }
+    this.notify();
+  }
+
+  async patchSession(id: string, patch: SessionOrganizationPatch): Promise<void> {
+    const version = this.organizationVersion;
+    const session = await patchSession(id, patch);
+    if (this.removed.has(id)) return;
+    const live = this.session(id);
+    const updated = this.mergeSessionSummary(session, live, version !== this.organizationVersion);
+    this.organizationVersion++;
+    this.sessions = live ? this.sessions.map((item) => item.id === id ? updated : item) : [...this.sessions, updated];
+    this.notify();
+  }
+
+  async createSessionGroup(name: string): Promise<SessionGroup> {
+    const group = await createSessionGroup(name);
+    if (!this.sessionGroups.some((item) => item.id === group.id)) this.sessionGroups = [...this.sessionGroups, group];
+    this.organizationVersion++;
+    this.notify();
+    return group;
+  }
+
+  async renameSessionGroup(id: string, name: string): Promise<void> {
+    const version = this.organizationVersion;
+    const group = await renameSessionGroup(id, name);
+    if (version === this.organizationVersion) this.sessionGroups = this.sessionGroups.map((item) => item.id === id ? group : item);
+    this.organizationVersion++;
+    this.notify();
+  }
+
+  async deleteSessionGroup(id: string): Promise<void> {
+    const version = this.organizationVersion;
+    const groups = await deleteSessionGroup(id);
+    if (version === this.organizationVersion) this.sessionGroups = groups;
+    this.sessions = this.sessions.map((session) => session.groupId === id ? { ...session, groupId: undefined } : session);
+    this.organizationVersion++;
+    this.notify();
+  }
+
   /**
    * 从工作台移除会话：DELETE 注册表条目 + 停 worker（原生 transcript 不动）。
    * 成功后清该会话全部本地状态；删的是当前会话时导航到左栏顺序的下一个会话
@@ -1186,6 +1588,11 @@ export class Store {
     this.configErrors.delete(id);
     this.configSwitching.delete(id);
     this.configHints.delete(id);
+    this.sendNotices.delete(id);
+    if (this.sendTextRestore?.sessionId === id) this.sendTextRestore = null;
+    for (const [requestId, stashed] of this.sendStash) {
+      if (stashed.sessionId === id) this.sendStash.delete(requestId);
+    }
     const hintTimer = this.configHintTimers.get(id);
     if (hintTimer) {
       clearTimeout(hintTimer);

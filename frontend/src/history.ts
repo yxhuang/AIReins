@@ -2,9 +2,9 @@ import type { AgentKind, HistorySession, HistorySource, SessionRecord } from "./
 
 // 历史会话浏览的纯逻辑（无 DOM 依赖，可单测）：查询串构造、来源筛选、已导入对照。
 
-/** 来源徽标文案：workbench 一眼可辨；unknown 如实显示「未知」，不猜。 */
+/** 来源徽标文案：workbench 一眼可辨；interactive（CLI/VS Code/codex exec 委派等工作台以外启动）显示「其他」；unknown 如实显示「未知」，不猜。 */
 export const SOURCE_LABELS: Record<HistorySource, string> = {
-  interactive: "对话",
+  interactive: "其他",
   workbench: "工作台",
   unknown: "未知",
 };
@@ -14,7 +14,7 @@ export type SourceFilter = "all" | HistorySource;
 
 export const SOURCE_FILTER_LABELS: Record<SourceFilter, string> = {
   all: "全部",
-  interactive: "对话",
+  interactive: "其他",
   workbench: "工作台",
   unknown: "未知",
 };

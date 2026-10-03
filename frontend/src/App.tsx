@@ -95,7 +95,6 @@ export function App() {
     <div
       className={`app${collapsed ? " sidebar-collapsed" : ""}${hasMain ? " has-main" : ""}${termOpen || dispatchesOpen || filesOpen ? " term-open" : ""}`}
     >
-      {!hasMain && <div className="mobile-topbar mobile-panel-launcher"><PanelActions /></div>}
       <Sidebar
         collapsed={collapsed}
         onToggle={() => {
@@ -105,18 +104,11 @@ export function App() {
         newOpen={newOpen}
         onNewOpenChange={setNewOpen}
         returnToSession={returnToSession}
+        mobileActions={hasMain ? undefined : <PanelActions />}
       />
       {/* 主会话保持挂载，三个面板互斥占用右侧位置；窄屏沿用终端全屏规则。 */}
       <div className={`workspace${termOpen || dispatchesOpen || filesOpen ? " term-open" : ""}`}>
         <main className="main">
-          {historySelection && (
-            <div className="mobile-topbar">
-              <button type="button" className="btn" onClick={() => store.backToHistoryList()}>‹ 所有来源会话</button>
-              {pendingTotal > 0 && (
-                <span className="gate-badge" title={`${pendingTotal} 个闸门等待处理`}>{pendingTotal}</span>
-              )}
-            </div>
-          )}
           {historySelection ? (
             <HistoryPreviewPane item={historySelection} onBack={() => store.backToHistoryList()} />
           ) : current ? (
@@ -131,14 +123,12 @@ export function App() {
             <section className="welcome-view">
             <div className="view-panel-actions"><PanelActions /></div>
             <div className="empty-state">
-              <h1>workbench</h1>
-              <p>
-                这里是三家 CLI agent（claude / codex / kimi）的调度台。
-                左侧选一个会话，或新建一个开始。
-              </p>
-              <p className="empty-hint">
-                暖色只出现在需要你处理的审批上——看到暖色，就说明有 agent 在等你拍板。
-              </p>
+              <h1 className="empty-logo" aria-label="workbench">
+                <span className="empty-logo-mark" aria-hidden="true">wb</span>
+                <span className="empty-logo-line" aria-hidden="true" />
+                <span className="empty-logo-name" aria-hidden="true">workbench</span>
+              </h1>
+              <p>选一个会话，或新建一个</p>
               <button
                 type="button"
                 className="btn btn-primary"

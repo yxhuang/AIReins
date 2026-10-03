@@ -18,6 +18,7 @@ import {
 } from "../terminal";
 import { store } from "../store";
 import { FONT_SCALE_EVENT } from "../font-scale";
+import { readTermFontSize } from "../body-font";
 
 /** xterm 主题字段 ← --term-* 令牌；通过 color 属性解析 light-dark()。 */
 const TERM_THEME_VARS: [keyof ITheme, string][] = [
@@ -68,14 +69,6 @@ const NERD_FONTS = '"Maple Mono NF CN", "JetBrainsMono Nerd Font Mono", "JetBrai
 function readTermFontFamily(): string {
   const mono = getComputedStyle(document.documentElement).getPropertyValue("--font-mono").trim();
   return mono ? `${NERD_FONTS}, ${mono}` : `${NERD_FONTS}, monospace`;
-}
-
-function readTermFontSize(): number {
-  // Read the applied value, so storage failures do not prevent live updates.
-  const scale = Number(getComputedStyle(document.documentElement).getPropertyValue("--font-scale"));
-  // 宽屏对齐用户 VSCode 终端的 16px；手机窄屏 13px，不然一行放不下几个字
-  const base = window.matchMedia("(max-width: 720px)").matches ? 13 : 16;
-  return base * (Number.isFinite(scale) && scale > 0 ? scale : 1);
 }
 
 const SHELL_OPTIONS: Array<{ value: ShellKind; label: string }> = [
@@ -472,7 +465,7 @@ export function TerminalPanel({ open, onClose }: { open: boolean; onClose: () =>
           ) : (
             <button
               type="button"
-              className="btn panel-icon-button panel-kill-button"
+              className="btn chrome-icon-btn panel-icon-button panel-kill-button"
               aria-label="结束终端进程"
               title="结束终端进程"
               onClick={() => setConfirmKill(true)}
@@ -480,7 +473,7 @@ export function TerminalPanel({ open, onClose }: { open: boolean; onClose: () =>
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" aria-hidden="true"><path d="M18.36 6.64a9 9 0 1 1-12.73 0M12 2v10" /></svg>
             </button>
           )}
-          <button type="button" className="btn panel-icon-button" aria-label="隐藏终端面板" title="收起面板" onClick={onClose}>
+          <button type="button" className="btn chrome-icon-btn panel-icon-button" aria-label="隐藏终端面板" title="收起面板" onClick={onClose}>
             <PanelRightIcon />
           </button>
         </div>

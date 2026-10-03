@@ -10,7 +10,7 @@ export function DispatchPanel({ onClose }: { onClose: () => void }) {
     <div className="term-panel dispatch-side-panel" role="region" aria-label="派单面板" style={{ width: `${width}px` }}>
       <div className="term-titlebar">
         <strong className="dispatch-side-title">派单</strong>
-        <button type="button" className="btn panel-icon-button" aria-label="关闭派单面板" title="收起面板" onClick={onClose}><PanelRightIcon /></button>
+        <button type="button" className="btn chrome-icon-btn panel-icon-button" aria-label="关闭派单面板" title="收起面板" onClick={onClose}><PanelRightIcon /></button>
       </div>
       <Suspense fallback={<div className="empty-state" aria-label="派单加载中">正在加载派单…</div>}>
         <DispatchView />

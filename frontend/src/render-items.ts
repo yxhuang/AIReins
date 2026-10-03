@@ -120,6 +120,8 @@ export interface SystemBlock {
   seq: number;
   text: string;
   tone: "muted" | "error";
+  /** 异常原始码只放 title，正文显示中文原因。 */
+  rawCode?: string;
 }
 
 export interface RawBlock {
@@ -324,6 +326,20 @@ export function gateFromEvent(event: UnifiedEvent, agent: AgentKind): GateView {
   };
 }
 
+const TURN_ERROR_LABELS: Record<string, string> = {
+  error_during_execution: "执行时发生错误",
+  error_max_turns: "已达到回合数上限",
+  error_max_budget_usd: "已达到费用上限",
+  error_json_schema: "输出格式校验失败",
+  error_max_structured_output_retries: "输出格式重试次数已用尽",
+  failed: "执行失败",
+  cancelled: "执行已取消",
+  canceled: "执行已取消",
+  interrupted: "执行已中断",
+  max_tokens: "已达到输出长度上限",
+  refusal: "模型拒绝了本次请求",
+};
+
 // 按 seq 顺序把事件流折叠为渲染条目。
 function abnormalTurnReason(payload: Record<string, unknown>, agent: AgentKind): string | null {
   if (agent === "claude") {
@@ -521,10 +537,15 @@ export function buildRenderItems(events: UnifiedEvent[], agent: AgentKind): Rend
         userTexts.clear();
         turn++;
         const reason = abnormalTurnReason(p, agent);
-        if (reason) items.push({
-          kind: "system", key: `sys:${event.seq}`, seq: event.seq,
-          text: `本轮异常结束：${reason}`, tone: "error",
-        });
+        if (reason) {
+          const label = Object.hasOwn(TURN_ERROR_LABELS, reason) ? TURN_ERROR_LABELS[reason]
+            : /^[a-z][a-z_]+$/.test(reason) ? "执行未正常完成" : reason;
+          const raw = agent === "claude" ? p.subtype : agent === "codex" ? p.status : p.stopReason;
+          items.push({
+            kind: "system", key: `sys:${event.seq}`, seq: event.seq,
+            text: `本轮异常结束：${label}`, tone: "error", rawCode: typeof raw === "string" ? raw : reason,
+          });
+        }
         break;
       }
       case "session_error":

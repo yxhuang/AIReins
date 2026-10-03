@@ -151,7 +151,17 @@ export interface SessionSnapshotState {
   promptCacheUsageAt: number | null;
 }
 
+export interface WorkerProcessIdentity {
+  bootId: string;
+  startTime: string;
+  /** Only saved when the worker owns a dedicated Linux process group. */
+  processGroupId?: number;
+}
+
 export interface SessionRecord {
+  pinned?: boolean;
+  customTitle?: string;
+  groupId?: string;
   /** Only tail snapshots carry reducers computed from the complete transcript. */
   snapshotState?: SessionSnapshotState;
   title?: string;
@@ -176,9 +186,11 @@ export interface SessionRecord {
     historyCursor?: string;
   };
   processId?: number;
+  /** Persisted Linux identity for crash recovery; never used to adopt or signal an old worker. */
+  processIdentity?: WorkerProcessIdentity;
   /** true = worker 已释放（手动或空闲超时）；下次发送时按原生会话 id 从磁盘续接 */
   released?: boolean;
-  /** 仅退出时写盘：released 会话的原生对话指纹，重启载入后还原进内存（发现停服期间的外部续聊），不对外 */
+  /** 最近已同步的原生对话指纹随注册表写盘，重启后还原进内存（发现停服期间的外部续聊），不对外 */
   releasedMark?: { path: string; identity: string; offset: number; size: number };
   model?: string | null;
   effort?: string | null;
@@ -192,6 +204,12 @@ export interface SessionRecord {
   remoteControl?: RemoteControlState;
   /** 仅 Claude：worker 当前的后台任务；非空时会话虽 idle 仍在干活。不跨 worker 保留。 */
   backgroundTasks?: BackgroundTask[];
+}
+
+export interface SessionGroup {
+  id: string;
+  name: string;
+  createdAt: string;
 }
 
 export interface DriverCapabilities {

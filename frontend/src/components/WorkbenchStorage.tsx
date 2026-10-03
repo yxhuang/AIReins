@@ -133,7 +133,7 @@ export function WorkbenchStorage({ dialogOpen, onDialogOpenChange }: {
             </label>
             {noCleanableItems && <p className="settings-hint">当前无可清理项。占用来自左栏仍在的 {storage.categories.transcripts.sessions} 个会话的记录和附件，在左栏移除会话才会释放。</p>}
           </> : <p className="settings-hint">{loading ? "正在读取存储统计…" : "存储统计读取失败，请重试。"}</p>}
-          <p className="settings-hint" id="storage-clean-description">只删工作台里的副本，CLI 原生记录保留，可在『所有来源会话』里续接。</p>
+          <p className="settings-hint" id="storage-clean-description">只删工作台里的副本，CLI 原生记录保留，可在『历史会话』里续接。</p>
           {error && <p className="new-error" role="alert">{error}</p>}
           <div className="dir-actions">
             {!storage && <button type="button" className="btn" disabled={loading} onClick={() => void retry()}>重新读取</button>}

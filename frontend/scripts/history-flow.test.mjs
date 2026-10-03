@@ -269,10 +269,76 @@ await t("历史行渲染：两行、品牌图标、工单/来源/时间、路径
 await t("改名后的列表/预览返回文案", () => {
   const list = renderToStaticMarkup(React.createElement(HistoryView));
   const preview = renderToStaticMarkup(React.createElement(HistoryPreviewPane, { item: historyItem(), onBack() {} }));
-  assert.ok(list.includes('aria-label="所有来源会话"'));
-  assert.ok(list.includes('aria-label="搜索所有来源会话"'));
-  assert.ok(preview.includes("‹ 所有来源会话"));
-  assert.ok(!list.includes("历史会话") && !preview.includes("历史会话列表"));
+  assert.ok(list.includes('aria-label="历史会话"'));
+  assert.ok(list.includes('aria-label="搜索历史会话"'));
+  assert.ok(preview.includes("‹ 历史会话"));
+  assert.ok(!list.includes("所有来源会话") && !preview.includes("所有来源会话"));
+});
+
+// 仅打桩 hooks 以装载响应状态与触发真实按钮，组件树仍交给 React 渲染。
+function historyViewFixture(list, phase = "ready") {
+  const values = ["", "all", "", "", list, phase, false, null];
+  const refs = [];
+  const internals = React.__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE;
+  return () => {
+    let stateIndex = 0;
+    let refIndex = 0;
+    const previous = internals.H;
+    internals.H = {
+      useState(initial) {
+        const index = stateIndex++;
+        if (!(index in values)) values[index] = initial;
+        return [values[index], (next) => { values[index] = typeof next === "function" ? next(values[index]) : next; }];
+      },
+      useRef(initial) { return refs[refIndex++] ??= { current: initial }; },
+      useCallback(fn) { return fn; },
+      useMemo(fn) { return fn(); },
+      useEffect() {},
+      useSyncExternalStore(_subscribe, getSnapshot) { return getSnapshot(); },
+    };
+    try { return HistoryView(); }
+    finally { internals.H = previous; }
+  };
+}
+
+function treeButtons(tree) {
+  if (Array.isArray(tree)) return tree.flatMap(treeButtons);
+  if (!tree || typeof tree !== "object") return [];
+  return [...(tree.type === "button" ? [tree] : []), ...treeButtons(tree.props?.children)];
+}
+
+await t("未完成扫描：14px 提示、重试沿 cursor 续扫，加载更多保留且不宣告空结果", async () => {
+  const page = { items: [], nextCursor: "START", truncated: true, skipped: 0, empty: 0, discovered: 2 };
+  const render = historyViewFixture(page);
+  const tree = render();
+  const html = renderToStaticMarkup(tree);
+  assert.match(html, /扫描未完成，可/);
+  assert.match(html, /font-size:var\(--detail-font-size\)/);
+  assert.ok(!html.includes("没有匹配") && !html.includes("没有更多"));
+  const buttons = treeButtons(tree);
+  const retry = buttons.find((button) => button.props.children === "重试");
+  assert.ok(retry, "提示中的重试可点击");
+  assert.ok(buttons.some((button) => button.props["aria-label"] === "加载更多"));
+  const calls = [];
+  globalThis.fetch = async (url) => {
+    calls.push(String(url));
+    return envelope({ sessions: [historyItem()], truncated: false, skipped: 0, empty: 0, discovered: 2 });
+  };
+  retry.props.onClick();
+  assert.equal(treeButtons(render()).find((button) => button.props.children === "重试").props.disabled, true);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(new URL(calls[0], "http://x").searchParams.get("cursor"), "START");
+  const completed = renderToStaticMarkup(render());
+  assert.ok(completed.includes("示例") && completed.includes("没有更多了"));
+  assert.ok(!completed.includes("扫描未完成"));
+});
+
+await t("已加载条目仍未完成扫描时不显示没有更多；完成后的空结果如实显示", () => {
+  const base = { items: [historyItem()], truncated: true, skipped: 0, empty: 0, discovered: 1 };
+  const incomplete = renderToStaticMarkup(historyViewFixture(base)());
+  assert.ok(!incomplete.includes("没有更多"));
+  const empty = renderToStaticMarkup(historyViewFixture({ ...base, items: [], truncated: false })());
+  assert.ok(empty.includes("没有匹配的历史会话"));
 });
 
 if (!process.exitCode) console.log(`✅ history 前端逻辑回归全过（${pass} 例）`);

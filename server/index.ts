@@ -14,7 +14,7 @@ import { normalizeFileQuery, searchFiles } from "./file-search.js";
 import { HistoryIndex, HistoryQueryError } from "./history.js";
 import { getMeta, SERVER_VERSION } from "./meta.js";
 import { feishuSender, GateNotifier, larkCliSender, loadNotifyConfig, type NotifyConfig } from "./notify.js";
-import { checkPageHealth, proxyPage, scanPages } from "./pages.js";
+import { checkPageHealth, proxyPage, readLinks, scanPages } from "./pages.js";
 import { pruneStorage, workbenchHome } from "./persistence.js";
 import { isValidIdleReleaseMinutes, loadPrefs, savePrefs, type WorkbenchPrefs } from "./prefs.js";
 import { readClaudeStartupSettings, writeClaudeStartupSettings } from "./claude-settings.js";
@@ -37,6 +37,8 @@ import {
 import { ulid } from "./ulid.js";
 import { serveStatic } from "./static.js";
 import { replaySession, sendEvent, sendWs } from "./event-stream.js";
+import { organizationRoute } from "./session-organization-routes.js";
+import { sendOrganizationUpdate, SessionOrganizationError } from "./session-organization.js";
 
 const HOST = "127.0.0.1";
 const PORT = listenPort(process.env.WORKBENCH_PORT);
@@ -139,6 +141,7 @@ idleReleaseSweep.unref();
 manager.onEvent((event) => {
   for (const client of clients) sendEvent(client, event);
 });
+manager.onOrganizationUpdated((frame) => sendOrganizationUpdate(clients, frame));
 
 startNotifier();
 
@@ -217,7 +220,12 @@ wss.on("connection", (socket, request) => {
   }
   sendWs(client, { type: "ready", serverVersion: SERVER_VERSION, sessionId, afterSeq });
 
-  socket.on("message", (data) => void handleWsMessage(client, data.toString("utf8")));
+  socket.on("message", (data) => {
+    handleWsMessage(client, data.toString("utf8")).catch((error) => {
+      // 兜底：handleWsMessage 内部的拒绝不能让进程退出（Node 22 未处理拒绝即崩）
+      log("warn", "ws message handling failed", { message: error instanceof Error ? error.message : String(error), sessionId });
+    });
+  });
   socket.on("pong", () => {
     client.alive = true;
   });
@@ -469,7 +477,10 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
     } else if (method === "GET" && url.pathname === "/api/dispatches") {
       try {
         const parent = url.searchParams.get("parent");
-        await respond(response, 200, 0, "success", { dispatches: parent !== null ? await listParentDispatches(parent) : await listDispatches(url.searchParams.get("limit")) }, requestId);
+        await respond(response, 200, 0, "success", { dispatches: parent !== null ? await listParentDispatches(parent)
+          : await listDispatches(url.searchParams.get("limit"), undefined, () => manager.list()
+            .filter((session) => session.agent === "claude")
+            .map(({ cwd, nativeSessionId }) => ({ cwd, nativeSessionId }))) }, requestId);
       } catch (error) {
         if (error instanceof DispatchQueryError) throw new ApiError(400, 40000, error.message);
         throw error;
@@ -501,6 +512,8 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       }
     } else if (method === "GET" && url.pathname === "/api/pages") {
       await respond(response, 200, 0, "success", { pages }, requestId);
+    } else if (method === "GET" && url.pathname === "/api/links") {
+      await respond(response, 200, 0, "success", { links: readLinks() }, requestId);
     } else if (url.pathname === "/api/prefs" && method === "GET") {
       await respond(response, 200, 0, "success", { ...prefs }, requestId);
     } else if (url.pathname === "/api/prefs" && method === "PUT") {
@@ -534,6 +547,12 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       }
     } else if (method === "GET" && url.pathname === "/api/sessions") {
       await respond(response, 200, 0, "success", { sessions: manager.list() }, requestId);
+    } else if (url.pathname === "/api/session-groups" || /^\/api\/session-groups\/[^/]+$/.test(url.pathname)
+      || (method === "PATCH" && /^\/api\/sessions\/[^/]+$/.test(url.pathname))) {
+      const body = method === "POST" || method === "PATCH" ? await readJson(request) : undefined;
+      const result = organizationRoute(manager, method, url.pathname, body);
+      if (!result) throw new ApiError(404, 40400, "接口不存在");
+      await respond(response, result.status, 0, "success", result.data, requestId);
     } else if (method === "GET" && url.pathname === "/api/history") {
       const input = validateHistoryQuery(url.searchParams);
       try {
@@ -750,7 +769,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       durationMs: Date.now() - started,
     });
   } catch (error) {
-    const apiError = error instanceof ApiError
+    const apiError = error instanceof ApiError || error instanceof SessionOrganizationError
       ? error
       : new ApiError(500, 50000, error instanceof Error ? error.message : String(error));
     if (!response.headersSent) await respond(response, apiError.status, apiError.code, apiError.message, {}, requestId);
@@ -780,9 +799,12 @@ function asTerminalApiError(error: unknown): Error {
 async function handleWsMessage(client: WsClientState, text: string): Promise<void> {
   let message: Record<string, any>;
   try {
-    message = JSON.parse(text) as Record<string, any>;
+    const value: unknown = JSON.parse(text);
+    // null/数组/原始值也能过 JSON.parse，随后在 try 外读字段会抛 TypeError 崩掉进程；统一按协议错误处理
+    if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("not a plain object");
+    message = value as Record<string, any>;
   } catch {
-    sendWs(client, { type: "error", code: 40001, msg: "WS 消息必须是 JSON" });
+    sendWs(client, { type: "error", code: 40001, msg: "WS 消息必须是 JSON 对象" });
     return;
   }
   const context = {

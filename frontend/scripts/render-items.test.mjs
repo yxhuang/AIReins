@@ -598,16 +598,21 @@ t("promptCacheExpiry：起点取最近一次 usage，TTL 取最近一次写缓�
 t("正常与旧版无字段的 turn_completed 不显示，三家异常均带原因", () => {
   const cases = [
     ["claude", { subtype: "success", isError: false }, null],
-    ["claude", { subtype: "error_max_turns", isError: true }, "error_max_turns"],
+    ["claude", { subtype: "error_max_turns", isError: true }, "已达到回合数上限", "error_max_turns"],
     ["codex", { status: "completed" }, null],
-    ["codex", { status: "failed", error: { message: "执行失败" } }, "执行失败"],
+    ["codex", { status: "failed", error: { message: "执行失败" } }, "执行失败", "failed"],
     ["kimi", { stopReason: "end_turn" }, null],
-    ["kimi", { stopReason: "cancelled" }, "cancelled"],
+    ["kimi", { stopReason: "cancelled" }, "执行已取消", "cancelled"],
+    ["claude", { subtype: "constructor", isError: true }, "执行未正常完成", "constructor"],
+    ["kimi", { stopReason: "unknown_reason" }, "执行未正常完成", "unknown_reason"],
     ["claude", {}, null], ["codex", {}, null], ["kimi", {}, null],
   ];
-  for (const [agent, payload, reason] of cases) {
+  for (const [agent, payload, reason, rawCode] of cases) {
     const items = buildRenderItems([ev(1, "turn_completed", payload)], agent);
-    if (reason) assert.match(items[0].text, new RegExp(reason));
+    if (reason) {
+      assert.match(items[0].text, new RegExp(reason));
+      if (rawCode) assert.equal(items[0].rawCode, rawCode);
+    }
     else assert.equal(items.length, 0);
   }
 });

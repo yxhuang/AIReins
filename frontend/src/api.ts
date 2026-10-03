@@ -1,5 +1,5 @@
 import type { ApiEnvelope, CommandInfo, DirectoryListing, HistoryListData, HistoryMessagesPage, MetaInfo, PageHealth, PageManifest, SessionConfig, SessionRecord, ShellKind, Snapshot, SnapshotPreflight, StorageCleanResult, StorageStats, TerminalInfo, WorkbenchPrefs } from "./types";
-import type { AgentKind } from "./types";
+import type { AgentKind, SessionGroup, SessionOrganizationPatch } from "./types";
 import { buildHistoryQuery, type HistoryQueryInput } from "./history";
 import type { DispatchRun } from "./dispatch-flow";
 
@@ -94,6 +94,34 @@ export function uploadsFileUrl(path: string): string {
 
 export function fetchSessions(): Promise<SessionRecord[]> {
   return call<{ sessions: SessionRecord[] }>("/api/sessions").then((data) => data.sessions);
+}
+
+export function patchSession(id: string, patch: SessionOrganizationPatch): Promise<SessionRecord> {
+  return call<{ session: SessionRecord }>(`/api/sessions/${encodeURIComponent(id)}`, {
+    method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify(patch),
+  }).then((data) => data.session);
+}
+
+export function fetchSessionGroups(): Promise<SessionGroup[]> {
+  return call<{ groups: SessionGroup[] }>("/api/session-groups").then((data) => data.groups);
+}
+
+export function createSessionGroup(name: string): Promise<SessionGroup> {
+  return call<{ group: SessionGroup }>("/api/session-groups", {
+    method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name }),
+  }).then((data) => data.group);
+}
+
+export function renameSessionGroup(id: string, name: string): Promise<SessionGroup> {
+  return call<{ group: SessionGroup }>(`/api/session-groups/${encodeURIComponent(id)}`, {
+    method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ name }),
+  }).then((data) => data.group);
+}
+
+export function deleteSessionGroup(id: string): Promise<SessionGroup[]> {
+  return call<{ groups: SessionGroup[] }>(`/api/session-groups/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  }).then((data) => data.groups);
 }
 
 export function restartWorkbench(signal?: AbortSignal): Promise<{ restarting: boolean }> {
@@ -313,6 +341,12 @@ export function savePrefs(prefs: WorkbenchPrefs): Promise<WorkbenchPrefs> {
 /** 启动时已注册的扩展页面列表（原始返回，类型过滤在 pages.ts 的 partitionPages）。 */
 export function fetchPages(): Promise<PageManifest[]> {
   return call<{ pages: PageManifest[] }>("/api/pages").then((data) => data.pages);
+}
+
+export interface LauncherLink { name: string; url: string; icon?: string; group?: string }
+
+export function fetchLinks(): Promise<LauncherLink[]> {
+  return call<{ links: LauncherLink[] }>("/api/links", { cache: "no-store" }).then((data) => data.links);
 }
 
 /** 限时探测扩展页面目标服务（后端最多等 2 秒）；只回答「服务在不在」。 */

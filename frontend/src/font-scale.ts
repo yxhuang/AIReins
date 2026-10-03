@@ -5,7 +5,7 @@ export const FONT_SCALES = {
   small: 0.9,
   default: 1,
   large: 1.15,
-  xlarge: 1.3,
+  xlarge: 1.25,
 } as const;
 
 export type FontScaleChoice = keyof typeof FONT_SCALES;

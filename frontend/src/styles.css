@@ -3,7 +3,7 @@
    底色前提 = 三层暖纸：浅色外框 --chrome #F0EEE6 / 画布 --bg #F5F4ED / 浮起物 --surface #FFFFFF。
    --chrome 仅侧栏、会话标题栏、手机标题栏、侧栏展开面板与页面工具栏；
    --chrome-sunk 仅外框悬停/选中态（浅 #E7E5DB），弹层与输入框内部仍用 --surface-sunk。
-   深色令牌值保持暖深灰画布 #1F1E1D、外框/浮起物 #262624、下沉态 #191817。
+   深色令牌值保持暖深灰画布 #1F1E1D、外框 #262624 / 浮起物 #2A2926（C1，2026-10-03 用户批准）、下沉态 #191817。
    主区需要更深时仅调整 --bg 浅色值；三家身份色、--gate 系、--term-* 与终端面板保持原值。
    三家身份色 = 各自品牌色，与 ai-usage 面板(8788)的进度条保持一致：
      claude 珊瑚橙 #D97757 / codex 青绿 #10A37F / kimi 蓝 #1A73E8
@@ -21,14 +21,15 @@
      3) ANSI yellow / bright-yellow 往橄榄/赭石偏（--term-yellow 系），与琥珀金 --gate 系明显拉开。
    会话列表状态点裁决（2026-09-30 用户拍板）：红绿灯。
      绿 --ok = 空闲；黄 --dot-working = 正在工作（例外：允许暖黄，色相约 48° 往黄偏，与琥珀金 --gate 约 36°/41° 拉开，且不得复用 --gate 系）；
-     红 --danger = 出错或有闸门/提问等用户处理；dead 灰不变。 */
+     红 --danger = 出错或有闸门/提问等用户处理；dead 灰不变。
+   发送键裁决（2026-10-03 用户拍板）：两端均参照 Claude App 用圆形与各家身份色 --agent-*；桌面保持紧凑尺寸。 */
 :root {
   /* 字号只用 14–16px（2026-10-01 用户定）：正文与输入框 16px；次要标题/按钮 15px；辅助信息、徽标、菜单、分组标题 14px；其余新增文字 16px。 */
   color-scheme: light dark;
   --bg:               light-dark(#F5F4ED, #1F1E1D);
   --chrome:           light-dark(#F0EEE6, #262624);
   --chrome-sunk:      light-dark(#E7E5DB, #191817);
-  --surface:          light-dark(#FFFFFF, #262624);
+  --surface:          light-dark(#FFFFFF, #2A2926);
   --surface-sunk:     light-dark(#F0EEE6, #191817);
   --border:           light-dark(#E3E0D6, #3A3936);
   --border-strong:    light-dark(#C9C5B8, #55534E);
@@ -144,7 +145,7 @@ body {
 }
 
 .sidebar {
-  width: 288px;
+  width: 304px;
   flex: 0 0 auto;
   display: flex;
   flex-direction: column;
@@ -405,7 +406,7 @@ body.resizing {
 .brand {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 4px;
   font-weight: 700;
   letter-spacing: 0.04em;
   font-size: 16px;
@@ -416,12 +417,12 @@ body.resizing {
   font: 700 24px var(--font-mono);
   letter-spacing: -0.08em;
 }
-.brand-line { width: 1px; height: 28px; background: var(--border-strong); margin: 0 3px; }
+.brand-line { width: 1px; height: 28px; background: var(--border-strong); margin: 0 2px; }
 .app.sidebar-collapsed .brand-line,
 .app.sidebar-collapsed .brand-name { display: none; }
 
-/* 刷新按钮紧跟「workbench」，收起按钮仍靠右 */
-.sidebar-reload { margin-right: auto; margin-left: 6px; }
+/* 刷新按钮靠右，紧挨收起按钮 */
+.sidebar-reload { margin-left: auto; }
 .app.sidebar-collapsed .sidebar-reload { margin: 0; }
 
 /* 收起态头部纵向排列，给总未决徽标留位置 */
@@ -471,6 +472,19 @@ body.resizing {
   border-style: solid;
   color: var(--text-muted);
 }
+.btn-new-session { display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+.new-session-icon { flex: 0 0 auto; transition: transform 160ms ease; }
+.btn-new-session[aria-expanded="true"] .new-session-icon { transform: rotate(45deg); }
+/* 桌面左栏顶部跟手机同一套按钮语言：浅底圆钮、蓝色实心「新建会话」、浅底胶囊 ChatGPT（用户定） */
+@media (min-width: 721px) {
+  .app:not(.sidebar-collapsed) .sidebar-new-row > .btn { border: none; border-radius: 999px; }
+  .app:not(.sidebar-collapsed) .btn-new-session { background: var(--busy); color: #fff; }
+  .app:not(.sidebar-collapsed) .btn-new-session:hover { background: color-mix(in srgb, var(--busy) 85%, #000); }
+  .app:not(.sidebar-collapsed) .sidebar-chatgpt { background: color-mix(in srgb, var(--text) 9%, var(--chrome)); color: var(--text); }
+  .app:not(.sidebar-collapsed) .sidebar-chatgpt:hover { background: color-mix(in srgb, var(--text) 18%, var(--chrome)); }
+}
+/* 手机列表页并进顶栏的面板开关，桌面不显示 */
+.mobile-panel-launcher { display: none; }
 
 /* 新建会话表单 */
 .new-form {
@@ -614,12 +628,7 @@ body.resizing {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  min-height: 0; /* 让左栏高度不够时由下面的已结束分组收缩滚动 */
-}
-
-.session-dead-group {
-  min-height: 0;
-  overflow-y: auto;
+  min-height: 0; /* 让会话区在侧栏高度不足时收缩 */
 }
 
 .session-list-empty {
@@ -628,26 +637,9 @@ body.resizing {
   padding: 8px 4px;
 }
 
-/* 「N 个已结束会话」折叠行：中性小字按钮，不压 dead 行本身的可读性 */
-.session-dead-toggle {
-  width: 100%;
-  border: none;
-  background: transparent;
-  border-radius: var(--radius);
-  color: var(--text-faint);
-  font-size: 16px;
-  padding: 6px 10px;
-  text-align: left;
-  cursor: pointer;
-}
-
-.session-dead-toggle:hover {
-  background: var(--chrome-sunk);
-  color: var(--text-muted);
-}
-
 /* 会话行容器：确认态时整行就地替换成 .session-confirm */
 .session-item {
+  position: relative;
   display: flex;
   align-items: stretch;
   gap: 2px;
@@ -658,20 +650,131 @@ body.resizing {
   min-width: 0;
 }
 
-.session-swipe-remove { display: none; }
+/* 手机左滑露出右侧「⋮」（行内容左移 52px，点它弹同一菜单）；桌面由悬停 ⋮ 负责 */
+.session-swipe-more { display: none; }
 @media (max-width: 720px) and (pointer: coarse) {
-  .session-item { position: relative; overflow: hidden; border-radius: var(--radius); gap: 0; }
+  .session-item { overflow: hidden; border-radius: var(--radius); gap: 0; }
   .session-item .session-row { position: relative; z-index: 1; background: var(--chrome); touch-action: pan-y; transition: transform 160ms ease; }
   .session-item .session-row.active, .session-item .session-row:hover { background: var(--chrome-sunk); }
-  .session-swipe-open .session-row { transform: translateX(-80px); }
+  .session-swipe-open .session-row { transform: translateX(-52px); }
   .session-swiping .session-row { transition: none; }
-  .session-swipe-remove { display: block; position: absolute; inset: 0 0 0 auto; width: 80px; border: 0; background: var(--danger); color: var(--surface); font-size: 16px; cursor: pointer; }
+  .session-swipe-more {
+    display: flex; align-items: center; justify-content: center;
+    position: absolute; inset: 0 0 0 auto; width: 52px; min-height: 44px;
+    border: 0; background: var(--chrome-sunk); color: var(--text); cursor: pointer;
+  }
 }
 
-/* 行菜单（右键 / 长按）：复用 .attach-menu 外观，fixed 定位到指针处 */
-.attach-menu.row-menu { position: fixed; bottom: auto; min-width: 180px; z-index: 50; }
-/* 「移除」用 --danger 冷调洋红（语义是「销毁」，与「拒绝/错误」同类，不是审批不用暖色） */
-.row-menu-danger { color: var(--danger); }
+/* 桌面悬停/键盘聚焦时行右侧出「⋮」（暂时替换时间显示）；触屏没有悬停，走左滑 */
+.session-row-more {
+  position: absolute; right: 4px; top: 50%; transform: translateY(-50%);
+  width: 26px; height: 26px;
+  display: flex; align-items: center; justify-content: center;
+  border: 0; border-radius: 6px; background: transparent; color: var(--text-muted); cursor: pointer;
+  opacity: 0; pointer-events: none;
+}
+.session-row-more:hover { background: var(--chrome-sunk); color: var(--text); }
+.session-row-more:focus-visible { opacity: 1; pointer-events: auto; outline: 2px solid var(--busy); outline-offset: -2px; }
+@media (hover: hover) and (pointer: fine) {
+  .session-item:hover .session-row-more, .session-item:focus-within .session-row-more,
+  .session-item.session-menu-open .session-row-more { opacity: 1; pointer-events: auto; }
+  .session-item:hover .row-time, .session-item:focus-within .row-time,
+  .session-item.session-menu-open .row-time { visibility: hidden; }
+}
+@media (hover: none), (pointer: coarse) {
+  .session-row-more { display: none; }
+}
+
+/* 「⋮」行菜单：与 settings-pop/.cfg-menu 同一浮层语言（圆角、阴影、深浅令牌），fixed 定位到指针处 */
+.row-menu {
+  position: fixed; z-index: 50;
+  min-width: 200px; max-width: calc(100vw - 32px); max-height: 60dvh; overflow-y: auto;
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 4px; box-shadow: var(--shadow-pop); animation: settings-pop 0.12s ease-out;
+}
+.row-menu-main { display: flex; flex-direction: column; }
+.row-menu-item {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  border: 0; border-radius: 6px; background: transparent; color: var(--text);
+  padding: 6px 8px; font-size: 14px; font-family: inherit; text-align: left; white-space: nowrap; cursor: pointer;
+}
+.row-menu-item svg { flex: 0 0 auto; color: var(--text-muted); }
+.row-menu-item > span { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+/* 焦点/悬停同命令面板选中项的纪律：冷色 --busy 竖条 */
+.row-menu-item:not(:disabled):hover, .row-menu-item:focus-visible {
+  outline: none; background: var(--surface-sunk); box-shadow: inset 2px 0 0 var(--busy);
+}
+.row-menu-shortcut {
+  flex: 0 0 auto; font-family: inherit; font-size: 14px; color: var(--text-faint);
+  border: 1px solid var(--border); border-radius: 4px; padding: 0 4px; background: transparent;
+}
+.row-menu-trailing { flex: 0 0 auto; color: var(--text-faint); }
+.row-menu-divider { height: 1px; margin: 4px 6px; background: var(--border); }
+/* 「删除」用 --danger 冷调洋红（语义是「销毁」，与「拒绝/错误」同类，不是审批不用暖色） */
+.row-menu-danger, .row-menu-item.row-menu-danger svg { color: var(--danger); }
+/* 分组子屏：手机/桌面统一为菜单内切换下一屏（覆盖主屏，「返回」切回） */
+.row-menu-subscreen {
+  position: absolute; inset: 0; overflow-y: auto;
+  background: var(--surface); border-radius: var(--radius); padding: 4px;
+  display: flex; flex-direction: column;
+}
+.row-menu-newgroup { padding: 4px; }
+.row-menu-input {
+  width: 100%; font-size: 16px; font-family: inherit; padding: 6px 8px;
+  border: 1px solid var(--border); border-radius: 6px; background: var(--surface); color: var(--text);
+}
+.row-menu-error { margin: 4px 6px 2px; font-size: 14px; color: var(--danger); }
+
+/* 分区小标签：14px 淡色 + 细线（与「历史会话」上方细分隔线同一语言，不抢眼） */
+.sidebar-section-label {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 14px; letter-spacing: 0.04em; color: var(--text-faint);
+  padding: 8px 6px 4px; list-style: none;
+}
+.sidebar-section-label::after { content: ""; flex: 1 1 auto; height: 1px; background: var(--border); }
+.sidebar-time-section, .sidebar-session-group { list-style: none; }
+
+/* 用户分组标题：整行折叠/展开 + 右侧 ⋮（触屏常显，桌面悬停淡入） */
+.session-group-header {
+  position: relative;
+  display: flex; align-items: center; gap: 2px; flex-wrap: wrap;
+  padding-top: 4px;
+}
+.session-group-toggle {
+  flex: 1 1 auto; min-width: 0;
+  display: flex; align-items: center; gap: 6px;
+  border: 0; border-radius: 6px; background: transparent; cursor: pointer;
+  font-size: 14px; letter-spacing: 0.04em; color: var(--text-faint);
+  padding: 4px 6px; text-align: left; font-family: inherit;
+}
+.session-group-toggle:hover { color: var(--text); background: var(--chrome-sunk); }
+.session-group-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.session-group-chevron { flex: 0 0 auto; transition: transform 120ms ease; }
+.session-group-chevron.collapsed { transform: rotate(-90deg); }
+.session-group-more {
+  flex: 0 0 auto; width: 26px; height: 26px; min-height: 44px; min-width: 44px;
+  display: flex; align-items: center; justify-content: center;
+  border: 0; border-radius: 6px; background: transparent; color: var(--text-faint); cursor: pointer;
+}
+.session-group-more:hover { color: var(--text); background: var(--chrome-sunk); }
+@media (hover: hover) and (pointer: fine) {
+  .session-group-more { min-width: 26px; min-height: 26px; opacity: 0.35; }
+  .session-group-header:hover .session-group-more, .session-group-more:focus-visible,
+  .session-group-more[aria-expanded="true"] { opacity: 1; }
+}
+.session-group-error { flex: 1 0 100%; }
+.session-group-list { padding-left: 10px; }
+
+/* 行内重命名输入框：16px 防 iOS 聚焦放大 */
+.session-title-input {
+  flex: 1 1 auto; min-width: 0;
+  font-size: 16px; font-family: inherit;
+  padding: 2px 6px; border: 1px solid var(--busy); border-radius: 6px;
+  background: var(--surface); color: var(--text);
+}
+.session-row-editing { cursor: text; }
+.session-row-editing:hover { background: var(--chrome-sunk); }
+.session-group-title-input { margin: 0 4px; }
 
 /* 行内二次确认：整行就地替换（非模态），全冷色 */
 .session-confirm {
@@ -720,16 +823,10 @@ body.resizing {
   padding: 8px 8px 8px 9px;
   cursor: pointer;
   color: var(--text);
-  /* 左侧 3px 身份色脊 + 左侧品牌图标，一起辨识 agent */
-  border-left: 3px solid var(--border);
   /* 长按出菜单：别让 iOS 弹系统的文字选择/链接预览 */
   -webkit-touch-callout: none;
   user-select: none;
 }
-
-.session-row.agent-claude { border-left-color: var(--agent-claude); }
-.session-row.agent-codex  { border-left-color: var(--agent-codex); }
-.session-row.agent-kimi   { border-left-color: var(--agent-kimi); }
 
 .session-row:hover { background: var(--chrome-sunk); }
 .session-row.active { background: var(--chrome-sunk); }
@@ -765,7 +862,7 @@ body.resizing {
 }
 
 .row-time {
-  min-width: 4em; /* 容下「23小时」，让各行状态灯竖向对齐 */
+  min-width: 3.25em; /* 标题优先占宽，时间仍单行 */
   text-align: right;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
@@ -802,6 +899,7 @@ body.resizing {
   color: var(--gate-on);
   font-size: 14px;
   font-weight: 700;
+  font-variant-numeric: tabular-nums;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -838,11 +936,13 @@ body.resizing {
 .session-head-main { min-width: 0; flex: 1; display: flex; align-items: center; gap: 8px; white-space: nowrap; }
 
 .session-head .agent-icon { width: 20px; height: 20px; flex: 0 0 20px; }
-.session-model { flex-shrink: 0; font-size: 14px; }
+.session-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-size: 15px; font-weight: 600; }
+.session-model { flex: 0 1 auto; min-width: 0; max-width: 35%; overflow: hidden; text-overflow: ellipsis; font-size: 14px; color: var(--text-muted); }
 
 .session-cwd {
   min-width: 0;
-  flex: 1;
+  flex: 0 1 auto;
+  max-width: 28%;
   font-weight: 400;
   font-size: 14px;
   color: var(--text-muted);
@@ -879,30 +979,43 @@ body.resizing {
 .welcome-view { display: flex; flex: 1 1 auto; flex-direction: column; min-height: 0; overflow-y: auto; }
 /* 手机顶栏（参照 Claude App）：色带 · 圆形返回 · 标题/模型 · 闸门计数 · 圆形「⋯」。
    文件/终端/派单/AI 用量收进「⋯」；顶栏渐变半透明，事件流从它下面滚过。 */
-.session-head .mobile-back, .mobile-title, .mobile-tail, .session-head-actions .session-more-mobile { display: none; }
+.session-head .mobile-back, .session-head .btn.session-dispatch-badge, .mobile-title, .mobile-tail, .session-head-actions .session-more-mobile { display: none; }
 .session-more-sep { margin: 4px 6px; border: 0; border-top: 1px solid var(--border); }
 .session-more-menu .page-icon { width: 18px; height: 18px; }
 @media (max-width: 720px) {
   .session-head {
     position: relative; z-index: 5; gap: 8px;
-    padding: 6px 10px 22px 8px; margin-bottom: -22px;
+    padding: 4px 10px 12px 8px; margin-bottom: -12px;
     border-bottom: none;
     background: linear-gradient(to bottom, var(--bg) 55%, transparent);
   }
-  .session-head + .stream { padding-top: 30px; }
-  .session-head + .session-dispatch-link, .session-head + .risky-banner { margin-top: 22px; }
+  /* 主屏幕 App：iOS 会把状态栏下方约 30px 虚化，顶栏整体下移，让标题落在清晰区 */
+  @media (display-mode: standalone) {
+    .session-head { padding-top: 10px; } /* 用户 10-02：少量虚化可接受，按钮上移 */
+  }
+  .session-head + .stream-region .stream { padding-top: 20px; }
+  .session-head + .session-dispatch-link, .session-head + .risky-banner { margin-top: 12px; }
   .session-head-main, .session-head .panel-actions { display: none; }
   .session-head .mobile-back { display: inline-flex; }
   .session-head .btn.mobile-round, .session-head .btn.session-more-trigger {
     display: inline-flex; align-items: center; justify-content: center;
-    flex: 0 0 auto; width: 40px; height: 40px; min-width: 40px; min-height: 40px; padding: 0;
+    flex: 0 0 auto; width: 44px; height: 44px; min-width: 44px; min-height: 44px; padding: 0;
     border: none; border-radius: 50%; color: var(--text);
     background: color-mix(in srgb, var(--text) 9%, var(--bg));
   }
-  .mobile-title { display: flex; flex: 1; min-width: 0; flex-direction: column; align-items: center; line-height: 1.25; }
+  .mobile-title { position: absolute; left: 50%; transform: translateX(-50%); width: calc(100% - 2 * var(--mobile-title-inset, 62px)); display: flex; min-width: 0; flex-direction: column; align-items: center; line-height: 1.2; }
+  .session-head:has(.session-dispatch-badge) { --mobile-title-inset: 110px; }
+  .session-head:has(.mobile-tail) { --mobile-title-inset: 88px; }
+  .session-head:has(.session-dispatch-badge):has(.mobile-tail) { --mobile-title-inset: 128px; }
   .mobile-title-text { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 16px; font-weight: 600; }
-  .mobile-subtitle { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; color: var(--text-muted); }
-  .session-head-actions { margin-left: 0; gap: 6px; }
+  .session-head-actions { margin-left: auto; gap: 6px; }
+  .session-head-actions .ws-note { position: absolute; top: 100%; right: 0; white-space: nowrap; }
+  /* 有派单时「⋯」左侧出图标（填执行端身份色，见 SessionDispatchBadge），标题下那行只在纯后台任务时留。 */
+  /* 深色主题身份色偏亮，白图标对比不足 3:1，改用深底色描边。 */
+  .session-head .btn.session-dispatch-badge { color: light-dark(#fff, var(--bg)); }
+  .session-head .btn.mobile-round svg, .session-head .btn.session-more-trigger svg { width: 22px; height: 22px; }
+  .session-head .btn.session-dispatch-badge svg { width: 22px; height: 22px; stroke-width: 2; }
+  .session-dispatch-link.has-runs { display: none; }
   .mobile-tail { display: flex; align-items: center; }
   .session-head-actions .session-more-mobile { display: flex; }
   .session-head-actions hr.session-more-mobile { display: block; }
@@ -1335,10 +1448,11 @@ body.resizing {
 .gate-command { background: var(--surface); }
 
 .gate-path {
-  font-size: 16px;
+  font-size: var(--detail-font-size);
   color: var(--text);
-  overflow-x: auto;
-  white-space: pre;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  line-height: 1.45;
 }
 
 .gate-fold {
@@ -1536,6 +1650,7 @@ body.resizing {
 
 /* 输入框 + 底栏（胶囊 + 发送）合成一个框，参照 Claude Code VSCode 扩展的输入框 */
 .composer-box {
+  container: composer / inline-size;
   display: flex;
   flex-direction: column;
   border: 1px solid var(--border);
@@ -1549,7 +1664,16 @@ body.resizing {
   box-shadow: 0 0 0 1px var(--border-strong);
 }
 
+.composer-input { display: flex; align-items: flex-end; min-width: 0; }
+.composer-input .cache-timer-top { display: none; }
+.refine-btn { flex: 0 0 32px; width: 32px; height: 32px; margin: 0 6px 4px 0; border: none; border-radius: 50%; background: var(--chrome); color: var(--text); font-family: inherit; line-height: 1; font-weight: 700; font-size: 18px; cursor: pointer; }
+.refine-btn:hover { background: var(--chrome-sunk); }
+@media (pointer: coarse) { .refine-btn { flex-basis: 44px; width: 44px; height: 44px; } }
+@media (max-width: 720px) { .refine-btn { margin-right: 6px; } }
+
 .composer-box textarea {
+  flex: 1 1 auto;
+  min-width: 0;
   border: 0;
   outline: none;
   background: transparent;
@@ -1559,6 +1683,10 @@ body.resizing {
   font-family: inherit;
   resize: none;
   max-height: 50dvh; /* 高度由 SessionView 按内容设，超过这里才滚动 */
+}
+
+@media (min-width: 721px) {
+  .composer-box textarea { min-height: 56px; } /* 两行高；不用 lh，Safari 16.4 前不认 */
 }
 
 .composer-box textarea:disabled {
@@ -1582,8 +1710,8 @@ body.resizing {
   min-width: 0;
 }
 
-/* 审批模式胶囊靠右，挨着发送键 */
-.cfg-pills > .cfg-pill-wrap + .cfg-pill-wrap { margin-left: auto; }
+/* 审批模式胶囊靠右，挨着发送键；不收缩，模型名过长时只截模型 */
+.cfg-pills > .cfg-pill-wrap + .cfg-pill-wrap { margin-left: auto; flex-shrink: 0; }
 
 .cfg-pill {
   display: inline-flex;
@@ -1609,6 +1737,13 @@ body.resizing {
 .cfg-pill:disabled { opacity: 0.55; cursor: not-allowed; }
 .cfg-pill-sub { color: var(--text-faint); text-transform: capitalize; }
 
+/* 两端共用 30px 跑道形浅底胶囊；手机额外命中区留在媒体查询里。 */
+.cfg-bar .cfg-pill, .cfg-bar .cfg-pill:hover:not(:disabled), .cfg-bar .cfg-pill.open {
+  position: relative; min-height: 30px; padding: 0 8px; gap: 3px; border-radius: 999px; font-weight: 400;
+  background: color-mix(in srgb, var(--text) 9%, var(--surface));
+}
+.cfg-bar .cfg-pill.open { color: var(--text); }
+
 .cfg-menu {
   position: absolute;
   z-index: 20;
@@ -1623,6 +1758,8 @@ body.resizing {
   box-shadow: var(--shadow-pop);
   animation: settings-pop 0.12s ease-out;
 }
+
+.cfg-menu-cwd { display: none; font-size: 14px; color: var(--text-muted); padding: 6px 8px; overflow-wrap: anywhere; border-bottom: 1px solid var(--border); }
 
 .cfg-menu-up { bottom: calc(100% + 4px); }
 .cfg-menu-down { top: calc(100% + 4px); }
@@ -1797,6 +1934,16 @@ body.resizing {
 }
 
 .send-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* 发送与空输入时的中断入口共用身份填充；深色图标沿用手机的对比度处理。 */
+.cfg-bar .send-btn { border-radius: 50%; background: var(--agent-claude); color: light-dark(#fff, var(--bg)); }
+.cfg-bar .send-btn svg { stroke-width: 2.5; }
+.agent-codex .cfg-bar .send-btn { background: var(--agent-codex); }
+.agent-kimi .cfg-bar .send-btn { background: var(--agent-kimi); }
+@media (min-width: 721px) {
+  .cfg-bar .send-btn { width: 32px; height: 32px; }
+  .cfg-bar .send-btn svg { width: 20px; height: 20px; }
+}
 
 /* ── 「+」附件入口与附件条：全部冷色/中性，暖色仍是闸门专用 ── */
 .attach-menu-wrap { position: relative; flex: 0 0 auto; }
@@ -2062,23 +2209,36 @@ body.resizing {
 /* 空状态 */
 .empty-state {
   margin: auto;
-  max-width: 460px;
+  max-width: 360px;
   text-align: center;
   padding: 24px;
 }
 
 .empty-state h1 {
-  font-size: 20px;
+  font-size: 16px;
+  font-weight: 600;
   letter-spacing: 0.04em;
   margin: 0 0 12px;
 }
 
+/* 与侧栏左上角同一套 wb + 竖线 + 名称，放大成整体 logo */
+.empty-state .empty-logo {
+  display: inline-flex;
+  align-items: center;
+  gap: 14px;
+  margin: 0 0 20px;
+  white-space: nowrap;
+}
+.empty-logo-mark { font: 700 44px var(--font-mono); letter-spacing: -0.08em; }
+.empty-logo-line { width: 1.5px; height: 48px; background: var(--border-strong); }
+.empty-logo-name { font-size: 28px; font-weight: 700; letter-spacing: 0.04em; }
+
 .empty-state p {
+  font-size: 15px;
   color: var(--text-muted);
   line-height: 1.7;
 }
 
-.empty-hint { font-size: 16px; }
 
 /* 错误提示条：z-index 高于浮层面板（20），出错时必须压过一切可见 */
 .toast {
@@ -2144,6 +2304,52 @@ body.resizing {
 }
 
 .app.sidebar-collapsed .sidebar-foot { align-items: center; }
+/* 两行入口：历史 │ 扩展页面；设置 + 直达。页面多时第一行可换行。 */
+.sidebar-foot { --foot-btn: 36px; }
+.sidebar-foot-pages, .sidebar-foot-actions { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.sidebar-foot-pages { flex-wrap: wrap; }
+.app:not(.sidebar-collapsed) .sidebar-foot { padding: 8px 4px 2px 10px; min-width: 0; }
+.sidebar-foot-pages .page-nav { flex: 0 1 auto; min-width: 0; max-width: 100%; }
+.sidebar-foot-pages .page-nav-name { min-width: 0; }
+.app:not(.sidebar-collapsed) .sidebar-foot-pages > .page-nav:first-child { display: flex; flex-direction: row; align-items: center; flex: 0 0 auto; } /* .page-nav 默认竖排，不改则分割线落到「历史会话」下方 */
+.app:not(.sidebar-collapsed) .sidebar-foot-pages > .page-nav:first-child::after {
+  content: ""; width: 1px; height: 22px; margin: 0 2px 0 8px; background: var(--border); border-radius: 1px;
+}
+.app:not(.sidebar-collapsed) .sidebar-foot-pages > .page-nav:only-child::after { content: none; }
+.sidebar-foot-pages > .page-nav-skipped { flex: 1 0 100%; }
+.app:not(.sidebar-collapsed) .sidebar-foot .settings-gear {
+  width: var(--foot-btn); height: var(--foot-btn); border: none; border-radius: 50%; color: var(--text);
+  background: color-mix(in srgb, var(--text) 9%, var(--chrome));
+}
+.app:not(.sidebar-collapsed) .sidebar-foot .settings-gear svg { width: 22px; height: 22px; }
+.app:not(.sidebar-collapsed) .sidebar-foot-pages > .page-nav .page-nav-item, .launcher-button {
+  width: auto; max-width: 100%; min-width: 0; min-height: var(--foot-btn); padding: 0 14px 0 12px; border: none; border-radius: 999px;
+  background: color-mix(in srgb, var(--text) 9%, var(--chrome)); color: var(--text);
+}
+.app:not(.sidebar-collapsed) .sidebar-foot-pages > .page-nav .page-nav-item.active { box-shadow: none; background: color-mix(in srgb, var(--text) 18%, var(--chrome)); }
+.app:not(.sidebar-collapsed) .sidebar-foot .sidebar-panel-head > .icon-btn { display: none; }
+.app:not(.sidebar-collapsed) .sidebar-foot .sidebar-panel-open .page-nav-item { padding-right: 10px; }
+.app:not(.sidebar-collapsed) .sidebar-foot .settings-panel { left: -10px; }
+.app:not(.sidebar-collapsed) .sidebar-foot .settings-gear:hover, .launcher-button:hover { background: color-mix(in srgb, var(--text) 18%, var(--chrome)); }
+.app.sidebar-collapsed .sidebar-foot-pages, .app.sidebar-collapsed .sidebar-foot-actions { flex-direction: column; }
+.app.sidebar-collapsed .launcher-button { width: 32px; padding: 0; }
+.launcher { position: relative; }
+.launcher-button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; cursor: pointer; font: inherit; }
+/* 浮层锚定按钮上方，但左边缘与设置面板对齐，避免越过侧栏。 */
+.app:not(.sidebar-collapsed) .sidebar-foot .launcher-panel { left: calc(-10px - var(--foot-btn) - 6px); }
+.settings-panel.launcher-panel { width: 220px; padding: 2px 8px; }
+.launcher-panel .settings-group { padding: 6px 0; }
+.launcher-panel .settings-group-title { margin: 0 0 2px; padding: 0 6px; font-size: 13px; }
+.launcher-link { display: flex; align-items: center; gap: 8px; min-height: 32px; border-radius: 6px; padding: 4px 6px; color: var(--text); text-decoration: none; }
+.launcher-link:hover { background: var(--chrome-sunk); }
+.launcher-link-icon { flex: 0 0 22px; text-align: center; }
+.launcher-link-name { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+@media (pointer: coarse) {
+  /* 保留 36/40px 视觉高度，用命中区补足 44px；行间 8px 不重叠。 */
+  .sidebar-foot .page-nav-item, .sidebar-foot .settings-gear, .launcher-button { position: relative; }
+  .sidebar-foot .page-nav-item::before, .sidebar-foot .settings-gear::before, .launcher-button::before { content: ""; position: absolute; inset: 50% 0 auto; transform: translateY(-50%); min-width: 44px; min-height: 44px; }
+  .launcher-link { min-height: 44px; }
+}
 
 /* 外框小按钮：只映射外框上的控件，不影响浮层或终端。 */
 .sidebar-reload, .sidebar-toggle, .sidebar-panel-head > .icon-btn,
@@ -2193,6 +2399,19 @@ body.resizing {
   padding: 4px 14px;
   box-shadow: var(--shadow-pop);
   animation: settings-pop 0.12s ease-out;
+}
+
+/* 桌面设置面板两栏：左「外观」，右「会话 + Workbench」，一屏放下不滚动。
+   .sidebar 有 overflow:hidden，540px 会被裁，所以改 fixed 贴左下（10 侧栏内边距 + 2 底栏内边距 + 按钮 + 8 间距） */
+@media (min-width: 721px) {
+  .app:not(.sidebar-collapsed) .sidebar-foot .settings > .settings-panel {
+    position: fixed; left: 10px; bottom: calc(20px + var(--foot-btn));
+    width: 540px; max-height: calc(100vh - 80px);
+    display: grid; grid-template-columns: 1fr 1fr; column-gap: 14px; align-items: start;
+  }
+  .settings > .settings-panel > .settings-group:first-child { grid-row: span 2; }
+  .settings > .settings-panel > .settings-group:not(:first-child) { grid-column: 2; border-left: 1px solid var(--border); padding-left: 14px; }
+  .settings > .settings-panel > .settings-group:nth-child(2) { border-top: none; }
 }
 
 @keyframes settings-pop {
@@ -2290,8 +2509,8 @@ body.resizing {
 
 /* 减少动态：关光标闪烁、徽标脉冲与浮层动画 */
 @media (prefers-reduced-motion: reduce) {
-  .cursor, .gate-badge, .settings-panel, .cmd-panel, .cfg-menu, .attach-menu, .timeline-item.timeline-running::before { animation: none; }
-  .segmented-slider { transition: none; }
+  .cursor, .gate-badge, .settings-panel, .cmd-panel, .cfg-menu, .attach-menu, .row-menu, .timeline-item.timeline-running::before { animation: none; }
+  .segmented-slider, .session-group-chevron { transition: none; }
 }
 
 /* ── 扩展页面：左栏分区与页面视图（全部冷色/中性，暖色仍是闸门专用） ── */
@@ -2519,9 +2738,12 @@ body.resizing {
 
 .sidebar-panel-missing { overflow-y: auto; padding: 12px; color: var(--text-muted); font-size: 16px; }
 .history-sidebar-list .history-list-pane { min-height: 0; }
-.history-sidebar-list .history-filters { flex-direction: column; align-items: stretch; padding: 8px 4px; gap: 8px; }
-.history-sidebar-list .history-filter-group { flex-wrap: wrap; }
-.history-sidebar-list .history-search { flex: none; width: 100%; min-width: 0; max-width: none; } /* 竖排时 flex-basis 会变成高度 */
+.history-sidebar-list .history-filters { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; padding: 8px 4px; gap: 6px 6px; }
+.history-sidebar-list .history-filter-group { grid-column: 1; flex-wrap: wrap; }
+.history-sidebar-list .history-chip { font-size: 14px; padding: 2px 6px; }
+.history-sidebar-list .history-search { grid-column: 1 / -1; width: 100%; min-width: 0; max-width: none; }
+/* 「加载更多」：筛选两行右侧的两行字按钮 */
+.history-load-more { grid-column: 2; grid-row: 1 / 3; align-self: stretch; padding: 0 8px; font-size: 14px; line-height: 1.25; white-space: nowrap; }
 .history-sidebar-list .history-meta { padding: 6px 4px 0; }
 .history-sidebar-list .history-list { padding: 4px 0; }
 .history-sidebar-list .history-more { padding: 6px 4px; flex-wrap: wrap; }
@@ -2529,6 +2751,9 @@ body.resizing {
 .page-view-sidebar { width: 100%; min-width: 0; }
 .page-view-sidebar .page-toolbar { flex-wrap: wrap; padding: 8px; gap: 6px; }
 .page-view-sidebar .page-toolbar-title { display: none; }
+/* 侧栏打开页面（AI 用量等）时：去掉「在新标签页打开」那行，把高度都让给页面（手机桌面一致，用户定） */
+.page-view-sidebar .page-toolbar:not(:has(.page-toolbar-hint)) { display: none; }
+
 .page-view-sidebar .page-toolbar-hint { margin-left: 0; }
 .page-view-sidebar .page-fallback { overflow-y: auto; padding: 12px; overflow-wrap: anywhere; }
 .page-view-sidebar .page-fallback-actions { flex-wrap: wrap; gap: 8px; }
@@ -2892,11 +3117,12 @@ body.resizing {
 }
 
 .history-actions .history-note { margin: 0; }
+.history-import-details { display: none; }
 
-/* 「‹ 所有来源会话」只在窄窗口出现 */
+/* 「‹ 历史会话」只在窄窗口出现 */
 .history-back { display: none; }
 
-/* 桌面也可退回当前会话；手机返回统一由 mobile-topbar 提供。 */
+/* 桌面保留返回按钮；手机预览通过系统后退回列表。 */
 .main > .history-preview-pane .history-back { display: inline-flex; }
 
 /* ── 建会话前快照确认弹窗 ─────────────────────
@@ -2986,7 +3212,9 @@ body.resizing {
   }
   /* 主屏幕 PWA 里紧贴状态栏显得挤，顶部再多让 8px（浏览器里不加） */
   @media (display-mode: standalone) {
-    .app { padding-top: calc(env(safe-area-inset-top) + 8px); }
+    .app { padding-top: calc(env(safe-area-inset-top) + 2px); }
+    /* 会话页顶栏自带圆按钮留白，不再多让 */
+    .app.has-main { padding-top: env(safe-area-inset-top); }
   }
   /* 顶部让出安全区后，把「workbench」并进「+ 新建会话」那一行，列表起点基本不下移 */
   .app:not(.sidebar-collapsed) .sidebar { display: grid; grid-template-columns: auto minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
@@ -2998,6 +3226,56 @@ body.resizing {
   .app.has-main .sidebar { display: none; }
   .app:not(.has-main) .main { display: none; }
   .main > .history-preview-pane .history-back { display: none; }
+  /* 手机历史预览：填充顶栏，系统后退代替返回/面板操作行。安全区顶部由 .app 让位。 */
+  .history-preview-pane > .view-panel-actions { display: none; }
+  .history-preview-pane .history-preview-head {
+    flex-shrink: 0; padding: 10px 16px 12px; border: none; background: var(--chrome);
+  }
+  .history-preview-pane .history-preview-title { font-size: 16px; font-weight: 600; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; }
+  .history-preview-pane .history-preview-meta {
+    font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .history-preview-pane .history-preview-id { display: none; }
+  .history-preview-pane .history-preview-cwd { font-size: 14px; }
+  @media (display-mode: standalone) {
+    .history-preview-pane .history-preview-head { padding-top: 10px; }
+  }
+  .history-preview-pane .session-history-divider {
+    display: flex; align-items: center; gap: 12px; margin-block: 16px 8px;
+    border: none; font-size: 14px; color: var(--text-faint); text-align: center;
+  }
+  .history-preview-pane .session-history-divider::before,
+  .history-preview-pane .session-history-divider::after {
+    content: ""; flex: 1; height: 1px; background: var(--border);
+  }
+  /* 底部安全区交给预览底栏填色，避免与 .app 的安全区重复留白。 */
+  .app:has(.history-preview-pane):not(.term-open) { padding-bottom: 0; }
+  .history-preview-pane .history-actions {
+    flex-shrink: 0; align-items: stretch; padding: 10px 16px calc(12px + env(safe-area-inset-bottom));
+    border: none; background: var(--chrome);
+  }
+  .history-preview-pane .history-actions .history-note,
+  .history-preview-pane .history-actions .history-error { font-size: 14px; line-height: 1.5; }
+  .history-preview-pane .history-actions .history-note { color: var(--text-faint); }
+  .history-preview-pane .history-actions > .btn-primary {
+    width: 100%; min-height: 44px; padding: 10px 16px; border: none; border-radius: 999px; font-size: 15px;
+  }
+  .history-preview-pane .history-import-note { display: none; }
+  .history-preview-pane .history-import-details { display: block; }
+  .history-import-details > summary {
+    display: block; cursor: pointer; list-style: none; min-height: 44px; font-size: 14px; color: var(--text-muted);
+  }
+  .history-import-details > summary::-webkit-details-marker { display: none; }
+  .history-import-details:not([open]) .history-note {
+    display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden;
+  }
+  .history-details-show, .history-details-hide {
+    display: flex; align-items: center; min-height: 44px; text-decoration: underline;
+  }
+  .history-import-details .history-details-hide,
+  .history-import-details[open] .history-details-show { display: none; }
+  .history-import-details[open] .history-details-hide { display: flex; }
+  .history-import-details[open] { max-height: 30dvh; overflow-y: auto; }
   /* manifest 的 maxWidth（如 ai-usage 的 33%）是给宽屏的，单栏下铺满；!important 压过内联样式 */
   .page-view { max-width: none !important; }
   /* 单栏下「收起」没有意义；只在已收起时保留按钮，作为展开的唯一出口 */
@@ -3011,8 +3289,34 @@ body.resizing {
     border-bottom: 1px solid var(--border);
     background: var(--chrome);
   }
-  .mobile-panel-launcher { flex: 0 0 auto; justify-content: flex-end; }
-  .app.term-open .mobile-panel-launcher { display: none; }
+  /* 手机列表页顶栏一行（参照 iOS 工具栏）：wb 标志 │ 刷新 · 文件 · 终端 · 派单（浅底圆钮）…… 右端蓝色实心「+」新建。
+     「workbench」字样与 ChatGPT 入口在手机上不显示（ChatGPT 用 App） */
+  .app:not(.sidebar-collapsed) .brand-name, .app:not(.sidebar-collapsed) .sidebar-chatgpt { display: none; }
+  .app:not(.sidebar-collapsed) .sidebar { grid-template-columns: minmax(0, 1fr) auto; }
+  .app:not(.sidebar-collapsed) .sidebar-head { justify-content: flex-start; gap: 6px; min-width: 0; }
+  .app:not(.sidebar-collapsed) .brand { gap: 0; }
+  .app:not(.sidebar-collapsed) .brand-line { height: 22px; margin: 0 6px 0 10px; border-radius: 1px; }
+  .app:not(.sidebar-collapsed) .sidebar-reload { margin: 0; }
+  .mobile-panel-launcher, .mobile-panel-launcher .panel-actions { display: flex; min-width: 0; }
+  .mobile-panel-launcher .panel-actions { flex: 0 1 auto; gap: 6px; }
+  .app:not(.sidebar-collapsed) .sidebar-head .sidebar-reload,
+  .mobile-panel-launcher .panel-actions .btn {
+    display: inline-flex; align-items: center; justify-content: center;
+    /* 放不下（小屏 + 特大字号）时圆钮一起收到 32px，不压到右端「+」 */
+    flex: 0 1 44px; width: 44px; height: auto; aspect-ratio: 1; min-width: 32px; min-height: 0; padding: 0;
+    border: none; border-radius: 50%; font-size: 20px; color: var(--text);
+    background: color-mix(in srgb, var(--text) 9%, var(--chrome));
+  }
+  .mobile-panel-launcher .panel-actions .btn svg { width: 21px; height: 21px; }
+  .mobile-panel-launcher .panel-actions .btn[aria-pressed="true"] { background: color-mix(in srgb, var(--text) 18%, var(--chrome)); }
+  .app:not(.sidebar-collapsed) .sidebar > .sidebar-new-row { display: flex; justify-content: flex-end; align-items: center; }
+  .app:not(.sidebar-collapsed) .btn-new-session {
+    width: 44px; height: 44px; min-height: 44px; padding: 0; flex: 0 0 auto;
+    border: none; border-radius: 50%; background: var(--busy); color: #fff;
+  }
+  .app:not(.sidebar-collapsed) .btn-new-session .new-session-icon { width: 22px; height: 22px; }
+  .app:not(.sidebar-collapsed) .new-session-label { display: none; }
+  .app:not(.sidebar-collapsed) .sidebar-foot { --foot-btn: 40px; }
   /* 终端在窄屏不做左右分栏：打开时占满主区（列表与会话主区都让位），「‹ 返回」回原视图 */
   .app.term-open .sidebar,
   .app.term-open .main {
@@ -3030,6 +3334,14 @@ body.resizing {
   .term-back {
     display: inline-flex;
     align-items: center;
+  }
+  /* 终端/文件/派单面板标题栏：确认结束或已退出时让出 shell 切换，不撑出屏幕（撑出后 iOS 会整页缩小） */
+  .term-titlebar:has(.term-confirm, .term-exited) .term-shells,
+  .term-titlebar .term-confirm-text { display: none; }
+  .term-panel { overflow-x: clip; }
+  /* 主屏幕 App：同会话顶栏，标题栏下移躲开 iOS 状态栏下方的虚化区 */
+  @media (display-mode: standalone) {
+    .term-titlebar { padding-top: 14px; }
   }
   /* 窄屏附件卡片收窄：文件名与错误文案不撑出附件条 */
   .attach-name, .attach-err { max-width: 140px; }
@@ -3054,6 +3366,37 @@ body.resizing {
   .cfg-slider { width: 176px; height: 32px; }
   /* iOS 聚焦字号小于 16px 的输入框会自动放大页面；!important 用来压过各处更具体的字号规则 */
   textarea, input, select { font-size: 16px !important; }
+}
+
+/* 手机输入框底栏（参照 Claude App 收紧）：缓存时间挪到发送键上方；
+   「+」「/」只收窄不降高（仍 44px 高），胶囊收内边距，让「Opus 5.5 High」「Auto」完整显示 */
+@media (max-width: 720px) {
+  /* 输入字号跟正文一致（不低于 16 防 iOS 聚焦放大），行高和上下留白加大，空着时也好点中；!important 压过触屏的 16px 统一规则 */
+  .composer-box textarea { font-size: max(16px, calc(var(--body-font-size) - 1px)) !important; /* 比正文小 1px（用户定）；16px 下限防 iOS 聚焦放大 */ line-height: 1.5; padding: 12px 12px 8px; }
+  .composer-input .cache-timer-top { display: inline-flex; padding: 0 10px 6px 4px; }
+  .cfg-bar .cache-timer-bar { display: none; }
+  .cfg-bar { gap: 0; padding: 0 6px 6px 4px; }
+  .cfg-bar .attach-btn { width: 36px; }
+  .cfg-bar .rc-pill { margin: 0 4px 0 2px; }
+  .cfg-bar .cfg-pills { gap: 4px; margin-right: 4px; }
+  /* 浮层仍定宽，但减去左右 6px 定位留白，并按界面 zoom 限定视口。 */
+  .cfg-bar .cfg-menu {
+    min-width: 0;
+    max-width: min(calc(100% - 12px), calc((100vw - 16px) / var(--font-scale)));
+  }
+  .cfg-bar .cfg-menu:has(.cfg-slider-row) {
+    width: min(300px, calc(100% - 12px), calc((100vw - 16px) / var(--font-scale)));
+  }
+  /* 标签和重置按钮在上，滑块单独一行，不挤窄中文标签。 */
+  .cfg-bar .cfg-slider-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; }
+  .cfg-bar .cfg-slider-label { grid-column: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .cfg-bar .cfg-slider-reset { grid-column: 2; grid-row: 1; }
+  .cfg-bar .cfg-slider { grid-column: 1 / -1; width: 100%; min-width: 0; }
+
+  /* 视觉保持共享的 30px 胶囊，::after 把手机点按区补回 44px。 */
+  .cfg-bar .cfg-pill::after { content: ""; position: absolute; inset: -7px 0; }
+  .cfg-menu-cwd { display: block; }
+  .cfg-bar .send-btn svg { width: 22px; height: 22px; }
 }
 
 /* 派单右侧面板复用终端容器、标题条、分隔条与窄屏全屏规则。 */
@@ -3082,60 +3425,66 @@ body.resizing {
 .dispatch-panel-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 13px 16px 0; }
 .dispatch-panel-head strong { font-size: 16px; font-weight: 600; }
 .dispatch-panel-head span { font-size: 16px; color: var(--text-faint); }
-.dispatch-tree { position: relative; padding: 18px 14px 20px; isolation: isolate; }
-.dispatch-wires { position: absolute; inset: 0; display: block; width: 100%; height: 100%; z-index: 0; overflow: visible; pointer-events: none; }
+.dispatch-tree { position: relative; padding: 16px 12px 20px; isolation: isolate; overflow-x: clip; }
+.dispatch-wires { position: absolute; inset: 0; display: block; width: 100%; height: 100%; z-index: 0; pointer-events: none; }
 .dispatch-wire { fill: none; stroke: var(--border-strong); stroke-width: 1.5; stroke-linejoin: round; stroke-linecap: round; }
 .dispatch-wire.flow { stroke: var(--wire-color); stroke-dasharray: 5 7; animation: dispatch-flow 1.1s linear infinite; }
 .dispatch-wire.finish { stroke: var(--wire-color); }
 @keyframes dispatch-flow { to { stroke-dashoffset: -24; } }
-.dispatch-node { position: relative; z-index: 1; border: 1px solid var(--border); border-radius: 9px; background: var(--surface); min-width: 0; }
-.dispatch-source { padding: 12px; border-color: color-mix(in srgb, var(--agent-claude-ink) 33%, var(--border)); background: color-mix(in srgb, var(--agent-claude-ink) 4%, var(--surface)); }
-.dispatch-source-head { display: flex; align-items: center; gap: 8px; font-weight: 600; }
-.dispatch-source-head .agent-icon { width: 23px; height: 23px; }
-.dispatch-role { margin-left: auto; font-size: 16px; color: var(--agent-claude-ink); font-weight: 400; }
-.dispatch-session-title { margin: 7px 0 0; font-size: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-/* 树形在任何宽度都保留：窄（侧面板 / 手机）用紧凑卡片，≥720px 放大。 */
-/* 卡片偏方形、两层拉开（用户 10-01 定）。 */
-.dispatch-source { width: min(260px, 72%); min-height: 112px; margin-inline: auto; padding: 10px 12px; }
-.dispatch-executors { margin: 84px 0 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; align-items: stretch; }
-.dispatch-subagents { margin-top: 84px; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px 8px; }
-.dispatch-subagent { --ink: var(--agent-codex-ink); box-sizing: border-box; width: min(100%, 150px); justify-self: center; padding: 7px; border-top: 3px solid var(--agent-codex); min-height: 88px; }
+/* 每层共用窄块尺寸；层数由数据决定，窄面板只收窄，不改成横向滚动或列表。 */
+.dispatch-level { --dispatch-columns: 3; margin-top: 48px; display: flex; flex-wrap: wrap; gap: 12px 8px; align-items: flex-start; justify-content: center; }
+.dispatch-node { --identity: var(--agent-codex); --ink: var(--agent-codex-ink); position: relative; z-index: 1; box-sizing: border-box; width: min(148px, calc((100cqi - 24px - (var(--dispatch-columns) - 1) * 8px) / var(--dispatch-columns))); min-width: 0; border: 1px solid var(--border); border-top: 3px solid var(--identity); border-radius: 8px; padding: 7px; background: var(--surface); color: var(--text); text-align: left; font: 14px/1.4 var(--font-ui); }
+.dispatch-node[data-tool="kimi"] { --identity: var(--agent-kimi); --ink: var(--agent-kimi-ink); }
+.dispatch-node[data-tool="copilot"] { --identity: var(--agent-copilot); --ink: var(--agent-copilot-ink); }
+.dispatch-node[data-tool="claude"], .dispatch-source { --identity: var(--agent-claude); --ink: var(--agent-claude-ink); }
+.dispatch-source { width: min(208px, 76%); margin-inline: auto; background: color-mix(in srgb, var(--agent-claude-ink) 4%, var(--surface)); }
+.dispatch-source-head { display: flex; align-items: center; gap: 5px; font-size: 14px; font-weight: 600; }
+.dispatch-source-head .agent-icon { width: 18px; height: 18px; flex: 0 0 auto; }
+.dispatch-role { margin-left: auto; color: var(--agent-claude-ink); font-weight: 400; white-space: nowrap; }
+.dispatch-session-title { margin: 4px 0 0; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dispatch-executor.idle { width: min(90px, calc((100cqi - 24px - (var(--dispatch-columns) - 1) * 8px) / var(--dispatch-columns))); padding: 5px; border-top-width: 1px; border-radius: 16px; --identity: var(--border-strong); --ink: var(--text-faint); background: var(--bg); }
+.dispatch-executor.idle .agent-icon { display: none; }
+.dispatch-idle-label { color: var(--text-faint); font-size: 14px; white-space: nowrap; }
+.dispatch-node-head { display: flex; gap: 4px; align-items: center; min-width: 0; }
+.dispatch-node-head .agent-icon { color: var(--ink); width: 16px; height: 16px; flex: 0 0 auto; }
+.dispatch-node-head h2 { margin: 0; min-width: 0; font-size: 14px; color: var(--ink); font-weight: 650; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dispatch-model { margin: 3px 0 0; min-width: 0; color: var(--text-muted); font: 14px/1.4 var(--font-mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dispatch-node-head .dispatch-model { margin: 0; display: flex; flex: 1 1 0; }
+.dispatch-model-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.dispatch-model-effort { flex: 0 0 auto; white-space: pre; }
 .dispatch-subagent-name { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink); font-size: 14px; }
-.dispatch-subagent .dispatch-model { margin: 4px 0; }
-.dispatch-subagent .dispatch-status, .dispatch-subagent .dispatch-activity { font-size: 13px; }
-/* 最小高度≈列宽（100cqi 是 .dispatch-panel 宽，减 tree 左右 padding 28 与两道 gap 16），同排拉齐等高 */
-.dispatch-executor { --identity: var(--agent-codex); --ink: var(--agent-codex-ink); min-height: calc((100cqi - 44px) / 3); padding: 8px 8px 10px; border-top: 3px solid var(--identity); }
-.dispatch-executor .dispatch-model { overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; margin: 2px 0 6px; }
-.dispatch-executor .dispatch-activity { white-space: normal; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; }
-.dispatch-executor .dispatch-node-head { gap: 5px; }
-.dispatch-executor .dispatch-node-head h2 { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.dispatch-executor[data-tool="kimi"] { --identity: var(--agent-kimi); --ink: var(--agent-kimi-ink); }
-.dispatch-executor[data-tool="copilot"] { --identity: var(--agent-copilot); --ink: var(--agent-copilot-ink); }
-.dispatch-executor.idle { --identity: var(--border-strong); --ink: var(--text-faint); background: var(--bg); }
-.dispatch-executor.idle .agent-icon { filter: grayscale(1); opacity: .5; }
-.dispatch-node-head { display: flex; gap: 7px; align-items: center; }
-.dispatch-node-head .agent-icon { color: var(--ink); width: 19px; height: 19px; }
-.dispatch-node-head h2 { margin: 0; font-size: 16px; color: var(--ink); font-weight: 650; }
-.dispatch-model { margin: 3px 0 8px; color: var(--text-muted); font: 14px/1.5 var(--font-mono); overflow-wrap: anywhere; }
-.dispatch-jobs { display: flex; flex-direction: column; gap: 8px; }
-.dispatch-job + .dispatch-job { border-top: 1px solid var(--border); padding-top: 8px; }
-.dispatch-job-meta { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 14px; }
-.dispatch-status { color: var(--ink); }
+.dispatch-job-meta { display: flex; align-items: center; justify-content: space-between; gap: 3px; margin-top: 4px; min-width: 0; font-size: 14px; }
+.dispatch-status { color: var(--ink); white-space: nowrap; }
 .dispatch-status.failed { color: var(--danger); }
 .dispatch-status.finished { color: var(--ok); }
-.dispatch-elapsed { color: var(--text-faint); font: 14px var(--font-mono); font-variant-numeric: tabular-nums; }
-.dispatch-activity { margin: 3px 0 0; color: var(--text); font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.dispatch-executor.idle .dispatch-activity, .dispatch-executor.idle .dispatch-job-meta { color: var(--text-faint); }
-.dispatch-more { font: 16px var(--font-mono); color: var(--text-muted); padding-top: 7px; }
+.dispatch-status.unknown { color: var(--text-faint); }
+.dispatch-elapsed { min-width: 0; color: var(--text-faint); font: 14px var(--font-mono); font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dispatch-activity { margin: 4px 0 0; color: var(--text); font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dispatch-summary-row { display: flex; gap: 3px; align-items: center; width: 100%; min-width: 0; min-height: 24px; margin-top: 3px; padding: 0; border: 0; background: transparent; color: var(--text); font: 14px/1.4 var(--font-ui); text-align: left; }
+.dispatch-row-name { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dispatch-summary-row .dispatch-elapsed { flex: 0 1 auto; max-width: 50%; }
+.dispatch-state-dot { flex: 0 0 6px; width: 6px; height: 6px; border-radius: 50%; background: var(--text-faint); }
+.dispatch-state-dot.running { background: var(--dot-working); }
+.dispatch-state-dot.failed { background: var(--danger); }
+.dispatch-state-dot.finished { background: var(--ok); }
+.dispatch-node.highlighted, .dispatch-summary-row.highlighted { outline: 2px solid var(--identity); }
+.dispatch-tree button.dispatch-node, .dispatch-tree button.dispatch-summary-row { cursor: pointer; }
+.dispatch-tree button.dispatch-node:hover, .dispatch-tree button.dispatch-summary-row:hover { background: var(--surface-sunk); }
+.dispatch-tree button:focus-visible, .dispatch-more summary:focus-visible { outline: 2px solid var(--identity); outline-offset: 2px; }
+.dispatch-more { font: 14px/1.4 var(--font-ui); color: var(--text-muted); margin-top: 4px; }
+.dispatch-more summary { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .dispatch-empty { padding: 16px 18px 26px; margin: 0; color: var(--text-faint); font-size: 16px; }
 .dispatch-error { margin: 0 18px 16px; color: var(--danger); font-size: 16px; }
+@container dispatch (max-width: 580px) {
+  .dispatch-model-head .agent-icon { display: none; }
+  .dispatch-status { font-size: 0; }
+  .dispatch-status::before { content: ""; display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+  .dispatch-status.running::before { background: var(--dot-working); }
+  .dispatch-executor.idle .dispatch-node-head { flex-direction: column; gap: 0; }
+  .dispatch-node { padding: 5px; }
+}
 @container dispatch (min-width: 720px) {
-  .dispatch-tree { padding: 24px 24px 30px; }
-  .dispatch-source { width: 300px; min-height: 130px; padding: 14px; }
-  .dispatch-executors { margin: 130px 0 0; gap: 20px; }
-  .dispatch-subagents { margin-top: 130px; gap: 20px; }
-  .dispatch-executor { min-height: 210px; padding: 14px; }
-  .dispatch-executor .dispatch-model { margin: 3px 0 8px; }
+  .dispatch-level { margin-top: 56px; gap: 14px 12px; }
 }
 @media (prefers-reduced-motion: reduce) {
   .dispatch-wire.flow { animation: none; stroke-dasharray: none; stroke-dashoffset: 0; }
@@ -3195,3 +3544,75 @@ body.resizing {
 
 .earlier-messages { padding: 12px; text-align: center; color: var(--text-muted); }
 .earlier-messages button { color: inherit; cursor: pointer; }
+
+/* 工单 C：按钮以浅底分区；桌面共享 32px 圆钮，手机沿用既定尺寸。 */
+@media (min-width: 721px) {
+  .chrome-icon-btn, .btn.chrome-icon-btn, .icon-btn.chrome-icon-btn {
+    display: inline-flex; align-items: center; justify-content: center;
+    flex: 0 0 auto; width: 32px; height: 32px; min-width: 32px; min-height: 32px;
+    padding: 0; border: 0; border-radius: 50%; color: var(--text);
+    background: color-mix(in srgb, var(--text) 9%, var(--chrome));
+  }
+  .chrome-icon-btn:hover:not(:disabled), .chrome-icon-btn[aria-pressed="true"], .chrome-icon-btn[aria-expanded="true"] { background: var(--chrome-sunk); }
+  .session > .session-dispatch-link { display: none; }
+  .session-head-actions > .session-dispatch-link {
+    display: inline-flex; align-items: center; gap: 4px; padding: 6px 10px;
+    border: 0; border-radius: 999px; font: inherit; font-size: 14px; white-space: nowrap;
+    color: var(--text-muted); background: color-mix(in srgb, var(--text) 9%, var(--chrome)); cursor: pointer;
+  }
+  .session-head-actions > .session-dispatch-link:hover { background: var(--chrome-sunk); }
+}
+@media (max-width: 720px) {
+  .session-head-actions > .session-dispatch-link { display: none; }
+}
+
+/* 按钮锚定在滚动区外，底部贴条和输入框仍在下面独立占位。 */
+.stream-region { position: relative; flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0; min-width: 0; }
+.back-to-latest {
+  position: absolute; right: 16px; bottom: 12px; z-index: 3;
+  height: 36px; padding: 0 12px; border: 0; border-radius: 999px;
+  background: var(--surface); color: var(--text); box-shadow: var(--shadow-pop);
+  font: inherit; font-size: 15px; cursor: pointer;
+}
+.back-to-latest:hover { background: var(--surface-sunk); }
+.back-to-latest::after { content: ""; position: absolute; inset: -4px 0; min-height: 44px; }
+.composer-interrupt {
+  position: relative; flex: 0 0 auto; display: inline-grid; place-items: center;
+  width: 30px; height: 30px; margin-right: 4px; padding: 0; border: 0; border-radius: 50%;
+  background: var(--surface-sunk); color: var(--text-muted); cursor: pointer;
+}
+.composer-interrupt:hover { color: var(--text); }
+.composer-interrupt::after { content: ""; position: absolute; inset: -7px 0; min-height: 44px; }
+/* 独立中断钮只在桌面采用发送键外观，手机保留中性小圆钮与 44px 命中区。 */
+@media (min-width: 721px) {
+  .cfg-bar .composer-interrupt { background: var(--agent-claude); color: light-dark(#fff, var(--bg)); }
+  .agent-codex .cfg-bar .composer-interrupt { background: var(--agent-codex); }
+  .agent-kimi .cfg-bar .composer-interrupt { background: var(--agent-kimi); }
+  .cfg-bar .composer-interrupt::after { content: none; }
+}
+@media (pointer: coarse) {
+  .tool-head, .thought-head, .gate-fold { position: relative; }
+  .tool-head::after, .thought-head::after, .gate-fold::after {
+    content: ""; position: absolute; left: 0; right: 0; top: 50%; transform: translateY(-50%);
+    height: 100%; min-height: 44px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .new-session-icon, .session-item .session-row { transition: none; }
+}
+
+/* 极窄输入区容不下固定宽的入口与完整审批文字：配置先独占一行。 */
+@media (max-width: 720px) {
+  @container composer (max-width: 280px) {
+    .cfg-bar { flex-wrap: wrap; row-gap: 4px; }
+    .cfg-bar .cfg-pills { flex-basis: 100%; order: -1; margin-right: 0; }
+    .cfg-bar .send-btn { margin-left: auto; }
+    .cfg-bar .composer-interrupt { margin-left: auto; }
+    .cfg-bar .composer-interrupt + .send-btn { margin-left: 0; }
+  }
+  @container composer (max-width: 330px) {
+    .cfg-bar:has(.composer-interrupt) { flex-wrap: wrap; row-gap: 4px; }
+    .cfg-bar:has(.composer-interrupt) .cfg-pills { flex-basis: 100%; order: -1; margin-right: 0; }
+    .cfg-bar:has(.composer-interrupt) .composer-interrupt { margin-left: auto; }
+  }
+}

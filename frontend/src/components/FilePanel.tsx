@@ -71,7 +71,7 @@ export function FilePanel({ onClose }: { onClose: () => void }) {
     }}>
       <div className="term-titlebar">
         <strong className="file-side-title">文件</strong>
-        <button type="button" className="btn panel-icon-button" aria-label="收起文件面板" title="收起面板" onClick={onClose}><PanelRightIcon /></button>
+        <button type="button" className="btn chrome-icon-btn panel-icon-button" aria-label="收起文件面板" title="收起面板" onClick={onClose}><PanelRightIcon /></button>
       </div>
       {notice && <div className="file-notice" role="status">
         {notice.reason && <p>{notice.reason}</p>}

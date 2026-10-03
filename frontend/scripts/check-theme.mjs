@@ -13,6 +13,11 @@ for (const theme of ["light", "dark"]) {
   assert.match(css, new RegExp(`:root\\[data-theme="${theme}"\\]\\s*\\{\\s*color-scheme:\\s*${theme}\\s*;`));
 }
 
+// 底栏已有局部尺寸变量；颜色仍必须由 :root 的主题令牌提供。
+const localSizes = new Set([...css.matchAll(/(--[\w-]+)\s*:\s*(?:\d+(?:\.\d+)?(?:px|em|rem)|0)\s*;/g)].map(([, name]) => name));
+assert.equal(tokens.get("--surface"), "light-dark(#FFFFFF, #2A2926)", "C1 深色浮层提亮");
+assert.equal(tokens.get("--chrome"), "light-dark(#F0EEE6, #262624)", "C1 外框保持原值");
+
 let checked = 0;
 for (const [, selector, body] of css.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
   if (!/\.(?:dir-[\w-]+|page-nav(?:-[\w-]+)?|page-icon)\b/.test(selector)) continue;
@@ -20,7 +25,7 @@ for (const [, selector, body] of css.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
   assert.doesNotMatch(body, /#[\da-f]{3,8}\b|\b(?:rgb|rgba|hsl|hsla|light-dark)\(/i,
     `${selector.trim()} 必须复用颜色令牌`);
   for (const [, name] of body.matchAll(/var\(\s*(--[\w-]+)/g)) {
-    assert.ok(tokens.has(name), `${selector.trim()} 引用了未定义令牌 ${name}`);
+    assert.ok(tokens.has(name) || localSizes.has(name), `${selector.trim()} 引用了未定义令牌 ${name}`);
     if (/^--(?:text(?:-[\w-]+)?|surface(?:-[\w-]+)?|chrome(?:-[\w-]+)?|border(?:-[\w-]+)?|busy)$/.test(name)) {
       assert.match(tokens.get(name), /^light-dark\(/, `${name} 必须覆盖深浅主题`);
     }

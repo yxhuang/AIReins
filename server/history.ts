@@ -97,12 +97,14 @@ interface DiscoveryResult {
   truncated: boolean;
 }
 
-interface CursorData {
+interface CursorPosition {
   version: 1;
   mtimeMs: number;
   agent: AgentKind;
   path: string;
 }
+
+type CursorData = CursorPosition | { version: 1; start: true };
 
 interface HeadRead {
   lines: string[];
@@ -188,15 +190,16 @@ export class HistoryIndex {
 
   async list(input: HistoryListInput): Promise<HistoryListResult> {
     const started = Date.now();
-    const deadline = started + this.timeoutMs;
     const agents = input.agent ? [input.agent] : AGENTS;
     const cursor = input.cursor ? decodeCursor(input.cursor) : undefined;
-    const discovery = await this.discover(agents, deadline);
+    const discovery = await this.discover(agents, started + this.timeoutMs);
     const candidates = discovery.candidates
       .sort(compareCandidates)
       .filter((candidate) => !cursor || candidateAfterCursor(candidate, cursor));
     const workbenchIds = await this.loadWorkbenchSessionIds();
     const dispatches = await dispatchSessionMap();
+    // 发现与消费各有预算；目录发现耗尽预算后，已发现的候选仍能处理。
+    const deadline = Date.now() + this.timeoutMs;
     const q = (input.q ?? "").trim().toLocaleLowerCase();
     const sessions: HistorySession[] = [];
     let skipped = discovery.skipped;
@@ -245,7 +248,8 @@ export class HistoryIndex {
     const hasMore = consumed < candidates.length || truncated;
     return {
       sessions,
-      ...(hasMore && lastConsumed ? { nextCursor: encodeCursor(lastConsumed) } : {}),
+      // 零消费时保留上一页边界；首轮用起始哨兵，不能排除尚未消费的候选。
+      ...(hasMore ? { nextCursor: lastConsumed ? encodeCursor(lastConsumed) : input.cursor ?? encodeCursor() } : {}),
       truncated,
       skipped,
       empty,
@@ -983,23 +987,25 @@ function compareCandidates(left: Candidate, right: Candidate): number {
 }
 
 function candidateAfterCursor(candidate: Candidate, cursor: CursorData): boolean {
+  if ("start" in cursor) return true;
   if (candidate.mtimeMs !== cursor.mtimeMs) return candidate.mtimeMs < cursor.mtimeMs;
   return `${candidate.agent}\0${candidate.path}`.localeCompare(`${cursor.agent}\0${cursor.path}`) > 0;
 }
 
-function encodeCursor(candidate: Candidate): string {
-  const value: CursorData = {
+function encodeCursor(candidate?: Candidate): string {
+  const value: CursorData = candidate ? {
     version: 1,
     mtimeMs: candidate.mtimeMs,
     agent: candidate.agent,
     path: candidate.path,
-  };
+  } : { version: 1, start: true };
   return Buffer.from(JSON.stringify(value)).toString("base64url");
 }
 
 function decodeCursor(value: string): CursorData {
   try {
-    const parsed = JSON.parse(Buffer.from(value, "base64url").toString("utf8")) as Partial<CursorData>;
+    const parsed = JSON.parse(Buffer.from(value, "base64url").toString("utf8")) as Partial<CursorPosition> & { start?: unknown };
+    if (parsed.version === 1 && parsed.start === true) return { version: 1, start: true };
     if (parsed.version !== 1 || typeof parsed.mtimeMs !== "number" || !AGENTS.includes(parsed.agent as AgentKind) || typeof parsed.path !== "string") {
       throw new Error("invalid cursor fields");
     }

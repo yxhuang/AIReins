@@ -65,7 +65,9 @@ assert.equal(byId.get("nested")?.status, "running", "a new turn reopens a comple
 for (const id of ["unknown", "stale"]) assert.equal(byId.get(id)?.status, "unknown");
 for (const id of ["final", "aborted"]) assert.equal(byId.get(id)?.status, "finished");
 for (const id of ["partial", "bounded"]) assert.equal(byId.get(id)?.status, "running");
-for (const id of ["unrelated", "outside-dates", "too-deep", "cycle", "inherited-root-not-thread-id"]) assert.ok(!byId.has(id));
+assert.equal(byId.get("too-deep")?.depth, 3, "third-level children remain attached to their actual parent");
+assert.equal(byId.get("too-deep")?.parentThreadId, "nested");
+for (const id of ["unrelated", "outside-dates", "cycle", "inherited-root-not-thread-id"]) assert.ok(!byId.has(id));
 assert.equal(await readCodexSubagent(join(history, "2026/10/01/rollout-oversized.jsonl")), null);
 assert.equal(await readCodexSubagent(join(history, "missing.jsonl")), null);
 await assert.rejects(readCodexSubagent(join(history, "2026/10/01/rollout-symlink.jsonl")));

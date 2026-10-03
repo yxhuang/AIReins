@@ -11,6 +11,59 @@ const PAGE_ID_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const EMOJI_PATTERN = /\p{Extended_Pictographic}/u;
 const PAGE_HEALTH_TIMEOUT_MS = 2_000;
 
+export interface LauncherLink {
+  name: string;
+  url: string;
+  icon?: string;
+  group?: string;
+}
+
+/** 根目录配置按请求现读；坏配置只影响本次链接列表，不影响扩展页面。 */
+export function readLinks(root = DEFAULT_PAGES_ROOT): LauncherLink[] {
+  const path = join(root, "links.json");
+  let input: unknown;
+  try {
+    input = JSON.parse(readFileSync(path, "utf8"));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+      log("warn", "links config read failed", { path, reason: errorMessage(error) });
+    }
+    return [];
+  }
+  if (!input || typeof input !== "object" || !Array.isArray((input as { links?: unknown }).links)) {
+    log("warn", "links config must contain a links array", { path });
+    return [];
+  }
+  const links: LauncherLink[] = [];
+  for (const [index, item] of (input as { links: unknown[] }).links.entries()) {
+    try {
+      if (!item || typeof item !== "object" || Array.isArray(item)) throw new Error("link must be an object");
+      const fields = item as Record<string, unknown>;
+      if (typeof fields.name !== "string" || !fields.name.trim()) throw new Error("name is required");
+      if (typeof fields.url !== "string" || !fields.url.trim()) throw new Error("url is required");
+      const url = fields.url.trim();
+      // URL scheme 必须显式给出；拒绝可执行内容、内联资源和本地文件。
+      if (!/^[a-z][a-z0-9+.-]*:/i.test(url) || /[\u0000-\u0020\u007f]/u.test(url)) throw new Error("invalid URL");
+      const parsed = new URL(url);
+      if (["javascript:", "data:", "vbscript:", "file:", "blob:", "filesystem:", "about:"].includes(parsed.protocol)) {
+        throw new Error("unsafe URL scheme");
+      }
+      if (["http:", "https:"].includes(parsed.protocol) && !parsed.hostname) throw new Error("URL host is required");
+      const link: LauncherLink = { name: fields.name.trim(), url };
+      for (const key of ["icon", "group"] as const) {
+        if (fields[key] !== undefined) {
+          if (typeof fields[key] !== "string" || !fields[key].trim()) throw new Error(`${key} must be a nonempty string`);
+          link[key] = fields[key].trim();
+        }
+      }
+      links.push(link);
+    } catch (error) {
+      log("warn", "invalid link skipped", { path, index, reason: errorMessage(error) });
+    }
+  }
+  return links;
+}
+
 export interface IframePageManifest {
   id: string;
   name: string;

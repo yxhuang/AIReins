@@ -57,7 +57,7 @@ function inventory(paths = [resolve(workbenchHome)]): Inventory {
 const sum = (files: FileEntry[]) => files.reduce((total, file) => total + file.bytes, 0);
 const inDir = (file: FileEntry, dir: string) => file.rel.startsWith(`${dir}${sep}`);
 
-function planFor(scan: Inventory, sessions: SessionRecord[]): Plan {
+function planFor(scan: Inventory, sessions: SessionRecord[], references = uploadDirReferences(sessions)): Plan {
   const ids = new Set(sessions.map((session) => session.id));
   const transcriptPaths = new Set(sessions.map((session) => resolve(session.transcriptPath)));
   const logs = scan.files.filter((file) => file.regular && /^server\.log\.[^/]+$/.test(file.rel));
@@ -65,11 +65,11 @@ function planFor(scan: Inventory, sessions: SessionRecord[]): Plan {
     && file.rel.startsWith(`transcripts${sep}`)
     && !file.rel.slice("transcripts/".length).includes(sep) && file.rel.endsWith(".ndjson")
     && !ids.has(file.rel.slice("transcripts/".length, -7)) && !transcriptPaths.has(file.path));
-  const referenced = uploadDirReferences(sessions);
+  const referenced = new Set(sessions.flatMap((session) => [...(references.get(session.id) ?? [])]));
   const uploadIds = scan.dirs.filter((dir) => dir.startsWith(`uploads${sep}`)
     && !dir.slice("uploads/".length).includes(sep))
     .map((dir) => dir.slice("uploads/".length))
-    .filter((id) => !ids.has(id) && !referenced.includes(join(workbenchHome, "uploads", id)));
+    .filter((id) => !ids.has(id) && !referenced.has(id));
   const files = [...logs, ...transcripts,
     ...scan.files.filter((file) => uploadIds.some((id) => inDir(file, join("uploads", id))))];
   return { logs, transcripts, uploadIds, files };
@@ -88,10 +88,11 @@ export function getStorageStats(manager: SessionManager): StorageStats {
     if (kind === "transcripts" && /^transcripts\/[^/]+\.ndjson$/.test(file.rel)) categories.transcripts.sessions++;
   }
   categories.uploads.sessions = scan.dirs.filter((dir) => /^uploads\/[^/]+$/.test(dir)).length;
-  const plan = planFor(scan, sessions);
+  const references = uploadDirReferences(sessions);
+  const plan = planFor(scan, sessions, references);
   const ended = sessions.filter((session) => manager.isEndedSessionRemovable(session.id));
   const endedIds = new Set(ended.map((session) => session.id));
-  const withEnded = planFor(scan, sessions.filter((session) => !endedIds.has(session.id)));
+  const withEnded = planFor(scan, sessions.filter((session) => !endedIds.has(session.id)), references);
   const defaultPaths = new Set(plan.files.map((file) => file.path));
   const endedPaths = new Set(ended.map((session) => resolve(session.transcriptPath)));
   const withEndedPaths = new Set(withEnded.files.map((file) => file.path));

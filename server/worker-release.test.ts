@@ -188,6 +188,52 @@ async function pendingMarks(manager: InstanceType<typeof SessionManager>, id: st
   await next.manager.shutdown();
 }
 
+// ── 1c. 释放尚未停完时续接必须等旧进程；旧代回调不得污染新代 ──
+{
+  const { manager, instances, events } = harness();
+  const session = await manager.create({ agent: "claude", cwd: fixture, resumeSessionId: claudeId, snapshot: "skip" });
+  await manager.sendUserMessage(session.id, { text: "竞态第一轮" });
+  const old = instances[0]!;
+  old.finish();
+  await pendingMarks(manager, session.id);
+  const reader = (manager as unknown as { nativeReader: InstanceType<typeof NativeConversationReader> }).nativeReader;
+  reader.changed = async () => undefined;
+  reader.capture = async () => undefined;
+  let finishStop!: () => void;
+  const stopGate = new Promise<void>(resolve => { finishStop = resolve; });
+  old.stop = async () => {
+    await stopGate;
+    old.stopped = true;
+    old.options.callbacks.exited({ code: 0, signal: null, expected: true });
+  };
+  const releasing = manager.release(session.id, "manual");
+  const sending = manager.sendUserMessage(session.id, { text: "释放期间发送" });
+  sending.catch(() => undefined);
+  try {
+    // 清空本轮微任务与 IO 回调；stop 由门闩控制，不依赖耗时或 sleep。
+    await new Promise<void>(resolve => setImmediate(resolve));
+    assert.equal(instances.length, 1, "旧 stop 未完成前不得起新 worker");
+    assert.equal(old.stopped, false);
+  } finally {
+    finishStop();
+    await releasing;
+    await sending;
+  }
+  assert.equal(instances.length, 2);
+  assert.equal(manager.get(session.id)?.released, undefined);
+  assert.equal(manager.get(session.id)?.status, "running");
+  old.options.callbacks.status("dead");
+  old.options.callbacks.metadata({ remoteControl: { status: "disconnected" } });
+  old.options.callbacks.emit("session_error", { message: "迟到的旧代错误" });
+  old.options.callbacks.exited({ code: 0, signal: null, expected: true });
+  assert.equal(manager.get(session.id)?.status, "running");
+  assert.ok(!events.some(event => event.payload.message === "迟到的旧代错误"));
+  const releasedIndex = events.findIndex(event => event.type === "worker_released");
+  const messageIndex = events.findIndex(event => event.type === "user_message" && event.payload.text === "释放期间发送");
+  assert.ok(releasedIndex >= 0 && messageIndex > releasedIndex);
+  await manager.shutdown();
+}
+
 // ── 2. 释放后发送：以同一原生 ID 起新 worker 并发出消息，清掉 released ──
 {
   const { manager, instances, events } = harness();

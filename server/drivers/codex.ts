@@ -285,9 +285,9 @@ export class CodexDriver extends BaseDriver {
     this.callbacks.commands(CODEX_COMMANDS.map(c => ({ ...c })));
   }
 
-  async queryInfo(kind: string): Promise<unknown> {
+  async queryInfo(kind: string, forceReload = true): Promise<unknown> {
     if (kind === "skills") {
-      const result = await withTimeout(this.request("skills/list", { cwds: [this.cwd], forceReload: true }), 15_000, "Codex skills/list");
+      const result = await withTimeout(this.request("skills/list", { cwds: [this.cwd], forceReload }), 15_000, "Codex skills/list");
       return codexSkillsForCwd(result, this.cwd);
     }
     if (kind === "status") {
@@ -406,7 +406,7 @@ export class CodexDriver extends BaseDriver {
       });
     }
     if (/\$[^\s]+/.test(text)) {
-      const listing = await this.queryInfo("skills") as ReturnType<typeof codexSkillsForCwd>;
+      const listing = await this.queryInfo("skills", false) as ReturnType<typeof codexSkillsForCwd>;
       input.push(...codexSkillInputs(text, listing.skills));
     }
     if (options?.steer) {
@@ -424,7 +424,7 @@ export class CodexDriver extends BaseDriver {
     this.turnId = "";
     const applyingConfig = this.capturePendingConfig();
     const permissions = codexPermissions(this.config.permissionMode ?? "on-request");
-    this.startingTurn = this.request("turn/start", {
+    this.startingTurn = withTimeout(this.request("turn/start", {
       threadId: this.threadId,
       input,
       approvalPolicy: permissions.approvalPolicy,
@@ -436,7 +436,7 @@ export class CodexDriver extends BaseDriver {
       ...(applyingConfig?.clearEffort
         ? { effort: null }
         : this.sendEffort && this.config.effort ? { effort: this.config.effort } : {}),
-    }).then((result) => {
+    }), 60_000, "Codex turn/start").then((result) => {
       if (result?.turn?.id) this.turnId = result.turn.id;
       this.confirmAppliedConfig(applyingConfig, this.turnId);
     }).catch((error) => {

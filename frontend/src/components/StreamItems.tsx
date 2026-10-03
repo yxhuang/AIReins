@@ -523,7 +523,7 @@ export const QuestionBlock = forwardRef<HTMLDivElement, { item: GateView; sessio
 );
 
 export function SystemLine({ item }: { item: SystemBlock }) {
-  return <div className={`system-line${item.tone === "error" ? " system-error" : ""}${item.text.startsWith("会话已创建") ? " system-created" : ""}`}>{item.text}</div>;
+  return <div title={item.rawCode} className={`system-line${item.tone === "error" ? " system-error" : ""}${item.text.startsWith("会话已创建") ? " system-created" : ""}`}>{item.text}</div>;
 }
 
 export function RawLine({ item }: { item: RawBlock }) {

@@ -14,16 +14,19 @@ export interface DispatchRun {
   session: string | null;
   parent: { agent: string; sessionId: string | null; entrypoint: string | null; model?: string | null; runId?: string } | null;
   promptHead?: string | null;
+  agentType?: string | null;
   subagents?: DispatchSubagent[];
 }
 
-interface DispatchSubagent {
+export interface DispatchSubagent {
   threadId: string; nickname: string; role: string | null; depth: number; parentThreadId: string;
   status: "running" | "finished" | "unknown";
   startedAt: string | null; lastActivityAt: string; activity?: string;
 }
 
-const DISPATCH_TOOLS = ["codex", "kimi", "copilot"] as const;
+const DISPATCH_TOOLS = ["codex", "kimi", "copilot", "claude"] as const;
+export type DispatchTool = typeof DISPATCH_TOOLS[number];
+export type DispatchWireState = "flow" | "finish" | "idle";
 export const RECENT_DISPATCH_MS = 30 * 60 * 1000;
 export const FINISHED_WIRE_MS = 10 * 60 * 1000;
 
@@ -65,7 +68,105 @@ export function groupDispatches(runs: readonly DispatchRun[], now: number, obser
       wireState: items.some((run) => run.status === "running") ? "flow"
         : items.some((run) => recentWireEnd(dispatchEnd(run, observedEnds), now)) ? "finish" : "idle",
     };
-  });
+  }).filter((group) => group.tool !== "claude" || group.runs.length > 0);
+}
+
+export interface DispatchTreeRow { id: string; run: DispatchRun }
+export interface DispatchTreeNode {
+  id: string;
+  parentId: string;
+  depth: number;
+  tool: DispatchTool;
+  kind: "executor" | "run" | "subagent";
+  mode?: "idle" | "single" | "group";
+  run?: DispatchRun;
+  runId?: string;
+  subagent?: DispatchSubagent;
+  rows: DispatchTreeRow[];
+  more: number;
+  expanded?: boolean;
+}
+export interface DispatchTreeEdge {
+  from: string; to: string; tool: DispatchTool; state: DispatchWireState;
+  kind: "executor" | "run" | "subagent";
+  /** Group-mode run wires: ordered port on the executor card bottom (folded runs keep theirs). */
+  port?: { index: number; count: number };
+}
+
+interface DispatchBounds { left: number; right: number; top: number; bottom: number }
+
+/** One independent curve per edge; summary rows select ordered ports on the card bottom. */
+export function dispatchWirePath(from: DispatchBounds, to: DispatchBounds, row?: { index: number; count: number }): string {
+  const x = from.left + (from.right - from.left) * (row ? (row.index + 1) / (row.count + 1) : .5);
+  const y = from.bottom;
+  const endX = (to.left + to.right) / 2;
+  const endY = to.top;
+  const bend = Math.max(0, endY - y) / 2;
+  return `M ${x} ${y} C ${x} ${y + bend} ${endX} ${endY - bend} ${endX} ${endY}`;
+}
+
+/** Keep versioned/full model identifiers in titles; tree cards only need the family. */
+export function dispatchModelName(model: string): string {
+  const short = modelShortName(model);
+  return short.match(/^gpt-\d+(?:\.\d+)*-(sol|luna|astra)(?:-|$)/i)?.[1] ?? short;
+}
+
+/** Stable IDs are scoped to the dispatch: identical thread nicknames never merge runs. */
+export function buildDispatchTree(groups: ReturnType<typeof groupDispatches>, now: number,
+  expanded: ReadonlySet<string> = new Set(), observedEnds: ReadonlyMap<string, number> = new Map()) {
+  const executors: DispatchTreeNode[] = [];
+  const levels: DispatchTreeNode[][] = [executors];
+  const edges: DispatchTreeEdge[] = [];
+  const add = (node: DispatchTreeNode, state: DispatchWireState, port?: DispatchTreeEdge["port"]) => {
+    (levels[node.depth - 2] ??= []).push(node);
+    edges.push({ from: node.parentId, to: node.id, tool: node.tool, state, kind: node.kind, ...(port && { port }) });
+  };
+  for (const group of groups) {
+    const shown = expanded.has(group.tool) ? group.runs : group.visible;
+    const single = group.runs.length === 1;
+    const executor: DispatchTreeNode = {
+      id: `executor:${group.tool}`, parentId: "dispatcher", depth: 2, tool: group.tool,
+      kind: "executor", mode: !group.runs.length ? "idle" : single ? "single" : "group",
+      run: single ? group.runs[0] : undefined,
+      rows: single ? [] : shown.map((run) => ({ id: `row:${JSON.stringify([group.tool, run.runId])}`, run })),
+      more: group.more, expanded: expanded.has(group.tool),
+    };
+    add(executor, group.wireState as DispatchWireState);
+    // 第二层摘要超过 3 行只折叠摘要行；第三层及以下始终完整，折叠行的块从执行端卡片底部连出。
+    group.runs.forEach((run, index) => {
+      const runId = `run:${JSON.stringify([group.tool, run.runId])}`;
+      if (!single) add({ id: runId, parentId: executor.rows.find(row => row.run === run)?.id ?? executor.id,
+        depth: 3, tool: group.tool, kind: "run", run, rows: [], more: 0 },
+        run.status === "running" ? "flow" : recentWireEnd(dispatchEnd(run, observedEnds), now) ? "finish" : "idle",
+        { index, count: group.runs.length });
+      const rootId = single ? executor.id : runId;
+      const rootDepth = single ? 2 : 3;
+      const children = new Map<string, DispatchSubagent[]>();
+      for (const agent of run.subagents ?? []) {
+        const parent = agent.parentThreadId;
+        const siblings = children.get(parent) ?? [];
+        siblings.push(agent); children.set(parent, siblings);
+      }
+      // Without a native session, only explicit first-depth records provide a root hint.
+      const roots = run.session ? [run.session]
+        : [...new Set((run.subagents ?? []).filter(agent => agent.depth === 1).map(agent => agent.parentThreadId))];
+      const seen = new Set(roots);
+      const queue = roots.map(threadId => ({ threadId, id: rootId, depth: rootDepth }));
+      for (let index = 0; index < queue.length; index++) {
+        const parent = queue[index]!;
+        for (const agent of children.get(parent.threadId) ?? []) {
+          if (seen.has(agent.threadId)) continue;
+          seen.add(agent.threadId);
+          const node: DispatchTreeNode = { id: `subagent:${JSON.stringify([run.runId, agent.threadId])}`,
+            parentId: parent.id, depth: parent.depth + 1, tool: group.tool, kind: "subagent",
+            runId: run.runId, subagent: agent, rows: [], more: 0 };
+          add(node, subagentWireState(agent, now));
+          queue.push({ threadId: agent.threadId, id: node.id, depth: node.depth });
+        }
+      }
+    });
+  }
+  return { executors, levels, edges };
 }
 
 export function dispatchName(run: DispatchRun): string {
@@ -97,7 +198,7 @@ export function dispatchStatus(status: string): { label: string; className: stri
   if (status === "OK") return { label: "刚完成 ✓", className: "finished" };
   if (["TOOL_FAIL", "ACCEPT_FAIL", "TIMEOUT"].includes(status)) return { label: "失败 ✗", className: "failed" };
   if (status === "lost") return { label: "lost", className: "failed" };
-  return { label: "未知", className: "" };
+  return { label: "未知", className: "unknown" };
 }
 
 export interface DispatchSessionTitle { id: string; nativeSessionId?: string; title: string; model?: string | null }

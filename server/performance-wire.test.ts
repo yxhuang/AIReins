@@ -41,7 +41,7 @@ assert.equal(fallback.headers["content-encoding"], undefined); assert.equal(fall
 writeFileSync(join(root, "index.html"), "index");
 assert.equal((await receiveStatic("/", "gzip")).headers["cache-control"], "no-cache");
 const frames: Record<string, any>[] = [];
-const client: EventClient = { socket: { readyState: 1, send(data) { frames.push(JSON.parse(String(data))); } }, lastSeq: new Map([["s", 5]]) };
+const client: EventClient = { socket: { readyState: 1, bufferedAmount: 0, terminate() { assert.fail("健康客户端不应断开"); }, send(data) { frames.push(JSON.parse(String(data))); } }, lastSeq: new Map([["s", 5]]) };
 const event = (seq: number, ephemeral?: true): UnifiedEvent => ({ type: "tool_call_updated", sessionId: "s", agentId: "main", seq, timestamp: "now", payload: {}, ...(ephemeral ? { ephemeral } : {}) });
 sendEvent(client, event(5, true)); sendEvent(client, event(5)); sendEvent(client, event(6));
 assert.deepEqual(frames.map((frame) => [frame.seq, frame.ephemeral]), [[5,true],[6,undefined]], "当前 seq 的临时帧仍透传，持久帧去重");

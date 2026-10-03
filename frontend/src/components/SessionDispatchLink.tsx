@@ -2,24 +2,47 @@ import { useEffect, useRef, useState } from "react";
 import { fetchParentDispatches } from "../api";
 import { store } from "../store";
 import { startSessionDispatchPolling } from "../dispatch-polling";
+import type { DispatchRun } from "../dispatch-flow";
+import { dispatchIcon } from "./PanelActions";
 
-export function SessionDispatchLink({ nativeId, backgroundCount }: { nativeId?: string; backgroundCount: number }) {
-  const [ids, setIds] = useState<string[]>([]);
+/** 本会话派出的任务：会话里只轮询一份，顶栏图标和标题下的行共用。 */
+export function useSessionDispatches(nativeId: string | undefined, backgroundCount: number): DispatchRun[] {
+  const [runs, setRuns] = useState<DispatchRun[]>([]);
   const linkCount = useRef(0);
-  useEffect(() => { setIds([]); linkCount.current = 0; }, [nativeId]);
+  useEffect(() => { setRuns([]); linkCount.current = 0; }, [nativeId]);
   useEffect(() => {
     if (!nativeId) return;
     return startSessionDispatchPolling({
       visible: () => document.visibilityState !== "hidden", now: Date.now,
       every: (callback, ms) => window.setInterval(callback, ms), cancel: (timer) => window.clearInterval(timer as number),
       onVisibility: (callback) => { document.addEventListener("visibilitychange", callback); return () => document.removeEventListener("visibilitychange", callback); },
-    }, (signal) => fetchParentDispatches(nativeId, signal), (runs) => {
-      linkCount.current = runs.length;
-      setIds(runs.map((run) => run.runId));
+    }, (signal) => fetchParentDispatches(nativeId, signal), (next) => {
+      linkCount.current = next.length;
+      setRuns(next);
     }, () => backgroundCount, linkCount.current);
   }, [nativeId, backgroundCount]);
-  if (!backgroundCount && !ids.length) return null;
-  return <div className="session-dispatch-link">{backgroundCount > 0 && <span>后台 {backgroundCount} 个任务</span>}
-    {ids.length > 0 && <button className="btn" onClick={() => store.navigateDispatches(ids)}>查看派单{ids.length > 1 ? `（${ids.length}）` : ""}</button>}
+  return runs;
+}
+
+/** 手机顶栏「⋯」左侧的派单图标：填执行端身份色，多家按扇区分色；点开派单流程图。 */
+export function SessionDispatchBadge({ runs, backgroundCount }: { runs: DispatchRun[]; backgroundCount: number }) {
+  if (!runs.length) return null;
+  const tools = [...new Set(runs.map((run) => run.tool))];
+  const color = (tool: string) => `var(--agent-${tool}, var(--busy))`;
+  const fill = tools.length === 1 ? color(tools[0]!)
+    : `conic-gradient(${tools.map((tool, i) => `${color(tool)} ${i / tools.length * 360}deg ${(i + 1) / tools.length * 360}deg`).join(", ")})`;
+  // 手机上标题下那行有派单时隐藏，后台任务数并进这里。
+  const label = `派单：${tools.join("、")}，共 ${runs.length} 个${backgroundCount ? `；后台 ${backgroundCount} 个任务` : ""}`;
+  return <button type="button" className="btn mobile-round session-dispatch-badge" style={{ background: fill }} aria-label={label} title={label}
+    onClick={() => store.navigateDispatches(runs.map((run) => run.runId))}>{dispatchIcon}</button>;
+}
+
+export function SessionDispatchLink({ runs, backgroundCount, desktop = false }: { runs: DispatchRun[]; backgroundCount: number; desktop?: boolean }) {
+  if (!backgroundCount && !runs.length) return null;
+  if (desktop) return <button type="button" className="session-dispatch-link" onClick={() => store.navigateDispatches(runs.length ? runs.map((run) => run.runId) : undefined)}>
+    {backgroundCount > 0 && `后台 ${backgroundCount} 个任务 · `}查看派单{runs.length > 1 ? `（${runs.length}）` : ""}
+  </button>;
+  return <div className={`session-dispatch-link${runs.length ? " has-runs" : ""}`}>{backgroundCount > 0 && <span>后台 {backgroundCount} 个任务</span>}
+    {runs.length > 0 && <button className="btn" onClick={() => store.navigateDispatches(runs.map((run) => run.runId))}>查看派单{runs.length > 1 ? `（${runs.length}）` : ""}</button>}
   </div>;
 }

@@ -1,5 +1,5 @@
 import { spawn, type ChildProcessWithoutNullStreams, type SpawnOptionsWithoutStdio } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { openSync, fstatSync, readSync, closeSync } from "node:fs";
 import { createInterface } from "node:readline";
 import { log } from "../logger.js";
 import type {
@@ -52,6 +52,8 @@ export abstract class BaseDriver implements Driver {
     const child = spawn(command, args, {
       cwd: this.cwd,
       env: process.env,
+      // Keep launcher descendants identifiable after wb or the launcher itself is killed.
+      detached: process.platform === "linux",
       ...options,
       stdio: ["pipe", "pipe", "pipe"],
     });
@@ -137,14 +139,29 @@ export function userMessageText(message: UserMessageInput): string {
 }
 
 function readMentionText(mention: FileMention): string {
-  const buffer = readFileSync(mention.path);
-  if (buffer.byteLength > MAX_EMBEDDED_MENTION_BYTES) {
-    throw new Error(`引用文件超过 1 MiB，无法嵌入：${mention.path}`);
-  }
+  const fd = openSync(mention.path, "r");
   try {
-    return new TextDecoder("utf-8", { fatal: true }).decode(buffer);
-  } catch {
-    throw new Error(`当前只支持 UTF-8 文本文件引用：${mention.path}`);
+    if (fstatSync(fd).size > MAX_EMBEDDED_MENTION_BYTES) {
+      throw new Error(`引用文件超过 1 MiB，无法嵌入：${mention.path}`);
+    }
+    // 多读一字节捕获检查后增长的文件；短读时继续，但总量始终有界。
+    const buffer = Buffer.alloc(MAX_EMBEDDED_MENTION_BYTES + 1);
+    let length = 0;
+    while (length < buffer.byteLength) {
+      const count = readSync(fd, buffer, length, buffer.byteLength - length, null);
+      if (count === 0) break;
+      length += count;
+    }
+    if (length > MAX_EMBEDDED_MENTION_BYTES) {
+      throw new Error(`引用文件超过 1 MiB，无法嵌入：${mention.path}`);
+    }
+    try {
+      return new TextDecoder("utf-8", { fatal: true }).decode(buffer.subarray(0, length));
+    } catch {
+      throw new Error(`当前只支持 UTF-8 文本文件引用：${mention.path}`);
+    }
+  } finally {
+    closeSync(fd);
   }
 }
 
@@ -163,11 +180,16 @@ export function mentionFallbackNote(path: string): string {
 }
 
 export async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
-  return await Promise.race([
-    promise,
-    new Promise<T>((_resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error(`${label} 超时（${timeoutMs}ms）`)), timeoutMs);
-      timer.unref();
-    }),
-  ]);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_resolve, reject) => {
+        timer = setTimeout(() => reject(new Error(`${label} 超时（${timeoutMs}ms）`)), timeoutMs);
+        timer.unref();
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }

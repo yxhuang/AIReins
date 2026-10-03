@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { useAnchoredMenu } from "./useAnchoredMenu";
 import { Segmented } from "./Segmented";
 import { WorkbenchStorage } from "./WorkbenchStorage";
-import { BODY_FONT_MAX, BODY_FONT_MIN, BODY_FONT_STEP, BODY_FONT_STORAGE_KEY, applyBodyFontSize, bodyFontSize, readBodyFontSize } from "../body-font";
+import { BODY_FONT_MAX, BODY_FONT_MIN, BODY_FONT_STEP, BODY_FONT_STORAGE_KEY, TERM_FONT_MAX, TERM_FONT_MIN, TERM_FONT_STORAGE_KEY, applyBodyFontSize, bodyFontSize, readBodyFontSize, readTermFontSize, termFontSize } from "../body-font";
 import { fetchClaudeStartupSettings, fetchPrefs, fetchSessions, restartWorkbench, saveClaudeStartupSettings, savePrefs } from "../api";
 import { restartAndReconnect, restartBusyCount } from "../restart";
 import { store } from "../store";
@@ -66,6 +67,11 @@ const SETTING_GROUPS: SettingGroup[] = [
         label: "正文字号",
         options: [],
       },
+      {
+        id: "term-font",
+        label: "终端字号",
+        options: [],
+      },
     ],
   },
   {
@@ -118,6 +124,7 @@ export function SettingsMenu() {
   const [theme, setTheme] = useState<ThemeChoice>(() => readTheme());
   const [scaleChoice, setScaleChoice] = useState<FontScaleChoice>(readFontScaleChoice);
   const [bodySize, setBodySize] = useState(readBodyFontSize);
+  const [termSize, setTermSize] = useState(() => Math.round(readTermFontSize()));
   const [idleRelease, setIdleRelease] = useState("30");
   const [rcStartup, setRcStartup] = useState<boolean | null>(null);
   const [rcSaving, setRcSaving] = useState(false);
@@ -198,53 +205,10 @@ export function SettingsMenu() {
     if (returnFocus) gearRef.current?.focus();
   };
 
-  // 打开时焦点落到当前选中项（aria-checked=true），与 roving tabindex 的 tabIndex=0 一致
-  useEffect(() => {
-    if (!open) return;
-    panelRef.current?.querySelector<HTMLElement>('button[aria-checked="true"]')?.focus();
-  }, [open]);
-
-  // Esc 关闭；Tab/Shift+Tab 在面板内循环（focus trap）；点浮层外关闭
-  // （齿轮按钮在 rootRef 内，自身 click 不会触发这条）
-  useEffect(() => {
-    if (!open || storageDialogOpen) return;
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        close(true);
-        return;
-      }
-      if (e.key !== "Tab") return;
-      const panel = panelRef.current;
-      if (!panel) return;
-      const focusables = panel.querySelectorAll<HTMLElement>(
-        'button:not(:disabled), [href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])',
-      );
-      if (focusables.length === 0) return;
-      const first = focusables.item(0);
-      const last = focusables.item(focusables.length - 1);
-      const active = document.activeElement;
-      const outside = !panel.contains(active);
-      if (e.shiftKey && (outside || active === first)) {
-        e.preventDefault();
-        last.focus();
-      } else if (!e.shiftKey && (outside || active === last)) {
-        e.preventDefault();
-        first.focus();
-      }
-    };
-    const onPointerDown = (e: PointerEvent) => {
-      // 点在浮层外只关闭、不抢焦点，让用户点到的目标（如输入框）保有焦点
-      if (rootRef.current && !rootRef.current.contains(e.target as Node)) {
-        close(false);
-      }
-    };
-    document.addEventListener("keydown", onKeyDown);
-    document.addEventListener("pointerdown", onPointerDown);
-    return () => {
-      document.removeEventListener("keydown", onKeyDown);
-      document.removeEventListener("pointerdown", onPointerDown);
-    };
-  }, [open, storageDialogOpen]);
+  useAnchoredMenu({
+    open: open && !storageDialogOpen, rootRef, buttonRef: gearRef, panelRef, close,
+    initialFocus: 'button[aria-checked="true"]', trapFocus: true,
+  });
 
   const chooseTheme = (value: string) => {
     const next: ThemeChoice = value === "light" || value === "dark" ? value : "system";
@@ -268,6 +232,8 @@ export function SettingsMenu() {
       /* localStorage 不可用时仅本次会话生效 */
     }
     window.dispatchEvent(new Event(FONT_SCALE_EVENT));
+    // 终端字号没单独设过时跟着界面字号走，滑块显示同步刷新
+    setTermSize(Math.round(readTermFontSize()));
   };
 
   const chooseIdleRelease = (value: string) => {
@@ -301,6 +267,15 @@ export function SettingsMenu() {
       setBodySize(next);
       applyBodyFontSize(next);
       try { localStorage.setItem(BODY_FONT_STORAGE_KEY, String(next)); } catch { /* 仅本次生效 */ }
+    }
+    else if (id === "term-font") {
+      const next = termFontSize(value);
+      if (next === null) return;
+      // 终端从存储读字号：存不进去就不改滑块，免得显示和实际不一致
+      try { localStorage.setItem(TERM_FONT_STORAGE_KEY, String(next)); } catch { return; }
+      setTermSize(next);
+      // 终端面板监听这个事件重读字号并重排
+      window.dispatchEvent(new Event(FONT_SCALE_EVENT));
     }
     else if (id === "idle-release") chooseIdleRelease(value);
   };
@@ -351,6 +326,17 @@ export function SettingsMenu() {
                     <input id="settings-body-font" className="settings-range" type="range"
                       min={BODY_FONT_MIN} max={BODY_FONT_MAX} step={BODY_FONT_STEP} value={bodySize}
                       onChange={(e) => choose(item.id, e.target.value)} />
+                  </div>
+                ) : item.id === "term-font" ? (
+                  <div className="settings-item" key={item.id}>
+                    <div className="settings-row">
+                      <label className="settings-item-label" htmlFor="settings-term-font">{item.label}</label>
+                      <span className="settings-range-value">{termSize}px</span>
+                    </div>
+                    <input id="settings-term-font" className="settings-range" type="range"
+                      min={TERM_FONT_MIN} max={TERM_FONT_MAX} step={1} value={termSize}
+                      onChange={(e) => choose(item.id, e.target.value)} />
+                    <span className="settings-hint">只对这台设备生效，电脑和手机分开记。</span>
                   </div>
                 ) : (
                   <div className="settings-item" key={item.id}>

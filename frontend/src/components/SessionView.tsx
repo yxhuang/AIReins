@@ -1,6 +1,7 @@
 import { Fragment, type ReactNode, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
-import type { CommandInfo, DriverConfigOption, SessionRecord } from "../types";
+import type { CommandInfo, DriverConfigOption, Mention, SessionRecord } from "../types";
 import { sessionTitle, truncateDisplayWidth } from "../format";
+import { compactCwd, awayFromLatest, showComposerInterrupt, appendRefineCommand } from "../session-ui";
 import { buildRenderItems, focusVisible, groupReadOnlyTools } from "../render-items";
 import { filterCommands, noteCommandUsed, readRecentCommands, recentInTable } from "../commands";
 import { extractMentionTokens, mentionQueryAt, mentionTokenEnd } from "../mentions";
@@ -19,7 +20,7 @@ import { DirectoryBrowser } from "./DirectoryBrowser";
 import { insertFileMention, planFileMention } from "./FilePanel";
 import { SlashMenu } from "./SlashMenu";
 import { AgentIcon, VSCodeIcon } from "./AgentIcon";
-import { SessionDispatchLink } from "./SessionDispatchLink";
+import { SessionDispatchBadge, SessionDispatchLink, useSessionDispatches } from "./SessionDispatchLink";
 import { PanelActions, PanelMenuItems } from "./PanelActions";
 import { PageIcon } from "./Sidebar";
 
@@ -39,6 +40,9 @@ export function SessionView({ session, mobileTail, usage }: { session: SessionRe
   const selectData = useCallback((value: Store) => value.data.get(session.id), [session.id]);
   const data = useStore(selectData);
   const wsState = useStore(selectWsState);
+  // 派单反查按 Claude 原生会话 id；别家会话不轮询。
+  const backgroundCount = session.agent === "claude" ? session.backgroundTasks?.length ?? 0 : 0;
+  const dispatchRuns = useSessionDispatches(session.agent === "claude" ? session.nativeSessionId : undefined, backgroundCount);
   const items = useMemo(
     () => (data ? buildRenderItems(data.events, session.agent) : []),
     // resync 可以用相同 seq 原子替换事件窗口，所以 events 引用也是必要失效键。
@@ -56,6 +60,7 @@ export function SessionView({ session, mobileTail, usage }: { session: SessionRe
   const readingAnchor = useRef<{ element?: HTMLElement; top: number; height: number; scrollTop: number } | null>(null);
   const gateRefs = useRef(new Map<string, HTMLElement>());
   const [hiddenPending, setHiddenPending] = useState(0);
+  const [showLatest, setShowLatest] = useState(false);
 
   // dead 会话的未决闸门渲染为「已失效」中性态，不计入待处理数。
   const pendingGateIds = useMemo(
@@ -108,8 +113,9 @@ export function SessionView({ session, mobileTail, usage }: { session: SessionRe
   const onStreamScroll = useCallback(() => {
     const container = streamRef.current;
     if (container) {
-      stickToBottom.current =
-        container.scrollHeight - container.scrollTop - container.clientHeight < 120;
+      const away = awayFromLatest(container.scrollHeight, container.scrollTop, container.clientHeight);
+      stickToBottom.current = !away;
+      setShowLatest(away);
     }
     updateHiddenPending();
   }, [updateHiddenPending]);
@@ -122,6 +128,7 @@ export function SessionView({ session, mobileTail, usage }: { session: SessionRe
         : anchor.scrollTop + container.scrollHeight - anchor.height;
       readingAnchor.current = null;
     } else if (container && stickToBottom.current) container.scrollTop = container.scrollHeight;
+    if (container) setShowLatest(awayFromLatest(container.scrollHeight, container.scrollTop, container.clientHeight));
   }, [items, data?.prependVersion]);
 
   useEffect(() => {
@@ -149,29 +156,31 @@ export function SessionView({ session, mobileTail, usage }: { session: SessionRe
   return (
     <div className={`session agent-${session.agent}`}>
       <header className="session-head">
-        <button type="button" className="btn mobile-round mobile-back" aria-label="返回会话列表" title="会话列表" onClick={() => store.navigate(null)}>
+        <button type="button" className="btn mobile-round mobile-back" aria-label="返回会话列表" title="会话列表" onClick={() => store.backFromSession()}>
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7" /></svg>
         </button>
         <div className="session-head-main">
           <AgentIcon agent={session.agent} label={session.agent} />
+          <span className="session-title" title={sessionTitle(session, data?.events)}>{sessionTitle(session, data?.events)}</span>
           <span className="session-model mono"><ConfigSummary session={session} /></span>
-          <span className="session-cwd mono" title={session.cwd}>{session.cwd}</span>
+          <span className="session-cwd mono" title={session.cwd}>{compactCwd(session.cwd)}</span>
         </div>
         <div className="mobile-title">
           <span className="mobile-title-text">{sessionTitle(session, data?.events)}</span>
-          <span className="mobile-subtitle"><ConfigSummary session={session} /></span>
         </div>
         <div className="session-head-actions">
+          <SessionDispatchLink runs={dispatchRuns} backgroundCount={backgroundCount} desktop />
           <div className="session-panel-controls">
             <PanelActions />
             {mobileTail && <div className="mobile-tail">{mobileTail}</div>}
+            <SessionDispatchBadge runs={dispatchRuns} backgroundCount={backgroundCount} />
             <SessionMoreMenu session={session} usage={usage} />
           </div>
           {wsState !== "open" && <span className="ws-note" role="status">{wsState === "connecting" ? "正在重连…" : "连接已断开"}</span>}
         </div>
       </header>
 
-      {session.agent === "claude" && <SessionDispatchLink nativeId={session.nativeSessionId} backgroundCount={session.backgroundTasks?.length ?? 0} />}
+      <SessionDispatchLink runs={dispatchRuns} backgroundCount={backgroundCount} />
 
       {session.riskyMode && (
         <div className="risky-banner" role="alert">
@@ -179,6 +188,7 @@ export function SessionView({ session, mobileTail, usage }: { session: SessionRe
         </div>
       )}
 
+      <div className="stream-region">
       <div className="stream" ref={streamRef} onScroll={onStreamScroll} style={{ overflowAnchor: "none" }}>
         {/* 续接会话：历史消息区在实时事件流上方，向上翻即可见（不默认折叠） */}
         {session.resumedFrom && <ResumedHistory session={session} streamRef={streamRef} />}
@@ -237,6 +247,16 @@ export function SessionView({ session, mobileTail, usage }: { session: SessionRe
               return null;
           }
         })}
+      </div>
+
+      {showLatest && <button type="button" className="back-to-latest" onClick={() => {
+        const container = streamRef.current;
+        if (!container) return;
+        stickToBottom.current = true;
+        container.scrollTop = container.scrollHeight;
+        setShowLatest(false);
+        updateHiddenPending();
+      }}>回到最新 ↓</button>}
       </div>
 
       {pendingGateIds.length > 0 && hiddenPending > 0 && (
@@ -349,7 +369,7 @@ function SessionMoreMenu({ session, usage }: { session: SessionRecord; usage?: U
         </span>
       )}
       <span className="session-more" ref={rootRef}>
-        <button ref={triggerRef} type="button" className="btn session-more-trigger" aria-label="更多" title="更多" aria-haspopup="menu" aria-expanded={open} aria-controls={menuId}
+        <button ref={triggerRef} type="button" className="btn chrome-icon-btn session-more-trigger" aria-label="更多" title="更多" aria-haspopup="menu" aria-expanded={open} aria-controls={menuId}
           onClick={() => open ? closeMenu() : setOpen(true)}
           onKeyDown={(event) => {
             if (event.key === "ArrowDown" || event.key === "ArrowUp") { event.preventDefault(); setOpen(true); }
@@ -498,7 +518,7 @@ function ConfigControls({ session }: { session: SessionRecord }) {
         </>
       ),
     };
-    return { group, text: pillText(option, current ?? undefined, effective?.value), reason };
+    return { group, text: pillText(option, current ?? undefined, effective?.value), fullText: current || effective?.value || option.default || "跟随配置", reason };
   };
 
   const byId = (id: string) => options.find((o) => o.id === id);
@@ -509,13 +529,14 @@ function ConfigControls({ session }: { session: SessionRecord }) {
       main={main}
       perm={perm ? build(perm) : null}
       permMode={session.config?.permissionMode ?? perm?.default ?? ""}
+      cwd={session.cwd}
     />
   );
 }
 
 // claude prompt 缓存剩余时间（同 VSCode 扩展输入框的「🕐 56m」）：过期后下一条消息要按全价重建缓存。
 // 回合进行中缓存随每次请求续期，不显示；判定不了 TTL（还没跑过回合）显示「—」，不猜。
-function CacheTimer({ session }: { session: SessionRecord }) {
+function CacheTimer({ session, className = "" }: { session: SessionRecord; className?: string }) {
   const selectExpiry = useCallback(
     (value: Store) => value.promptCacheExpiry(session.id),
     [session.id],
@@ -525,7 +546,7 @@ function CacheTimer({ session }: { session: SessionRecord }) {
   if (session.status === "running" || session.status === "starting") return null;
   if (expiry === null) {
     return (
-      <span className="cache-timer expired" title="Prompt 缓存剩余时间：这个会话还没有完成过回合，第一轮结束后开始倒计时">
+      <span className={`cache-timer expired ${className}`} title="Prompt 缓存剩余时间：这个会话还没有完成过回合，第一轮结束后开始倒计时">
         <ClockIcon />—
       </span>
     );
@@ -534,7 +555,7 @@ function CacheTimer({ session }: { session: SessionRecord }) {
   const minutes = Math.ceil(left / 60_000);
   return (
     <span
-      className={`cache-timer${left <= 0 ? " expired" : ""}`}
+      className={`cache-timer${left <= 0 ? " expired" : ""} ${className}`}
       title={`Prompt 缓存${left > 0 ? `约剩 ${minutes} 分钟` : "已过期"}（自上个回合结束起算）；过期后下一条消息要重建缓存，更慢也更贵`}
     >
       <ClockIcon />
@@ -630,6 +651,23 @@ function ConfigStatus({ session }: { session: SessionRecord }) {
 }
 
 // usage 按 driver 能力位分家渲染，不强行归一。
+/** 被拒引用恢复为可再次手动发送的附件；已上传文件沿用原路径，不重新上传。 */
+export function restoreComposerInput(currentText: string, attachments: Attachment[], restored: { text: string; mentions: Mention[]; version: number }): { text: string; attachments: Attachment[] } | null {
+  if (currentText.trim() !== "") return null;
+  const paths = new Set(attachments.map((attachment) => attachment.path));
+  const added: Attachment[] = [];
+  for (const [index, mention] of restored.mentions.entries()) {
+    if (paths.has(mention.path)) continue;
+    paths.add(mention.path);
+    added.push({
+      id: `restore-${restored.version}-${index}`, source: "local", status: "ready", path: mention.path,
+      name: mention.name ?? mention.path.split(/[\\/]/).filter(Boolean).pop() ?? "附件",
+      ...(mention.type === "image" ? { mimeType: mention.mimeType } : {}),
+    });
+  }
+  return { text: restored.text, attachments: [...attachments, ...added] };
+}
+
 function Composer({ session, dead, errored }: { session: SessionRecord; dead: boolean; errored: boolean }) {
   const meta = useStore(selectMeta);
   const selectCommands = useCallback(
@@ -638,6 +676,9 @@ function Composer({ session, dead, errored }: { session: SessionRecord; dead: bo
   );
   const commands = useStore(selectCommands);
   const fileMentionRequest = useStore((value) => value.fileMentionRequest);
+  // 发送被本地拦下的原因（有待决闸门 / 配置切换中）与服务端拒绝后的完整输入还回请求
+  const sendNotice = useStore((value) => value.sendNotices.get(session.id));
+  const sendTextRestore = useStore((value) => value.sendTextRestore);
   useStore((value) => value.mentionVersion);
   // 草稿随会话恢复：SessionView 按会话 id key 重挂载，useState 惰性初始值即该会话草稿
   const [text, setText] = useState(() => store.getDraft(session.id));
@@ -665,7 +706,12 @@ function Composer({ session, dead, errored }: { session: SessionRecord; dead: bo
   /** @ 检索序号：晚到的旧响应丢弃 */
   const searchSeq = useRef(0);
   // 「+」附件：附件条状态、弹出菜单、「电脑上的文件」浏览器
-  const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const [attachments, setAttachments] = useState<Attachment[]>(() => {
+    // 其他会话中发生拒绝，回到本会话时文本已从草稿加载，引用也要一起加载。
+    const restored = store.sendTextRestore;
+    return restored?.sessionId === session.id && restored.text === store.getDraft(session.id)
+      ? restoreComposerInput("", [], restored)!.attachments : [];
+  });
   const [attachMenuOpen, setAttachMenuOpen] = useState(false);
   const [fileBrowseOpen, setFileBrowseOpen] = useState(false);
   const attachMenuRef = useRef<HTMLSpanElement>(null);
@@ -685,6 +731,22 @@ function Composer({ session, dead, errored }: { session: SessionRecord; dead: bo
     return mention ? [mention] : [];
   });
   const table = commands ?? [];
+  const refineCommand = session.agent === "claude" ? "/refine-prompt" : session.agent === "codex" ? "$refine-prompt" : null;
+  const showRefine = !dead && Boolean(text.trim() && refineCommand);
+  const appendRefine = () => {
+    if (!refineCommand || dead) return;
+    const next = appendRefineCommand(textareaRef.current?.value ?? text, refineCommand);
+    setDismissed(true);
+    setCursor(next.length);
+    setText(next);
+    // 即使防重复而文本不变，也要恢复焦点并移到末尾。
+    textareaRef.current?.focus();
+    textareaRef.current?.setSelectionRange(next.length, next.length);
+    if (next !== text) {
+      pendingCursor.current = next.length;
+      focusAfterInsert.current = true;
+    }
+  };
 
   // 仅行首 / 触发（整段文本即「/query」形态）；行中间的 /（如路径）是普通字符。
   // 中文输入法的中文标点模式下「/」键打出「、」，行首同样触发；选中命令后整段换成「/命令」。
@@ -812,12 +874,26 @@ function Composer({ session, dead, errored }: { session: SessionRecord; dead: bo
   }, [slashOpen, mentionOpen, skillOpen, sel, selM, selSkill, active?.name, activeFile]);
 
   // 输入框随内容长高（参照 VSCode 扩展），上限由 CSS max-height 管，超过才出滚动条
-  useLayoutEffect(() => {
+  const fitTextarea = useCallback(() => {
     const el = textareaRef.current;
     if (!el) return;
     el.style.height = "auto";
     el.style.height = `${el.scrollHeight + el.offsetHeight - el.clientHeight}px`;
-  }, [text]);
+  }, []);
+  useLayoutEffect(fitTextarea, [text, fitTextarea]);
+  // 宽度变了（手机缓存计时器出现/消失、转屏）换行数会变，也要重算；只看宽度，避免改高度又触发自己
+  useEffect(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    let width = el.clientWidth;
+    const observer = new ResizeObserver(() => {
+      if (el.clientWidth === width) return;
+      width = el.clientWidth;
+      fitTextarea();
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [fitTextarea]);
 
   // 补全插入后把光标落到插入路径之后
   useEffect(() => {
@@ -842,6 +918,22 @@ function Composer({ session, dead, errored }: { session: SessionRecord; dead: bo
     setCursor(next.cursor);
     setDismissed(false);
   }, [fileMentionRequest, session.id, session.cwd, dead, mentionsSupported, text, cursor]);
+
+  // 拒绝后只在空输入框还回文字与引用；保留间隙新增和仍在上传的附件。
+  useEffect(() => {
+    if (!sendTextRestore || sendTextRestore.sessionId !== session.id) return;
+    const restored = store.consumeSendTextRestore(sendTextRestore.version);
+    if (restored === null) return;
+    const currentText = textareaRef.current?.value ?? text;
+    const plan = restoreComposerInput(currentText, attachments, { ...restored, version: sendTextRestore.version });
+    if (!plan) {
+      // 输入可能已更新、草稿 effect 还没写入：以当前可见文字为准。
+      store.setDraft(session.id, currentText);
+      return;
+    }
+    setText(plan.text);
+    setAttachments(plan.attachments);
+  }, [sendTextRestore, session.id, text, attachments]);
 
   // 卸载时回收全部本地预览 URL
   useEffect(() => {
@@ -1011,6 +1103,9 @@ function Composer({ session, dead, errored }: { session: SessionRecord; dead: bo
     // 「/命令 参数」整行形态经 sendComposerInput 走结构化 command，同样记入最近使用；
     // 带附件时 store 不走 command 分支（按文本+mentions 发），这里也就不记
     if (readyMentions.length === 0 && willBeCommand && cmdMatch) noteCommandUsed(session.agent, cmdMatch[1]!);
+    // 本次实际提交的附件（ready 才有 mention）；发送成功只清这几个，
+    // 上传中/上传失败的附件条必须留下，不被一起清掉。
+    const submittedIds = new Set(attachments.filter((att) => attachmentMention(att)).map((att) => att.id));
     // 先清空（mentions 异步路径下「确认成功」不好定义）；失败时把文本还回输入框、附件条原样保留。
     // 草稿语义统一走草稿缓存：输入即草稿；发送成功由 store 侧清草稿（文本框也已清空）；
     // 失败时草稿本来就在，这里只需把可见文本还回。
@@ -1023,14 +1118,16 @@ function Composer({ session, dead, errored }: { session: SessionRecord; dead: bo
         setText((current) => (current === "" ? trimmed : current));
         return;
       }
-      // 发送成功清空附件条并回收预览 URL；失败保留（与草稿纪律一致）
-      for (const att of attachments) {
-        if (att.previewUrl) {
-          URL.revokeObjectURL(att.previewUrl);
-          previewUrls.current.delete(att.previewUrl);
+      // 发送成功只移除本次提交的附件并回收其预览 URL；其余附件条保留（与草稿纪律一致）
+      setAttachments((list) => {
+        for (const att of list) {
+          if (submittedIds.has(att.id) && att.previewUrl) {
+            URL.revokeObjectURL(att.previewUrl);
+            previewUrls.current.delete(att.previewUrl);
+          }
         }
-      }
-      setAttachments([]);
+        return list.filter((att) => !submittedIds.has(att.id));
+      });
     });
   };
 
@@ -1129,6 +1226,21 @@ function Composer({ session, dead, errored }: { session: SessionRecord; dead: bo
     <div className="composer">
       {/* 配置的过渡文案 / 提示 / 错误；可交互的胶囊在输入框底栏，会话头留只读摘要 */}
       <ConfigStatus session={session} />
+      {/* 发送被本地拦下的原因（有待决闸门 / 配置切换中）：就地提示，文字保留在输入框 */}
+      {sendNotice && (
+        <div className="session-config">
+          <span className="config-error" role="alert">
+            {sendNotice}
+            <button
+              type="button"
+              className="config-error-close"
+              onClick={() => store.clearSendNotice(session.id)}
+            >
+              ×
+            </button>
+          </span>
+        </div>
+      )}
       {(dead || errored) && (
         <div className="composer-dead">
           {/* error 与 dead 共用续接出口（同 agent/cwd/nativeSessionId），文案区分 */}
@@ -1293,40 +1405,46 @@ function Composer({ session, dead, errored }: { session: SessionRecord; dead: bo
           uploadFiles(dropped);
         }}
       >
-        <textarea
-          ref={textareaRef}
-          value={text}
-          rows={2}
-          disabled={dead}
-          placeholder={
-            dead
-              ? "会话已结束，新建会话可续接"
-              : TOUCH
-                ? "发消息给这个 agent…"
-                : "发消息给这个 agent…（Enter 发送，Shift+Enter 换行）"
-          }
-          onChange={(e) => {
-            setText(e.target.value);
-            setCursor(e.target.selectionStart);
-            setDismissed(false);
-          }}
-          onSelect={(e) => setCursor(e.currentTarget.selectionStart)}
-          onCompositionStart={() => setComposing(true)}
-          onCompositionEnd={(e) => {
-            // 组合结束后再按当前文本评估是否触发 @ 面板
-            setComposing(false);
-            setText(e.currentTarget.value);
-            setCursor(e.currentTarget.selectionStart);
-          }}
-          onPaste={(e) => {
-            // 剪贴板里有文件（截图等）时上传为附件；纯文本粘贴走默认行为
-            const pasted = Array.from(e.clipboardData.files);
-            if (pasted.length === 0 || !attachEnabled) return;
-            e.preventDefault();
-            uploadFiles(pasted);
-          }}
-          onKeyDown={onKeyDown}
-        />
+        {/* 手机：缓存时间不是按钮，挪到发送键上方的空位，底栏留给按钮 */}
+        <div className="composer-input">
+          <textarea
+            ref={textareaRef}
+            value={text}
+            rows={1}
+            disabled={dead}
+            placeholder={
+              dead
+                ? "会话已结束，新建会话可续接"
+                : TOUCH
+                  ? "发消息给这个 agent…"
+                  : "发消息给这个 agent…（Enter 发送，Shift+Enter 换行）"
+            }
+            onChange={(e) => {
+              setText(e.target.value);
+              setCursor(e.target.selectionStart);
+              setDismissed(false);
+            }}
+            onSelect={(e) => setCursor(e.currentTarget.selectionStart)}
+            onCompositionStart={() => setComposing(true)}
+            onCompositionEnd={(e) => {
+              // 组合结束后再按当前文本评估是否触发 @ 面板
+              setComposing(false);
+              setText(e.currentTarget.value);
+              setCursor(e.currentTarget.selectionStart);
+            }}
+            onPaste={(e) => {
+              // 剪贴板里有文件（截图等）时上传为附件；纯文本粘贴走默认行为
+              const pasted = Array.from(e.clipboardData.files);
+              if (pasted.length === 0 || !attachEnabled) return;
+              e.preventDefault();
+              uploadFiles(pasted);
+            }}
+            onKeyDown={onKeyDown}
+          />
+          {showRefine ? <button type="button" className="refine-btn" title={`追加 ${refineCommand}`} aria-label={`追加 ${refineCommand}`}
+            onPointerDown={(event) => event.preventDefault()} onClick={appendRefine}>R</button>
+            : session.agent === "claude" && <CacheTimer session={session} className="cache-timer-top" />}
+        </div>
         <div className="cfg-bar">
           <span className="attach-menu-wrap" ref={attachMenuRef}>
             <button
@@ -1383,7 +1501,11 @@ function Composer({ session, dead, errored }: { session: SessionRecord; dead: bo
             }} />
           {session.agent === "claude" && <RemoteControlPill session={session} />}
           <ConfigControls session={session} />
-          {session.agent === "claude" && <CacheTimer session={session} />}
+          {session.agent === "claude" && <CacheTimer session={session} className="cache-timer-bar" />}
+          {showComposerInterrupt(session.status, caps?.interrupt, session.processId, text) && (
+            <button type="button" className="composer-interrupt" aria-label="中断" title="打断当前执行"
+              onClick={() => store.interrupt(session.id)}><StopIcon /></button>
+          )}
           {/* 运行中且输入框为空：发送键变中断键；有内容时插话，Kimi 降级为排队 */}
           {session.status === "running" && caps?.interrupt && session.processId
             && !text.trim() && readyMentions.length === 0 ? (

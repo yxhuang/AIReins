@@ -1,7 +1,8 @@
 // 会话标题：列表字段优先，缺省时用首条 user_message 派生。
 // 所有空白（含换行）压成单空格后按显示宽度截断（CJK/全角计 2，其余计 1，上限 30，超出加 …）；
 // 首条消息还没到时返回占位「新会话」。
-export function sessionTitle(session: { title?: string }, events: { type: string; payload: Record<string, unknown> }[] | undefined): string {
+export function sessionTitle(session: { title?: string; customTitle?: string }, events?: { type: string; payload: Record<string, unknown> }[]): string {
+  if (session.customTitle?.trim()) return session.customTitle.trim();
   if (session.title !== undefined) return session.title;
   const firstUser = events?.find((event) => event.type === "user_message");
   const text = firstUser ? String(firstUser.payload.text ?? "") : "";
@@ -29,4 +30,3 @@ const WIDE_CHAR = /[ᄀ-ᅟ⺀-鿿ꥠ-꥿가-ퟻ豈-﫿︰-﹏＀-｠￠-￦𠀀
 function charDisplayWidth(ch: string): number {
   return WIDE_CHAR.test(ch) ? 2 : 1;
 }
-

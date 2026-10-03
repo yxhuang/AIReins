@@ -112,7 +112,22 @@ export interface AskQuestion {
   otherSupported?: boolean;
 }
 
+export interface SessionGroup {
+  id: string;
+  name: string;
+  createdAt: string;
+}
+
+export interface SessionOrganizationPatch {
+  pinned?: boolean;
+  customTitle?: string;
+  groupId?: string | null;
+}
+
 export interface SessionRecord {
+  pinned?: boolean;
+  customTitle?: string;
+  groupId?: string;
   title?: string;
   pendingGateCount?: number;
   /** tail 快照从全量事件重建的会话级状态，避免旧段尚未加载时丢失。 */
