@@ -43,6 +43,11 @@ export class NativeConversationReader {
     return snapshot?.mark;
   }
 
+  /** Metadata callers need the same validated ID/path lookup without reading conversation tails. */
+  transcriptPath(session: SessionRecord): string | undefined {
+    return this.pathFor(session);
+  }
+
   /** Startup readiness only: bounded native headers, not a full archive integrity audit. */
   hasArchive(session: SessionRecord): boolean {
     try {

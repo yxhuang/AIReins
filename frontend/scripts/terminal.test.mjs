@@ -4,14 +4,18 @@ import { strict as assert } from "node:assert";
 
 const {
   isTerminalToggleKey,
+  TERM_ACTIVE_STORAGE_KEY,
   TERM_MIN_WIDTH,
   TERM_MAIN_MIN_WIDTH,
   TERM_DEFAULT_WIDTH,
   TERM_SHORTCUT_KEYS,
   buildTerminalWsUrl,
+  buildTermTabs,
   clampPanelWidth,
   initialTermState,
-  pickAttachTarget,
+  pickBootTerminal,
+  pickRecentTerminal,
+  pickAdjacentTerminal,
   pickTerminalCwd,
   reduceTermFrame,
 } = await import("../src/terminal.ts");
@@ -157,7 +161,9 @@ t("垃圾帧（非对象 / 无 type / 未知 type）不产生副作用", () => {
   }
 });
 
-// ══ pickTerminalCwd / pickAttachTarget ══
+// ══ pickTerminalCwd / pickBootTerminal / buildTermTabs ══
+const term = (id, exited, kind = "bash") => ({ id, cwd: `/${id}`, kind, shell: kind, cols: 80, rows: 24, createdAt: "", exited, exitCode: null });
+
 t("新建终端 cwd：当前会话优先，没有会话取 defaultCwd，都没有则不带", () => {
   assert.equal(pickTerminalCwd("/a", "/b"), "/a");
   assert.equal(pickTerminalCwd(undefined, "/b"), "/b");
@@ -165,13 +171,65 @@ t("新建终端 cwd：当前会话优先，没有会话取 defaultCwd，都没�
   assert.equal(pickTerminalCwd(undefined, undefined), undefined);
 });
 
-t("attach 目标：该种 shell 第一个未退出的；默认 bash；没有返回 null（调用方新建）", () => {
-  const term = (id, exited, kind = "bash") => ({ id, cwd: "/", kind, shell: kind, cols: 80, rows: 24, createdAt: "", exited, exitCode: null });
-  assert.equal(pickAttachTarget([term("p", false, "powershell"), term("a", true), term("b", false), term("c", false)])?.id, "b");
-  assert.equal(pickAttachTarget([term("a", false), term("p", true, "powershell"), term("q", false, "powershell")], "powershell")?.id, "q");
-  assert.equal(pickAttachTarget([term("a", false)], "powershell"), null);
-  assert.equal(pickAttachTarget([term("a", true)]), null);
-  assert.equal(pickAttachTarget([]), null);
+t("引导 attach：持久化的激活 id 仍存活优先；已退出或不存在则第一个未退出的；都没有返回 null（调用方新建）", () => {
+  const list = [term("a", true), term("b", false), term("c", false, "powershell")];
+  assert.equal(pickBootTerminal(list, "c")?.id, "c", "持久化 id 存活时不限 shell 种类");
+  assert.equal(pickBootTerminal(list, "a")?.id, "b", "持久化 id 已退出则回落");
+  assert.equal(pickBootTerminal(list, "term_不存在的")?.id, "b");
+  assert.equal(pickBootTerminal(list, null)?.id, "b");
+  assert.equal(pickBootTerminal([term("a", true)], "a"), null);
+  assert.equal(pickBootTerminal([], null), null);
+});
+
+t("滑块：按激活顺序选同 kind 存活终端，忽略退出/删除/异种记录，无记录回落注册表首项", () => {
+  const list = [term("a", false), term("b", false), term("dead", true), term("p", false, "powershell")];
+  const before = JSON.stringify(list);
+  assert.equal(pickRecentTerminal(list, "bash", ["a", "b", "dead", "missing", "p"])?.id, "b");
+  assert.equal(pickRecentTerminal(list, "bash", ["b", "a"])?.id, "a");
+  assert.equal(pickRecentTerminal(list, "bash", [])?.id, "a");
+  assert.equal(pickRecentTerminal(list, "powershell", ["b", "p", "a"])?.id, "p");
+  assert.equal(pickRecentTerminal([term("dead", true)], "bash", ["dead"]), null);
+  assert.equal(pickRecentTerminal([], "powershell", []), null);
+  assert.equal(JSON.stringify(list), before);
+});
+
+t("关闭退出标签：右邻优先、左邻回落、跳过退出记录，没有存活邻居清空", () => {
+  const list = [term("a", false), term("dead", true), term("p", false, "powershell")];
+  assert.equal(pickAdjacentTerminal(list, "dead")?.id, "p");
+  assert.equal(pickAdjacentTerminal(list.slice(0, 2), "dead")?.id, "a");
+  assert.equal(pickAdjacentTerminal([term("a", false), term("dead", true), term("dead2", true)], "dead2")?.id, "a");
+  assert.equal(pickAdjacentTerminal([term("dead", true)], "dead"), null);
+  assert.equal(pickAdjacentTerminal(list, "missing"), null);
+});
+
+t("标签：唯一时不带序号；同种多个按注册表顺序全体编号", () => {
+  assert.deepEqual(buildTermTabs([term("a", false)], "a").map((x) => x.label), ["bash"]);
+  const duo = buildTermTabs([term("a", false), term("b", false)], "a");
+  assert.deepEqual(duo.map((x) => x.label), ["bash 1", "bash 2"]);
+  const trio = buildTermTabs([term("a", false), term("b", false), term("c", false)], "b");
+  assert.deepEqual(trio.map((x) => x.label), ["bash 1", "bash 2", "bash 3"]);
+  const mixed = buildTermTabs([term("p", false, "powershell"), term("a", false)], "a");
+  assert.deepEqual(mixed.map((x) => x.label), ["PowerShell", "bash"], "不同种各自唯一就都不编号，顺序保持注册表顺序");
+});
+
+t("标签：已退出的只保留当前激活的（看输出与退出码），其余藏掉", () => {
+  const list = [term("a", true), term("b", false), term("c", true)];
+  assert.deepEqual(buildTermTabs(list, "b").map((x) => x.id), ["b"]);
+  const keepActive = buildTermTabs(list, "a");
+  assert.deepEqual(keepActive.map((x) => x.id), ["a", "b"]);
+  assert.equal(keepActive[0].exited, true);
+  assert.equal(keepActive[1].exited, false);
+});
+
+t("标签：cwd 与 kind 原样带出（title 与样式用）", () => {
+  const [tab] = buildTermTabs([term("a", false, "powershell")], "a");
+  assert.equal(tab.cwd, "/a");
+  assert.equal(tab.kind, "powershell");
+  assert.equal(tab.id, "a");
+});
+
+t("激活 id 的 localStorage 键固定为 workbench-term-active", () => {
+  assert.equal(TERM_ACTIVE_STORAGE_KEY, "workbench-term-active");
 });
 
 if (!process.exitCode) console.log(`✅ terminal 纯逻辑单测全过（${pass} 例）`);

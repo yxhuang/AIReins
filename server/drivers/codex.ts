@@ -155,7 +155,7 @@ export function codexConfigSchemaFromModels(
           { value: "auto-review", label: "Approve for me", description: "保留工作区沙盒，额外权限由 Codex 自动审核" },
           { value: "full-access", label: "Full access", description: "不使用沙盒，也不弹出执行审批" },
         ],
-        default: "on-request",
+        default: "auto-review",
         mutable: true,
       },
     ],
@@ -202,7 +202,7 @@ export class CodexDriver extends BaseDriver {
   constructor(options: DriverOptions) {
     super(options);
     // 旧会话的 never 只关闭审批，不能因菜单升级而自动获得 Full access。
-    this.config.permissionMode ??= "on-request";
+    this.config.permissionMode ??= options.resumeSessionId ? "on-request" : "auto-review";
     this.sendModel = Boolean(options.config.model);
     this.sendEffort = Boolean(options.config.effort);
   }

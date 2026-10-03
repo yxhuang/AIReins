@@ -12,7 +12,7 @@ import { useStore } from "../useStore";
 import { LauncherMenu } from "./LauncherMenu";
 import { SettingsMenu } from "./SettingsMenu";
 import { ConfigPills, type MenuGroup } from "./ConfigMenu";
-import { pillText } from "../config-view";
+import { newSessionConfig, pillText } from "../config-view";
 import { DirectoryBrowser } from "./DirectoryBrowser";
 import { HistoryView } from "./HistoryView";
 import { PageView } from "./PageView";
@@ -83,18 +83,9 @@ interface SidebarProps {
 export function Sidebar({ collapsed, onToggle, newOpen, onNewOpenChange, returnToSession = false, mobileActions }: SidebarProps) {
   const sessionRecords = useStore(selectSessions);
   const sessionGroups = useStore((value) => value.sessionGroups);
-  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(() => {
-    try {
-      const saved: unknown = JSON.parse(localStorage.getItem("workbench-collapsed-session-groups") ?? "[]");
-      return new Set(Array.isArray(saved) ? saved.filter((id): id is string => typeof id === "string") : []);
-    } catch { return new Set(); }
-  });
-  const toggleGroup = (id: string) => setCollapsedGroups(previous => {
-    const next = new Set(previous);
-    if (next.has(id)) next.delete(id); else next.add(id);
-    try { localStorage.setItem("workbench-collapsed-session-groups", JSON.stringify([...next])); } catch { /* 私密模式保留当前设备内存态 */ }
-    return next;
-  });
+  const [collapsedGroups, toggleGroup] = usePersistedSet("workbench-collapsed-session-groups", []);
+  // 时间分区默认只折叠「更早」（用户 10-03）
+  const [collapsedSections, toggleSection] = usePersistedSet("workbench-collapsed-time-sections", ["更早"]);
   const now = useStore(selectNow);
   const currentId = useStore(selectCurrentId);
   const panelOpen = useStore((value) => value.historyOpen || value.currentPageId !== null);
@@ -186,7 +177,6 @@ export function Sidebar({ collapsed, onToggle, newOpen, onNewOpenChange, returnT
         >
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M20 7v5h-5M20 12a8 8 0 1 0-2 5M20 12a8 8 0 0 0-2-5" /></svg>
         </button>
-        {mobileActions && <span className="mobile-panel-launcher">{mobileActions}</span>}
         {collapsed && totalPending > 0 && (
           <button
             type="button"
@@ -228,6 +218,8 @@ export function Sidebar({ collapsed, onToggle, newOpen, onNewOpenChange, returnT
               ChatGPT ↗
             </button>
           </div>
+          {/* 手机列表页右上角的文件 / 终端 / 派单（桌面隐藏）；放在新建行之后，网格里排到最右列 */}
+          {mobileActions && <span className="mobile-panel-launcher">{mobileActions}</span>}
         </>
       )}
       <div className="sidebar-body">
@@ -248,10 +240,17 @@ export function Sidebar({ collapsed, onToggle, newOpen, onNewOpenChange, returnT
                 <SessionGroupHeader group={group} collapsed={collapsedGroups.has(group.id)} onToggle={() => toggleGroup(group.id)} />
                 {!collapsedGroups.has(group.id) && <ul className="session-list session-group-list" id={`session-group-${group.id}`}>{group.sessions.map(renderRow)}</ul>}
               </li>)}
-              {sections.map(section => <li className="sidebar-time-section" key={section.label}>
-                <div className="sidebar-section-label" role="presentation"><span>{section.label}</span></div>
-                <ul className="session-list">{section.sessions.map(renderRow)}</ul>
-              </li>)}
+              {sections.map(section => {
+                const folded = collapsedSections.has(section.label);
+                return <li className="sidebar-time-section" key={section.label}>
+                  <button type="button" className="sidebar-section-toggle" aria-expanded={!folded}
+                    aria-controls={`time-section-${section.label}`} onClick={() => toggleSection(section.label)}>
+                    <span>{section.label}</span>
+                    <svg className={`sidebar-section-chevron${folded ? " collapsed" : ""}`} width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.25" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg>
+                  </button>
+                  {!folded && <ul className="session-list" id={`time-section-${section.label}`}>{section.sessions.map(renderRow)}</ul>}
+                </li>;
+              })}
               {waiting.length === 0 && pinned.length === 0 && groups.every(group => group.sessions.length === 0) && sections.length === 0 && (
                 <li className="session-list-empty">{totalSessions === 0 ? "还没有会话" : "最近 3 天没有会话"}</li>
               )}
@@ -317,7 +316,7 @@ function HistoryNav({ collapsed, onPrepare, onClose }: PanelNavProps) {
           </svg>
         </span>
         {/* 打开后入口变「‹ 后退」，再点收起回到会话列表（用户 10-02） */}
-        {!collapsed && <span className="page-nav-name">{historyOpen ? "后退" : "历史会话"}</span>}
+        {!collapsed && <span className="page-nav-name">{historyOpen ? "后退" : "历史"}</span>}
       </button>
     } />
   );
@@ -342,15 +341,23 @@ function PageNav({ collapsed, onPrepare, onClose }: PanelNavProps) {
   const pages = useStore((value) => value.pages);
   const skippedPages = useStore((value) => value.skippedPages);
   const currentPageId = useStore((value) => value.currentPageId);
+  const [desktop, setDesktop] = useState(false);
+  useEffect(() => {
+    const query = window.matchMedia("(min-width: 721px)");
+    const update = () => setDesktop(query.matches);
+    update();
+    query.addEventListener("change", update);
+    return () => query.removeEventListener("change", update);
+  }, []);
   return (
     <>
       {pages.map((page) => (
         <SidebarPanel key={page.id} name={page.name} open={currentPageId === page.id} collapsed={collapsed} onClose={onClose} header={
         <button
           type="button"
-          className={`page-nav-item${currentPageId === page.id ? " active" : ""}`}
-          title={collapsed ? page.name : page.description || page.name}
-          aria-label={page.name}
+          className={`page-nav-item${page.id === "ai-usage" ? " sidebar-foot-usage" : ""}${currentPageId === page.id ? " active" : ""}`}
+          title={currentPageId === page.id ? `后退：收起${page.name}` : collapsed || (desktop && page.id === "ai-usage") ? page.name : page.description || page.name}
+          aria-label={currentPageId === page.id ? `后退：收起${page.name}` : page.name}
           aria-expanded={currentPageId === page.id}
           aria-controls={`sidebar-page-${page.id}`}
           onClick={() => {
@@ -359,8 +366,10 @@ function PageNav({ collapsed, onPrepare, onClose }: PanelNavProps) {
             else store.navigatePage(page.id);
           }}
         >
-          <PageIcon icon={page.icon} />
-          {!collapsed && <span className="page-nav-name">{page.name}</span>}
+          {currentPageId === page.id ? <span className="page-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 5l-7 7 7 7" /></svg>
+          </span> : <PageIcon icon={page.icon} />}
+          {!collapsed && <span className="page-nav-name">{currentPageId === page.id ? "后退" : page.id === "ai-usage" ? "额度" : page.name}</span>}
         </button>
         } />
       ))}
@@ -786,7 +795,7 @@ function SessionRow({
             </span>
           )}
           {session.riskyMode && (
-            <span className="risky-mark" title="该会话已关闭 agent 主动询问">
+            <span className="risky-mark" title="该会话使用免审批或不询问模式">
               !
             </span>
           )}
@@ -849,6 +858,24 @@ function SessionRow({
 }
 
 /** 用户分组标题：整行折叠/展开，右侧 ⋮ 弹分组操作（重命名分组 / 删除分组＝成员移回普通分区）。 */
+/** 折叠状态按设备记在 localStorage；隐私模式读写会抛，退回内存态。 */
+function usePersistedSet(key: string, fallback: string[]): [Set<string>, (id: string) => void] {
+  const [value, setValue] = useState<Set<string>>(() => {
+    try {
+      const raw = localStorage.getItem(key);
+      const saved: unknown = raw === null ? fallback : JSON.parse(raw);
+      return new Set(Array.isArray(saved) ? saved.filter((id): id is string => typeof id === "string") : fallback);
+    } catch { return new Set(fallback); }
+  });
+  const toggle = (id: string) => setValue(previous => {
+    const next = new Set(previous);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    try { localStorage.setItem(key, JSON.stringify([...next])); } catch { /* 私密模式保留当前设备内存态 */ }
+    return next;
+  });
+  return [value, toggle];
+}
+
 function SessionGroupHeader({
   group,
   collapsed,
@@ -1001,7 +1028,7 @@ function NewSessionForm({ onDone }: { onDone: () => void }) {
   const browseButtonRef = useRef<HTMLButtonElement>(null);
   const submitBtnRef = useRef<HTMLButtonElement>(null);
   // 三个配置下拉的已选值；"" = 跟随配置（不传该字段）。切 agent 时整体重置。
-  const [configSel, setConfigSel] = useState<Partial<Record<ConfigOptionId, string>>>({});
+  const [configSel, setConfigSel] = useState<Partial<Record<ConfigOptionId, string>>>(() => newSessionConfig("claude"));
   const options = meta?.drivers[agent]?.options ?? [];
 
   // meta/会话列表可能晚于表单挂载到达：用户未动手且仍为空时补一次预填
@@ -1061,7 +1088,7 @@ function NewSessionForm({ onDone }: { onDone: () => void }) {
             onClick={() => {
               setAgent(kind);
               // 选项随 agent 切换，已选值一并重置（别把 claude 的值发给 kimi）
-              setConfigSel({});
+              setConfigSel(newSessionConfig(kind));
             }}
           >
             {AGENT_LABELS[kind]}

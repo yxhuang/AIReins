@@ -131,12 +131,16 @@ await t('固定三端，按 tool 分组；运行中保留，结束 30 分钟边�
   assert.deepEqual(groups.map(g => g.wireState), ['flow', 'idle', 'idle']);
   assert.equal(groupDispatches([], now).length, 3);
 });
-await t('结束时间缺失可由 startedAt + elapsedS 推算；lost 从首次观察起算且会过期', () => {
+await t('结束时间缺失由 startedAt + elapsedS 推算；lost 无可信时间在刷新前后都排除', () => {
   const lost = run({ status: 'lost' });
-  assert.equal(groupDispatches([lost], now, new Map([[lost.runId, now]]) )[0].runs.length, 1);
-  assert.equal(groupDispatches([lost], now + RECENT_DISPATCH_MS + 1, new Map([[lost.runId, now]]))[0].runs.length, 0);
+  assert.equal(groupDispatches([lost], now)[0].runs.length, 0);
+  assert.equal(groupDispatches([lost], now + RECENT_DISPATCH_MS + 1)[0].runs.length, 0);
   const completed = run({ status: 'TOOL_FAIL', startedAt: iso(now - RECENT_DISPATCH_MS - 1000), elapsedS: 1 });
   assert.equal(groupDispatches([completed], now)[0].runs.length, 1);
+  assert.equal(groupDispatches([run({ status: 'lost', endedAt: iso(now) })], now)[0].runs.length, 1);
+  assert.equal(groupDispatches([run({ status: 'lost', elapsedS: 10 })], now)[0].runs.length, 1);
+  for (const elapsedS of [-1, NaN, Infinity]) assert.equal(groupDispatches([run({ status: 'lost', elapsedS })], now)[0].runs.length, 0);
+  assert.equal(groupDispatches([run({ status: 'OK', endedAt: iso(now + 1) })], now)[0].runs.length, 0);
 });
 await t('运行中优先，最多三单与 +N；嵌套单仍普通分组，输入不被修改', () => {
   const items = Array.from({ length: 5 }, (_, i) => run({ runId: String(i), status: i === 4 ? 'running' : 'OK', endedAt: iso(now - 1000), parent: { runId: 'outer', agent: 'codex', sessionId: 'parent', entrypoint: null } }));
@@ -157,15 +161,113 @@ await t('简述只用 name 或 runId 尾段；运行走秒，结束只用 elapse
   assert.equal(dispatchTime(3661), '1:01:01'); assert.equal(dispatchTime(null), '—');
   assert.deepEqual(['running', 'OK', 'TOOL_FAIL', 'ACCEPT_FAIL', 'TIMEOUT', 'lost', 'unknown'].map(x => dispatchStatus(x).label), ['运行中', '刚完成 ✓', '失败 ✗', '失败 ✗', '失败 ✗', 'lost', '未知']);
 });
-await t('派单人标题：取 parent.sessionId（仅 claude）、工作台/原生 id 匹配、短 id、多个会话、执行端 session 不算', () => {
+await t('派单人标题：三家 parent.sessionId、工作台/原生 id 匹配、短 id、多个会话、执行端 session 不算', () => {
   const titles = [{ id: 'wb', nativeSessionId: 'native', title: '工作台标题' }];
   const by = (sessionId, agent = 'claude') => run({ session: 'executor-own', parent: { agent, sessionId, entrypoint: null } });
   assert.equal(dispatcherTitle([by('native')], titles), '工作台标题');
   assert.equal(dispatcherTitle([by('wb'), by('native')], titles), '工作台标题');
   assert.equal(dispatcherTitle([by('abcdefgh-123')], titles), 'Claude Code 会话 · abcdefgh');
   assert.equal(dispatcherTitle([by('native'), by('other')], titles), '工作台标题\nClaude Code 会话 · other');
-  assert.equal(dispatcherTitle([by('native', 'codex')], titles), 'Claude Code 会话');
-  assert.equal(dispatcherTitle([run({ session: 'native' })], titles), 'Claude Code 会话');
+  assert.equal(dispatcherTitle([by('native', 'codex')], titles), '工作台标题');
+  assert.equal(dispatcherTitle([by('kimi-native', 'kimi')], titles), 'Kimi 会话 · kimi-nat');
+  assert.equal(dispatcherTitle([run({ session: 'native' })], titles), '未关联父会话');
+});
+
+await t('三家独立会话分图，运行端与原生 ID 一起隔离；嵌套派单留在同一棵树', () => {
+  const sessions = ['claude', 'codex', 'kimi'].map(agent => ({ id: `wb-${agent}`, agent, nativeSessionId: 'same-native', title: `${agent} 的会话` }));
+  const direct = ['claude', 'codex', 'kimi'].map(agent => run({ runId: agent, tool: agent === 'kimi' ? 'copilot' : 'kimi', session: `${agent}-executor`, parent: { agent, sessionId: 'same-native' } }));
+  const nested = run({ runId: 'copilot-nested', tool: 'copilot', parent: { agent: 'kimi', runId: 'codex' } });
+  const forests = flow.dispatchForests([...direct, nested], sessions);
+  assert.equal(forests.length, 3);
+  assert.deepEqual(forests.map(forest => forest.title), ['Claude Code', 'Codex', 'Kimi']);
+  assert.deepEqual(forests.find(forest => forest.agent === 'codex').runs.map(run => run.runId), ['codex', 'copilot-nested']);
+  for (const forest of forests) {
+    const html = renderToStaticMarkup(React.createElement(DispatchTree, { groups: groupDispatches(forest.runs, now),
+      title: forest.title, agent: forest.agent, model: null, now }));
+    assert.ok(html.includes(`data-source-agent="${forest.agent}"`));
+    assert.ok(html.includes(`<span>${flow.dispatcherLabel(forest.agent)}</span>`));
+  }
+});
+
+await t('同主体不同会话合为一树；Copilot 不作根，仍可作为第二层执行端', () => {
+  const sessions = [{ id: 'one', agent: 'claude', title: '会话一' }, { id: 'two', agent: 'claude', title: '会话二' }];
+  const runs = [run({ runId: 'one', parent: { agent: 'claude', sessionId: 'one' } }),
+    run({ runId: 'two', tool: 'copilot', parent: { agent: 'claude', sessionId: 'two' } }),
+    run({ runId: 'copilot-root', parent: { agent: 'copilot', sessionId: 'three' } })];
+  const forests = flow.dispatchForests(runs, sessions);
+  assert.equal(forests.length, 1); assert.equal(forests[0].title, 'Claude Code');
+  assert.deepEqual(forests[0].runs.map(run => run.runId), ['one', 'two']);
+  const dispatchers = dispatcherSessions(forests[0].runs, sessions);
+  assert.deepEqual(dispatchers.map(source => source.title), ['会话一', '会话二']);
+  const html = renderToStaticMarkup(React.createElement(DispatchTree, { groups: groupDispatches(forests[0].runs, now),
+    title: forests[0].title, agent: forests[0].agent, dispatchers, model: null, now }));
+  assert.ok(html.includes('会话一')); assert.ok(html.includes('会话二'));
+  assert.ok(treeFor(forests[0].runs).executors.some(node => node.tool === 'copilot' && node.run?.runId === 'two'));
+  const oldParent = run({ runId: 'old-parent', tool: 'codex', session: 'old-session', parent: { agent: 'claude', sessionId: 'one' } });
+  const nested = run({ runId: 'nested', tool: 'kimi', parent: { agent: 'codex', sessionId: 'old-session' } });
+  assert.equal(flow.dispatchForests([nested], sessions, [oldParent, nested])[0].agent, 'claude');
+});
+await t('运行时三树固定排序；CLI Codex 委派 Claude 可点详情并保留子代理层级', () => {
+  const codex = run({ runId: 'codex-to-claude', tool: 'claude', model: 'opus', effort: 'high', session: 'claude-executor',
+    parent: { agent: 'codex', sessionId: 'cli-codex', title: '独立 Codex 审核' } });
+  const childRun = run({ runId: 'claude-child', tool: 'claude', native: true, parent: { agent: 'claude', sessionId: 'claude-executor' } });
+  const items = [run({ runId: 'kimi-root', parent: { agent: 'kimi', sessionId: 'cli-kimi' } }), codex, childRun,
+    run({ runId: 'claude-root', parent: { agent: 'claude', sessionId: 'wb-claude' } }),
+    run({ runId: 'codex-second', tool: 'copilot', parent: { agent: 'codex', sessionId: 'cli-codex-second' } })];
+  const forests = flow.dispatchForests(items, []);
+  assert.deepEqual(forests.map(forest => forest.agent), ['claude', 'codex', 'kimi']);
+  const forest = forests[1];
+  const roots = forest.runs.filter(item => !flow.dispatchParent(item, items));
+  assert.deepEqual(dispatcherSessions(roots, []).map(source => source.title), ['独立 Codex 审核', 'Codex 会话 · cli-code']);
+  const tree = treeFor(forest.runs);
+  const claude = tree.levels.flat().find(node => node.run?.runId === codex.runId);
+  assert.equal(claude.parentId, 'dispatcher');
+  assert.equal(tree.levels.flat().find(node => node.run?.runId === childRun.runId).parentId, claude.id);
+  const html = renderToStaticMarkup(React.createElement(DispatchTree, { groups: groupDispatches(forest.runs, now),
+    title: forest.title, agent: forest.agent, dispatchers: dispatcherSessions(roots, []), model: null, now }));
+  assert.match(html, /<button[^>]*data-tool="claude"/);
+  assert.ok(html.includes('opus')); assert.ok(html.includes(' · high'));
+  assert.match(html, /<article[^>]*data-tool="claude"/);
+  assert.deepEqual(flow.dispatchForests([codex], []).map(forest => forest.agent), ['codex']);
+});
+
+await t('Claude native 子代理作根侧支，显示类型/模型/状态，嵌套派单挂在侧支下', () => {
+  const native = run({ runId: 'native', tool: 'claude', native: true, session: 'native-thread', model: 'claude-sonnet-5-5', agentType: 'Explore',
+    parent: { agent: 'claude', sessionId: 'root' } });
+  const nested = run({ runId: 'nested', tool: 'kimi', parent: { agent: 'claude', sessionId: 'native-thread' } });
+  const tree = treeFor([native, nested, run({ runId: 'external', parent: { agent: 'claude', sessionId: 'root' } })]);
+  assert.equal(tree.sidebranches.length, 1);
+  assert.ok(!tree.executors.some(node => node.tool === 'claude'));
+  assert.ok(!tree.levels[0].some(node => node.run?.runId === 'native'));
+  assert.equal(tree.levels.flat().find(node => node.run?.runId === 'nested').parentId, tree.sidebranches[0].id);
+  assert.equal(tree.edges.find(edge => edge.to === tree.sidebranches[0].id).from, 'dispatcher');
+  const html = renderToStaticMarkup(React.createElement(DispatchTree, { groups: groupDispatches([native, nested], now), title: 'Claude Code', agent: 'claude', model: null, now }));
+  for (const text of ['dispatch-sidebranches', 'dispatch-sidebranch-wire', 'Explore', 'sonnet-5.5', '运行中']) assert.ok(html.includes(text));
+  const empty = renderToStaticMarkup(React.createElement(DispatchTree, { groups: groupDispatches([run()], now), title: 'Claude Code', model: null, now }));
+  assert.ok(!empty.includes('dispatch-sidebranches'));
+  assert.equal(flow.dispatchWirePath({ left: 0, right: 100, top: 0, bottom: 60 }, { left: 140, right: 200, top: 20, bottom: 80 }, undefined, true),
+    'M 100 30 C 120 30 120 50 140 50');
+});
+
+await t('跨工具子任务连到真实父节点，Luna 派单连到 Luna；原生子代理不打开工单详情', () => {
+  const parent = run({ runId: 'parent-run', session: 'codex-parent', subagents: [child('luna-native', 'codex-parent')] });
+  const kimi = run({ runId: 'kimi-child', tool: 'kimi', session: 'kimi-executor', parent: { agent: 'codex', sessionId: 'luna-native', runId: 'parent-run' } });
+  const copilot = run({ runId: 'copilot-child', tool: 'copilot', parent: { agent: 'kimi', sessionId: 'kimi-executor' } });
+  const tree = treeFor([copilot, kimi, parent]);
+  const nodes = tree.levels.flat();
+  const luna = nodes.find(node => node.subagent?.threadId === 'luna-native');
+  const kimiNode = nodes.find(node => node.run?.runId === 'kimi-child');
+  const copilotNode = nodes.find(node => node.run?.runId === 'copilot-child');
+  assert.equal(kimiNode.parentId, luna.id);
+  assert.equal(copilotNode.parentId, kimiNode.id);
+  assert.equal(kimiNode.depth, luna.depth + 1);
+  assert.equal(copilotNode.depth, kimiNode.depth + 1);
+  const native = run({ runId: 'native-luna', native: true, name: 'Luna', parent: { agent: 'codex', sessionId: 'direct-root' } });
+  const html = renderToStaticMarkup(React.createElement(DispatchTree, { groups: groupDispatches([native], now), title: 'Codex 会话', agent: 'codex', model: null, now }));
+  assert.match(html, /<article[^>]*class="dispatch-node dispatch-executor/);
+  assert.ok(!html.includes('<button'));
+  assert.equal(flow.dispatchForests([run({ runId: 'cycle-a', parent: { agent: 'codex', runId: 'cycle-b' } }),
+    run({ runId: 'cycle-b', parent: { agent: 'codex', runId: 'cycle-a' } })], []).length, 1);
 });
 
 await t('派单人保持窄块：多会话压成一行摘要，完整标题保留 title，别名去重', () => {
@@ -198,8 +300,8 @@ await t('工具组连线结束十分钟前/正好/之后变灰，卡片仍显示
   const inferred = run({ status: 'OK', endedAt: null, startedAt: iso(now - FINISHED_WIRE_MS - 1001), elapsedS: 1 });
   assert.equal(groupDispatches([inferred], now)[0].wireState, 'idle');
   const lost = run({ status: 'lost', startedAt: null });
-  assert.equal(groupDispatches([lost], now, new Map([[lost.runId, now - FINISHED_WIRE_MS]]))[0].wireState, 'finish');
-  assert.equal(groupDispatches([lost], now, new Map([[lost.runId, now - FINISHED_WIRE_MS - 1]]))[0].wireState, 'idle');
+  assert.equal(groupDispatches([lost], now)[0].wireState, 'idle');
+  assert.equal(groupDispatches([lost], now + FINISHED_WIRE_MS)[0].runs.length, 0);
   assert.equal(groupDispatches([inferred, run({ startedAt: iso(now - 86400000) })], now)[0].wireState, 'flow');
   assert.equal(groupDispatches([inferred, run({ status: 'OK', endedAt: iso(now - 1) })], now)[0].wireState, 'finish');
 });
@@ -264,7 +366,7 @@ await t('派单模型优先匹配 nativeSessionId，外部会话用 parent.model
   assert.equal(dispatcherModel([run({ parent })], [{ id: 'wb', nativeSessionId: 'native', title: '会话', model: 'claude-opus-5-5' }]), 'opus-5.5');
   assert.equal(dispatcherModel([run({ parent })], []), 'sonnet-4.5');
   assert.equal(dispatcherModel([run({ parent: { ...parent, model: null } })], []), null);
-  assert.equal(dispatcherModel([run({ parent: { ...parent, agent: 'codex' } })], []), null);
+  assert.equal(dispatcherModel([run({ parent: { ...parent, agent: 'codex', model: 'gpt-6-luna' } })], []), 'gpt-6-luna');
 });
 await t('只读列表 URL 与现有信封，错误 msg 透传', async () => {
   let url;
@@ -350,7 +452,7 @@ await t('派单与主区并列，当前会话仍有输入框；主页仍可打�
   assert.ok(home.includes('aria-label="派单面板"')); assert.ok(home.includes('新建会话'));
   store.closeDispatches(); assert.equal(store.currentId, null);
   const flow = renderToStaticMarkup(React.createElement(DispatchView));
-  assert.equal((flow.match(/dispatch-node dispatch-executor idle/g) || []).length, 3);
+  assert.equal((flow.match(/dispatch-node dispatch-source/g) || []).length, 0);
   assert.ok(!flow.includes('dispatch-intro')); assert.ok(!flow.includes('谁在接力'));
   const css = readFileSync(new URL('../src/styles.css', import.meta.url), 'utf8');
   assert.ok(!css.includes('dispatch-intro'));
@@ -392,19 +494,21 @@ await t('渲染：单 agent 无内嵌块，双 agent 行锚点独立，Claude �
   assert.equal((double.match(/class="dispatch-summary-row/g) || []).length, 2);
   assert.equal((double.match(/class="dispatch-node dispatch-run"/g) || []).length, 2);
   assert.ok(double.includes('data-from="row:'));
-  const claude = render([run({ tool: 'claude', model: 'claude-sonnet-5-5' })]);
+  const claude = render([run({ tool: 'claude', native: true, model: 'claude-sonnet-5-5' })]);
   assert.ok(claude.includes('data-tool="claude"')); assert.ok(claude.includes('sonnet-5.5'));
   assert.ok(claude.includes('--wire-color:var(--agent-claude)'));
   assert.ok(!claude.match(/<button[^>]*data-tool="claude"/));
 });
-await t('树：每单独立计算十分钟连线，lost 观察时间传给第三层', () => {
+await t('树：每单独立计算十分钟连线，无时间 lost 不产生节点/连线', () => {
   const lost = run({ runId: 'lost', status: 'lost', startedAt: null });
-  const groups = groupDispatches([lost, run({ runId: 'active' })], now, new Map([['lost', now]]));
-  const tree = flow.buildDispatchTree(groups, now, new Set(), new Map([['lost', now]]));
-  assert.equal(tree.edges.find(edge => edge.to === tree.levels[1].find(node => node.run.runId === 'lost').id).state, 'finish');
-  const old = run({ runId: 'old', status: 'OK', endedAt: iso(now - FINISHED_WIRE_MS - 1) });
-  const mixed = treeFor([old, run({ runId: 'active' })]);
-  assert.equal(mixed.edges.find(edge => edge.to === mixed.levels[1].find(node => node.run.runId === 'old').id).state, 'idle');
+  const tree = treeFor([lost, run({ runId: 'active' })]);
+  assert.ok(!tree.levels.flat().some(node => node.run?.runId === 'lost'));
+  const recent = run({ runId: 'recent', status: 'lost', endedAt: iso(now) });
+  const mixed = treeFor([recent, run({ runId: 'old', status: 'OK', endedAt: iso(now - FINISHED_WIRE_MS - 1) })]);
+  for (const [id, state] of [['recent', 'finish'], ['old', 'idle']]) {
+    const node = mixed.levels[1].find(node => node.run.runId === id);
+    assert.equal(mixed.edges.find(edge => edge.to === node.id).state, state);
+  }
 });
 await t('无子 agent 不新增层/连线；空数组和旧列表都保持原来三端布局', () => {
   for (const subagents of [undefined, []]) {

@@ -25,7 +25,7 @@ interface PendingRpc {
 
 interface KimiPermission {
   rpcId: string | number;
-  method: "session/request_permission" | "terminal/create" | "fs/write_text_file" | "elicitation/create";
+  method: "session/request_permission" | "elicitation/create";
   params: Record<string, any>;
   questions?: KimiFormQuestion[];
 }
@@ -161,7 +161,7 @@ function kimiConfigSchemaFromOptions(configOptions: AcpConfigOption[]): DriverCo
             ...(value.description ? { description: value.description } : {}),
           }];
         }),
-        default: option.currentValue === undefined ? "" : String(option.currentValue),
+        default: id === "permissionMode" ? "auto" : option.currentValue === undefined ? "" : String(option.currentValue),
         mutable: true,
       }];
     }),
@@ -278,8 +278,8 @@ export class KimiDriver extends BaseDriver {
 
     if (requestedConfig.model) await this.applyConfigOption("model", requestedConfig.model);
     if (requestedConfig.effort) await this.applyConfigOption("effort", requestedConfig.effort);
-    // 安全边界：即使 session/new 声称 currentModeId=default，也必须实际设置 mode。
-    await this.applyConfigOption("permissionMode", requestedConfig.permissionMode ?? "default");
+    // 新会话默认 Auto；续接无保存档位的旧会话沿用原来的 default，仍实际设置 mode。
+    await this.applyConfigOption("permissionMode", requestedConfig.permissionMode ?? (this.resumeSessionId ? "default" : "auto"));
     this.callbacks.metadata({
       nativeSessionId: this.nativeSessionId,
       config: { ...this.config },
@@ -409,15 +409,9 @@ export class KimiDriver extends BaseDriver {
         }
         this.replyResult(pending.rpcId, { action: "accept", content });
       }
-    } else if (pending.method === "session/request_permission") {
+    } else {
       if (questionAnswers !== undefined) throw new Error("Kimi 普通审批不接受 questionAnswers");
       this.resolveStandardPermission(pending, decision);
-    } else if (pending.method === "terminal/create") {
-      if (questionAnswers !== undefined) throw new Error("Kimi 最终闸门不接受 questionAnswers");
-      this.resolveTerminalGate(pending, decision, updatedInput);
-    } else {
-      if (questionAnswers !== undefined) throw new Error("Kimi 最终闸门不接受 questionAnswers");
-      this.resolveWriteGate(pending, decision, updatedInput);
     }
     this.permissions.delete(requestId);
   }
@@ -490,21 +484,12 @@ export class KimiDriver extends BaseDriver {
       return;
     }
     if (method === "terminal/create") {
-      // 最终闸门：无论 mode 或上游标准审批是否已经放行，都不能直接执行。
-      this.queuePermission(message, "terminal/create", "terminal/create", {
-        toolName: "terminal/create",
-        input: message.params ?? {},
-        finalGate: true,
-      });
+      // 与 Claude/Codex 一致：审批由 CLI 按会话模式决定，执行端不重复询问。
+      this.handleCreateTerminal(message.id, message.params ?? {});
       return;
     }
     if (method === "fs/write_text_file") {
-      // 最终闸门：ACP 的 fs 回退路径与 terminal 路径同等敏感。
-      this.queuePermission(message, "fs/write_text_file", "fs/write_text_file", {
-        toolName: "fs/write_text_file",
-        input: message.params ?? {},
-        finalGate: true,
-      });
+      this.handleWriteTextFile(message.id, message.params ?? {});
       return;
     }
     if (method === "fs/read_text_file") {
@@ -626,12 +611,7 @@ export class KimiDriver extends BaseDriver {
     this.replyResult(pending.rpcId, { outcome });
   }
 
-  private resolveTerminalGate(pending: KimiPermission, decision: PermissionDecision, updatedInput?: unknown): void {
-    if (decision === "deny") {
-      this.replyError(pending.rpcId, -32001, "用户拒绝 terminal/create");
-      return;
-    }
-    const params = this.mergedParams(pending.params, updatedInput);
+  private handleCreateTerminal(id: string | number, params: Record<string, any>): void {
     const terminalId = `workbench-${this.sessionId}-${++this.terminalCounter}`;
     const args = Array.isArray(params.args) ? params.args.map(String) : [];
     const envEntries = Array.isArray(params.env) ? params.env : [];
@@ -639,6 +619,8 @@ export class KimiDriver extends BaseDriver {
     for (const entry of envEntries) {
       if (entry && typeof entry.name === "string") env[entry.name] = String(entry.value ?? "");
     }
+    env.WORKBENCH_PARENT_AGENT = "kimi";
+    env.WORKBENCH_PARENT_SESSION_ID = this.nativeSessionId;
     const outputLimit = Math.max(1, Number(params.outputByteLimit) || 4 * 1024 * 1024);
     const processHandle = spawn(String(params.command), args, {
       cwd: typeof params.cwd === "string" ? params.cwd : this.cwd,
@@ -668,20 +650,15 @@ export class KimiDriver extends BaseDriver {
       finish();
     });
     this.terminals.set(terminalId, state);
-    this.replyResult(pending.rpcId, { terminalId });
+    this.replyResult(id, { terminalId });
   }
 
-  private resolveWriteGate(pending: KimiPermission, decision: PermissionDecision, updatedInput?: unknown): void {
-    if (decision === "deny") {
-      this.replyError(pending.rpcId, -32001, "用户拒绝 fs/write_text_file");
-      return;
-    }
-    const params = this.mergedParams(pending.params, updatedInput);
+  private handleWriteTextFile(id: string | number, params: Record<string, any>): void {
     try {
       writeFileSync(String(params.path), String(params.content ?? ""), "utf8");
-      this.replyResult(pending.rpcId, {});
+      this.replyResult(id, {});
     } catch (error) {
-      this.replyError(pending.rpcId, -32000, errorMessage(error));
+      this.replyError(id, -32000, errorMessage(error));
     }
   }
 
@@ -855,12 +832,6 @@ export class KimiDriver extends BaseDriver {
 
   private replyError(id: string | number, code: number, message: string): void {
     this.send({ jsonrpc: "2.0", id, error: { code, message } });
-  }
-
-  private mergedParams(original: Record<string, any>, updatedInput?: unknown): Record<string, any> {
-    return updatedInput && typeof updatedInput === "object"
-      ? { ...original, ...updatedInput as Record<string, any> }
-      : original;
   }
 
   private normalizeCommands(value: unknown): UnifiedCommand[] {

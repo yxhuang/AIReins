@@ -5,7 +5,7 @@ import type { DriverCallbacks, SessionConfig } from "./types.js";
 
 // 权限是 approvalPolicy + reviewer + sandbox 的组合；只改菜单标签不足以通过这些协议检查。
 const schema = codexConfigSchemaFromModels([], {}).options.find((item) => item.id === "permissionMode")!;
-assert.equal(schema.default, "on-request");
+assert.equal(schema.default, "auto-review");
 assert.deepEqual(schema.values.map((item) => [item.value, item.label]), [
   ["on-request", "Ask for approval"],
   ["auto-review", "Approve for me"],
@@ -89,11 +89,14 @@ for (const mode of ["on-request", "auto-review", "full-access"] as const) {
   }
 }
 
-// 未传配置的初始回合明确采用人工审批，不受全局 reviewer / sandbox 的意外组合影响。
+// 新建默认自动审核；没有保存档位的旧会话续接保留人工审批。
 {
   const h = harness();
   await h.driver.start();
-  check(h.sent.find((frame) => frame.method === "thread/start").params, "on-request");
+  check(h.sent.find((frame) => frame.method === "thread/start").params, "auto-review");
+  const resumed = harness({}, "old-thread");
+  await resumed.driver.start();
+  check(resumed.sent.find((frame) => frame.method === "thread/resume").params, "on-request");
 }
 
 // 热切换同时修改三项；切回人工审批必须撤销 auto_review / dangerFullAccess。

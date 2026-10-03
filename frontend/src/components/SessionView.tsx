@@ -40,9 +40,9 @@ export function SessionView({ session, mobileTail, usage }: { session: SessionRe
   const selectData = useCallback((value: Store) => value.data.get(session.id), [session.id]);
   const data = useStore(selectData);
   const wsState = useStore(selectWsState);
-  // 派单反查按 Claude 原生会话 id；别家会话不轮询。
+  // 三家均按原生会话身份查询派单；后台任务计数仍由 Claude 原生事件提供。
   const backgroundCount = session.agent === "claude" ? session.backgroundTasks?.length ?? 0 : 0;
-  const dispatchRuns = useSessionDispatches(session.agent === "claude" ? session.nativeSessionId : undefined, backgroundCount);
+  const dispatchRuns = useSessionDispatches(session.nativeSessionId ?? session.id, backgroundCount, session.agent);
   const items = useMemo(
     () => (data ? buildRenderItems(data.events, session.agent) : []),
     // resync 可以用相同 seq 原子替换事件窗口，所以 events 引用也是必要失效键。
@@ -184,7 +184,7 @@ export function SessionView({ session, mobileTail, usage }: { session: SessionRe
 
       {session.riskyMode && (
         <div className="risky-banner" role="alert">
-          该会话已关闭 agent 主动询问，workbench 仍会拦截实际执行
+          工具审批遵循输入窗所选权限模式
         </div>
       )}
 

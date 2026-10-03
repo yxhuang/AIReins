@@ -128,9 +128,70 @@ export function pickTerminalCwd(
   return fallback || undefined;
 }
 
-/** GET /api/terminals 后决定 attach 谁：该种 shell 第一个未退出的；没有则返回 null（调用方新建）。 */
-export function pickAttachTarget(terminals: TerminalInfo[], kind: ShellKind = "bash"): TerminalInfo | null {
-  return terminals.find((t) => !t.exited && t.kind === kind) ?? null;
+/** localStorage 键：最近激活的终端 id，刷新后引导优先重连它（读写按本仓库纪律 try/catch）。 */
+export const TERM_ACTIVE_STORAGE_KEY = "workbench-term-active";
+
+/** 激活顺序从旧到新；忽略已退出、已删除或其他 kind 的记录。 */
+export function pickRecentTerminal(terminals: TerminalInfo[], kind: ShellKind, activationOrder: readonly string[]): TerminalInfo | null {
+  const live = terminals.filter((terminal) => !terminal.exited && terminal.kind === kind);
+  for (let index = activationOrder.length - 1; index >= 0; index--) {
+    const target = live.find((terminal) => terminal.id === activationOrder[index]);
+    if (target) return target;
+  }
+  return live[0] ?? null;
+}
+
+/** 关闭退出标签时优先右侧邻居，再向两侧找最近的存活标签。 */
+export function pickAdjacentTerminal(terminals: TerminalInfo[], id: string): TerminalInfo | null {
+  const index = terminals.findIndex((terminal) => terminal.id === id);
+  if (index < 0) return null;
+  for (let distance = 1; distance < terminals.length; distance++) {
+    for (const candidate of [terminals[index + distance], terminals[index - distance]]) {
+      if (candidate && !candidate.exited) return candidate;
+    }
+  }
+  return null;
+}
+
+/**
+ * 刷新/重进面板时的 attach 目标：
+ * 持久化的激活 id 仍存活 → 它；否则第一个未退出的（不限 shell 种类）；都没有返回 null（调用方新建）。
+ */
+export function pickBootTerminal(terminals: TerminalInfo[], persistedId: string | null): TerminalInfo | null {
+  if (persistedId) {
+    const hit = terminals.find((t) => t.id === persistedId && !t.exited);
+    if (hit) return hit;
+  }
+  return terminals.find((t) => !t.exited) ?? null;
+}
+
+/** 标签条上的一个终端标签。 */
+export interface TermTab {
+  id: string;
+  kind: ShellKind;
+  /** 显示名：唯一时就是 shell 名；同种多个时全部带序号（bash 1 / bash 2，VSCode 式）。 */
+  label: string;
+  cwd: string;
+  exited: boolean;
+}
+
+/**
+ * 终端列表 → 标签条：
+ * 已退出的只保留当前激活的那个（刚退出还能看输出与退出码），其余藏掉；
+ * 顺序保持服务端注册表顺序（创建先后）；同种 shell 多个时按顺序编号。
+ */
+export function buildTermTabs(terminals: TerminalInfo[], activeId: string | null): TermTab[] {
+  const visible = terminals.filter((t) => !t.exited || t.id === activeId);
+  const totals = new Map<ShellKind, number>();
+  for (const t of visible) totals.set(t.kind, (totals.get(t.kind) ?? 0) + 1);
+  const seen = new Map<ShellKind, number>();
+  return visible.map((t) => {
+    const base = t.kind === "powershell" ? "PowerShell" : "bash";
+    const n = (seen.get(t.kind) ?? 0) + 1;
+    seen.set(t.kind, n);
+    const label = (totals.get(t.kind) ?? 0) > 1 ? `${base} ${n}` : base;
+    return { id: t.id, kind: t.kind, label, cwd: t.cwd, exited: t.exited };
+  });
 }
 
 /** Shared by the global listener and xterm passthrough; dispatch only on keydown. */

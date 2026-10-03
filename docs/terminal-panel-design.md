@@ -163,10 +163,10 @@ PTY 活在 server 进程里，前端刷新不该杀它。按 terminalId 重新 a
 **M1（核心，先跑起来）**
 单个终端、无标签页、PTY + WS + 分隔条 + 开关 + 宽度持久化 + 主题跟随。
 
-**M2（可用性）**
-多终端标签页、cwd 跟随当前会话、刷新后按 id 重连并回放 scrollback。
+**M2（可用性）** ✅ 2026-10-03 已全部落地
+多终端标签页（见 §9 末补充）、cwd 跟随当前会话、刷新后按 id 重连并回放 scrollback。
 
-**M3（可选）**
+**M3（暂不做）**
 搜索、选中即复制、链接识别。
 
 M1 就能满足「随时可以使用 terminal」。M2 之前刷新页面会断连，M1 阶段可接受。
@@ -191,7 +191,7 @@ M1 就能满足「随时可以使用 terminal」。M2 之前刷新页面会断�
 3. **ANSI 黄按 §4 三条**：终端内容区豁免配色不变量；终端 chrome 禁暖色；调色板的 yellow / bright-yellow 往橄榄 / 赭石偏，拉开与琥珀金的距离。结论写进 `styles.css` 顶部不变量注释。
 4. **鉴权已由 `server/access.ts` 解决**（本机 Host/Origin 白名单、远程 Tailscale 身份白名单）。**手机远程入口也开放终端**，但须 `~/.workbench/remote.json` 显式 `"terminal": true` 才开（缺省关）；该文件由用户自己改。
 
-范围：本轮做 §7 的 **M1 + 刷新 / 断线后按 id 重连并回放 scrollback**（手机锁屏重连是常态，没它不可用）。多终端标签页、搜索等留到以后。
+范围：本轮做 §7 的 **M1 + 刷新 / 断线后按 id 重连并回放 scrollback**（手机锁屏重连是常态，没它不可用）。搜索等 M3 项留到以后。
 
 ### 接口契约（前后端都以此为准）
 
@@ -207,9 +207,19 @@ REST（沿用现有 `{code, msg, data}` 包装）：
 
 WS `/ws/terminal`（与 `/ws` 同一套 Host / Origin / Tailscale 身份检查；能力位为 false 时拒绝升级），全部 JSON 文本帧（PTY 输出本就是 UTF-8 字符串，不再做二进制分帧，偏离 §3 原建议，换实现简单）：
 
-- 上行 `{type:"attach", terminalId}`：服务端先回 `{type:"attached", terminalId, omitted}`（`omitted` = scrollback 因 256KB 上限丢掉的字节数，>0 时前端顶部提示「已省略较早输出」），再发一条 `{type:"data", terminalId, data}` 装当前全部 scrollback，之后实时推送。同一连接可 attach 多个；重复 attach 同一 id 视为重新回放（前端先 `reset()` 再写）。上行 `{type:"detach", terminalId}` 解除该连接对它的订阅（PTY 与 scrollback 保留），前端切换 shell 时对切走的终端发送。
+- 上行 `{type:"attach", terminalId}`：服务端先回 `{type:"attached", terminalId, omitted}`（`omitted` = scrollback 因 256KB 上限丢掉的字节数，>0 时前端顶部提示「已省略较早输出」），再发一条 `{type:"data", terminalId, data}` 装当前全部 scrollback（回放帧会剥掉 OSC 4/10/11/12 颜色查询与 CSI DA 询问序列，见 `stripReplayQueries`——重放会让 xterm 重新应答、应答字节被 shell 当输入回显成垃圾；实时推送不剥），之后实时推送。同一连接可 attach 多个；重复 attach 同一 id 视为重新回放（前端先 `reset()` 再写）。上行 `{type:"detach", terminalId}` 解除该连接对它的订阅（PTY 与 scrollback 保留），前端切换 shell 时对切走的终端发送。
 - 上行 `{type:"input", terminalId, data}`、`{type:"resize", terminalId, cols, rows}`。
 - 下行 `{type:"data", terminalId, data}`、`{type:"exit", terminalId, exitCode}`、`{type:"error", terminalId?, message}`（未知 id、已退出等）。
 - 服务端每终端保留最近 256KB 输出；进程退出后记录保留（`exited: true`），直到 server 重启。server 重启 = 全部终端结束，这是已知行为。
 
 安全硬约束（§5）：用户终端注册表与 kimi ACP `terminal/create` **物理隔离**，独立模块、独立 id 空间，agent 侧代码不得 import 它；终端输出永远不进会话事件流。
+
+### 多终端标签页（2026-10-03 补，M2 最后一项）
+
+- 标签条列出注册表全部未退出终端，外加当前激活的已退出终端（看输出与退出码）；同种 shell 多个时按注册表顺序全体编号（bash 1 / bash 2）；已退出标签切走后从条上消失。
+- 仍是**单 xterm 实例**：切标签 = detach 旧的 + attach 新的，屏幕先 reset 再写回放（沿用 §9 重复 attach 语义）；后台终端的 PTY 与 scrollback 不受影响。
+- 激活终端 id 存 localStorage `workbench-term-active`（按设备）；刷新/重进面板优先重连它，已退出或不存在回落第一个未退出终端，都没有新建 bash。
+- 标题栏保留原 `Segmented.term-shells` bash / PowerShell 滑块，value 跟随激活标签的 kind。点另一侧优先切到本面板内最近激活过的该 kind 存活终端；没有激活记录则选注册表第一个该 kind 存活终端；都没有才新建，cwd 规则与「＋」一致。
+- 「＋」固定在标签条右端，一键新建当前激活标签同 kind 的终端；没有激活标签时新建 bash。cwd 仍优先跟随当前所看会话，否则用默认 cwd；不弹 shell 菜单。
+- 每个标签右侧「×」：存活终端复用标题栏的行内二次确认，非激活标签先切到它再确认；只有点击「确认结束」才调用 kill。已退出标签直接从本面板条上移除，并切到最近的存活邻居（同距离右侧优先）；没有存活邻居则清空激活态。注册表接口不变。
+- 标签为等宽可收缩的 Chrome 圆角与反向圆弧脚，带 shell 图标、标题省略与相邻分隔线；标签区独立横向滚动。激活标签「×」常显，其他标签悬停或键盘聚焦时显示。窄屏点击区域至少 44px，cwd 让位，滑块保留。

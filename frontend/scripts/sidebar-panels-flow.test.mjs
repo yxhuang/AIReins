@@ -8,6 +8,8 @@ import { renderToStaticMarkup } from "react-dom/server";
 globalThis.React = React;
 globalThis.WebSocket = { CONNECTING: 0, OPEN: 1, CLOSING: 2, CLOSED: 3 };
 globalThis.window = { location: { hash: "#/", href: "http://127.0.0.1:8790/" }, innerWidth: 1280, addEventListener() {} };
+// 这里验证的是列表筛选，不是折叠：时间分区全部展开（默认会折叠「更早」）
+globalThis.localStorage = { getItem: (key) => key === "workbench-collapsed-time-sections" ? "[]" : null, setItem() {}, removeItem() {} };
 const { store, Store } = await import("../src/store.ts");
 const { App } = await import("../src/App.tsx");
 const { Sidebar } = await import("../src/components/Sidebar.tsx");
@@ -64,6 +66,22 @@ t("页面旧链接：健康检查加载态在侧栏，仅一个面板展开", ()
   assert.ok(!collapsed.includes("sidebar-page-open"), "页面路由下收起态不加宽");
 });
 
+t("AI 用量打开后入口变后退，图标态也保留返回语义，收起后恢复原入口", () => {
+  store.navigatePage("ai-usage");
+  const html = renderApp();
+  assert.ok(sidebarOf(html).includes('aria-label="后退：收起AI 用量"'));
+  assert.ok(sidebarOf(html).includes('class="page-nav-name">后退</span>'));
+  assert.ok(sidebarOf(html).includes('d="M15 5l-7 7 7 7"'));
+  const collapsed = renderToStaticMarkup(React.createElement(Sidebar, {
+    collapsed: true, onToggle() {}, newOpen: false, onNewOpenChange() {},
+  }));
+  assert.ok(collapsed.includes('aria-label="后退：收起AI 用量"'));
+  store.closeSidebarPanel();
+  const back = renderApp();
+  assert.ok(sidebarOf(back).includes('aria-label="AI 用量"'));
+  assert.ok(!sidebarOf(back).includes('aria-label="后退：收起AI 用量"'));
+});
+
 t("收起面板恢复会话列表；图标态保留历史/页面/设置/直达入口", () => {
   store.closeSidebarPanel();
   const html = renderApp();
@@ -80,7 +98,7 @@ t("收起面板恢复会话列表；图标态保留历史/页面/设置/直达�
   assert.ok(!icons.includes('<span>直达</span>'), "收起态只显示直达图标");
 });
 
-t("底部两行保留历史/页面顺序，设置/直达独立一行；内容仍在覆盖区", () => {
+t("底部单行显示历史与额度，额度为加宽胶囊、直达为圆钮；内容仍在覆盖区", () => {
   const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
   const foot = (html) => sidebarOf(html)?.match(/<div class="sidebar-foot">([\s\S]*)/)?.[1];
   store.navigateHistory();
@@ -103,6 +121,23 @@ t("底部两行保留历史/页面顺序，设置/直达独立一行；内容仍
   assert.ok(overlayCss.includes("grid-area: 1 / 1"));
   assert.ok(!overlayCss.includes("order:"));
   assert.ok(!css.includes(".sidebar-foot.has-panel"));
+  const desktopFoot = css.match(/@media \(min-width: 721px\) \{\s*\/\* 桌面展开态[\s\S]*?\n\}/)?.[0];
+  assert.ok(desktopFoot, "新增规则限定桌面展开态");
+  assert.match(desktopFoot, /flex-direction: row;.*flex-wrap: nowrap/);
+  for (const [selector, order] of [["settings", 1], ["page-nav:first-child", 2], ["page-nav:not(:first-child)", 3], ["launcher", 4]]) {
+    assert.ok(desktopFoot.includes(`.${selector} { order: ${order};`));
+  }
+  assert.match(desktopFoot, /width: var\(--foot-btn\); height: var\(--foot-btn\)/);
+  assert.match(desktopFoot, /border-radius: 50%/);
+  assert.match(desktopFoot, /\.launcher-button > span \{ display: none; \}/);
+  assert.ok(!desktopFoot.includes(".sidebar-foot-usage .page-nav-name"), "额度文字在桌面可见");
+  assert.match(css, /\.page-nav-item\.sidebar-foot-usage \{ min-width: 88px; justify-content: center; \}/);
+  store.closeSidebarPanel();
+  const closed = foot(renderApp());
+  assert.ok(closed.includes('class="page-nav-name">历史</span>'));
+  assert.ok(closed.includes('class="page-nav-name">额度</span>'));
+  assert.match(closed, /class="page-nav-item sidebar-foot-usage" title="AI 用量" aria-label="AI 用量"/);
+  assert.match(closed, /class="launcher-button"[^>]*title="直达" aria-label="直达"/);
 });
 
 t("派单打开不替换主区历史预览，收起保留侧栏展开状态", () => {

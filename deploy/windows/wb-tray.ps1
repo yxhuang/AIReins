@@ -4,11 +4,15 @@
 .DESCRIPTION
     Chrome 自绘标题栏无法从外部拦截 ×。看门狗发现窗口消失时视为收到托盘，
     下次点击重开页面；WSL 服务和会话继续运行。保留任务栏及系统最小化行为。
-    左键单击切换显隐；被遮挡或最小化时先显示，双击和冷启动期间补点只受理一次。
+    左键单击切换显隐；被遮挡或最小化时先显示，双击只受理一次；
+    忙碌（打开/退出/启动段）期间投递的单击不丢弃，在该忙段结束后按当时状态补切换。
+    快捷方式/任务栏启动的备用实例把「显示主窗口」经消息窗口转交给托盘执行，不自己抬窗。
     使用默认 Chrome 配置，以保留 localStorage 和已登录的外部站点。
 .NOTES
     必须使用 UTF-8 带 BOM 保存，由 powershell.exe 5.1 运行，不用 pwsh。
     按 Chrome_WidgetWin_1 类名和标题认窗口，不查进程命令行，不会匹配脚本自身。
+    STA 线程上 WaitForExit / WaitOne / Task.Wait 等托管阻塞会泵消息：
+    可能阻塞的段先置 $script:Busy，让泵进来的点击走挂起而不是嵌套执行。
     仓库修改后需重跑 install-tray.ps1，退出旧托盘实例再启动。
 #>
 [CmdletBinding()]
@@ -20,7 +24,8 @@ param(
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
-Add-Type -TypeDefinition @'
+# 显式指定引用后默认引用集会丢，HashSet 在 System.Core，必须列全。
+Add-Type -ReferencedAssemblies @('System', 'System.Core', 'System.Windows.Forms') -TypeDefinition @'
 using System;
 using System.Collections.Generic;
 using System.Text;
@@ -40,6 +45,10 @@ public static class WbNative {
     [DllImport("user32.dll")] public static extern IntPtr GetAncestor(IntPtr h, uint flags);
     [DllImport("user32.dll")] public static extern int GetMessageTime();
     [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+    [DllImport("user32.dll", CharSet=CharSet.Unicode)]
+    public static extern IntPtr FindWindowEx(IntPtr parent, IntPtr childAfter, string className, string windowName);
+    [DllImport("user32.dll")] public static extern bool AllowSetForegroundWindow(int processId);
+    public const uint WM_APP_SHOW = 0x8001; // WM_APP+1：备用实例转交的「显示主窗口」请求
     [StructLayout(LayoutKind.Sequential)]
     public struct RECT { public int Left, Top, Right, Bottom; }
     [StructLayout(LayoutKind.Sequential)]
@@ -85,6 +94,23 @@ public static class WbNative {
         if (smallReady && largeReady) iconWindows.Add(h);
     }
 }
+// 托盘的纯消息窗口（HWND_MESSAGE）：备用实例 PostMessage 显示请求到这里，在 UI 线程触发事件。
+public class WbTrayListener : System.Windows.Forms.NativeWindow {
+    public event Action ShowRequested;
+    public void Create(string title) {
+        var cp = new System.Windows.Forms.CreateParams();
+        cp.Caption = title;
+        cp.Parent = new IntPtr(-3); // HWND_MESSAGE
+        CreateHandle(cp);
+    }
+    protected override void WndProc(ref System.Windows.Forms.Message m) {
+        if (m.Msg == (int)WbNative.WM_APP_SHOW) {
+            var handler = ShowRequested;
+            if (handler != null) handler();
+        }
+        base.WndProc(ref m);
+    }
+}
 '@
 
 $script:BaseUrl = "http://127.0.0.1:$Port"
@@ -99,6 +125,11 @@ $script:LastClickTick = [long][Environment]::TickCount - 10000
 $script:LastActionEndTick = $script:LastClickTick
 $script:LastReviveTick = $script:LastClickTick
 $script:LastWindowState = ''
+$script:PendingToggle = $false
+$script:PendingShow = $false
+$script:StaleEpisodeEnd = $script:LastClickTick
+$script:LastActionFailed = $false
+$script:ShowListener = $null
 
 function Resolve-Chrome {
     $candidates = @(
@@ -240,10 +271,19 @@ function Get-TickElapsed([long]$now, [long]$then) {
     return $elapsed
 }
 
-function Test-AcceptClick([long]$sent, [long]$actionEnd, [long]$lastClick, [int]$doubleClickTime) {
-    if ((Get-TickElapsed $sent $actionEnd) -le 0) { return $false }
-    if ((Get-TickElapsed $sent $lastClick) -lt $doubleClickTime) { return $false }
-    return $true
+# 单击裁决。Toggle=立即切换；StaleToggle=忙段（打开/启动段等）期间投递、泵恢复后补一次切换，
+# 同一忙段只补一次（staleEpisodeEnd 记下该忙段结束时刻，其前投递的点击不再补）；
+# Defer=正忙（含模态框泵消息），挂起到忙段结束；Drop*=丢弃。双击去重基于上一次受理的点击。
+function Get-ClickVerdict([long]$sent, [long]$lastClick, [long]$actionEnd, [long]$staleEpisodeEnd,
+        [bool]$busy, [bool]$exiting, [int]$doubleClickTime) {
+    if ($exiting) { return 'DropExiting' }
+    if ((Get-TickElapsed $sent $lastClick) -lt $doubleClickTime) { return 'DropDoubleClick' }
+    if ($busy) { return 'Defer' }
+    if ((Get-TickElapsed $sent $actionEnd) -le 0) {
+        if ((Get-TickElapsed $sent $staleEpisodeEnd) -le 0) { return 'DropStale' }
+        return 'StaleToggle'
+    }
+    return 'Toggle'
 }
 
 function Test-WindowOnTop([IntPtr]$Window) {
@@ -310,11 +350,45 @@ function Switch-Workbench {
     finally { $script:LastActionEndTick = [Environment]::TickCount }
 }
 
+# 忙段（打开流程/退出检查/启动段）收尾：先补挂起的显隐请求，再记忙段结束时刻。
+# 挂起的显示请求优先于切换：任务栏点击的意图就是显示。补的切换按当时窗口状态决定收或放。
+function Complete-Action([bool]$Failed) {
+    if ($script:Exiting) {
+        $script:PendingShow = $false
+        $script:PendingToggle = $false
+    } elseif ($script:PendingShow) {
+        $script:PendingShow = $false
+        $script:PendingToggle = $false
+        Write-TrayLog 'deferred show after busy'
+        Open-Workbench
+    } elseif ($script:PendingToggle) {
+        $script:PendingToggle = $false
+        if ($Failed) { Write-TrayLog 'deferred toggle dropped (action failed)' }
+        else { Write-TrayLog 'deferred toggle after busy'; Switch-Workbench }
+    }
+    $script:LastActionEndTick = [Environment]::TickCount
+}
+
+# 备用实例（任务栏/快捷方式）经消息窗口转交的「显示主窗口」请求；PostMessage 异步，发送方不等。
+function Invoke-ForwardedShow {
+    $sent = [WbNative]::GetMessageTime()
+    if ($script:Exiting) { Write-TrayLog 'forward: dropped (exiting)'; return }
+    if ($script:Busy) { $script:PendingShow = $true; Write-TrayLog 'forward: deferred (busy)'; return }
+    # 在忙段期间投递、忙段结束后才被处理的请求视为已被覆盖：刚结束的打开/显示流程已处理窗口。
+    if ((Get-TickElapsed $sent $script:LastActionEndTick) -le 0) {
+        Write-TrayLog 'forward: covered by just-finished action'
+        return
+    }
+    Write-TrayLog 'forward: show'
+    Open-Workbench
+}
+
 # 两实例同时启动、或双击托盘时，串行执行找窗口/开窗口，避免重复 Chrome 窗口。
 $script:OpenMutex = New-Object System.Threading.Mutex($false, "Local\Workbench.Open.$Distro.$Port")
 function Open-Workbench([switch]$ServiceReady, [switch]$RetryService) {
     if ($script:Busy -or $script:Exiting) { return }
     $script:Busy = $true
+    $script:LastActionFailed = $false
     $locked = $false
     try {
         try { $locked = $script:OpenMutex.WaitOne(60000) }
@@ -324,7 +398,16 @@ function Open-Workbench([switch]$ServiceReady, [switch]$RetryService) {
         Write-TrayLog "open: windows=$($windows.Length) serviceReady=$ServiceReady retry=$RetryService"
         # 窗口还在但服务已停（wsl --shutdown 后页面一直断线）时不能只抬窗口，要先拉起服务，页面会自己重连。
         if ($windows.Length -gt 0 -and -not $RetryService -and ($ServiceReady -or (Test-Service))) {
-            Raise-Window $windows[0]; return
+            Raise-Window $windows[0]
+            # 外部 SW_SHOW 可能被 Chrome 收回（tray.log 10-03：抬完约 0.2 秒又被藏起）；补显示一次，再显示后 Chrome 不会再藏。
+            Start-Sleep -Milliseconds 300
+            if ([WbNative]::IsWindow($windows[0]) -and -not [WbNative]::IsWindowVisible($windows[0]) -and
+                    -not [WbNative]::IsIconic($windows[0])) {
+                Write-TrayLog 'raise: hidden again, re-show once'
+                [void][WbNative]::ShowWindow($windows[0], 5) # SW_SHOW
+                [void][WbNative]::SetForegroundWindow($windows[0])
+            }
+            return
         }
         if (-not $ServiceReady) { Ensure-Service }
         # 获取锁后再次枚举，避免启动期间用户从备用入口开了窗口。
@@ -347,7 +430,7 @@ function Open-Workbench([switch]$ServiceReady, [switch]$RetryService) {
                 else { Raise-Window $windows[0] }
                 $script:HadWindow = $true
                 # 兜底：3 秒内每 50ms 采样，窗口被外部隐藏（不可见且未最小化）就补显示一次；再显示后 Chrome 不会再藏。
-                # 这段时间 UI 线程被占着，用户的托盘单击不会在此期间执行，不会和「单击收起」打架。
+                # 期间泵进来的托盘单击走挂起，在本流程收尾后按当时状态补一次切换，不会和这里的补显示打架。
                 $last = ''
                 $reshown = $false
                 for ($i = 0; $i -lt 60; $i++) {
@@ -372,11 +455,11 @@ function Open-Workbench([switch]$ServiceReady, [switch]$RetryService) {
             Start-Sleep -Milliseconds 200
         } while ($clock.Elapsed.TotalSeconds -lt 15)
         throw '15 秒内未找到工作台窗口，请检查 Chrome 是否正常启动。'
-    } catch { Show-Failure $_.Exception.Message }
+    } catch { $script:LastActionFailed = $true; Show-Failure $_.Exception.Message }
     finally {
         if ($locked) { $script:OpenMutex.ReleaseMutex() }
         $script:Busy = $false
-        $script:LastActionEndTick = [Environment]::TickCount
+        Complete-Action $script:LastActionFailed
     }
 }
 
@@ -465,6 +548,7 @@ function Exit-Workbench {
     } finally {
         if ($locked) { $script:OpenMutex.ReleaseMutex() }
         $script:Busy = $false
+        Complete-Action $false
     }
 }
 
@@ -477,15 +561,31 @@ try {
     catch [System.Threading.AbandonedMutexException] { $ownsInstance = $true }
     Write-TrayLog "start: owner=$ownsInstance"
     if (-not $ownsInstance) {
-        Open-Workbench
-        # 退出时图标先收、服务后停，用户这时点任务栏会进到这里；打开流程等退出放开 OpenMutex 后才继续，
-        # 旧托盘放开 OpenMutex 后还要走完收尾才放实例互斥量，等 3 秒再接手，免得只剩窗口没有托盘。
-        # 旧托盘正常在跑时这里白等 3 秒，窗口已抬起，用户无感。
+        # 转交而非自己抬窗：tray.log 10-03 证实备用实例对隐藏窗口的 SW_SHOW + SetForegroundWindow
+        # 从未生效（8 次全败，窗口保持 v=0；owner 同样的调用 6 次全成），且它的补显示看门狗
+        # 会把用户刚收进托盘的窗口重新放出来。显示、还原、抬前台、无窗口时重开全由 owner 执行。
+        $target = [WbNative]::FindWindowEx([IntPtr](-3), [IntPtr]::Zero, $null, "Workbench.Tray.Show.$Distro.$Port")
+        if ($target -ne [IntPtr]::Zero) {
+            # 本进程因任务栏/快捷方式点击拿到前台权限；放行给 owner，它抬窗时才能抢到前台。
+            [void][WbNative]::AllowSetForegroundWindow(-1) # ASFW_ANY
+            [void][WbNative]::PostMessage($target, [WbNative]::WM_APP_SHOW, [IntPtr]::Zero, [IntPtr]::Zero)
+            Write-TrayLog 'start: forwarded show to owner'
+        } else {
+            # 找不到说明 owner 还在启动段（消息窗口尚未创建），它的启动打开流程会把窗口显示出来。
+            Write-TrayLog 'start: owner message window not found (owner starting up)'
+        }
+        # 退出时图标先收、服务后停，用户这时点任务栏会进到这里；旧托盘走完收尾才放实例互斥量，
+        # 等 3 秒再接手，免得只剩窗口没有托盘。旧托盘正常在跑时这里白等 3 秒，请求已转交，用户无感。
         try { $ownsInstance = $instance.WaitOne(3000) }
         catch [System.Threading.AbandonedMutexException] { $ownsInstance = $true }
         Write-TrayLog "start: takeover owner=$ownsInstance"
         if (-not $ownsInstance) { return }
     }
+
+    # 先建消息窗口再走启动段：备用实例在启动期间也能把显示请求投进队列。
+    $script:ShowListener = New-Object WbTrayListener
+    $script:ShowListener.add_ShowRequested({ Invoke-ForwardedShow })
+    $script:ShowListener.Create("Workbench.Tray.Show.$Distro.$Port")
 
     $iconPath = Join-Path $PSScriptRoot 'workbench.ico'
     try {
@@ -509,10 +609,23 @@ try {
     $script:Tray.add_MouseClick({ param($sender, $eventArgs)
         if ($eventArgs.Button -ne [System.Windows.Forms.MouseButtons]::Left) { return }
         $sent = [WbNative]::GetMessageTime()
-        if (Test-AcceptClick $sent $script:LastActionEndTick $script:LastClickTick `
-                ([System.Windows.Forms.SystemInformation]::DoubleClickTime)) {
-            $script:LastClickTick = $sent
-            Switch-Workbench
+        $verdict = Get-ClickVerdict $sent $script:LastClickTick $script:LastActionEndTick `
+            $script:StaleEpisodeEnd $script:Busy $script:Exiting `
+            ([System.Windows.Forms.SystemInformation]::DoubleClickTime)
+        switch ($verdict) {
+            'Toggle' { $script:LastClickTick = $sent; Switch-Workbench }
+            'StaleToggle' {
+                $script:LastClickTick = $sent
+                $script:StaleEpisodeEnd = $script:LastActionEndTick
+                Write-TrayLog 'click: queued during busy, toggle once'
+                Switch-Workbench
+            }
+            'Defer' {
+                $script:LastClickTick = $sent
+                $script:PendingToggle = $true
+                Write-TrayLog 'click: deferred (busy)'
+            }
+            default { Write-TrayLog "click: dropped ($verdict)" }
         }
     })
     # 不挂 MouseDoubleClick：双击的第二次 MouseClick 由投递时间过滤。
@@ -538,16 +651,32 @@ try {
         }
         # wsl --shutdown 后窗口还在、经任务栏激活不走本脚本：用户正看着工作台而端口不通时拉起服务，页面自己重连。
         # 只在窗口处于前台时探测，不会在后台把刚关掉的 WSL 唤醒；失败后 30 秒内不重试，免得反复弹错。
+        # Busy 包住探测与拉起：Task.Wait 也会泵消息，不能让泵进来的点击在这里嵌套执行。
         $now = [Environment]::TickCount
         if ($hasWindow -and ($windows -contains [WbNative]::GetForegroundWindow()) -and
-                (Get-TickElapsed $now $script:LastReviveTick) -gt 30000 -and -not (Test-Port)) {
-            Write-TrayLog 'tick: service down while window in foreground'
-            Open-Workbench
-            $script:LastReviveTick = [Environment]::TickCount # 冷却从这次尝试结束算起
+                (Get-TickElapsed $now $script:LastReviveTick) -gt 30000) {
+            $script:Busy = $true
+            $revived = $false
+            try {
+                if (-not (Test-Port)) {
+                    $revived = $true
+                    Write-TrayLog 'tick: service down while window in foreground'
+                    Open-Workbench
+                }
+            } finally {
+                $script:Busy = $false
+                if ($revived) { $script:LastReviveTick = [Environment]::TickCount } # 冷却从这次尝试结束算起
+                Complete-Action $false
+            }
         }
     })
     # 无论是否已有窗口，首次启动均确保服务就绪；失败后保留托盘供重试。
+    # Busy 包住整个启动段：STA 线程上 WaitForExit 会泵消息，启动期间投递的点击走挂起，
+    # 不再嵌套开第二个打开流程（tray.log 10-03 08:28：嵌套打开 + 启动打开连番抬窗，Chrome 把窗口藏了）。
+    $script:Busy = $true
     try { Ensure-Service; Open-Workbench -ServiceReady } catch { Show-Failure $_.Exception.Message }
+    $script:Busy = $false
+    Complete-Action $false
     $script:HadWindow = @([WbNative]::Windows()).Count -gt 0
     $timer.Start()
     [System.Windows.Forms.Application]::Run($script:Context)
@@ -556,6 +685,7 @@ try {
     if ($script:Tray) { $script:Tray.Visible = $false; $script:Tray.Dispose() }
     if ($menu) { $menu.Dispose() }
     if ($script:Context) { $script:Context.Dispose() }
+    if ($script:ShowListener) { $script:ShowListener.DestroyHandle() }
     if ($script:Icon) { $script:Icon.Dispose() }
     if ($script:LargeIcon) { $script:LargeIcon.Dispose() }
     $script:OpenMutex.Dispose()

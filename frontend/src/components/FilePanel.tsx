@@ -4,7 +4,7 @@ import { store } from "../store";
 import type { SessionRecord } from "../types";
 import { useStore } from "../useStore";
 import { DirectoryContents } from "./DirectoryBrowser";
-import { FILE_WIDTH_OPTIONS, PanelRightIcon, SidePanelResize, useSidePanelWidth } from "./SidePanelResize";
+import { FILE_WIDTH_OPTIONS, PanelBackButton, PanelRightIcon, SidePanelResize, useSidePanelWidth } from "./SidePanelResize";
 
 function absolutePath(path: string): string | null {
   if (!path.startsWith("/") || path.includes("\0")) return null;
@@ -70,8 +70,9 @@ export function FilePanel({ onClose }: { onClose: () => void }) {
       if (event.key === "Escape") { event.stopPropagation(); onClose(); }
     }}>
       <div className="term-titlebar">
+        <PanelBackButton onClick={onClose} />
         <strong className="file-side-title">文件</strong>
-        <button type="button" className="btn chrome-icon-btn panel-icon-button" aria-label="收起文件面板" title="收起面板" onClick={onClose}><PanelRightIcon /></button>
+        <button type="button" className="btn chrome-icon-btn panel-icon-button panel-collapse" aria-label="收起文件面板" title="收起面板" onClick={onClose}><PanelRightIcon /></button>
       </div>
       {notice && <div className="file-notice" role="status">
         {notice.reason && <p>{notice.reason}</p>}

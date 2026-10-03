@@ -52,7 +52,7 @@ socket.addEventListener("message", (event) => {
   seen.push(`${frame.seq}:${frame.type}`);
   if (frame.type === "permission_request") {
     sawPermission = true;
-    // 自动放行所有闸门（kimi 有 request_permission + terminal/create 最终闸门两道）。
+    // 自动放行 CLI 原生审批请求；Kimi 执行端不追加审批。
     socket.send(JSON.stringify({
       type: "permission_resolved",
       sessionId,

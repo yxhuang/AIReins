@@ -27,6 +27,7 @@ import { TerminalError, TerminalRegistry, terminalEnabled, type TerminalEvent } 
 import { IMAGE_MENTION_MIME_TYPES, resolveUploadFile, saveUpload, UploadError } from "./uploads.js";
 import {
   AGENTS,
+  type AgentKind,
   CONFIG_OPTION_IDS,
   type CreateSessionInput,
   type PermissionDecision,
@@ -477,10 +478,13 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
     } else if (method === "GET" && url.pathname === "/api/dispatches") {
       try {
         const parent = url.searchParams.get("parent");
-        await respond(response, 200, 0, "success", { dispatches: parent !== null ? await listParentDispatches(parent)
-          : await listDispatches(url.searchParams.get("limit"), undefined, () => manager.list()
-            .filter((session) => session.agent === "claude")
-            .map(({ cwd, nativeSessionId }) => ({ cwd, nativeSessionId }))) }, requestId);
+        const agent = url.searchParams.get("agent");
+        if (agent !== null && !["claude", "codex", "kimi"].includes(agent)) throw new DispatchQueryError("agent 必须是 claude、codex 或 kimi");
+        const sessions = () => manager.list().map(({ id, agent, cwd, nativeSessionId, config, createdAt }) =>
+          ({ id, agent, cwd, nativeSessionId, model: config.model, createdAt }));
+        await respond(response, 200, 0, "success", { dispatches: parent !== null
+          ? await listParentDispatches(parent, undefined, agent === null ? undefined : agent as AgentKind, sessions)
+          : await listDispatches(url.searchParams.get("limit"), undefined, sessions) }, requestId);
       } catch (error) {
         if (error instanceof DispatchQueryError) throw new ApiError(400, 40000, error.message);
         throw error;

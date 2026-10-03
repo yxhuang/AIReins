@@ -1,4 +1,4 @@
-import { open, readdir, readFile, stat } from "node:fs/promises";
+import { open, readdir, readFile, realpath, stat } from "node:fs/promises";
 import { createReadStream } from "node:fs";
 import { createInterface } from "node:readline";
 import { homedir } from "node:os";
@@ -256,6 +256,16 @@ export class HistoryIndex {
       discovered: discovery.candidates.length,
       durationMs: Date.now() - started,
     };
+  }
+
+  /** Reuse native title parsing for an already validated path, without archive discovery. */
+  async sessionMetadata(agent: AgentKind, path: string): Promise<HistorySession | null> {
+    try {
+      if (await realpath(path) !== path) return null;
+      const metadata = await stat(path);
+      return await this.parseCandidate({ agent, path, idHint: idHintFor(agent, path),
+        mtimeMs: metadata.mtimeMs, size: metadata.size });
+    } catch { return null; }
   }
 
   /**

@@ -6,21 +6,21 @@ import type { DispatchRun } from "../dispatch-flow";
 import { dispatchIcon } from "./PanelActions";
 
 /** 本会话派出的任务：会话里只轮询一份，顶栏图标和标题下的行共用。 */
-export function useSessionDispatches(nativeId: string | undefined, backgroundCount: number): DispatchRun[] {
+export function useSessionDispatches(nativeId: string | undefined, backgroundCount: number, agent?: string): DispatchRun[] {
   const [runs, setRuns] = useState<DispatchRun[]>([]);
   const linkCount = useRef(0);
-  useEffect(() => { setRuns([]); linkCount.current = 0; }, [nativeId]);
+  useEffect(() => { setRuns([]); linkCount.current = 0; }, [nativeId, agent]);
   useEffect(() => {
     if (!nativeId) return;
     return startSessionDispatchPolling({
       visible: () => document.visibilityState !== "hidden", now: Date.now,
       every: (callback, ms) => window.setInterval(callback, ms), cancel: (timer) => window.clearInterval(timer as number),
       onVisibility: (callback) => { document.addEventListener("visibilitychange", callback); return () => document.removeEventListener("visibilitychange", callback); },
-    }, (signal) => fetchParentDispatches(nativeId, signal), (next) => {
+    }, (signal) => fetchParentDispatches(nativeId, signal, agent), (next) => {
       linkCount.current = next.length;
       setRuns(next);
     }, () => backgroundCount, linkCount.current);
-  }, [nativeId, backgroundCount]);
+  }, [nativeId, backgroundCount, agent]);
   return runs;
 }
 

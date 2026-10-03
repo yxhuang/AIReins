@@ -6,6 +6,7 @@ import type { AgentKind, DispatchDetail as Detail, HistoryMessage } from "../typ
 import { modelShortName } from "../config-view";
 import { store } from "../store";
 import { HistoryTimeline } from "./HistoryTimeline";
+import { PanelBackButton } from "./SidePanelResize";
 import { MarkdownMessage } from "./MarkdownMessage";
 
 /** Show only the current dispatch's process after its last matching prompt; keep delta indices intact. */
@@ -115,11 +116,11 @@ export function DispatchDetail({ runId, sessions, terminalOpen }: { runId: strin
   const prompt = detail?.prompt ?? "派单原文尚未生成";
   const processMessages = useMemo(() => dispatchProcessMessages(messages, detail?.prompt), [messages, detail?.prompt]);
   return <section className={`dispatch-view dispatch-detail agent-${detail?.tool || "codex"}`} aria-label="派单详情">
-    <div className="dispatch-detail-nav"><button className="btn" onClick={() => store.navigateDispatches()}>‹ 返回派单</button><span>只读详情</span></div>
+    <div className="dispatch-detail-nav"><PanelBackButton label="返回派单" onClick={() => store.navigateDispatches()} /><span>只读详情</span></div>
     {error && <p className="dispatch-error" role="alert">{error}</p>}
     {!detail ? <p className="dispatch-empty">正在加载派单…</p> : <>
       <header className="dispatch-detail-head" data-tool={detail.tool}>
-        <p className="dispatch-detail-source">{dispatcher} → {detail.tool === "codex" ? "Codex" : detail.tool === "kimi" ? "Kimi" : "Copilot"}</p>
+        <p className="dispatch-detail-source">{dispatcher} → {detail.tool === "codex" ? "Codex" : detail.tool === "kimi" ? "Kimi" : detail.tool === "claude" ? "Claude Code" : "Copilot"}</p>
         <h1>{dispatchName(detail)}</h1>
         <div className="dispatch-detail-meta"><span className="mono">{detail.model ? modelShortName(detail.model) : "模型未知"} / {detail.effort || "继承"}</span>
           <span className="mono" aria-label="已跑时长">{dispatchTime(dispatchSeconds(detail, now))}</span>

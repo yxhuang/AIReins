@@ -41,7 +41,9 @@ try {
   assert.equal(second.nextOffset, null);
   assert.equal(first.dispatches[0]?.runId, "20260925-120000-codex-0", "sort by end time, not directory/start date");
   assert.equal(new Set([...first.dispatches, ...second.dispatches].map((run) => run.runId)).size, 25);
-  assert.deepEqual((await listParentDispatches("parent")).map((run) => run.runId), [running]);
+  assert.deepEqual((await listParentDispatches("parent", undefined, "claude")).map((run) => run.runId), [running]);
+  assert.equal((await listParentDispatches("parent", undefined, "codex")).length, 1);
+  assert.equal((await listParentDispatches("parent")).length, 2);
   for (const value of ["-1", "", "bad", "1.5"]) await assert.rejects(listDispatchHistory(value), DispatchQueryError);
   await assert.rejects(listParentDispatches("../parent"), DispatchQueryError);
 

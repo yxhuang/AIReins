@@ -49,12 +49,17 @@ export abstract class BaseDriver implements Driver {
   ): Promise<void>;
 
   protected spawnProcess(command: string, args: string[], options: SpawnOptionsWithoutStdio = {}): void {
+    const env = { ...(options.env ?? process.env) };
+    // A Workbench worker is its own conversation, not the launcher terminal's delegate.
+    for (const key of ["DELEGATE_RUN_ID", "DELEGATE_TOOL", "CLAUDE_CODE_SESSION_ID", "CODEX_THREAD_ID", "CODEX_SESSION_ID", "KIMI_CODE_SESSION_ID", "KIMI_SESSION_ID"]) delete env[key];
+    env.WORKBENCH_PARENT_AGENT = this.kind;
+    env.WORKBENCH_PARENT_SESSION_ID = this.sessionId;
     const child = spawn(command, args, {
       cwd: this.cwd,
-      env: process.env,
       // Keep launcher descendants identifiable after wb or the launcher itself is killed.
       detached: process.platform === "linux",
       ...options,
+      env,
       stdio: ["pipe", "pipe", "pipe"],
     });
     this.child = child;

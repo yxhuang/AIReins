@@ -42,8 +42,8 @@ export function fetchDispatches(signal?: AbortSignal): Promise<{ dispatches: Dis
   return call("/api/dispatches?limit=50", { signal });
 }
 
-export function fetchParentDispatches(parent: string, signal?: AbortSignal): Promise<{ dispatches: DispatchRun[] }> {
-  return call(`/api/dispatches?parent=${encodeURIComponent(parent)}`, { signal });
+export function fetchParentDispatches(parent: string, signal?: AbortSignal, agent?: string): Promise<{ dispatches: DispatchRun[] }> {
+  return call(`/api/dispatches?parent=${encodeURIComponent(parent)}${agent ? `&agent=${encodeURIComponent(agent)}` : ""}`, { signal });
 }
 
 export function fetchDispatchHistory(offset = 0, signal?: AbortSignal): Promise<{ dispatches: DispatchRun[]; total: number; nextOffset: number | null }> {

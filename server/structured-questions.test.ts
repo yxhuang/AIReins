@@ -104,10 +104,12 @@ function harness<T extends CodexDriver | KimiDriver>(Driver: new (options: Drive
   h.exit();
   await assert.rejects(h.driver.resolvePermission("kimi:elicitation:54", "deny"), /不存在/);
 
-  // Form 能力不能绕过原有 terminal/create 最终闸门。
-  h.receive({ jsonrpc: "2.0", id: 55, method: "terminal/create", params: { command: "true" } });
-  assert.equal(h.events.at(-1)?.payload.finalGate, true);
-  await h.driver.resolvePermission("kimi:terminal/create:55", "deny");
+  // Form 能力不影响 CLI 原生审批；Workbench 仍转发它并回传拒绝。
+  h.receive({ jsonrpc: "2.0", id: 55, method: "session/request_permission", params: {
+    toolCall: { title: "Shell" }, options: [{ kind: "reject_once", optionId: "reject" }],
+  } });
+  assert.equal(h.events.at(-1)?.payload.gate, "session/request_permission");
+  await h.driver.resolvePermission("kimi:session/request_permission:55", "deny");
   assert.equal(h.sent.at(-1).id, 55);
-  assert.equal(h.sent.at(-1).error.code, -32001);
+  assert.deepEqual(h.sent.at(-1).result, { outcome: { outcome: "selected", optionId: "reject" } });
 }

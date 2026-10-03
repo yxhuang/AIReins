@@ -36,3 +36,17 @@ assert.ok(checked > 0, "未找到文件浏览或侧栏入口样式");
 assert.match(css, /\.dir-copy-status\s*\{[^}]*overflow-wrap:\s*anywhere;[^}]*user-select:\s*text;/,
   "复制退路必须完整换行并允许手动选中");
 console.log(`✅ 主题检查通过（文件浏览与侧栏入口，${checked} 条规则，深浅主题令牌与闸门色隔离）`);
+
+// 终端标签 chrome：禁止复用暖纸/品牌/闸门色，只允许终端中性色与冷色焦点环。
+let terminalRules = 0;
+for (const [, selector, body] of css.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+  if (!/\.term-tab[\w-]*\b/.test(selector)) continue;
+  for (const [, token] of body.matchAll(/var\(\s*(--[\w-]+)/g)) {
+    assert.ok(["--term-bg", "--term-fg", "--busy", "--font-ui"].includes(token), `${selector.trim()} 终端 chrome 不得使用 ${token}`);
+    assert.ok(tokens.has(token), `${token} 必须有主题令牌`);
+  }
+  assert.doesNotMatch(body, /#[\da-f]{3,8}\b|\b(?:rgb|rgba|hsl|hsla)\(/i, `${selector.trim()} 不得硬编码颜色`);
+  terminalRules++;
+}
+assert.ok(terminalRules > 0);
+console.log(`✅ 终端标签主题检查通过（${terminalRules} 条规则，中性色与冷色焦点环）`);

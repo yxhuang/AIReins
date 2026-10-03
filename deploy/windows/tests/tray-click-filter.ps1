@@ -18,7 +18,7 @@ if ($parseErrors -and $parseErrors.Count -gt 0) { throw ($parseErrors | Out-Stri
 $selfErrors = $null
 $null = [System.Management.Automation.Language.Parser]::ParseFile($PSCommandPath, [ref]$tokens, [ref]$selfErrors)
 if ($selfErrors -and $selfErrors.Count -gt 0) { throw ($selfErrors | Out-String) }
-foreach ($name in @('Get-ClickAction', 'Get-ShowAction', 'Get-TickElapsed', 'Test-AcceptClick')) {
+foreach ($name in @('Get-ClickAction', 'Get-ShowAction', 'Get-TickElapsed', 'Get-ClickVerdict')) {
     $functions = @($ast.FindAll({
         param($node)
         $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $name
@@ -72,25 +72,32 @@ foreach ($case in $showCases) {
         $case[3] (Get-ShowAction $case[0] $case[1] $case[2])
 }
 
-# 投递时刻而非处理时刻；纯函数不修改上一点击的时间。
+# 单击裁决。投递时刻而非处理时刻；纯函数不修改上一点击的时间。
+# 参数序：sent, lastClick, actionEnd, staleEpisodeEnd, busy, exiting, doubleClickTime。
 foreach ($doubleClickTime in @(200, 500, 900)) {
-    Check "闲时单击 ($doubleClickTime ms)" $true (Test-AcceptClick 20000 10000 0 $doubleClickTime)
-    Check "双击第二下 ($doubleClickTime ms)" $false `
-        (Test-AcceptClick (20000 + [int]($doubleClickTime / 2)) 20000 20000 $doubleClickTime)
-    Check "间隔前一毫秒 ($doubleClickTime ms)" $false `
-        (Test-AcceptClick (20000 + $doubleClickTime - 1) 20000 20000 $doubleClickTime)
-    Check "间隔恰好达到阈值 ($doubleClickTime ms)" $true `
-        (Test-AcceptClick (20000 + $doubleClickTime) 20000 20000 $doubleClickTime)
+    Check "闲时单击 ($doubleClickTime ms)" 'Toggle' (Get-ClickVerdict 20000 0 10000 -1 $false $false $doubleClickTime)
+    Check "双击第二下 ($doubleClickTime ms)" 'DropDoubleClick' `
+        (Get-ClickVerdict (20000 + [int]($doubleClickTime / 2)) 20000 10000 -1 $false $false $doubleClickTime)
+    Check "间隔前一毫秒 ($doubleClickTime ms)" 'DropDoubleClick' `
+        (Get-ClickVerdict (20000 + $doubleClickTime - 1) 20000 10000 -1 $false $false $doubleClickTime)
+    Check "间隔恰好达到阈值 ($doubleClickTime ms)" 'Toggle' `
+        (Get-ClickVerdict (20000 + $doubleClickTime) 20000 10000 -1 $false $false $doubleClickTime)
 }
-Check '冷启动期间补点一' $false (Test-AcceptClick 21000 23000 20000 500)
-Check '冷启动期间补点二' $false (Test-AcceptClick 22000 23000 20000 500)
-Check '动作结束同刻补点' $false (Test-AcceptClick 23000 23000 20000 500)
-Check '动作结束后的新单击' $true (Test-AcceptClick 23001 23000 20000 500)
-Check '忙时拒绝不延长双击间隔' $true (Test-AcceptClick 23500 23000 20000 500)
-Check '签名回绕后的新单击' $true (Test-AcceptClick -2147483000 2147483500 2147483000 500)
-Check '签名回绕后的双击第二下' $false (Test-AcceptClick -2147483600 2147483500 2147483500 500)
-Check '回绕前投递但回绕后才处理' $false (Test-AcceptClick 2147483600 -2147483000 2147483000 500)
-Check '跨零的新单击' $true (Test-AcceptClick 600 -1 -100 500)
+Check '忙时挂起' 'Defer' (Get-ClickVerdict 21000 20000 10000 -1 $true $false 500)
+Check '忙时双击第二下仍去重' 'DropDoubleClick' (Get-ClickVerdict 20100 20000 10000 -1 $true $false 500)
+Check '忙段期间投递的点击补一次切换' 'StaleToggle' (Get-ClickVerdict 21000 20000 23000 -1 $false $false 500)
+Check '挂起后又一个忙段点击也补' 'StaleToggle' (Get-ClickVerdict 22000 21000 23000 -1 $false $false 500)
+Check '同一忙段只补一次' 'DropStale' (Get-ClickVerdict 22000 21000 23000 23000 $false $false 500)
+Check '补切换后动作结束时刻前移仍算同段' 'DropStale' (Get-ClickVerdict 22000 21000 23500 23000 $false $false 500)
+Check '新忙段再补一次' 'StaleToggle' (Get-ClickVerdict 24000 23000 25000 23000 $false $false 500)
+Check '动作结束同刻算忙段投递' 'StaleToggle' (Get-ClickVerdict 23000 20000 23000 -1 $false $false 500)
+Check '动作结束后的新单击' 'Toggle' (Get-ClickVerdict 23001 20000 23000 23000 $false $false 500)
+Check '退出中丢弃' 'DropExiting' (Get-ClickVerdict 23001 20000 23000 -1 $false $true 500)
+Check '退出中双击也丢弃' 'DropExiting' (Get-ClickVerdict 20100 20000 10000 -1 $false $true 500)
+Check '签名回绕后的新单击' 'Toggle' (Get-ClickVerdict -2147483000 2147483000 2147483500 -1 $false $false 500)
+Check '签名回绕后的双击第二下' 'DropDoubleClick' (Get-ClickVerdict -2147483600 2147483500 2147483500 -1 $false $false 500)
+Check '回绕前投递但回绕后才处理' 'StaleToggle' (Get-ClickVerdict 2147483600 2147483000 -2147483000 -1 $false $false 500)
+Check '跨零的新单击' 'Toggle' (Get-ClickVerdict 600 -100 -1 -1 $false $false 500)
 
 if ($script:failed -gt 0) { throw "$script:failed / $script:checked 项未通过" }
 Write-Host "全部通过：$script:checked 项；源文件和测试脚本解析无错误。"

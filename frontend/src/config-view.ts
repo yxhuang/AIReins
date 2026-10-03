@@ -1,4 +1,11 @@
-import type { ConfigOptionId, DriverConfigOption, EffectiveSource, SessionRecord } from "./types";
+import type { AgentKind, ConfigOptionId, DriverConfigOption, EffectiveSource, SessionRecord } from "./types";
+
+/** 新建表单显式提交用户指定的默认模式，兼容尚未重启的服务端。 */
+export function newSessionConfig(agent: AgentKind): Partial<Record<ConfigOptionId, string>> {
+  if (agent === "codex") return { permissionMode: "auto-review" };
+  if (agent === "kimi") return { permissionMode: "auto" };
+  return {};
+}
 
 // 配置控件展示的纯逻辑（无 DOM 依赖，可单测）：mutableVia:"restart" 的代价标注、
 // claude 实际生效值（effectiveModel/effectiveEffort）的读取与来源标注。

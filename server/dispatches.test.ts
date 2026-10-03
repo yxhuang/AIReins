@@ -129,7 +129,7 @@ try {
   assert.equal((await listDispatches(2)).length, 2);
 
   await fixture("unrelated");
-  await fixture("20261001-120100-claude-ignored");
+  await fixture("20261001-120100-unknown-ignored");
   const escapeId = "20261001-120101-codex-escape";
   await symlink(outside, join(root, escapeId));
   for (const id of ["../x", `${doneId}/../x`, `${doneId}..`, escapeId, "20261001-120102-codex-missing"]) {

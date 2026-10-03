@@ -66,13 +66,16 @@ t('菜单渲染：图标/快捷键/分隔线/删除；已置顶显示取消置�
   assert.equal((html.match(/role="menuitem"/g) ?? []).length, 4); assert.ok(html.includes('row-menu-shortcut')); assert.ok(html.includes('role="separator"')); assert.ok(html.includes('<svg'));
 });
 t('行渲染：分区顺序与空闲点隐藏，⋮ 保持独立按钮和标题 aria', () => {
+  const savedStorage = globalThis.localStorage;
+  globalThis.localStorage = { getItem: () => null, setItem() {}, removeItem() {} }; // 无存档 → 默认折叠
   const saved = { sessions: store.sessions, now: store.now, currentId: store.currentId, sessionGroups: store.sessionGroups, pendingCount: store.pendingCount, historyOpen: store.historyOpen, currentPageId: store.currentPageId };
   try {
     Object.assign(store, { now, currentId: null, sessionGroups: [{ id: 'g', name: '项目', createdAt: '2026-10-01' }], sessions: [session('wait'), session('pin', 400000000, 'dead', { pinned: true }), session('group', 400000000, 'idle', { groupId: 'g' }), session('fresh'), session('old', 7200001)], pendingCount: id => id === 'wait' ? 1 : 0, historyOpen: false, currentPageId: null });
     const html = renderToStaticMarkup(React.createElement(Sidebar, { collapsed: false, onToggle() {}, newOpen: false, onNewOpenChange() {} }));
     const order = ['等待处理', '置顶', '项目', '进行中', '更早'].map(x => html.indexOf(x)); assert.ok(order.every((x, i) => x >= 0 && (!i || x > order[i - 1])));
+    assert.ok(/aria-expanded="true" aria-controls="time-section-进行中"/.test(html) && /aria-expanded="false" aria-controls="time-section-更早"/.test(html), '默认只折叠「更早」');
     assert.equal((html.match(/status-idle/g) ?? []).length, 1); assert.ok(html.includes('aria-label="会话 fresh 的操作"')); assert.ok(html.includes('aria-label="项目 的分组操作"'));
-  } finally { Object.assign(store, saved); }
+  } finally { Object.assign(store, saved); globalThis.localStorage = savedStorage; }
 });
 t('右键、500ms 长按、⋮ 共用 openMenu；重命名 Enter/Esc/失焦与触屏命中', () => {
   const source = readFileSync(new URL('../src/components/Sidebar.tsx', import.meta.url), 'utf8');

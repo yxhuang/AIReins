@@ -171,7 +171,7 @@ export interface SessionRecord {
   config: SessionConfig;
   /** 建会话时后端自动快照的写入路径；git 目录/跳过快照/旧会话为缺省或 null，缺失就不显示 */
   snapshotPath?: string | null;
-  /** true = 该会话已关闭 agent 主动询问（claude bypass/dontAsk、codex never、kimi yolo） */
+  /** true = 免审批或不询问模式（claude bypass/dontAsk、codex full-access/旧 never、kimi yolo） */
   riskyMode: boolean;
   remoteControl?: RemoteControlState;
   /** 仅 Claude：后台任务清单；非空时虽 idle 仍在干活（列表状态点显示黄色） */

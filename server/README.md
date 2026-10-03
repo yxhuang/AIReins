@@ -254,17 +254,17 @@ Claude 额外固定返回四个字段；未显式覆盖时的初始形状如下�
 
 `config.model / config.effort` 只表示会话级覆盖，`null` 不改写；前端据此区分“覆盖”与“继承”。`effectiveModel / effectiveEffort` 是当前能确认的实际值，拿不到就是 `null`。对应 source 为：`session`（会话显式覆盖）、`settings`（分层 settings 合并）或 `init`（Claude `system/init` 的运行时回报）；值为 `null` 时 source 也为 `null`。兼容字段 `model / effort` 保留既有语义：首轮前是覆盖值或 `null`，init 报出某项后更新为该项的运行时精确值。显式覆盖始终保留在 `config` 中，不会被 settings 或 init 改写。
 
-`riskyMode` 在 Claude 的 `bypassPermissions / dontAsk`、Codex 的 `never`、Kimi 的 `yolo` 下为 `true`。这是每会话标记，不存在全局 yolo 开关。
+`riskyMode` 在 Claude 的 `bypassPermissions / dontAsk`、Codex 的 `full-access / 旧 never`、Kimi 的 `yolo` 下为 `true`。这是每会话标记，不存在全局 yolo 开关。
 
 ### 派单只读接口
 
 实现在 `server/dispatches.ts`，路由在 `server/index.ts`。默认读取 `~/.cache/delegate`，可用
-`WB_DELEGATE_DIR` 覆盖；每次请求重新读取，不启动或控制派单进程，不写入数据源。
+`WB_DELEGATE_DIR` 覆盖；两秒共享扫描缓存，不启动或控制派单进程，不写入数据源。
 三个接口均走现有 `/api` 访问控制和 `{code,msg,data,request_id}` 信封：
 
 - `GET /api/dispatches?limit=50` → `data: {dispatches: Dispatch[]}`。有效目录名按字符串倒序；
-  默认 50 条，上限 200，正数小数向下取整，非法值或小于 1 回退到 50。根目录不存在或不可读取时返回空列表。
-  除 delegate 记录外，还返回 Claude Code 原生子代理记录（`tool=claude`）：候选父会话 = 注册表里的 Claude 会话（cwd + nativeSessionId）∪ delegate 记录里 `parent.agent=claude` 的 sessionId，只读这些父会话目录下的 `subagents/agent-<id>.jsonl` 与同名 `.meta.json`，不枚举无关项目。默认根目录 `~/.claude/projects`，可用 `WORKBENCH_CLAUDE_PROJECTS_DIR` 覆盖。实际模型取自 assistant `message.model`，类型/任务名取自 meta，生命周期按最终回复与写入新鲜度判定；路径/mtime/size 指纹加两秒共享扫描缓存，头尾读取各限 1 MiB。Claude 原生记录只进流程图列表，不进 delegate 历史、详情、日志和父会话徽标接口。Codex 子代理沿真实 `parentThreadId` 递归，有防环处理。
+  默认 50 条，上限 200，正数小数向下取整，非法值或小于 1 回退到 50。delegate 根目录不存在或不可读取时不返回工单；已注册会话的原生子代理独立读取。
+  除 delegate 记录外，还返回 Claude Code 原生子代理记录（`tool=claude`）：候选父会话 = 注册表里的 Claude 会话（cwd + nativeSessionId）∪ delegate 记录里 `parent.agent=claude` 的 sessionId，只读这些父会话目录下的 `subagents/agent-<id>.jsonl` 与同名 `.meta.json`，不枚举无关项目。默认根目录 `~/.claude/projects`，可用 `WORKBENCH_CLAUDE_PROJECTS_DIR` 覆盖。实际模型取自 assistant `message.model`，类型/任务名取自 meta，生命周期按最终回复与写入新鲜度判定；路径/mtime/size 指纹加两秒共享扫描缓存，头尾读取各限 1 MiB。三家原生子代理进入流程图和父会话徽标，标记 `native:true`，只读展示，不打开 delegate 历史、详情或日志。独立 Codex 会话也按注册表原生 ID 发现子线程（包括 Luna），沿真实 `parentThreadId` 递归并防环。Kimi 只枚举工作空间根目录名，再读指定注册会话的 `state.json` 与其中列出的 `agents/<id>/wire.jsonl`；头尾各限 64 KiB，拒绝符号链接，按文件指纹缓存并重新判断新鲜度。未关联的记录不猜测父会话。
 - `GET /api/dispatches/<runId>` → `data: DispatchDetail`。
 - `GET /api/dispatches/<runId>/log?stream=stdout&offset=0` → `data: DispatchLog`。
   `stream` 缺省为 `stdout`，仅允许 `stdout` / `stderr`；`offset` 为非负安全整数，单位为字节。
@@ -278,8 +278,9 @@ interface Dispatch {
   startedAt: string | null; endedAt: string | null;
   elapsedS: number | null; exit: number | null; files: number | null;
   session: string | null;
-  parent: {agent: string; sessionId: string | null; entrypoint: string | null; model: string | null; runId?: string} | null;
+  parent: {agent: string; sessionId: string | null; entrypoint: string | null; model: string | null; title?: string | null; runId?: string} | null;
   promptHead: string | null;
+  native?: boolean; // 原生子代理，只读展示
   subagents?: Array<{
     threadId: string; nickname: string; role: string | null; depth: number; parentThreadId: string;
     status: "running" | "finished" | "unknown";
@@ -328,12 +329,12 @@ Codex 的 `session` 缺失时，从 `stderr.log` 前 8KB 的 `session id: <uuid>
 REST 沿用 `{code,msg,data,request_id}` 信封：
 
 - `GET /api/terminals` → `data: {terminals: TerminalInfo[]}`。
-- `POST /api/terminals`，body `{cwd?: string, cols: number, rows: number}` → `data: TerminalInfo`。`cwd` 缺省或不存在时回退到 server 的 `defaultCwd`；shell 取 `$SHELL`，缺省 `bash`，以登录交互模式启动，继承 server 环境。`cols` 限 1–500，`rows` 限 1–300，均须为整数。
+- `POST /api/terminals`，body `{cwd?: string, shell?: "bash"|"powershell", cols: number, rows: number}` → `data: TerminalInfo`。`cwd` 缺省或不存在时回退到 server 的 `defaultCwd`；shell 是白名单（不收路径），缺省 `bash`，bash 以登录交互模式（`bash -l -i`）启动，powershell 的 cwd 只在 `/mnt/<盘符>` 下沿用，否则进 Windows 用户目录；继承 server 环境。`cols` 限 1–500，`rows` 限 1–300，均须为整数。
 - `POST /api/terminals/:id/kill` → `data: {ok: true}`。只结束进程，不删除文件；退出记录保留到 server 重启。
 
 `TerminalInfo = {id:string, cwd:string, shell:string, cols:number, rows:number, createdAt:string, exited:boolean, exitCode:number|null}`。
 
-`/ws/terminal` 是独立的 JSON 文本帧通道，一个连接可订阅多个终端。上行 `{type:"attach",terminalId}` 后，服务端依次发送 `{type:"attached",terminalId,omitted}`、`{type:"data",terminalId,data}`（当前全部回放），随后推送实时 `{type:"data",terminalId,data}`。重复 attach 同一 id 会重新回放。每终端只保留最近 256KB 输出，`omitted` 为此前丢弃的字节数。上行还支持 `{type:"input",terminalId,data}` 和 `{type:"resize",terminalId,cols,rows}`。进程退出发送 `{type:"exit",terminalId,exitCode}`；未知 id、已退出或参数无效发送 `{type:"error",terminalId?,message}`。连接断开仅解除订阅，不结束 PTY。
+`/ws/terminal` 是独立的 JSON 文本帧通道，一个连接可订阅多个终端。上行 `{type:"attach",terminalId}` 后，服务端依次发送 `{type:"attached",terminalId,omitted}`、`{type:"data",terminalId,data}`（当前全部回放），随后推送实时 `{type:"data",terminalId,data}`。重复 attach 同一 id 会重新回放。**回放帧会剥掉 OSC 4/10/11/12 颜色查询与 CSI DA 询问序列**（`stripReplayQueries`）：查询无视觉效果，但重放时 xterm 会重新应答，应答字节进 PTY 输入被 shell 回显成垃圾；实时推送不剥。每终端只保留最近 256KB 输出，`omitted` 为此前丢弃的字节数。上行还支持 `{type:"input",terminalId,data}` 和 `{type:"resize",terminalId,cols,rows}`。进程退出发送 `{type:"exit",terminalId,exitCode}`；未知 id、已退出或参数无效发送 `{type:"error",terminalId?,message}`。连接断开仅解除订阅，不结束 PTY。
 
 ## 委派前自动快照
 
@@ -380,7 +381,7 @@ Promise。复制前先检查目标文件系统可用空间至少为扫描量的 
 
 - Claude：CLI 启动 flag 与 stream-json control protocol；审批模式原生活改。模型和推理强度为 `mutable:true, mutableVia:"control"`。空闲且无待审批闸门时，模型发送 `set_model {model}`，推理强度发送 `apply_flag_settings {settings:{effortLevel}}`；success 后即时更新配置、有效值及前端。错误或 15 秒超时回落到原重启路径；释放的会话只保存新配置，下次拉起带入 `--model / --effort`。
 - Codex：模型选项来自 `model/list`；默认 model/effort 来自 `config/read(cwd)` 返回的有效合并配置，而不是模型内建默认。创建或续接线程后，再以 `thread/start` / `thread/resume` 返回的实际 `model / reasoningEffort` 和 `approvalPolicy + approvalsReviewer + sandbox` 更新 session；权限模式是三者的组合，不能只用 `approvalPolicy` 回填。若旧版 app-server 无法提供 `config/read`，schema 的 model/effort 默认值为 `null`，不会猜值。effort 可选覆盖仍限定为 `minimal / low / medium / high / xhigh`；三项活修改在下一次 `turn/start` 生效。
-- Kimi：三项和值全部从一次真实 `session/new` 返回的 `configOptions` 转换，不在 Workbench 手抄；三项均通过 `session/set_config_option` 活改。
+- Kimi：三项和值全部从一次真实 `session/new` 返回的 `configOptions` 转换，不在 Workbench 手抄；新建会话的权限默认值由 Workbench 指定为 `auto`（Auto），模型与推理强度默认值沿用原生返回；三项均通过 `session/set_config_option` 活改。
 
 Codex 与 Kimi 的元数据探针失败时，对应 driver 返回 `options:[]` 和 `error`。Claude 启动时后台发一次不含用户消息的 stream-json `initialize` 控制请求，从应答的 `response.models` 中提取模型描述开头的名字与版本号，仅更新 `fable / opus / sonnet / haiku` 的显示标签；每个 Claude worker 的 initialize 应答也会刷新这些标签。`value` 和“跟随 Claude 配置”标签不变。探针失败或某条描述缺失时，该项保留静态“（最新）”标签，不妨碍建会话。
 
@@ -394,13 +395,15 @@ Codex 权限菜单已按当前官方三个常用预设更新（2026-10-01；本�
 
 | 菜单 | Workbench `permissionMode` | `approvalPolicy` | `approvalsReviewer` | 沙盒 |
 | --- | --- | --- | --- | --- |
-| Ask for approval（缺省） | `on-request` | `on-request` | `user` | `workspace-write` |
-| Approve for me | `auto-review` | `on-request` | `auto_review` | `workspace-write` |
+| Ask for approval | `on-request` | `on-request` | `user` | `workspace-write` |
+| Approve for me（新建缺省） | `auto-review` | `on-request` | `auto_review` | `workspace-write` |
 | Full access | `full-access` | `never` | `user` | `danger-full-access` |
 
 每次 `thread/start` / `thread/resume` 都显式传三项；每次 `turn/start` 同时传 `approvalPolicy / approvalsReviewer / sandboxPolicy`。因此切回人工审批会同时撤销自动审核和完全访问。前两项的沙盒禁止网络，额外权限分别交给用户与 Codex 审核；Full access 的 `sandboxPolicy` 为 `{type:"dangerFullAccess"}`，并沿用高权限提示。自动审核由原生 Codex 执行，WB 不自行批准请求，也不改全局配置。
 
 旧会话续接仍接受原来保存的 `untrusted` 和 `never`，但菜单不再提供这两个旧值。旧 `never` 保留 `workspace-write` 沙盒，绝不自动升级为 Full access；旧值在前端作为当前值显示，可切换到新预设。新会话不得显式选择旧值。官方的 `Custom (config.toml)` 属于自定义权限组合，本菜单仅提供上述三个常用预设。协议回归在 `server/codex-permissions.test.ts`；运行 `node --import tsx server/codex-permissions.test.ts`。
+
+2026-10-03 起，新建表单显式提交 Codex `auto-review`、Kimi `auto`，刷新已构建的前端即可使用。服务端缺省也同步调整；旧会话保留已保存档位，无保存档位的旧会话续接仍用 Codex `on-request`、Kimi `default`。
 
 `GET /api/sessions/:id/snapshot` 不带 `tail=1` 时，`data` 仍为 `{session, seq, events}`，返回全量统一事件（包括现有验证脚本的用法）。`?tail=1` 返回 `{session, seq, events, hasMore, firstSeq}`，`events` 只含最近一段；`seq` 始终为整个会话的当前游标，不能改成分页首尾游标。`session.snapshotState` 携带由全量事件计算的 `latestUsage`、`commands`、`configSwitching`、`promptCacheTtlMs` 和 `promptCacheUsageAt`，`session.title` 也由完整会话确定；未产生的用量和切换态字段可省略，缓存未知时为 `null`。
 
@@ -662,7 +665,7 @@ Codex 的首次 `config_updated.effectiveFrom` 为 `next_turn`，Claude 与 Kimi
 
 Claude 的 model/effort 切换优先热切换：模型走 `set_model`，effort 走 `apply_flag_settings`，控制回应 success 后广播 `config_updated`，含 `mutableVia:"control"`、`workerRestarted:false`、`effectiveFrom:"immediate"` 与四个 `effective*` 字段。`model:null` 使用 CLI 的会话默认模型语义；`effort:null` 尝试清除 flag 覆盖，若 CLI 拒绝则回落到不带 `--effort` 的重启路径。显式覆盖的有效值来源为 `session`；清除覆盖时按 cwd settings 恢复展示，后续 `system/init` 的实际值仍可用 `source:"init"` 校准。释放后变更不启动进程，事件为 `next_turn`，下一次拉起使用新配置。
 
-控制请求报错或超时才沿用重启路径：先广播 `config_update_started`（`mutableVia:"restart"`、旧/新配置及 native ID），再停止 worker；首条消息前直接重建，发过消息或导入历史时用 `--resume` 同一原生 ID。成功广播 `config_updated`（`workerRestarted:true`）；失败恢复旧配置/有效值/来源并发 `session_error`。回合进行中、starting 或有待审批闸门时拒绝模型/effort 切换；切换期间发送、释放、移除等操作保持互斥。热切换无需原生 ID，重启回落的续接仍需原生 ID。审批协议与最终闸门保持原行为，重启仍带 `--permission-mode` 和 `--permission-prompt-tool stdio`。Codex/Kimi 的切换路径不变。
+控制请求报错或超时才沿用重启路径：先广播 `config_update_started`（`mutableVia:"restart"`、旧/新配置及 native ID），再停止 worker；首条消息前直接重建，发过消息或导入历史时用 `--resume` 同一原生 ID。成功广播 `config_updated`（`workerRestarted:true`）；失败恢复旧配置/有效值/来源并发 `session_error`。回合进行中、starting 或有待审批闸门时拒绝模型/effort 切换；切换期间发送、释放、移除等操作保持互斥。热切换无需原生 ID，重启回落的续接仍需原生 ID。审批仍遵循 Claude 原生权限模式，重启仍带 `--permission-mode` 和 `--permission-prompt-tool stdio`。Codex/Kimi 的切换路径不变。
 
 ## 文件检索
 
@@ -693,7 +696,7 @@ Claude 的 model/effort 切换优先热切换：模型走 `set_model`，effort �
 }
 ```
 
-`name` 不含开头的 `/`；发送时既可用上面的结构化 `command`，也仍可把原生命令作为普通 `text` 交给支持命令的 driver。结构化命令和 `text` 不能同时出现，Claude/Kimi 可附 `mentions`；Codex 命令不能附文本或附件。Claude/Kimi 命令复用普通 prompt 通道；Codex 命令走下节列出的专用 RPC；由命令触发的工具调用仍走既有审批流程，Kimi 的 `terminal/create / fs/write_text_file` 最终闸门照常生效。
+`name` 不含开头的 `/`；发送时既可用上面的结构化 `command`，也仍可把原生命令作为普通 `text` 交给支持命令的 driver。结构化命令和 `text` 不能同时出现，Claude/Kimi 可附 `mentions`；Codex 命令不能附文本或附件。Claude/Kimi 命令复用普通 prompt 通道；Codex 命令走下节列出的专用 RPC；由命令触发的工具调用仍遵循所选会话权限模式；Kimi 的 `session/request_permission` 原样转发，`terminal/create / fs/write_text_file` 不追加审批。
 
 命令表按会话保存于内存，并通过 `commands_updated` 实时广播完整新表：
 
@@ -741,11 +744,11 @@ Codex 0.157.1 没有多选字段，统一事件的 `multiSelect` 固定为 `fals
 
 - Claude Code 2.1.238：`control_response` 的 `allow` 只接受并使用 `updatedInput`；在其中加入 `answers: {"完整问题文本":"答案"}` 后，`AskUserQuestion` 返回正常工具结果并让模型继续。额外塞入 `result / toolResult / content / message` 不会成为工具结果。`deny.message` 会原样成为 `is_error:true` 的工具结果，可作降级，但会同时留下拒绝语义。无答案放行后再发一条明确关联的 user message 也能继续，但会多出一个用户回合。
 - Codex CLI 0.157.1：已接入 app-server `item/tool/requestUserInput`，按原生 question `id` 回写 `{answers:{id:{answers:[text]}}}`。schema 新增 `isBlocking`、`isSecret` 等字段；无原生多选和显式取消 action，跳过以空 `answers` 对象表示。
-- Kimi Code CLI 2.1.1：ACP initialize 已声明 `clientCapabilities.elicitation.form`，`elicitation/create` 可原样覆盖多题与多选；回包为 `{action:"accept",content:{q0:"选项",q1:["选项A","选项B"]}}`，跳过/取消分别为 `decline`/`cancel`。`session/request_permission` 仍用于普通审批；`terminal/create`、`fs/write_text_file` 最终闸门继续拦截。
+- Kimi Code CLI 2.1.1：ACP initialize 已声明 `clientCapabilities.elicitation.form`，`elicitation/create` 可原样覆盖多题与多选；回包为 `{action:"accept",content:{q0:"选项",q1:["选项A","选项B"]}}`，跳过/取消分别为 `decline`/`cancel`。`session/request_permission` 用于原生审批；`terminal/create`、`fs/write_text_file` 执行已获 CLI 放行的请求，不再追加 Workbench 审批（2026-10-03 调整）。
 
 `decision` 可为 `allow / deny / always`，也可附 `updatedInput`。Claude 的 `request_id` 原样保留并回填，`permissionSuggestions` 透传；Codex 按 server request 的 JSON-RPC `id` 应答；Kimi 每次 `terminal/create` 和 `fs/write_text_file` 都会额外产生不可绕过的最终审批事件。
 
-Kimi 即使显式选择 `yolo`，真正执行 `terminal/create` 或 `fs/write_text_file` 前仍会再次等待 UI 放行。因此模式只影响 agent 是否主动请求标准审批，不能绕过 Workbench 作为执行端的最终闸门；本机全局默认是 yolo 也同样不能绕过。
+三家工具审批均遵循输入窗所选权限模式。Kimi 在新建、续接和切换时通过 `session/set_config_option` 实际设置 mode；新建未选择时明确设置 `auto`；无保存档位的旧会话续接仍设置 `default`，不继承机器的 yolo。Workbench 转发 CLI 发来的 `session/request_permission` 并回传允许/拒绝；已获 CLI 放行的 `terminal/create`、`fs/write_text_file` 直接执行，不重复审批。Codex 按 `approvalPolicy + approvalsReviewer + sandbox` 完整传递模式：`on-request` 为人工审批，`auto-review` 为自动审查，`full-access` 为无审批且移除工作区沙箱。原生 CLI 或托管环境的限制与交互提问仍保留。
 
 ## curl + Node 22 WebSocket 演示
 
@@ -790,7 +793,7 @@ node server/scripts/verify-snapshot.mjs '<sessionId>' --probe-message "只回复
 - [x] **7. 三家自定义 config 真正生效。** Claude `01J00000000000000000000044` 用 `haiku / low / manual` 启动，首轮 session 被 `system/init` 更新为实际模型 `claude-haiku-4-5-20251001`，回复 `CLAUDE_CONFIG_FINAL_OK`；Codex `01J00000000000000000000045` 的原生 rollout `turn_context` 为 `gpt-5.4-mini / low / on-request`，回复 `CODEX_CONFIG_FINAL_OK`；Kimi `01J00000000000000000000046` 的 `session/new` 后配置为 `kimi-code/k3-256k / low / yolo`，并标记 `riskyMode:true`。
 - [x] **8. meta schema 来自预期事实源。** 隔离实例的 `GET /api/meta` 返回三家各 3 项；Codex 模型实时来自 `model/list`，有效默认值来自 `config/read(cwd)`；Kimi 的 source 为 `Kimi ACP session/new.configOptions`，模型列表包含本机 Kimi 当时实际报告的 4 项，而不是后端静态常量。
 - [x] **9. 活修改与不可改拒绝。** Kimi 经 WS 一次改为 `kimi-code/k3 / high / plan`，收到 `config_updated` 后再收到 ack；Claude `acceptEdits → manual` 两次均即时成功，且 `manual` 已正确映射到控制协议的 `default`。尝试活改 Claude model 收到 `claude.model 只能在建会话时设置`。Codex 活改为 `gpt-5.4 / medium / never` 后，事件标记 `effectiveFrom:"next_turn"`，下一轮原生 `turn_context` 三项逐一吻合。
-- [x] **10. yolo 不能绕过最终闸门。** Kimi 会话在 `yolo` 下请求 Shell 写入 `config-yolo-gate-final-1787317200.txt`，Workbench 仍发出 `gate:"terminal/create", finalGate:true`；拒绝后 turn 正常收尾，`existsSync` 实测目标文件为 `false`。
+- [x] **10. 历史验证：yolo 不能绕过最终闸门（已于 2026-10-03 改为遵循原生模式）。** Kimi 会话在 `yolo` 下请求 Shell 写入 `config-yolo-gate-final-1787317200.txt`，Workbench 仍发出 `gate:"terminal/create", finalGate:true`；拒绝后 turn 正常收尾，`existsSync` 实测目标文件为 `false`。
 - [x] **11. 不传 config 回归。** Claude `01J00000000000000000000047`、Codex `01J00000000000000000000048`、Kimi `01J00000000000000000000049` 均不传 config 建会话并完成一轮；分别回复 `CLAUDE_DEFAULT_FINAL_OK / CODEX_DEFAULT_FINAL_OK / KIMI_DEFAULT_FINAL_OK`，模式保持 `manual / untrusted / default`，均为 `riskyMode:false`。
 - [x] **12. 有效默认 effort 与 rollout 对齐。** 本机 Codex `config/read` 返回 `gpt-5.6-sol / xhigh`。不传 config 的会话 `01J00000000000000000000050` 在 schema、创建响应、snapshot 中均报告 `xhigh`，原生 rollout `00000000-0000-4000-8000-000000000051` 的 `effort` 与 `collaboration_mode.settings.reasoning_effort` 也均为 `xhigh`。显式传 `effort:low` 的会话 `01J00000000000000000000052` 报告 `low`，原生 rollout `00000000-0000-4000-8000-000000000053` 同样为 `low`。
 - [x] **13. Claude/Kimi 默认值复核。** Claude `01J00000000000000000000054` 初始 model/effort 为 `null/null`，首轮 init 后 model 更新为实际 `claude-opus-5`，init 没有 effort 字段，故 effort 继续诚实保留 `null`；permissionMode 为 driver 强制的 `manual`。Kimi `01J00000000000000000000055` 的 `session/new.configOptions` 与 session 均为 `kimi-code/k3 / high / default`，且仍无条件实际设置 `default`，没有回落到机器 yolo。
@@ -814,8 +817,8 @@ node server/scripts/verify-snapshot.mjs '<sessionId>' --probe-message "只回复
   每页 20 条，按结束时间倒序（同时间以 runId 倒序）；覆盖结束时间在请求时刻前 7 天内的非 running 单。
   旧目录缺 `endedAt` 时，用 `startedAt + elapsedS` 推导；没有可确认结束时间的单不列入历史。
   扫描不受普通列表的 200 条上限影响；非负整数 offset 无效时返回 400 / `40000`。
-- `GET /api/dispatches?parent=<Claude原生会话ID>` → `{dispatches:Dispatch[]}`。
-  仅返回 `parent.agent=claude` 且 `parent.sessionId` 精确匹配的 running 单，不受普通列表条数上限限制。
+- `GET /api/dispatches?parent=<会话ID>&agent=claude|codex|kimi` → `{dispatches:Dispatch[]}`。
+  按执行端和工作台/原生会话 ID 精确匹配，返回该父会话直接或间接派出的 running 工单和原生子代理，不受普通列表条数上限限制；省略 agent 时兼容三家，非法 agent 返回 400。
   parent 仅接受 1–128 位字母、数字、下划线或连字符；无效返回 400 / `40000`。
 - `GET /api/dispatches/<runId>/messages?cursor=<上次cursor>` →
   `{source:"native"|"stdout",agent?:"codex"|"kimi",messages:HistoryMessage[],replaceFrom:number,cursor:string|null,truncated:boolean}`。
@@ -880,7 +883,7 @@ Codex 输入框 `$` 在光标 token 处打开名称+描述面板，支持过滤�
 ### Codex 派单子 agent（2026-10-01）
 
 - 列表、parent 列表、历史和详情共用第二轮性能改的 2 秒扫描缓存。Codex 派单追加 `subagents`（无子 agent 为 `[]`），其他执行端不追加。`Dispatch.session` 对应父 rollout 的 `session_meta.payload.id`；子 rollout 的 `payload.id` 是 `threadId`，不能用可能继承父 ID 的 `payload.session_id`。
-- 从 `payload.parent_thread_id` 或 `source.subagent.thread_spawn.parent_thread_id` 建关系，昵称/角色也支持两种位置。按父线程递归，最多两层；`depth` 是相对本派单的深度 1/2，`parentThreadId` 保留真实直接父线程。循环、无关线程不挂入树。
+- 从 `payload.parent_thread_id` 或 `source.subagent.thread_spawn.parent_thread_id` 建关系，昵称/角色也支持两种位置。按父线程递归；`depth` 是相对本派单的深度，`parentThreadId` 保留真实直接父线程。循环、无关线程不挂入树。
 - 原生目录只读。默认 `~/.codex/sessions`，夹具复用 `WORKBENCH_CODEX_HISTORY_DIR`。仅枚举派单 `startedAt` 的本地/UTC 日期前后一天目录；目录名时区与元数据时区跨午夜可能不同，不递归扫描全历史。跨多日之后才创建的子线程超出本契约扫描窗口。
 - 每文件只解析首行 `session_meta`（上限 64 KiB）及最后 64 KiB，跳过窗口首残行、尾部未换行记录、坏行和非普通/软链文件。文件解析结果（含空结果）按路径 + mtime + size 缓存，最多 4096 项；缓存命中仍重新判断新鲜度，无磁盘缓存写入。
 - 真实 0.159.2 样本 `rollout-2026-10-01T01-30-52-00000000-0000-4000-8000-000000000061.jsonl`：Carver 的父线程是 `00000000-0000-4000-8000-000000000062`，事件为 `task_started → item_completed/token_count → task_complete`。`item_completed` 只是条目完成，不能判回合结束。
@@ -945,3 +948,18 @@ Codex 输入框 `$` 在光标 token 处打开名称+描述面板，支持过滤�
 成功返回 HTTP 200，`data` 为 `{ freedBytes, removed: { rotatedLogs, orphanFiles, orphanUploadDirs, endedSessions }, storage }`。计数为实际删除的日志文件、孤儿文件、孤儿附件目录及结束会话数；`freedBytes` 累加本次删除文件的逻辑长度，不把登记表重写或其他文件增长算作释放量；`storage` 是清理后的最新 GET 结构。并发清理串行执行；预估和执行之间状态可能变化，以实际结果为准。IO 错误沿用 HTTP 500 / code `50000`，已完成的删除不回滚。前端成功后调用现有会话列表刷新；已移除会话的 CLI 原生记录仍可从「所有来源会话」续接。
 
 覆盖测试：`server/storage.test.ts`，由 `npm test` 的 `server/*.test.ts` 测试入口自动执行；所有 fixture 使用临时 `WORKBENCH_HOME`。
+
+### 三家独立会话的派单关系（2026-10-03）
+
+- 图按主运行时分棵，Claude Code、Codex 和 Kimi 均可作为派单人；同运行时多个主会话在同一棵树逐行列标题，顺序为 Claude、Codex、Kimi。跨工具任务通过 `parent.runId` 或执行端 + 原生 `parent.sessionId` 连到实际父节点。原生子代理与外部工单可出现在同一条链中。
+- 三家 worker 带当前会话的 `WORKBENCH_PARENT_AGENT / WORKBENCH_PARENT_SESSION_ID`；Kimi ACP 的命令执行入口改用原生 session ID。agent-env 的 `delegate` 优先识别最近工单，再识别当前 Workbench 会话及该执行端原生 ID，避免把继承的上游环境误当父会话。Codex 的嵌套工单同时记录 run ID 与当前线程 ID，使 Luna 派单连回 Luna。
+- 不回填旧工单的未知父会话，不从 cwd、模型或任务名猜测关系；旧记录已有父 ID 时仍可显示。没有 delegate 元数据的任意外部 CLI 调用，需要调用方另行提供明确关系。
+- 验证入口：`server/dispatches-multi-runtime.test.ts`、`server/dispatch-parent-env.test.ts`、`frontend/scripts/dispatch-flow.test.mjs`。
+
+### delegate Claude 执行端与独立 CLI 根（2026-10-03）
+
+- 目录正则支持 `YYYYMMDD-HHMMSS-claude-<name>`，与 Codex/Kimi/Copilot 共用 run.json、列表、详情、日志、近 7 天历史和原生消息接口。`session` 使用 delegate 预设的 Claude UUID；执行端模型/effort 原样返回。
+- Codex/Kimi 父会话可只存在于 delegate 元数据；可选 `parent.title` 按原生 ID 定向定位已有历史文件，复用 `history.ts` 的标题解析，缺失返回 null。结果与空结果缓存 30 秒，不调用历史全量递归扫描。前端找不到标题时显示短 ID。
+- Claude 执行端自身的 `session` 纳入原生子代理候选，其子代理附带 `parent.runId` 指向该派单，继续归属外层 Codex/Kimi 主树。既有 Claude 主会话子代理扫描规则保持。
+- 回归：`server/dispatches-claude-runtime.test.ts` 使用伪造 run 目录和真实 Codex 父 ID，核对三棵主树、Claude 派单/子代理归属、标题、详情、消息与历史。持久机械冒烟夹具在 `.work-orders/2026-10-03-delegate-claude-runtime-trees/smoke/`。
+- server 改动尚未提交，需用户执行 `wb restart` 后生效；当前服务未重启。Claude 真调用、续接与桌面/手机真机布局待用户确认。

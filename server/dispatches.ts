@@ -4,11 +4,11 @@ import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { StringDecoder } from "node:string_decoder";
 import { createHash } from "node:crypto";
-import { mergeHistoryMessages, parseHistoryMessages, type HistoryMessage } from "./history.js";
+import { HistoryIndex, mergeHistoryMessages, parseHistoryMessages, type HistoryMessage } from "./history.js";
 import { boundExternalMessages, NativeConversationReader } from "./native-conversation.js";
 import type { AgentKind, SessionRecord } from "./types.js";
 
-const RUN_ID = /^(\d{8})-(\d{6})-(codex|kimi|copilot)-(.*)$/u;
+const RUN_ID = /^(\d{8})-(\d{6})-(codex|kimi|copilot|claude)-(.*)$/u;
 const CHUNK_SIZE = 64 * 1024;
 const STATUSES = new Set(["running", "OK", "TOOL_FAIL", "ACCEPT_FAIL", "TIMEOUT"]);
 
@@ -26,10 +26,12 @@ export interface Dispatch {
   exit: number | null;
   files: number | null;
   session: string | null;
-  parent: { agent: string; sessionId: string | null; entrypoint: string | null; model: string | null; runId?: string } | null;
+  parent: { agent: string; sessionId: string | null; entrypoint: string | null; model: string | null; title?: string | null; runId?: string } | null;
   promptHead: string | null;
   subagents?: CodexSubagent[];
   agentType?: string | null;
+  /** Native child records have no delegate prompt/log files and are display-only. */
+  native?: boolean;
 }
 
 interface CodexSubagent {
@@ -42,6 +44,8 @@ interface CodexSubagent {
   startedAt: string | null;
   lastActivityAt: string;
   activity?: string;
+  model?: string | null;
+  effort?: string | null;
 }
 
 interface SubagentSnapshot {
@@ -78,6 +82,8 @@ export async function readCodexSubagent(path: string): Promise<SubagentSnapshot 
     let lifecycle: SubagentSnapshot["lifecycle"] = "unknown";
     let lastActivityAt = stringValue(meta.timestamp) ?? new Date(mtimeMs).toISOString();
     let activity: string | undefined;
+    let model: string | null = null;
+    let effort: string | null = null;
     // Real 0.159.2 Carver rollout: task_started -> item_completed/token_count -> task_complete.
     // item_completed alone is NOT a turn completion. A later task_started reopens the agent.
     // final_answer is a fallback when task_complete has not yet been flushed; stale active
@@ -87,6 +93,10 @@ export async function readCodexSubagent(path: string): Promise<SubagentSnapshot 
         const event = JSON.parse(line);
         if (Number.isFinite(Date.parse(event.timestamp))) lastActivityAt = event.timestamp;
         const payload = event.payload;
+        if (event.type === "turn_context") {
+          model = stringValue(payload?.model) ?? model;
+          effort = stringValue(payload?.effort) ?? stringValue(payload?.reasoning_effort) ?? effort;
+        }
         if (event.type === "event_msg") {
           if (["task_complete", "turn_aborted"].includes(payload?.type)) lifecycle = "finished";
           else if (payload?.type === "task_started" || payload?.type === "user_message") {
@@ -114,6 +124,7 @@ export async function readCodexSubagent(path: string): Promise<SubagentSnapshot 
       nickname: stringValue(meta.agent_nickname) ?? stringValue(spawn?.agent_nickname) ?? threadId.slice(0, 8),
       role: stringValue(meta.agent_role) ?? stringValue(spawn?.agent_role),
       depth: numberValue(spawn?.depth) ?? 1, status: "unknown",
+      model, effort,
       startedAt: stringValue(meta.timestamp) ?? stringValue(row.timestamp), lastActivityAt,
       ...(activity ? { activity: activity.replace(/\s+/gu, " ").trim().slice(0, 160) } : {}),
     } };
@@ -134,7 +145,8 @@ export function createCodexSubagentReader(read = readCodexSubagent) {
       if (!run.session) continue;
       // Include local and UTC start dates: native folder names and metadata timestamps
       // differ across midnight. Only +/-1 day, never a recursive history-directory scan.
-      for (const day of [run.startedAt?.slice(0, 10), run.startedAt ? new Date(run.startedAt).toJSON()?.slice(0, 10) : null]) {
+      for (const day of [run.startedAt?.slice(0, 10), run.startedAt ? new Date(run.startedAt).toJSON()?.slice(0, 10) : null,
+        new Date(now).toISOString().slice(0, 10)]) {
         if (!day) continue;
         const start = Date.parse(`${day}T00:00:00Z`);
         if (!Number.isFinite(start)) continue;
@@ -270,6 +282,13 @@ export async function readClaudeSubagent(path: string): Promise<ClaudeSubagentSn
 
 export interface ClaudeParentSession { cwd: string | null; nativeSessionId?: string }
 export type ClaudeSessionProvider = () => readonly ClaudeParentSession[] | Promise<readonly ClaudeParentSession[]>;
+export interface DispatchParentSession extends ClaudeParentSession {
+  id?: string;
+  agent?: AgentKind;
+  model?: string | null;
+  createdAt?: string;
+}
+export type DispatchSessionProvider = () => readonly DispatchParentSession[] | Promise<readonly DispatchParentSession[]>;
 
 /** Only registered/delegate parent IDs; snapshots cache JSONL/meta path/mtime/size. */
 export function createClaudeSubagentReader(read = readClaudeSubagent,
@@ -290,6 +309,9 @@ export function createClaudeSubagentReader(read = readClaudeSubagent,
     for (const run of runs) {
       const id = run.parent?.agent === "claude" ? run.parent.sessionId : null;
       if (id && NATIVE_ID.test(id) && !candidates.has(id)) candidates.set(id, null);
+      if (run.tool === "claude" && run.session && NATIVE_ID.test(run.session)) {
+        if (!candidates.has(run.session)) candidates.set(run.session, stringValue(run.cwd));
+      }
     }
     // A delegate executor's cwd need not equal its Claude parent's cwd. For an ID-only
     // parent, inspect just <project>/<id>.jsonl; never list other projects' contents.
@@ -373,13 +395,17 @@ export function createClaudeSubagentReader(read = readClaudeSubagent,
               const status = value.lifecycle === "finished" ? "OK" : value.lifecycle === "failed" ? "TOOL_FAIL"
                 : value.lifecycle === "active" && now - value.mtimeMs <= 300_000 ? "running" : "unknown";
               const runId = `claude-agent-${parentSessionId}-${agent.agentId}`;
+              const delegatedParent = runs.filter((run) => run.tool === "claude" && run.session === parentSessionId)
+                .sort((a, b) => Number(b.status === "running") - Number(a.status === "running")
+                  || (b.startedAt ?? "").localeCompare(a.startedAt ?? "") || b.runId.localeCompare(a.runId))[0];
               const started = Date.parse(agent.startedAt ?? "");
               output.set(runId, {
-                runId, tool: "claude", name: agent.name, cwd, model: agent.model, effort: null, agentType: agent.agentType,
+                runId, tool: "claude", name: agent.name, cwd, model: agent.model, effort: null, agentType: agent.agentType, native: true,
                 status, startedAt: agent.startedAt, endedAt: status === "OK" || status === "TOOL_FAIL" ? agent.lastActivityAt : null,
                 elapsedS: Number.isFinite(started) ? Math.max(0, ((status === "running" ? now : last) - started) / 1000) : null,
                 exit: null, files: null, session: agent.agentId, promptHead: agent.promptHead,
-                parent: { agent: "claude", sessionId: parentSessionId, entrypoint: parent.entrypoint, model: parent.model },
+                parent: { agent: "claude", sessionId: parentSessionId, entrypoint: parent.entrypoint, model: parent.model,
+                  ...(delegatedParent ? { runId: delegatedParent.runId } : {}) },
               });
             } catch { /* Isolate inaccessible or concurrent writes. */ }
           }
@@ -450,6 +476,33 @@ function rootDirectory(): string {
 }
 
 const parentModelCache = new Map<string, { expiresAt: number; value: Promise<string | null> }>();
+const parentTitleCache = new Map<string, { expiresAt: number; value: Promise<string | null> }>();
+
+/** Resolve only the requested native ID, then reuse history's bounded head/title parser. */
+async function readNativeParentTitle(agent: string, sessionId: string | null): Promise<string | null> {
+  if (!sessionId || !NATIVE_ID.test(sessionId) || !["codex", "kimi"].includes(agent)) return null;
+  const roots = {
+    codex: process.env.WORKBENCH_CODEX_HISTORY_DIR || join(homedir(), ".codex", "sessions"),
+    kimi: process.env.WORKBENCH_KIMI_HISTORY_DIR || join(homedir(), ".kimi-code", "sessions"),
+  };
+  const kind = agent as "codex" | "kimi";
+  const key = `${roots[kind]}/${kind}/${sessionId}`;
+  const cached = parentTitleCache.get(key);
+  if (cached && cached.expiresAt > Date.now()) return cached.value;
+  const value = (async () => {
+    try {
+      const transcript = new NativeConversationReader(roots).transcriptPath({ agent: kind, nativeSessionId: sessionId } as SessionRecord);
+      if (!transcript) return null;
+      const path = kind === "kimi" ? join(dirname(dirname(dirname(transcript))), "state.json") : transcript;
+      const metadata = await new HistoryIndex({ roots }).sessionMetadata(kind, path);
+      return metadata?.nativeSessionId === sessionId && metadata.title !== "无标题会话" ? metadata.title : null;
+    } catch { return null; }
+  })();
+  parentTitleCache.delete(key);
+  if (parentTitleCache.size >= 256) parentTitleCache.delete(parentTitleCache.keys().next().value!);
+  parentTitleCache.set(key, { expiresAt: Date.now() + 30_000, value });
+  return value;
+}
 
 /** 最多读末尾 1 MiB；最后一条 assistant 缺 model 时返回 null，不借更早的模型冒充。 */
 export async function readClaudeTranscriptModel(path: string): Promise<string | null> {
@@ -642,6 +695,8 @@ async function readDispatch(runId: string, directory: string, includePrompt = tr
         if (agent) result.parent = {
           agent, sessionId: stringValue(input.sessionId), entrypoint: stringValue(input.entrypoint),
           model: agent === "claude" ? await readClaudeParentModel(stringValue(input.sessionId)) : null,
+          ...(["codex", "kimi"].includes(agent) && stringValue(input.sessionId)
+            ? { title: await readNativeParentTitle(agent, stringValue(input.sessionId)) } : {}),
           ...(typeof input.runId === "string" ? { runId: input.runId } : {}),
         };
       }
@@ -675,7 +730,7 @@ async function readDispatch(runId: string, directory: string, includePrompt = tr
 }
 
 export async function listDispatches(limit: string | number | null = null, root = rootDirectory(),
-  listClaudeSessions: ClaudeSessionProvider = () => []): Promise<Dispatch[]> {
+  listSessions: DispatchSessionProvider = () => []): Promise<Dispatch[]> {
   const raw = limit === null ? 50 : Number(limit);
   const count = Number.isFinite(raw) && raw >= 1 ? Math.min(200, Math.floor(raw)) : 50;
   const nativeRuns = await allDispatches(root);
@@ -684,9 +739,10 @@ export async function listDispatches(limit: string | number | null = null, root 
     const directory = await resolveRun(run.runId, root);
     try { if (directory) run.promptHead = await promptHead(directory); } catch { run.status = "unknown"; }
   }));
-  const claude = await allClaudeSubagents(root, await listClaudeSessions());
+  const sessions = await listSessions();
+  const native = await allNativeSubagents(root, sessions);
   // Preserve delegate's existing run-ID ordering; insert native Claude records by time.
-  for (const agent of claude.sort((a, b) => Date.parse(b.startedAt ?? "") - Date.parse(a.startedAt ?? ""))) {
+  for (const agent of native.sort((a, b) => Date.parse(b.startedAt ?? "") - Date.parse(a.startedAt ?? ""))) {
     const index = dispatches.findIndex((run) => Date.parse(run.startedAt ?? "") < Date.parse(agent.startedAt ?? ""));
     dispatches.splice(index < 0 ? dispatches.length : index, 0, agent);
   }
@@ -760,7 +816,7 @@ export function createDispatchScanCache(scan: (root: string) => Promise<Dispatch
 }
 
 const allDispatches = createDispatchScanCache(scanDispatches, () => Date.now());
-// Claude's native-only records never enter delegate history, details, or parent badge APIs.
+// Native records have no delegate history/detail files; parent links include them.
 const claudeScans = new Map<string, { fingerprint: string; list: ReturnType<typeof createDispatchScanCache> }>();
 async function allClaudeSubagents(root: string, sessions: readonly ClaudeParentSession[]): Promise<Dispatch[]> {
   const projectsRoot = process.env.WORKBENCH_CLAUDE_PROJECTS_DIR || join(homedir(), ".claude", "projects");
@@ -783,10 +839,188 @@ async function allClaudeSubagents(root: string, sessions: readonly ClaudeParentS
   return entry.list(root);
 }
 
-export async function listParentDispatches(parent: string, root = rootDirectory()): Promise<Dispatch[]> {
+function eventTime(value: unknown): string | null {
+  const time = typeof value === "number" ? value : typeof value === "string" ? Date.parse(value) : NaN;
+  return Number.isFinite(time) ? new Date(time).toISOString() : null;
+}
+
+/** Only registered Kimi sessions: root workspace names, explicit state.json and agents from that state. */
+export function createKimiSubagentReader() {
+  const wireCache = new Map<string, { fingerprint: string; rows: Record<string, any>[] }>();
+  return async (root: string, sessions: readonly DispatchParentSession[], now = Date.now()): Promise<Dispatch[]> => {
+    const candidates = sessions.filter((session) => session.agent === "kimi"
+      && session.nativeSessionId && NATIVE_ID.test(session.nativeSessionId));
+    if (!candidates.length) return [];
+    let canonicalRoot: string;
+    let workspaces;
+    try { canonicalRoot = await realpath(root); workspaces = await readdir(canonicalRoot, { withFileTypes: true }); }
+    catch { return []; }
+    const output = new Map<string, Dispatch>();
+    for (const session of candidates) for (const workspace of workspaces) {
+      if (!workspace.isDirectory()) continue;
+      const directory = join(canonicalRoot, workspace.name, session.nativeSessionId!);
+      try {
+        if (await realpath(directory) !== directory || await realpath(join(directory, "agents")) !== join(directory, "agents")) continue;
+        const state = await readJson(directory, "state.json");
+        if (!state || state.id !== session.nativeSessionId || (session.cwd && state.cwd !== session.cwd)
+          || !state.agents || typeof state.agents !== "object" || Array.isArray(state.agents)) continue;
+        for (const [id, raw] of Object.entries(state.agents as Record<string, unknown>)) {
+          if (id === "main" || !NATIVE_ID.test(id) || !raw || typeof raw !== "object" || Array.isArray(raw)) continue;
+          try {
+          const metadata = raw as Record<string, unknown>;
+          const agentDirectory = join(directory, "agents", id);
+          if (await realpath(agentDirectory) !== agentDirectory) continue;
+          const path = join(agentDirectory, "wire.jsonl");
+          const file = await openFile(agentDirectory, "wire.jsonl");
+          if (!file) continue;
+          let rows: Record<string, any>[];
+          let mtimeMs: number;
+          try {
+            const info = await file.stat();
+            mtimeMs = info.mtimeMs;
+            const fingerprint = `${info.mtimeMs}:${info.size}`;
+            const cached = wireCache.get(path);
+            if (cached?.fingerprint === fingerprint) rows = cached.rows;
+            else {
+              const head = await readBytes(file, 0, Math.min(info.size, CHUNK_SIZE));
+              const offset = Math.max(head.length, info.size - CHUNK_SIZE);
+              const tail = offset < info.size ? await readBytes(file, offset, info.size - offset) : Buffer.alloc(0);
+              const lines = head.toString("utf8").split("\n");
+              lines.pop(); // Ignore incomplete/capped records.
+              if (tail.length) {
+                const last = tail.toString("utf8").split("\n");
+                if (offset > head.length) last.shift();
+                last.pop();
+                lines.push(...last);
+              }
+              rows = lines.flatMap((line) => {
+                try {
+                  const row = JSON.parse(line);
+                  if (!row || typeof row !== "object") return [];
+                  // Retain lifecycle fields only, not prompts, reasoning or command output.
+                  return [{ type: row.type, time: row.time, created_at: row.created_at, model: stringValue(row.model),
+                    ...(row.event ? { event: { type: row.event.type, name: row.event.name, finishReason: row.event.finishReason } } : {}),
+                    ...(row.info?.taskId ? { info: { taskId: row.info.taskId } } : {}) }];
+                }
+                catch { return []; }
+              });
+              if (wireCache.size >= 256) wireCache.delete(wireCache.keys().next().value!);
+              wireCache.set(path, { fingerprint, rows });
+            }
+          } finally { await file.close(); }
+          let status = "unknown";
+          let startedAt = eventTime(metadata.createdAt);
+          let lastActivityAt = new Date(mtimeMs).toISOString();
+          let model = stringValue(metadata.model);
+          let activity: string | null = null;
+          const tasks = new Set<string>();
+          for (const row of rows) {
+            const time = eventTime(row.time) ?? eventTime(row.created_at);
+            if (time) { startedAt ??= time; lastActivityAt = time; }
+            model = stringValue(row.model) ?? model;
+            const event = row.type === "context.append_loop_event" ? row.event : row;
+            if (["agent.turn.started", "turn.prompt", "step.begin", "tool.call"].includes(event?.type)) status = "running";
+            if (event?.type === "tool.call") activity = `调用 ${event.name ?? "工具"}`;
+            if (event?.type === "step.end" && ["stop", "end_turn"].includes(event.finishReason)) status = "OK";
+            if (["agent.turn.completed", "turn.completed"].includes(event?.type)) status = "OK";
+            if (["agent.turn.failed", "turn.failed"].includes(event?.type)) status = "TOOL_FAIL";
+            if (row.type === "task.started" && row.info?.taskId) tasks.add(row.info.taskId);
+            if (row.type === "task.terminated") tasks.delete(row.info?.taskId);
+          }
+          if (tasks.size) status = "running";
+          if (status === "running" && now - mtimeMs > 300_000) status = "unknown";
+          const parentId = stringValue(metadata.parentAgentId) ?? "main";
+          // Explicit state membership avoids accepting arbitrary homedir paths or orphan parents.
+          if (parentId !== "main" && !Object.hasOwn(state.agents, parentId)) continue;
+          const nativeId = `${session.nativeSessionId}--${id}`;
+          const runId = `kimi-agent-${nativeId}`;
+          const started = Date.parse(startedAt ?? "");
+          output.set(runId, {
+            runId, tool: "kimi", name: stringValue(metadata.name) ?? stringValue(metadata.description) ?? id,
+            cwd: stringValue(state.cwd), model, effort: null, status, startedAt,
+            endedAt: ["OK", "TOOL_FAIL"].includes(status) ? lastActivityAt : null,
+            elapsedS: Number.isFinite(started) ? Math.max(0, ((status === "running" ? now : Date.parse(lastActivityAt)) - started) / 1000) : null,
+            exit: null, files: null, session: nativeId, promptHead: activity, agentType: stringValue(metadata.type), native: true,
+            parent: { agent: "kimi", sessionId: parentId === "main" ? session.nativeSessionId! : `${session.nativeSessionId}--${parentId}`,
+              model: session.model ?? null, entrypoint: null },
+          });
+          } catch { /* One invalid child must not hide other agents in this session. */ }
+        }
+      } catch { /* Missing, symlinked or concurrently written candidate session is isolated. */ }
+    }
+    return [...output.values()];
+  };
+}
+
+const readKimiSubagents = createKimiSubagentReader();
+const nativeScans = new Map<string, { fingerprint: string; list: ReturnType<typeof createDispatchScanCache> }>();
+async function allNativeSubagents(root: string, sessions: readonly DispatchParentSession[]): Promise<Dispatch[]> {
+  const codexRoot = process.env.WORKBENCH_CODEX_HISTORY_DIR || join(homedir(), ".codex", "sessions");
+  const kimiRoot = process.env.WORKBENCH_KIMI_HISTORY_DIR || join(homedir(), ".kimi-code", "sessions");
+  const fingerprint = JSON.stringify([codexRoot, kimiRoot, sessions]);
+  let entry = nativeScans.get(root);
+  if (!entry || entry.fingerprint !== fingerprint) {
+    entry = { fingerprint, list: createDispatchScanCache(async () => {
+      const codexSessions = sessions.filter((session) => session.agent === "codex"
+        && session.nativeSessionId && NATIVE_ID.test(session.nativeSessionId));
+      const roots: Dispatch[] = codexSessions.map((session) => ({
+        runId: `codex-session-${session.nativeSessionId}`, tool: "codex", name: "Codex", cwd: session.cwd,
+        model: session.model ?? null, effort: null, status: "running", startedAt: session.createdAt ?? new Date().toISOString(),
+        endedAt: null, elapsedS: null, exit: null, files: null, session: session.nativeSessionId!, parent: null, promptHead: null,
+      }));
+      await attachCodexSubagents(roots, codexRoot);
+      const output = new Map<string, Dispatch>();
+      for (const parent of roots) for (const child of parent.subagents ?? []) {
+        const started = Date.parse(child.startedAt ?? "");
+        output.set(child.threadId, {
+          runId: `codex-agent-${child.threadId}`, tool: "codex", name: child.nickname, cwd: parent.cwd,
+          model: child.model ?? null, effort: child.effort ?? null, agentType: child.role, native: true,
+          status: child.status === "finished" ? "OK" : child.status, startedAt: child.startedAt,
+          endedAt: child.status === "finished" ? child.lastActivityAt : null,
+          elapsedS: Number.isFinite(started) ? Math.max(0, (Date.parse(child.lastActivityAt) - started) / 1000) : null,
+          exit: null, files: null, session: child.threadId, promptHead: child.activity ?? null,
+          parent: { agent: "codex", sessionId: child.parentThreadId, model: parent.model, entrypoint: null },
+        });
+      }
+      const [kimi, claude] = await Promise.all([
+        readKimiSubagents(kimiRoot, sessions),
+        allClaudeSubagents(root, sessions.filter((session) => (session.agent ?? "claude") === "claude")),
+      ]);
+      return [...output.values(), ...kimi, ...claude];
+    }) };
+    nativeScans.delete(root);
+    if (nativeScans.size >= 256) nativeScans.delete(nativeScans.keys().next().value!);
+    nativeScans.set(root, entry);
+  }
+  return entry.list(root);
+}
+
+export async function listParentDispatches(parent: string, root = rootDirectory(), agent?: AgentKind,
+  listSessions: DispatchSessionProvider = () => []): Promise<Dispatch[]> {
   if (!/^[A-Za-z0-9_-]{1,128}$/.test(parent)) throw new DispatchQueryError("parent 必须是原生会话 ID");
-  return (await allDispatches(root)).filter((run) => run.status === "running"
-    && run.parent?.agent === "claude" && run.parent.sessionId === parent);
+  const sessions = await listSessions();
+  const aliases = new Set([parent]);
+  for (const session of sessions) {
+    if (agent && (session.agent ?? "claude") !== agent) continue;
+    if (session.id === parent || session.nativeSessionId === parent) {
+      if (session.id) aliases.add(session.id);
+      if (session.nativeSessionId) aliases.add(session.nativeSessionId);
+    }
+  }
+  const runs = [...await allDispatches(root), ...await allNativeSubagents(root, sessions)];
+  return runs.filter((run) => {
+    if (run.status !== "running") return false;
+    const seen = new Set<string>();
+    let current: Dispatch | undefined = run;
+    while (current?.parent && !seen.has(current.runId)) {
+      seen.add(current.runId);
+      const source: NonNullable<Dispatch["parent"]> = current.parent;
+      if (source.sessionId && aliases.has(source.sessionId) && (!agent || source.agent === agent)) return true;
+      current = source.runId ? runs.find((item) => item.runId === source.runId)
+        : runs.find((item) => item.tool === source.agent && item.session === source.sessionId);
+    }
+    return false;
+  });
 }
 
 function endedTime(run: Dispatch): number {
@@ -829,7 +1063,7 @@ export async function getDispatchMessages(runId: string, cursor: string | null, 
   if (!directory) return null;
   const run = await readDispatch(runId, directory, false);
   const fallback: DispatchMessages = { source: "stdout", messages: [], replaceFrom: 0, cursor: null, truncated: false };
-  if (!run.session || !["codex", "kimi"].includes(run.tool)) return fallback;
+  if (!run.session || !["codex", "kimi", "claude"].includes(run.tool)) return fallback;
   const agent = run.tool as AgentKind;
   try {
     const mark = await (reader ?? (nativeReader ??= new NativeConversationReader())).capture({ agent, nativeSessionId: run.session } as SessionRecord);

@@ -1,17 +1,21 @@
 import { useEffect, useRef, useState } from "react";
 import { Terminal, type ITheme } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
-import { PanelRightIcon, SidePanelResize, useSidePanelWidth } from "./SidePanelResize";
+import { PanelBackButton, PanelRightIcon, SidePanelResize, useSidePanelWidth } from "./SidePanelResize";
 import { Segmented } from "./Segmented";
 import "@xterm/xterm/css/xterm.css";
 import type { ShellKind, TerminalInfo } from "../types";
 import { createTerminal, fetchTerminals, killTerminal } from "../api";
 import {
   isTerminalToggleKey,
+  TERM_ACTIVE_STORAGE_KEY,
   TERM_SHORTCUT_KEYS,
   buildTerminalWsUrl,
+  buildTermTabs,
   initialTermState,
-  pickAttachTarget,
+  pickBootTerminal,
+  pickRecentTerminal,
+  pickAdjacentTerminal,
   pickTerminalCwd,
   reduceTermFrame,
   type TermSessionState,
@@ -82,19 +86,43 @@ interface TermRuntime {
   sendInput: (data: string) => void;
   paste: (text: string) => void;
   createNew: (kind: ShellKind) => Promise<void>;
+  switchTo: (id: string) => void;
   switchShell: (kind: ShellKind) => Promise<void>;
+  closeExited: (id: string) => void;
   reconnectNow: () => void;
+}
+
+function readSavedActiveTerminalId(): string | null {
+  try {
+    return localStorage.getItem(TERM_ACTIVE_STORAGE_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function writeSavedActiveTerminalId(id: string | null): void {
+  try {
+    if (id) localStorage.setItem(TERM_ACTIVE_STORAGE_KEY, id);
+    else localStorage.removeItem(TERM_ACTIVE_STORAGE_KEY);
+  } catch {
+    /* localStorage 不可用时仅本次会话生效 */
+  }
 }
 
 /**
  * 终端面板（工作区级，不绑会话）。挂载后常驻：隐藏只是 CSS display:none，
- * xterm 实例、WS 连接与服务端 PTY 全部保留。首次挂载完成引导：
- * GET /api/terminals 有未退出的 bash attach 第一个，没有就 POST 新建。标题栏可切 PowerShell。
+ * xterm 实例、WS 连接与服务端 PTY 全部保留。标签条列出服务端全部未退出终端
+ * （当前激活的已退出终端也保留，看输出与退出码）；「＋」新建当前 kind 的终端。
+ * 切标签 = detach 旧的 + attach 新的（服务端回放 scrollback）；刷新后优先重连
+ * localStorage 记的激活 id，其次第一个未退出终端，都没有就新建 bash。
  */
 export function TerminalPanel({ open, onClose }: { open: boolean; onClose: () => void }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useSidePanelWidth();
   const [info, setInfo] = useState<TerminalInfo | null>(null);
+  /** 服务端注册表快照（含已退出记录）；标签条按 buildTermTabs 过滤 */
+  const [terminals, setTerminals] = useState<TerminalInfo[]>([]);
+  const terminalsRef = useRef<TerminalInfo[]>([]);
   /** null = 运行中；否则已退出（exitCode 可能为 null = 服务端没给码） */
   const [exit, setExit] = useState<{ code: number | null } | null>(null);
   const [omitted, setOmitted] = useState(0);
@@ -103,6 +131,11 @@ export function TerminalPanel({ open, onClose }: { open: boolean; onClose: () =>
   const [killBusy, setKillBusy] = useState(false);
   const [switching, setSwitching] = useState(false);
   const runtimeRef = useRef<TermRuntime | null>(null);
+
+  const setTerminalList = (list: TerminalInfo[]) => {
+    terminalsRef.current = list;
+    setTerminals(list);
+  };
 
   // 手机上 xterm 的隐藏 textarea 拿不到长按粘贴菜单；读不了剪贴板（拒绝授权 / 不支持）时退回 prompt 手动粘贴
   const pasteClipboard = async () => {
@@ -137,6 +170,7 @@ export function TerminalPanel({ open, onClose }: { open: boolean; onClose: () =>
     let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
     let reconnectDelay = 1000;
     let attachedId: string | null = null;
+    let activationOrder: string[] = [];
     let termState: TermSessionState = initialTermState();
     let lastSentCols = 0;
     let lastSentRows = 0;
@@ -197,6 +231,8 @@ export function TerminalPanel({ open, onClose }: { open: boolean; onClose: () =>
       // 单面板只看一个终端：切走的解除订阅（PTY 与 scrollback 仍在服务端），免得后台输出挤占这条 WS
       if (attachedId && attachedId !== id) sendFrame({ type: "detach", terminalId: attachedId });
       attachedId = id;
+      activationOrder = [...activationOrder.filter((previous) => previous !== id), id];
+      writeSavedActiveTerminalId(id);
       termState = initialTermState();
       // 尺寸缓存按终端失效：切回的终端 PTY 可能还是旧尺寸，attached 后的 fit 必须重发
       lastSentCols = 0;
@@ -218,6 +254,7 @@ export function TerminalPanel({ open, onClose }: { open: boolean; onClose: () =>
         rows: dims.rows,
       });
       if (disposed) return;
+      setTerminalList([...terminalsRef.current, created]);
       setInfo(created);
       attach(created.id);
     };
@@ -253,6 +290,12 @@ export function TerminalPanel({ open, onClose }: { open: boolean; onClose: () =>
             term.write(effect.data);
           } else if (effect.type === "exited") {
             setExit({ code: effect.exitCode });
+            // 同步标签条状态（kill 的退出也走这条路）；exited 标签在切走后由 buildTermTabs 过滤掉
+            setTerminalList(
+              terminalsRef.current.map((t) =>
+                t.id === attachedId ? { ...t, exited: true, exitCode: effect.exitCode } : t,
+              ),
+            );
           } else {
             setError(effect.message);
           }
@@ -304,18 +347,7 @@ export function TerminalPanel({ open, onClose }: { open: boolean; onClose: () =>
     const resizeObserver = new ResizeObserver(() => fit());
     resizeObserver.observe(host);
 
-    // 引导与切换 shell：该种 shell 有未退出的就 attach，没有就新建；切走的留在后台
-    const showShell = async (kind: ShellKind) => {
-      const target = pickAttachTarget(await fetchTerminals(), kind);
-      if (disposed) return;
-      if (target) {
-        setInfo(target);
-        attach(target.id);
-      } else {
-        await createNew(kind);
-      }
-    };
-    // 引导 / 切换 / 新建串行：在途时按钮禁用、再点忽略，杜绝重复 POST 与晚到响应覆盖新选择
+    // 引导 / 新建串行：在途时按钮禁用、再点忽略，杜绝重复 POST 与晚到响应覆盖新选择
     let busy = false;
     const runGuarded = async (task: () => Promise<void>) => {
       if (busy) return;
@@ -331,7 +363,61 @@ export function TerminalPanel({ open, onClose }: { open: boolean; onClose: () =>
         if (!disposed) setSwitching(false);
       }
     };
-    void runGuarded(() => showShell("bash"));
+
+    // 引导：持久化的激活 id 仍存活优先重连，其次第一个未退出终端，都没有新建 bash
+    const boot = async () => {
+      const list = await fetchTerminals();
+      if (disposed) return;
+      setTerminalList(list);
+      const target = pickBootTerminal(list, readSavedActiveTerminalId());
+      if (target) {
+        setInfo(target);
+        attach(target.id);
+      } else {
+        await createNew("bash");
+      }
+    };
+
+    // 切标签：detach 旧的、attach 新的（服务端回放 scrollback）；无 REST，不占用 busy
+    const switchTo = (id: string) => {
+      if (busy || id === attachedId) return;
+      const target = terminalsRef.current.find((t) => t.id === id);
+      if (!target) return;
+      setInfo(target);
+      attach(target.id);
+      // 触屏不把焦点还给 xterm（会弹起键盘）；桌面点标签后可以直接敲
+      if (window.matchMedia("(pointer: fine)").matches) term.focus();
+    };
+    const showShell = async (kind: ShellKind) => {
+      const list = await fetchTerminals();
+      if (disposed) return;
+      setTerminalList(list);
+      const target = pickRecentTerminal(list, kind, activationOrder);
+      if (target) {
+        setInfo(target);
+        attach(target.id);
+      } else await createNew(kind);
+    };
+    const closeExited = (id: string) => {
+      if (busy) return;
+      const target = terminalsRef.current.find((terminal) => terminal.id === id);
+      if (!target?.exited) return;
+      const neighbor = pickAdjacentTerminal(terminalsRef.current, id);
+      if (neighbor) switchTo(neighbor.id);
+      else {
+        if (attachedId) sendFrame({ type: "detach", terminalId: attachedId });
+        attachedId = null;
+        writeSavedActiveTerminalId(null);
+        termState = initialTermState();
+        term.reset();
+        setInfo(null);
+        setExit(null);
+        setConfirmKill(false);
+        setOmitted(0);
+      }
+      setTerminalList(terminalsRef.current.filter((terminal) => terminal.id !== id));
+    };
+    void runGuarded(boot);
     connect();
 
     runtimeRef.current = {
@@ -345,7 +431,9 @@ export function TerminalPanel({ open, onClose }: { open: boolean; onClose: () =>
       // 走 term.paste：bracketed paste 与换行归一由 xterm 处理，再经 onData 上行
       paste: (text) => term.paste(text),
       createNew: (kind) => runGuarded(() => createNew(kind)),
+      switchTo,
       switchShell: (kind) => runGuarded(() => showShell(kind)),
+      closeExited,
       reconnectNow: onVisibilityChange,
     };
 
@@ -398,6 +486,8 @@ export function TerminalPanel({ open, onClose }: { open: boolean; onClose: () =>
     }
   };
 
+  const tabs = buildTermTabs(terminals, info?.id ?? null);
+
   return (
     <>
       {open && <SidePanelResize label="终端" width={width} setWidth={setWidth} />}
@@ -408,73 +498,117 @@ export function TerminalPanel({ open, onClose }: { open: boolean; onClose: () =>
         style={{ width: `${width}px` }}
       >
         <div className="term-titlebar">
-          <button type="button" className="btn term-back" aria-label="返回" onClick={onClose}>
-            ‹ 返回
-          </button>
+          <PanelBackButton onClick={onClose} />
           <Segmented
             className="term-shells"
             buttonClassName="term-shell"
             options={SHELL_OPTIONS}
             value={info?.kind ?? null}
             ariaLabel="切换 shell"
-            disabled={confirmKill || switching}
+            disabled={confirmKill || switching || killBusy}
             onChange={(kind) => { if (info?.kind !== kind) void runtimeRef.current?.switchShell(kind); }}
           />
           <span className="term-cwd mono" title={info?.cwd ?? ""}>
             {info?.cwd ?? "…"}
           </span>
-          {exit && <span className="term-exited">已退出（码 {exit.code ?? "未知"}）</span>}
-          {confirmKill && !exit ? (
-            <span
-              className="term-confirm"
-              onKeyDown={(e) => {
-                if (e.key === "Escape") {
-                  e.preventDefault();
-                  if (!killBusy) setConfirmKill(false);
-                }
-              }}
-            >
-              <span className="term-confirm-text">结束该终端进程？</span>
-              <button
-                type="button"
-                className="btn btn-danger"
-                disabled={killBusy}
-                onClick={() => void kill()}
+          <span className="panel-titlebar-actions">
+            {exit && <span className="term-exited">已退出（码 {exit.code ?? "未知"}）</span>}
+            {confirmKill && !exit ? (
+              <span
+                className="term-confirm"
+                onKeyDown={(e) => {
+                  if (e.key === "Escape") {
+                    e.preventDefault();
+                    if (!killBusy) setConfirmKill(false);
+                  }
+                }}
               >
-                {killBusy ? "结束中…" : "确认结束"}
-              </button>
+                <span className="term-confirm-text">结束该终端进程？</span>
+                <button
+                  type="button"
+                  className="btn btn-danger"
+                  disabled={killBusy}
+                  onClick={() => void kill()}
+                >
+                  {killBusy ? "结束中…" : "确认结束"}
+                </button>
+                <button
+                  type="button"
+                  className="btn"
+                  disabled={killBusy}
+                  title="取消（Esc）"
+                  onClick={() => setConfirmKill(false)}
+                >
+                  取消
+                </button>
+              </span>
+            ) : exit ? (
               <button
                 type="button"
                 className="btn"
-                disabled={killBusy}
-                title="取消（Esc）"
-                onClick={() => setConfirmKill(false)}
+                disabled={switching || killBusy}
+                onClick={() => void runtimeRef.current?.createNew(info?.kind ?? "bash")}
               >
-                取消
+                新建终端
               </button>
-            </span>
-          ) : exit ? (
-            <button
-              type="button"
-              className="btn"
-              disabled={switching}
-              onClick={() => void runtimeRef.current?.createNew(info?.kind ?? "bash")}
-            >
-              新建终端
+            ) : (
+              <button
+                type="button"
+                className="btn chrome-icon-btn panel-icon-button panel-kill-button"
+                aria-label="结束终端进程"
+                title="结束终端进程"
+                disabled={!info || switching || killBusy}
+                onClick={() => setConfirmKill(true)}
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" aria-hidden="true"><path d="M18.36 6.64a9 9 0 1 1-12.73 0M12 2v10" /></svg>
+              </button>
+            )}
+            <button type="button" className="btn chrome-icon-btn panel-icon-button panel-collapse" aria-label="隐藏终端面板" title="收起面板" onClick={onClose}>
+              <PanelRightIcon />
             </button>
-          ) : (
-            <button
-              type="button"
-              className="btn chrome-icon-btn panel-icon-button panel-kill-button"
-              aria-label="结束终端进程"
-              title="结束终端进程"
-              onClick={() => setConfirmKill(true)}
-            >
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" aria-hidden="true"><path d="M18.36 6.64a9 9 0 1 1-12.73 0M12 2v10" /></svg>
-            </button>
-          )}
-          <button type="button" className="btn chrome-icon-btn panel-icon-button" aria-label="隐藏终端面板" title="收起面板" onClick={onClose}>
-            <PanelRightIcon />
+          </span>
+        </div>
+        <div className="term-tabs">
+          <div className="term-tab-list" role="tablist" aria-label="终端标签页"
+            onKeyDown={(event) => {
+              const direction = event.key === "ArrowRight" ? 1 : event.key === "ArrowLeft" ? -1 : 0;
+              if (!direction) return;
+              const items = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>("[role=tab]:not(:disabled)"));
+              const index = items.indexOf(event.target as HTMLButtonElement);
+              if (index < 0) return;
+              event.preventDefault();
+              const next = items[(index + direction + items.length) % items.length];
+              next?.focus();
+              next?.click();
+            }}>
+            {tabs.map((tab) => {
+              const active = tab.id === info?.id;
+              return <div key={tab.id} className={`term-tab${active ? " active" : ""}${tab.exited ? " exited" : ""}`}>
+                <button type="button" role="tab" aria-selected={active} tabIndex={active ? 0 : -1}
+                  className="term-tab-select" title={tab.cwd} disabled={switching || killBusy}
+                  onClick={() => runtimeRef.current?.switchTo(tab.id)}>
+                  <svg className="term-tab-icon" width="16" height="16" viewBox="0 0 24 24" fill="none"
+                    stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    {tab.kind === "bash" ? <path d="m4 6 6 6-6 6m9 0h7" /> : <><path d="m7 5 7 7-9 7M15 19h5" /><path d="M3 2h18l-3 20H0z" /></>}
+                  </svg>
+                  <span className="term-tab-label">{tab.label}{tab.exited ? "（已退出）" : ""}</span>
+                </button>
+                <button type="button" className="term-tab-close" aria-label={`${tab.exited ? "移除" : "结束"} ${tab.label}`}
+                  title={tab.exited ? "移除已退出标签" : "结束终端（需确认）"} disabled={switching || killBusy}
+                  onClick={() => {
+                    if (tab.exited) runtimeRef.current?.closeExited(tab.id);
+                    else {
+                      runtimeRef.current?.switchTo(tab.id);
+                      setConfirmKill(true);
+                    }
+                  }}>×</button>
+              </div>;
+            })}
+          </div>
+          <button type="button" className="term-tab-new" aria-label="新建终端"
+            title={`新建 ${info?.kind === "powershell" ? "PowerShell" : "bash"} 终端`} disabled={switching || killBusy || confirmKill}
+            onClick={() => void runtimeRef.current?.createNew(info?.kind ?? "bash")}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
           </button>
         </div>
         {omitted > 0 && (

@@ -11,7 +11,7 @@ import { fileURLToPath } from "node:url";
 import type { spawn } from "@lydell/node-pty";
 import { WebSocket } from "ws";
 import { localPolicy, remotePolicy } from "./access.js";
-import { MAX_SCROLLBACK_BYTES, TerminalRegistry, isWindowsMount, resolveShell, terminalEnabled, windowsHome } from "./terminals.js";
+import { MAX_SCROLLBACK_BYTES, TerminalRegistry, isWindowsMount, resolveShell, stripReplayQueries, terminalEnabled, windowsHome } from "./terminals.js";
 
 type Pty = ReturnType<typeof spawn>;
 class FakePty {
@@ -120,6 +120,17 @@ if ((() => { try { resolveShell("powershell"); return true; } catch { return fal
 registry.shutdown();
 assert.equal(registry.get(second.id)?.exited, true);
 assert.equal(ptys[1].kills, 1);
+
+// 回放剥查询序列：OSC 颜色查询与 CSI DA 询问无视觉效果，但回放时 xterm 会重新应答，
+// 应答字节进 PTY 输入被 shell 回显成垃圾（10-03 切标签/重连复现）；设置命令不剥。
+// （独立 registry，新 PTY 用 at(-1) 取，不占 ptys 数字下标）
+const registryQueries = new TerminalRegistry(process.cwd(), fakeSpawn);
+const queried = registryQueries.create({ cols: 80, rows: 24 });
+ptys.at(-1)!.output("prompt$ \x1b]10;?\x1b\\\x1b]11;?\x07\x1b]4;0;?\x1b\\\x1b[>c\x1b[0c echo ok \x1b]11;rgb:fbfb/fafa/f7f7\x07 done");
+const strippedReplay = registryQueries.attach(queried.id, () => undefined);
+assert.equal(strippedReplay.data, "prompt$  echo ok \x1b]11;rgb:fbfb/fafa/f7f7\x07 done");
+assert.equal(stripReplayQueries("\x1b]12;?\x07"), "");
+assert.equal(stripReplayQueries("plain text"), "plain text");
 
 const local = localPolicy(8790);
 const remote = remotePolicy({ port: 8792, origin: "https://desk.tail1234.ts.net", allowedLogins: ["me@github"] });

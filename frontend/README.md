@@ -73,8 +73,8 @@ node frontend/scripts/smoke-ws.mjs  # 需后端；会创建测试会话、批准
 ## 派单面板
 
 - `#/dispatches` / `#/dispatches/<runId>` / `?runs=` 打开右侧只读面板，关闭恢复原会话或历史预览；与终端共用宽度记忆，拖拽、方向键、双击复位。入口与壳见 [DispatchPanel.tsx](src/components/DispatchPanel.tsx)、[SidePanelResize.tsx](src/components/SidePanelResize.tsx)。
-- 派单树数据由 [dispatch-flow.ts](src/dispatch-flow.ts) 的 `buildDispatchTree` 纯函数生成，节点分 executor/run/subagent，执行端分 idle/single/group：单派单直接显示执行 agent；同一执行端多单时上层每单一行摘要（默认最多三行，`+N` 展开；折叠只收摘要行，下层任务块和子代理始终完整画出），下层分别画任务块，连线按派单顺序从执行端卡片底边的独立锚点出发；Codex 子代理连接所属派单或父 thread 节点，递归不限层。DispatchView.tsx 只负责紧凑卡片渲染和 ResizeObserver 几何测量；每层节点最大 148px、派单人最大 208px，窄面板按可用宽度收窄，长文本保留在 title；模型显示短名（`sol · xhigh`）。空闲执行端只显示小胶囊；Claude 原生子代理用珊瑚橙身份色，只读展示，不打开 delegate 详情，无近期记录时隐藏。标题按 Claude `parent.sessionId` 匹配工作台/原生 id，模型优先匹配会话值、否则 `parent.model`。
-- 多个派单会话在派单人卡片逐行显示标题和各自运行单数，单行省略、最多三行，其余 `+N`；工作台/原生 id 别名去重，单会话保持原显示。
+- 派单树数据由 [dispatch-flow.ts](src/dispatch-flow.ts) 的 `buildDispatchTree` 纯函数生成，节点分 executor/run/subagent，执行端分 idle/single/group：单派单直接显示执行 agent；同一执行端多单时上层每单一行摘要（默认最多三行，`+N` 展开；折叠只收摘要行，下层任务块和子代理始终完整画出），下层分别画任务块，连线按派单顺序从执行端卡片底边的独立锚点出发；Codex 子代理连接所属派单或父 thread 节点，递归不限层。DispatchView.tsx 只负责紧凑卡片渲染和 ResizeObserver 几何测量；每层节点最大 148px、派单人最大 208px，窄面板按可用宽度收窄，长文本保留在 title；模型显示短名（`sol · xhigh`）。空闲执行端只显示小胶囊；Claude 执行端用珊瑚橙身份色（如 `opus · high`），delegate 派单可打开详情；Claude 原生子代理保持只读展示，不打开 delegate 详情，无近期记录时隐藏。标题按三家 `parent.sessionId` + 执行端匹配工作台/原生 id，独立 CLI 父会话复用服务端 `parent.title`，缺标题则显示短 ID，模型优先匹配会话值、否则 `parent.model`；按主运行时合成树（Claude → Codex → Kimi，无派单者隐藏），跨工具派单连接实际父节点。Codex/Luna 与 Kimi 原生子代理可由独立会话发现，均只读展示。
+- 多个派单会话沿用派单人卡片的一行摘要，包含标题和各自运行单数，完整标题保留在 title；工作台/原生 id 别名去重，单会话保持原显示。
 - 列表只读 `/api/dispatches?limit=50`，可见每 3 秒刷新、每秒走时，隐藏暂停、恢复立即刷新，慢请求不重叠；关闭清理请求/计时器，失败保留旧数据并重试。会话内派单链接独立轮询；见 [dispatch-polling.ts](src/dispatch-polling.ts)。
 - 图中仅显示运行中及结束 30 分钟内派单；结束时间可由 startedAt + elapsedS 推算，lost 无结束时间用本次首次观察计时，其他结束时间不明者不显示。不读取或清理本机派单目录。
 - 连线运行中为 `flow`，结束 10 分钟内（含边界）为 `finish`，之后为 `idle` 灰色；子 agent 独立按自身 `lastActivityAt` 判断，运行中不受时间影响。`FINISHED_WIRE_MS` 与卡片 30 分钟窗口 `RECENT_DISPATCH_MS` 分开。
@@ -112,7 +112,7 @@ node frontend/scripts/smoke-ws.mjs  # 需后端；会创建测试会话、批准
 
 ## 终端与文件
 
-- 终端入口只认 `meta.capabilities.terminal`，Ctrl+` 切换且忽略自动重复；首次打开懒加载 xterm，隐藏仅 CSS，实例、连接、PTY 保留。bash/PowerShell 各自 attach 已存活终端，否则新建，切走继续后台；见 [TerminalPanel.tsx](src/components/TerminalPanel.tsx)。
+- 终端入口只认 `meta.capabilities.terminal`，Ctrl+` 切换且忽略自动重复；首次打开懒加载 xterm，隐藏仅 CSS，实例、连接、PTY 保留。标签条列出全部未退出终端（激活的已退出终端也保留），同种 shell 按注册表顺序编号，「＋」菜单新建 bash/PowerShell；单 xterm 实例，切标签 = detach 旧的 + attach 新的并回放，激活 id 存 localStorage `workbench-term-active`，刷新优先重连；见 [TerminalPanel.tsx](src/components/TerminalPanel.tsx)、[terminal.ts](src/terminal.ts) 的 `buildTermTabs`/`pickBootTerminal`。
 - 专用 `/ws/terminal` 每次 open 重新 attach，收到 attached 先 reset 再回放；省略输出给提示，resize 只在尺寸变化时发送。退避与回前台重连沿全局规则；kill 就地二次确认，exit 显示退出码、允许新建；见 [terminal.ts](src/terminal.ts)。
 - 终端/派单宽默认 480px，clamp 至 `[320, 视口−480]`，窄屏全屏；手机 Esc/Tab/Ctrl-C/Ctrl-D/方向键与粘贴，Clipboard 失败退回手动 prompt，经 xterm.paste 处理。终端主题读 CSS 令牌，随主题/系统变化；契约见 [terminal-panel-design.md](../docs/terminal-panel-design.md)。
 - 等宽字体优先本地 Maple Mono NF CN/Nerd Font，不下载字体；字体就绪或 1.5 秒超时重新度量 fit，不阻塞连接。终端字号默认按「宽屏 16 / 手机 13px × 整体比例」自动；设置里「终端字号」滑块（10–24px，localStorage `workbench-term-font`，按设备分开）设过就用设定值，见 `readTermFontSize`（[body-font.ts](src/body-font.ts)）。关闭尝试把焦点还给输入框。
@@ -131,7 +131,7 @@ node frontend/scripts/smoke-ws.mjs  # 需后端；会创建测试会话、批准
 - 配色裁决以 [styles.css 顶部注释](src/styles.css) 为准：`--gate` 系专属闸门/提问/待处理，消息与终端内容有明确例外；终端 chrome 中性/冷色，会话状态点红绿灯。浅色外框 chrome、画布 bg、浮起 surface 分层，别把旧“暖色只用于审批”当完整规则。
 - 主题三态、整体字号四档 0.9/1/1.15/1.25 保存本机，首屏内联恢复；localStorage 不可用回退默认。sidebar/main 使用 zoom，AI 用量 iframe 抵消 zoom，终端独立 fit；见 [font-scale.ts](src/font-scale.ts)、[index.html](index.html)。
 - 正文字号 14–20px、步长 0.5、默认 16，旧 22/无效值回退；作用于 stream 用户/助手/思考正文，代码块和工具细节用 `max(14px, 正文−2px)`，与整体 zoom 叠加；见 [body-font.ts](src/body-font.ts)、[styles.css](src/styles.css)。
-- 主题与终端 shell 复用 [Segmented.tsx](src/components/Segmented.tsx)，保持单选/方向键和禁用语义，滑块按实际布局度量；减少动态偏好关闭动画。设置浮层限高滚动、focus trap、Esc/外点关闭并还焦点。
+- 主题切换复用 [Segmented.tsx](src/components/Segmented.tsx)，保持单选/方向键和禁用语义，滑块按实际布局度量；减少动态偏好关闭动画。设置浮层限高滚动、focus trap、Esc/外点关闭并还焦点。
 - 会话移除行内二次确认，Esc 取消，成功清本地状态/草稿并作废旧请求；只移除工作台条目和停 worker，原生 transcript 保留。手机左滑 80px 露入口，10px 锁方向，纵向保留滚动，同刻只展开一行；见 [Sidebar.tsx](src/components/Sidebar.tsx)、[store.ts](src/store.ts)。
 - 设置存储面板打开时读一次，清理需弹窗确认，可选移除结束会话；清理只涉及工作台副本，原生记录保留，返回最新统计再刷新会话列表；见 [WorkbenchStorage.tsx](src/components/WorkbenchStorage.tsx)。
 - 不引入 UI/图标/路由库；图标用 Unicode/内联 SVG，错误与禁用原因尽量可见。所有输入/审批/配置按后端能力与状态约束，`riskyMode` 警示不能替代实际 driver 权限契约。
@@ -145,3 +145,5 @@ node frontend/scripts/smoke-ws.mjs  # 需后端；会创建测试会话、批准
 - 终端 kill 时恰好断线后的退出码恢复、断线后重复 attach/reset。
 - 快照分页：加载失败后点提示重试、图片/Markdown 异步撑高时的阅读位置（只做过 DOM 接线复核）。
 - 设置面板 focus trap / 焦点返回、`prefers-reduced-motion` 的真实键盘与浏览器流程。
+
+- 左下扩展页面入口（包括 AI 用量）打开后变为“‹ 后退”，再次点击收起页面并回到会话列表；图标态也保留返回箭头和可访问标签，与历史会话一致。

@@ -83,9 +83,10 @@ export function WorkbenchStorage({ dialogOpen, onDialogOpenChange }: {
   return <>
     <div className="settings-item settings-storage">
       <span className="settings-item-label">存储占用 {storage ? formatBytes(storage.totalBytes) : loading ? "读取中…" : "读取失败"}</span>
-      {storage && <span className="settings-hint settings-storage-breakdown">
-        会话记录 {formatBytes(storage.categories.transcripts.bytes)} · 附件 {formatBytes(storage.categories.uploads.bytes)} · 日志 {formatBytes(storage.categories.logs.bytes)} · 其他 {formatBytes(storage.categories.other.bytes)}
-      </span>}
+      <span className="settings-hint settings-storage-breakdown" aria-busy={loading}>
+        {storage ? <>会话记录 {formatBytes(storage.categories.transcripts.bytes)} · 附件 {formatBytes(storage.categories.uploads.bytes)} · 日志 {formatBytes(storage.categories.logs.bytes)} · 其他 {formatBytes(storage.categories.other.bytes)}</>
+          : "会话记录 — · 附件 — · 日志 — · 其他 —"}
+      </span>
       {error && !dialogOpen && <span className="new-error" role="alert">{error}</span>}
       {result && <span className="settings-hint" role="status">{result}</span>}
       <button type="button" className="settings-action" ref={cleanButton} aria-haspopup="dialog"
