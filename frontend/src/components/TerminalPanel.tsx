@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { Terminal, type ITheme } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { PanelBackButton, PanelRightIcon, SidePanelResize, useSidePanelWidth } from "./SidePanelResize";
@@ -8,6 +8,8 @@ import type { ShellKind, TerminalInfo } from "../types";
 import { createTerminal, fetchTerminals, killTerminal } from "../api";
 import {
   isTerminalToggleKey,
+  isTerminalPasteKey,
+  createTermTitlebarGesture,
   TERM_ACTIVE_STORAGE_KEY,
   TERM_SHORTCUT_KEYS,
   buildTerminalWsUrl,
@@ -83,6 +85,7 @@ const SHELL_OPTIONS: Array<{ value: ShellKind; label: string }> = [
 interface TermRuntime {
   focus: () => void;
   fit: () => void;
+  isAtTop: () => boolean;
   sendInput: (data: string) => void;
   paste: (text: string) => void;
   createNew: (kind: ShellKind) => Promise<void>;
@@ -119,6 +122,8 @@ function writeSavedActiveTerminalId(id: string | null): void {
 export function TerminalPanel({ open, onClose }: { open: boolean; onClose: () => void }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useSidePanelWidth();
+  const [maximized, setMaximized] = useState(false);
+  const [titlebarHidden, setTitlebarHidden] = useState(false);
   const [info, setInfo] = useState<TerminalInfo | null>(null);
   /** 服务端注册表快照（含已退出记录）；标签条按 buildTermTabs 过滤 */
   const [terminals, setTerminals] = useState<TerminalInfo[]>([]);
@@ -137,7 +142,7 @@ export function TerminalPanel({ open, onClose }: { open: boolean; onClose: () =>
     setTerminals(list);
   };
 
-  // 手机上 xterm 的隐藏 textarea 拿不到长按粘贴菜单；读不了剪贴板（拒绝授权 / 不支持）时退回 prompt 手动粘贴
+  // 右键 / 粘贴按钮读剪贴板；拒绝授权、不支持或非安全上下文时退回手动粘贴。
   const pasteClipboard = async () => {
     let text: string | null = null;
     try {
@@ -145,7 +150,10 @@ export function TerminalPanel({ open, onClose }: { open: boolean; onClose: () =>
     } catch {
       text = window.prompt("粘贴到终端");
     }
-    if (text) runtimeRef.current?.paste(text);
+    if (text) {
+      runtimeRef.current?.paste(text);
+      if (window.matchMedia("(pointer: fine)").matches) runtimeRef.current?.focus();
+    }
   };
   const openRef = useRef(open);
   openRef.current = open;
@@ -162,8 +170,9 @@ export function TerminalPanel({ open, onClose }: { open: boolean; onClose: () =>
     const fitAddon = new FitAddon();
     term.loadAddon(fitAddon);
     term.open(host);
-    // Returning false skips xterm handling without stopping DOM bubbling.
-    term.attachCustomKeyEventHandler((event) => !isTerminalToggleKey(event));
+    // 返回 false 只跳过 xterm；保留浏览器默认粘贴，再由 xterm 的 paste 监听处理。
+    // 键盘粘贴无需 readText 授权，也不会重复发送或破坏 bracketed paste。
+    term.attachCustomKeyEventHandler((event) => !isTerminalToggleKey(event) && !isTerminalPasteKey(event));
 
     let disposed = false;
     let socket: WebSocket | null = null;
@@ -423,6 +432,7 @@ export function TerminalPanel({ open, onClose }: { open: boolean; onClose: () =>
     runtimeRef.current = {
       focus: () => term.focus(),
       fit,
+      isAtTop: () => term.buffer.active.viewportY === 0,
       sendInput: (data) => {
         if (attachedId && termState.attached && !termState.exited) {
           sendFrame({ type: "input", terminalId: attachedId, data });
@@ -464,11 +474,39 @@ export function TerminalPanel({ open, onClose }: { open: boolean; onClose: () =>
     return () => cancelAnimationFrame(raf);
   }, [open]);
 
+  // 只观察触摸，不阻止默认事件；xterm 继续处理输出滚动及终端鼠标协议。
+  useEffect(() => {
+    setTitlebarHidden(false);
+    const host = hostRef.current;
+    if (!host || !open || confirmKill) return;
+    const mobile = window.matchMedia("(max-width: 720px)");
+    const gesture = createTermTitlebarGesture({
+      isMobile: () => mobile.matches,
+      isAtTop: () => runtimeRef.current?.isAtTop() ?? false,
+      onHiddenChange: setTitlebarHidden,
+    });
+    const start = (event: TouchEvent) => gesture.start(event.touches);
+    const move = (event: TouchEvent) => gesture.move(event.touches);
+    const options = { capture: true, passive: true };
+    host.addEventListener("touchstart", start, options);
+    host.addEventListener("touchmove", move, options);
+    host.addEventListener("touchend", gesture.end, options);
+    host.addEventListener("touchcancel", gesture.end, options);
+    mobile.addEventListener("change", gesture.reset);
+    return () => {
+      host.removeEventListener("touchstart", start, options);
+      host.removeEventListener("touchmove", move, options);
+      host.removeEventListener("touchend", gesture.end, options);
+      host.removeEventListener("touchcancel", gesture.end, options);
+      mobile.removeEventListener("change", gesture.reset);
+    };
+  }, [open, info?.id, confirmKill]);
+
   // 宽度变化：面板尺寸变了要重新 fit
   useEffect(() => {
     const raf = requestAnimationFrame(() => runtimeRef.current?.fit());
     return () => cancelAnimationFrame(raf);
-  }, [width]);
+  }, [width, maximized, titlebarHidden]);
 
   const kill = async () => {
     if (killBusy || !info) return;
@@ -490,12 +528,12 @@ export function TerminalPanel({ open, onClose }: { open: boolean; onClose: () =>
 
   return (
     <>
-      {open && <SidePanelResize label="终端" width={width} setWidth={setWidth} />}
+      {open && !maximized && <SidePanelResize label="终端" width={width} setWidth={setWidth} />}
       <div
-        className={`term-panel${open ? "" : " term-hidden"}`}
+        className={`term-panel${open ? "" : " term-hidden"}${maximized ? " term-maximized" : ""}${titlebarHidden ? " term-titlebar-hidden" : ""}`}
         role="region"
         aria-label="终端"
-        style={{ width: `${width}px` }}
+        style={{ width: maximized ? undefined : `${width}px` }}
       >
         <div className="term-titlebar">
           <PanelBackButton onClick={onClose} />
@@ -608,7 +646,14 @@ export function TerminalPanel({ open, onClose }: { open: boolean; onClose: () =>
           <button type="button" className="term-tab-new" aria-label="新建终端"
             title={`新建 ${info?.kind === "powershell" ? "PowerShell" : "bash"} 终端`} disabled={switching || killBusy || confirmKill}
             onClick={() => void runtimeRef.current?.createNew(info?.kind ?? "bash")}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="M12 4v16M4 12h16" /></svg>
+          </button>
+          <button type="button" className="term-tab-maximize" aria-label={maximized ? "还原终端窗口" : "最大化终端窗口"}
+            title={maximized ? "还原终端窗口" : "最大化终端窗口（保留左侧栏）"} aria-pressed={maximized}
+            onClick={() => setMaximized((value) => !value)}>
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              {maximized ? <><path d="M8 8V4h12v12h-4" /><rect x="4" y="8" width="12" height="12" rx="1" /></> : <path d="M9 4H4v5m11-5h5v5M4 15v5h5m11-5v5h-5" />}
+            </svg>
           </button>
         </div>
         {omitted > 0 && (
@@ -629,11 +674,21 @@ export function TerminalPanel({ open, onClose }: { open: boolean; onClose: () =>
             </button>
           </div>
         )}
-        <div className="term-host" ref={hostRef} />
+        <div className="term-host" ref={hostRef}
+          onContextMenuCapture={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            void pasteClipboard();
+          }} />
         <div className="term-keys" role="toolbar" aria-label="终端快捷键">
-          {TERM_SHORTCUT_KEYS.map((key) => (
+          {TERM_SHORTCUT_KEYS.map((key, index) => (
+            <Fragment key={key.id}>
+              {index === 2 && (
+                <button type="button" className="term-key" aria-label="粘贴剪贴板" onClick={() => void pasteClipboard()}>
+                  粘贴
+                </button>
+              )}
             <button
-              key={key.id}
               type="button"
               className="term-key"
               aria-label={key.ariaLabel}
@@ -641,10 +696,8 @@ export function TerminalPanel({ open, onClose }: { open: boolean; onClose: () =>
             >
               {key.label}
             </button>
+            </Fragment>
           ))}
-          <button type="button" className="term-key" aria-label="粘贴剪贴板" onClick={() => void pasteClipboard()}>
-            粘贴
-          </button>
         </div>
       </div>
     </>

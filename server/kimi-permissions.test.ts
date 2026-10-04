@@ -111,4 +111,23 @@ for (const mode of modes) {
   assert.equal(h.sent.at(-1).error.code, -32000, "实际写入失败仍回传 RPC 错误");
 }
 
+// Deferred terminal replies must tolerate a worker that closed stdin meanwhile.
+{
+  const h = harness();
+  let finish!: () => void;
+  const done = new Promise<void>(resolve => { finish = resolve; });
+  h.internal.terminals.set("late", { done, exitCode: 0, signal: null });
+  h.receive({ jsonrpc: "2.0", id: 80, method: "terminal/wait_for_exit", params: { terminalId: "late" } });
+  h.internal.send = () => { throw new Error("kimi worker stdin 已关闭"); };
+  finish();
+  await new Promise<void>(resolve => setImmediate(resolve)); // unhandled rejection would terminate this test
+}
+{
+  const h = harness();
+  h.internal.terminals.set("normal", { done: Promise.resolve(), exitCode: 7, signal: null });
+  h.receive({ jsonrpc: "2.0", id: 81, method: "terminal/wait_for_exit", params: { terminalId: "normal" } });
+  await new Promise<void>(resolve => setImmediate(resolve));
+  assert.deepEqual(h.sent.at(-1), { jsonrpc: "2.0", id: 81, result: { exitCode: 7, signal: null } });
+}
+
 console.log("✅ Kimi 权限：新建/续接/切换按所选模式；原生审批保留；文件与终端执行不重复审批");

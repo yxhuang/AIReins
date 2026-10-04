@@ -76,6 +76,8 @@ export interface DriverConfigOption {
   id: ConfigOptionId;
   name: string;
   values: ConfigOptionValue[];
+  valuesByModel?: Record<string, ConfigOptionValue[]>;
+  defaultsByModel?: Record<string, string | null>;
   default: string | null;
   mutable: boolean;
   mutableVia?: "restart" | "control";

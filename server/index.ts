@@ -4,7 +4,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { join, resolve } from "node:path";
 import type { Duplex } from "node:stream";
 import { fileURLToPath } from "node:url";
-import { compressResponse } from "./response-compression.js";
+import { acceptsGzip, compressResponse } from "./response-compression.js";
 import { WebSocket, WebSocketServer } from "ws";
 import { checkAccess, loadRemoteConfig, localPolicy, remotePolicy, type AccessPolicy, type RemoteConfig } from "./access.js";
 import { DispatchQueryError, getDispatch, getDispatchLog, getDispatchMessages, listDispatches, listDispatchHistory, listParentDispatches } from "./dispatches.js";
@@ -18,7 +18,7 @@ import { checkPageHealth, proxyPage, readLinks, scanPages } from "./pages.js";
 import { pruneStorage, workbenchHome } from "./persistence.js";
 import { isValidIdleReleaseMinutes, loadPrefs, savePrefs, type WorkbenchPrefs } from "./prefs.js";
 import { readClaudeStartupSettings, writeClaudeStartupSettings } from "./claude-settings.js";
-import { SessionManager } from "./session-manager.js";
+import { SessionBusyError, SessionManager } from "./session-manager.js";
 import { cleanStorage, getStorageStats, StorageInputError, validateStorageCleanInput } from "./storage.js";
 import { parseMcpAction, parseSideQuestion, parseTaskId } from "./session-menu.js";
 import { preflightSnapshot, SnapshotCwdError } from "./snapshot.js";
@@ -184,7 +184,13 @@ function handleUpgrade(request: IncomingMessage, socket: Duplex, head: Buffer, p
     socket.end("HTTP/1.1 403 Forbidden\r\nConnection: close\r\nContent-Length: 0\r\n\r\n");
     return;
   }
-  const url = new URL(request.url ?? "/", `http://${request.headers.host ?? `${HOST}:${PORT}`}`);
+  let url: URL;
+  try {
+    url = new URL(request.url ?? "/", `http://${request.headers.host ?? `${HOST}:${PORT}`}`);
+  } catch {
+    socket.end("HTTP/1.1 400 Bad Request\r\nConnection: close\r\nContent-Length: 0\r\n\r\n");
+    return;
+  }
   if (url.pathname === "/ws/terminal") {
     if (!terminalEnabled(policy, REMOTE_CONFIG)) {
       log("warn", "websocket rejected", { reason: "终端未对该入口开放", path: request.url });
@@ -737,13 +743,19 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
         await respond(response, 200, 0, "success", { session }, requestId);
       } else if (method === "DELETE" && detailMatch) {
         const id = decodeURIComponent(detailMatch[1]);
-        const removed = await manager.remove(id);
+        let removed;
+        try { removed = await manager.remove(id); }
+        catch (error) {
+          if (error instanceof SessionBusyError) throw new ApiError(400, 40063, error.message);
+          throw error;
+        }
         if (!removed) throw new ApiError(404, 40401, `会话不存在：${id}`);
         await respond(response, 200, 0, "success", {
           removedSessionId: id,
-          transcriptsDeleted: false,
+          transcriptsDeleted: true,
           nativeTranscriptPath: removed.nativeTranscriptPath,
-          workbenchTranscriptPreserved: true,
+          workbenchTranscriptPreserved: false,
+          nativeTranscriptPreserved: true,
         }, requestId);
       } else if (pageProxyMatch) {
         const page = pagesById.get(decodeURIComponent(pageProxyMatch[1]));
@@ -972,7 +984,7 @@ async function respond(
 ): Promise<void> {
   const json = JSON.stringify({ code, msg, data, request_id: requestId });
   // 长会话快照可达十几 MB，手机走远程时 10 秒内下不完；大响应按 Accept-Encoding 用 gzip（level 1：约 1/5 体积、百毫秒内）
-  const gzip = json.length > 32 * 1024 && /\bgzip\b/.test(String(response.req?.headers["accept-encoding"] ?? ""));
+  const gzip = json.length > 32 * 1024 && acceptsGzip(String(response.req?.headers["accept-encoding"] ?? ""));
   const body = gzip ? await compressResponse(json) : json;
   response.writeHead(status, {
     "content-type": "application/json; charset=utf-8",

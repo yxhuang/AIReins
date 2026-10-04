@@ -31,7 +31,7 @@ node frontend/scripts/smoke-ws.mjs  # 需后端；会创建测试会话、批准
 ### 状态模型
 
 - 单一 `Store` 经 [useStore.ts](src/useStore.ts) 的 `useSyncExternalStore` 订阅；优先 selector 与稳定引用，派生 tuple 用 `shallowEqual`，避免每次通知重绘全部组件。
-- `sessions` 保存列表摘要；未打开会话只更新标题、seq、未决数与状态，不预取全部快照。标题优先后端 `session.title`，兼容事件派生见 [shared/session-title.ts](../shared/session-title.ts)。
+- `sessions` 保存列表摘要；未打开会话只更新标题、seq、未决数与状态，不预取全部快照。标题优先后端 `session.title`，首条结构化命令可从 `/name 参数` 派生，兼容事件派生见 [shared/session-title.ts](../shared/session-title.ts)。
 - `data` 按会话保存已加载事件、replay 游标、分页游标、未决闸门、用量/缓存信息；配置、RC、后台任务来自会话记录。普通事件推断状态，2 秒防抖重拉列表对齐，列表不覆盖较新 WS 摘要。
 - 流式文本、思考、工具更新和调试事件通知按 `requestAnimationFrame` 合批；其他通知立即发出。活动会话时钟每秒更新，全局空闲改为 30 秒；实现见 [store.ts](src/store.ts)。
 
@@ -40,7 +40,7 @@ node frontend/scripts/smoke-ws.mjs  # 需后端；会创建测试会话、批准
 - 一条全局 `/ws` 收所有会话事件。首连/重连刷新列表，对已加载会话发送 `{type:"replay", sessionId, afterSeq}`；`replay_complete` 后顺序应用缓冲帧，不再对每个会话一律重取快照。
 - 快照请求去重并带代次戳，期间实时事件先缓存；响应原子替换旧窗口后追加较新帧。只接受推进 seq 的持久事件，重复帧忽略；临时工具更新不推进游标。
 - seq 缺口、`resync_required` 或补发失败退回快照；重连作废受影响的在途快照。断线退避 1 秒起、封顶 15 秒，回前台可立即重连；见 [store.ts](src/store.ts)。
-- 用户输入、审批回执、中断、配置和 RC 控制共用 WS；配置错误就地显示，其余进入可关联会话的全局错误条。发送失败保留文本与草稿，不把发送帧写出视为模型完成。
+- 用户输入、审批回执、中断、配置和 RC 控制共用 WS；配置错误就地显示，其余进入可关联会话的全局错误条。发送被拒绝时保留文本与草稿，不把发送帧写出视为模型完成。Codex 消息的 `turn/start` 后续失败目前通过 `session_error` 显示，不自动还回已确认输入；Codex 斜杠命令失败则在输入仍为空时还回提交原文，保留随后新写的草稿。消息输入框有稳定的无障碍标签「消息」。
 
 ### 闸门与提问
 
@@ -129,7 +129,7 @@ node frontend/scripts/smoke-ws.mjs  # 需后端；会创建测试会话、批准
 ## 外观与通用边界
 
 - 配色裁决以 [styles.css 顶部注释](src/styles.css) 为准：`--gate` 系专属闸门/提问/待处理，消息与终端内容有明确例外；终端 chrome 中性/冷色，会话状态点红绿灯。浅色外框 chrome、画布 bg、浮起 surface 分层，别把旧“暖色只用于审批”当完整规则。
-- 主题三态、整体字号四档 0.9/1/1.15/1.25 保存本机，首屏内联恢复；localStorage 不可用回退默认。sidebar/main 使用 zoom，AI 用量 iframe 抵消 zoom，终端独立 fit；见 [font-scale.ts](src/font-scale.ts)、[index.html](index.html)。
+- 主题三态、整体字号四档 0.9/1/1.15/1.25 保存本机，首屏内联恢复；localStorage 不可用回退默认。sidebar/main 使用 zoom，AI 用量 iframe 抵消 zoom，终端独立 fit；手机侧栏按百分比包含块铺满，≤360px 顶栏收紧间距，窄空间底栏允许换行；设置/直达浮层尺寸受缩放后的视口约束；见 [font-scale.ts](src/font-scale.ts)、[index.html](index.html)。
 - 正文字号 14–20px、步长 0.5、默认 16，旧 22/无效值回退；作用于 stream 用户/助手/思考正文，代码块和工具细节用 `max(14px, 正文−2px)`，与整体 zoom 叠加；见 [body-font.ts](src/body-font.ts)、[styles.css](src/styles.css)。
 - 主题切换复用 [Segmented.tsx](src/components/Segmented.tsx)，保持单选/方向键和禁用语义，滑块按实际布局度量；减少动态偏好关闭动画。设置浮层限高滚动、focus trap、Esc/外点关闭并还焦点。
 - 会话移除行内二次确认，Esc 取消，成功清本地状态/草稿并作废旧请求；只移除工作台条目和停 worker，原生 transcript 保留。手机左滑 80px 露入口，10px 锁方向，纵向保留滚动，同刻只展开一行；见 [Sidebar.tsx](src/components/Sidebar.tsx)、[store.ts](src/store.ts)。

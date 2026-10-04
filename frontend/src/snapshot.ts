@@ -36,7 +36,7 @@ export function snapshotConfirmReasons(preflight: SnapshotPreflight): string[] {
 interface CreateWithSnapshotDeps {
   /** POST /api/snapshot/preflight */
   preflight: (cwd: string) => Promise<SnapshotPreflight>;
-  /** 实际建会话；snapshot 缺省 = 不传该字段（后端默认 "auto"） */
+  /** 实际建会话；snapshot 缺省 = 不传该字段（后端默认 "skip"） */
   create: (snapshot?: "auto" | "skip") => Promise<void>;
   /** 弹确认框等用户选择；只在需要确认时被调用 */
   confirm: (preflight: SnapshotPreflight) => Promise<SnapshotChoice>;

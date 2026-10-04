@@ -1,7 +1,7 @@
 // 组织信息独立于会话 seq 和活动时间；不用真实网络或端口。
 import { strict as assert } from "node:assert";
 import { Store } from "../src/store.ts";
-import { sessionTitle } from "../../shared/session-title.ts";
+import { sessionTitle, truncateDisplayWidth } from "../../shared/session-title.ts";
 const session = (overrides = {}) => ({ id: "organized", agent: "claude", cwd: "/repo", status: "idle", config: {}, seq: 0,
   createdAt: "2026-10-01T00:00:00Z", lastActivityAt: "2026-10-01T00:00:00Z", title: "自动标题", ...overrides });
 const group = { id: "group-one", name: "论文", createdAt: "2026-10-03T00:00:00Z" };
@@ -17,6 +17,26 @@ await check("自定义标题优先；清空恢复自动标题与事件回退", (
   assert.equal(sessionTitle({ title: "自动", customTitle: "用户标题" }), "用户标题");
   assert.equal(sessionTitle({ title: "自动", customTitle: "" }), "自动");
   assert.equal(sessionTitle({ customTitle: "   " }, [{ type: "user_message", payload: { text: "原始消息" } }]), "原始消息");
+});
+await check("自动标题保留完整文字，已有首条消息时补全旧截断标题", () => {
+  const full = "拉宽侧栏后要显示更多完整会话标题内容和后面的详细信息";
+  const events = [{ type: "user_message", payload: { text: `  ${full}\n后续内容  ` } }];
+  const normalized = `${full} 后续内容`;
+  assert.equal(sessionTitle({}, events), normalized);
+  const old = truncateDisplayWidth(normalized, 30);
+  assert.equal(sessionTitle({ title: old }, events), normalized);
+  assert.equal(sessionTitle({ title: old }), old, "没有原始消息时不猜测缺失标题");
+  assert.equal(sessionTitle({ title: "服务端权威标题" }, events), "服务端权威标题");
+  assert.equal(sessionTitle({ title: old, customTitle: "自定义标题" }, events), "自定义标题");
+  assert.equal(sessionTitle({}, [{ type: "user_message", payload: { text: "a".repeat(120) } }]), "a".repeat(120));
+});
+await check("首条结构化命令派生标题，显式与自定义标题仍优先", () => {
+  const events = [{ type: "user_message", payload: { command: { name: "review", arguments: " 长参数\n第二行 " } } }];
+  assert.equal(sessionTitle({}, events), "/review 长参数 第二行");
+  assert.equal(sessionTitle({}, [{ type: "user_message", payload: { command: { name: "compact" } } }]), "/compact");
+  assert.equal(sessionTitle({ title: "保留标题" }, events), "保留标题");
+  assert.equal(sessionTitle({ customTitle: "手工标题" }, events), "手工标题");
+  assert.equal(sessionTitle({}, [{ type: "user_message", payload: { text: "普通文字", command: { name: "review" } } }]), "普通文字");
 });
 await check("组织广播更新其他页面；不覆盖较新的运行状态与 seq", () => {
   const value = new Store(); value.sessions = [session({ seq: 8, status: "running" })];

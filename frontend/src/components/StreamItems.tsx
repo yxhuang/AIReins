@@ -19,6 +19,7 @@ import {
   toggleOther,
   type AskOther,
   type AskSelection,
+  selectedOptions,
 } from "../ask";
 import { store } from "../store";
 import { uploadsFileUrl } from "../api";
@@ -427,7 +428,7 @@ export const QuestionBlock = forwardRef<HTMLDivElement, { item: GateView; sessio
       <div className="gate-block question-block" ref={ref}>
         <div className="gate-title">{item.agent} 在问你</div>
         {questions.map((q, qi) => {
-          const picked = selection[q.question] ?? [];
+          const picked = selectedOptions(selection, q);
           const otherActive = hasOther(other, q);
           return (
             <div className="question-item" key={qi}>

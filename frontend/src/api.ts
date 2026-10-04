@@ -193,8 +193,7 @@ export interface CreateSessionInput {
   resumeSessionId?: string;
   initialMessage?: string;
   /**
-   * 非 git 目录的建会话前快照：缺省 = "auto"（后端静默快照）。
-   * 只在用户于确认框里做出选择后才显式传值；省略即让后端按默认处理。
+   * 建会话前快照：缺省 = "skip"；显式 "auto" 才执行快照。
    */
   snapshot?: "auto" | "skip";
 }
@@ -208,7 +207,7 @@ export function fetchSnapshotPreflight(cwd: string): Promise<SnapshotPreflight> 
   });
 }
 
-/** 移除注册表条目并停 worker；各家 CLI 的原生 transcript 不受影响。 */
+/** 停 worker，移除注册表与 wb 副本；各家 CLI 的原生 transcript 不受影响。 */
 export function deleteSession(id: string): Promise<{ nativeTranscriptPath?: string }> {
   return call<{ nativeTranscriptPath?: string }>(`/api/sessions/${encodeURIComponent(id)}`, {
     method: "DELETE",

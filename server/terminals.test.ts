@@ -132,6 +132,9 @@ assert.equal(strippedReplay.data, "prompt$  echo ok \x1b]11;rgb:fbfb/fafa/f7f7\x
 assert.equal(stripReplayQueries("\x1b]12;?\x07"), "");
 assert.equal(stripReplayQueries("plain text"), "plain text");
 
+assert.equal(stripReplayQueries("before\x1b[5n\x1b[6n\x1b[?6nafter"), "beforeafter");
+assert.equal(stripReplayQueries("\x1b[1n\x1b[?5n\x1b[31mred\x1b[0m"), "\x1b[1n\x1b[?5n\x1b[31mred\x1b[0m", "只剥标准查询，不泛化所有 n 或视觉控制");
+
 const local = localPolicy(8790);
 const remote = remotePolicy({ port: 8792, origin: "https://desk.tail1234.ts.net", allowedLogins: ["me@github"] });
 assert.equal(terminalEnabled(local, null), true);

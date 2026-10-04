@@ -50,13 +50,18 @@ export type AskSelection = Record<string, string[]>;
 /** 「其他…」自由文本：key 逐字 = question；键存在即表示该题选中「其他」（与选项互斥），值为输入文本。 */
 export type AskOther = Record<string, string>;
 
+/** 问题原文可与 Object.prototype 的属性同名，只读取实际选择键。 */
+export function selectedOptions(selection: AskSelection, question: AskQuestion): string[] {
+  return Object.hasOwn(selection, question.question) ? selection[question.question]! : [];
+}
+
 /** 点选一个选项：单选替换，多选 toggle。返回新对象（React state）。 */
 export function toggleOption(
   selection: AskSelection,
   question: AskQuestion,
   label: string,
 ): AskSelection {
-  const current = selection[question.question] ?? [];
+  const current = selectedOptions(selection, question);
   let next: string[];
   if (question.multiSelect) {
     next = current.includes(label)
@@ -113,7 +118,7 @@ export function allAnswered(
   return questions.every((q) =>
     hasOther(other, q)
       ? other[q.question]!.trim().length > 0
-      : (selection[q.question]?.length ?? 0) > 0,
+      : selectedOptions(selection, q).length > 0,
   );
 }
 
@@ -127,16 +132,16 @@ export function buildQuestionAnswers(
   selection: AskSelection,
   other: AskOther = {},
 ): Record<string, string> {
-  const answers: Record<string, string> = {};
+  const answers: [string, string][] = [];
   for (const q of questions) {
     if (hasOther(other, q)) {
       const text = other[q.question]!.trim();
-      if (text) answers[q.question] = text;
+      if (text) answers.push([q.question, text]);
       continue;
     }
-    const picked = new Set(selection[q.question] ?? []);
+    const picked = new Set(selectedOptions(selection, q));
     const ordered = q.options.map((o) => o.label).filter((label) => picked.has(label));
-    if (ordered.length > 0) answers[q.question] = ordered.join(",");
+    if (ordered.length > 0) answers.push([q.question, ordered.join(",")]);
   }
-  return answers;
+  return Object.fromEntries(answers);
 }

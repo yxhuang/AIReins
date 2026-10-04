@@ -69,6 +69,8 @@ export interface DriverConfigOption {
   id: ConfigOptionId;
   name: string;
   values: ConfigOptionValue[];
+  valuesByModel?: Record<string, ConfigOptionValue[]>;
+  defaultsByModel?: Record<string, string | null>;
   default: string | null;
   /** false = 只能建会话时设置，活改会被后端拒绝 */
   mutable: boolean;

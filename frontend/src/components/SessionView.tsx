@@ -5,7 +5,7 @@ import { compactCwd, awayFromLatest, showComposerInterrupt, appendRefineCommand 
 import { buildRenderItems, focusVisible, groupReadOnlyTools } from "../render-items";
 import { filterCommands, noteCommandUsed, readRecentCommands, recentInTable } from "../commands";
 import { extractMentionTokens, mentionQueryAt, mentionTokenEnd } from "../mentions";
-import { needsRestartNote, effectiveFor, modelShortName, pillText, EFFECTIVE_SOURCE_LABELS, ALIAS_NOTE, RESTART_NOTE } from "../config-view";
+import { configOptionsForModel, modelConfigPatch, needsRestartNote, effectiveFor, modelShortName, pillText, EFFECTIVE_SOURCE_LABELS, ALIAS_NOTE, RESTART_NOTE } from "../config-view";
 import { fetchFiles, uploadAttachment, fetchCodexSkills, runCodexCommand, type CodexSkillInfo } from "../api";
 import { filterSkills, insertSkill, skillQueryAt } from "../codex-skills";
 import { CodexCommandPanel, type CodexCommandResult } from "./CodexCommandPanel";
@@ -436,7 +436,8 @@ function useConfigState(sessionId: string) {
 function ConfigControls({ session }: { session: SessionRecord }) {
   const meta = useStore(selectMeta);
   const { switching } = useConfigState(session.id);
-  const options = meta?.drivers[session.agent]?.options ?? [];
+  const schemaOptions = meta?.drivers[session.agent]?.options ?? [];
+  const options = configOptionsForModel(schemaOptions, session.config?.model);
   const pending = store.configPending.get(session.id);
   // 重启切换进行中（claude model/effort）：全部控件禁用，就地显示后端给的过渡文案
   // 已释放会话改配置时后端会先按原生 id 续接再改（ensureWorker）
@@ -506,7 +507,8 @@ function ConfigControls({ session }: { session: SessionRecord }) {
       slider: option.id === "effort",
       effective: effective?.value,
       onSelect: (value) => {
-        if (value) store.setConfig(session.id, { [option.id]: value });
+        if (value) store.setConfig(session.id, option.id === "model"
+          ? modelConfigPatch(schemaOptions, session.config, value) : { [option.id]: value });
       },
       note: (
         <>
@@ -1030,7 +1032,7 @@ function Composer({ session, dead, errored }: { session: SessionRecord; dead: bo
     ]);
   };
 
-  const executeCodex = async (name: string, args?: string) => {
+  const executeCodex = async (name: string, args?: string, submittedText?: string) => {
     if (codexBusy.current) return;
     codexBusy.current = true;
     setCodexResult({ name });
@@ -1044,6 +1046,7 @@ function Composer({ session, dead, errored }: { session: SessionRecord; dead: bo
       }
     } catch (error) {
       setCodexResult(current => current ? { name, error: error instanceof Error ? error.message : String(error) } : null);
+      if (submittedText !== undefined) setText(current => current === "" ? submittedText : current);
     } finally { codexBusy.current = false; }
   };
 
@@ -1063,7 +1066,7 @@ function Composer({ session, dead, errored }: { session: SessionRecord; dead: bo
       if (session.agent === "codex") {
         if (codexBusy.current) return;
         setText("");
-        void executeCodex(cmd.name);
+        void executeCodex(cmd.name, undefined, text || `/${cmd.name}`);
       } else if (store.sendCommand(session.id, cmd.name, "")) setText("");
     } else {
       // 有参数（或 Tab 只填充）：填入「/name 」，光标留在末尾参数位等用户补完
@@ -1097,7 +1100,7 @@ function Composer({ session, dead, errored }: { session: SessionRecord; dead: bo
       noteCommandUsed(session.agent, cmdMatch[1]!);
       setText("");
       setDismissed(false);
-      void executeCodex(cmdMatch[1]!, /^\/\S+\s+([\s\S]*)$/.exec(trimmed)?.[1]);
+      void executeCodex(cmdMatch[1]!, /^\/\S+\s+([\s\S]*)$/.exec(trimmed)?.[1], text);
       return;
     }
     // 「/命令 参数」整行形态经 sendComposerInput 走结构化 command，同样记入最近使用；
@@ -1408,6 +1411,7 @@ function Composer({ session, dead, errored }: { session: SessionRecord; dead: bo
         {/* 手机：缓存时间不是按钮，挪到发送键上方的空位，底栏留给按钮 */}
         <div className="composer-input">
           <textarea
+            aria-label="消息"
             ref={textareaRef}
             value={text}
             rows={1}

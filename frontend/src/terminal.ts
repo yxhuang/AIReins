@@ -198,3 +198,58 @@ export function buildTermTabs(terminals: TerminalInfo[], activeId: string | null
 export function isTerminalToggleKey(event: Pick<KeyboardEvent, "ctrlKey" | "code" | "altKey" | "metaKey" | "shiftKey">): boolean {
   return event.ctrlKey && event.code === "Backquote" && !event.altKey && !event.metaKey && !event.shiftKey;
 }
+
+/** 交给浏览器产生原生 paste 事件，避免 xterm 把 Ctrl+V 发送为控制字符。 */
+export function isTerminalPasteKey(event: Pick<KeyboardEvent, "ctrlKey" | "code" | "altKey" | "metaKey">): boolean {
+  return event.code === "KeyV" && !event.altKey && event.ctrlKey !== event.metaKey;
+}
+
+type TermTouch = Pick<Touch, "identifier" | "clientX" | "clientY">;
+const TERM_TITLEBAR_SWIPE_DISTANCE = 48;
+
+/** 仅观察单指纵向手势；下拉距离从到达输出顶部以后开始累计。 */
+export function createTermTitlebarGesture(options: {
+  isMobile: () => boolean;
+  isAtTop: () => boolean;
+  onHiddenChange: (hidden: boolean) => void;
+}) {
+  let hidden = false;
+  let touch: TermTouch | null = null;
+  let origin: TermTouch | null = null;
+  let distance = 0;
+  const end = () => { touch = origin = null; distance = 0; };
+  const reset = () => {
+    end();
+    hidden = false;
+    options.onHiddenChange(false);
+  };
+  return {
+    reset,
+    end,
+    start(touches: ArrayLike<TermTouch>) {
+      end();
+      if (options.isMobile() && touches.length === 1) touch = origin = touches[0] ?? null;
+    },
+    move(touches: ArrayLike<TermTouch>) {
+      if (!options.isMobile() || touches.length !== 1 || !touch || !origin) { end(); return; }
+      const next = touches[0];
+      if (!next || next.identifier !== touch.identifier) { end(); return; }
+      const dx = Math.abs(next.clientX - origin.clientX);
+      const dy = Math.abs(next.clientY - origin.clientY);
+      // 横向拖动或点按不折叠标题栏。
+      if (dx > dy && dx >= 8) { end(); return; }
+      const delta = next.clientY - touch.clientY;
+      touch = next;
+      if ((!hidden && delta < 0) || (hidden && delta > 0 && options.isAtTop())) {
+        distance += Math.abs(delta);
+      } else {
+        distance = 0;
+      }
+      if (distance >= TERM_TITLEBAR_SWIPE_DISTANCE) {
+        hidden = !hidden;
+        distance = 0;
+        options.onHiddenChange(hidden);
+      }
+    },
+  };
+}

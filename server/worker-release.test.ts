@@ -348,6 +348,48 @@ async function pendingMarks(manager: InstanceType<typeof SessionManager>, id: st
   await manager.shutdown();
 }
 
+// ── 6b. 并发恢复共享任务；失败清除任务后仍可重试 ──
+for (const operation of ["remote", "send", "failure"] as const) {
+  let failNext = false;
+  const { manager, instances } = harness(() => { const fail = failNext; failNext = false; return fail; });
+  const session = await manager.create({ agent: "claude", cwd: fixture, resumeSessionId: claudeId, snapshot: "skip" });
+  await manager.sendUserMessage(session.id, { text: "初始回合" });
+  instances[0]!.finish();
+  await pendingMarks(manager, session.id);
+  await manager.release(session.id, "manual");
+  let releaseCheck!: () => void;
+  const gate = new Promise<void>(resolve => { releaseCheck = resolve; });
+  let checks = 0;
+  const reader = (manager as unknown as { nativeReader: InstanceType<typeof NativeConversationReader> }).nativeReader;
+  reader.changed = async () => { checks++; await gate; return undefined; };
+  failNext = operation === "failure";
+  const first = manager.setRemoteControl(session.id, true);
+  first.catch(() => undefined);
+  await new Promise<void>(resolve => setImmediate(resolve));
+  const second = operation === "send"
+    ? manager.sendUserMessage(session.id, { text: "并发发送" })
+    : manager.setRemoteControl(session.id, false);
+  second.catch(() => undefined);
+  try {
+    await new Promise<void>(resolve => setImmediate(resolve));
+    assert.equal(checks, 1, "两个调用共用一个原生检查");
+    assert.equal(instances.length, 1, "检查尚未结束不得起 worker");
+    const { SessionBusyError } = await import("./session-manager.js");
+    await assert.rejects(manager.remove(session.id), SessionBusyError, "检查窗口的移除是可重试忙态");
+  } finally { releaseCheck(); }
+  const results = await Promise.allSettled([first, second]);
+  assert.equal(instances.length, 2, "只创建一个续接 worker");
+  if (operation === "failure") {
+    assert.ok(results.every(result => result.status === "rejected"));
+    await manager.setRemoteControl(session.id, true);
+    assert.equal(instances.length, 3, "失败后清除在途任务，下一调用可重试");
+  } else {
+    assert.ok(results.every(result => result.status === "fulfilled"));
+    if (operation === "send") assert.equal(instances[1]!.sent.at(-1)?.text, "并发发送");
+  }
+  await manager.shutdown();
+}
+
 // ── 7. 释放后续接失败：广播 session_error、保持 released 与 idle，可重试 ──
 {
   let failNext = false;

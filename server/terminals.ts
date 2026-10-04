@@ -9,12 +9,12 @@ const MAX_TERMINAL_COLS = 500;
 const MAX_TERMINAL_ROWS = 300;
 
 /**
- * 回放专用过滤：OSC 4/10/11/12 颜色查询与 CSI DA 询问（`\x1b[>…c`）。
+ * 回放专用过滤：OSC 4/10/11/12 颜色查询、CSI DA 与 DSR/CPR 询问。
  * 这些查询没有视觉效果，但回放 scrollback 时 xterm 会重新应答，应答字节进 PTY 输入，
  * 被 shell 当键盘输入回显成垃圾（如 `11;rgb:fbfb/…`）。只剥查询（参数位只认数字/?/;），
  * `]11;rgb:x/y/z` 这类设置命令不受影响。实时推送不过滤——shell 启动时的首次应答是需要的。
  */
-const REPLAY_QUERY_RE = /\x1b\](?:4|10|11|12)(?:;[\d?]+)+(?:\x07|\x1b\\)|\x1b\[[\d;>]*c/g;
+const REPLAY_QUERY_RE = /\x1b\](?:4|10|11|12)(?:;[\d?]+)+(?:\x07|\x1b\\)|\x1b\[[\d;>]*c|\x1b\[(?:5|6|\?6)n/g;
 
 export function stripReplayQueries(data: string): string {
   return data.replace(REPLAY_QUERY_RE, "");

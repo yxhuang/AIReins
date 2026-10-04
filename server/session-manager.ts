@@ -1,4 +1,5 @@
 import { sessionTitle } from "../shared/session-title.js";
+import { configOptionsForModel } from "../shared/model-config.js";
 import { statSync } from "node:fs";
 import { isAbsolute, resolve } from "node:path";
 import { readClaudeEffectiveSettings, type ClaudeEffectiveSettings } from "./claude-settings.js";
@@ -75,6 +76,8 @@ const SESSION_INFO_SUBTYPES: Record<string, string> = {
   output: "initialize",
 };
 
+export class SessionBusyError extends Error {}
+
 export class SessionManager {
   private readonly thinkingUpdates = new Set<string>();
   private readonly sideQuestions = new Set<string>();
@@ -93,6 +96,8 @@ export class SessionManager {
   /** 移除会话时在后台停的进程；shutdown 要等它们，免得退出时留下孤儿 CLI。 */
   private readonly backgroundStops = new Set<Promise<void>>();
   private readonly checkingSessions = new Set<string>();
+  /** 同会话的原生检查/恢复共享一个在途任务，避免并发菜单操作重复起 worker。 */
+  private readonly nativeRefreshes = new Map<string, Promise<void>>();
   /** 发过消息的会话：Claude 原生存档要到首条消息后才落盘，没发过的切换配置时不能续接 */
   private readonly promptedSessions = new Set<string>();
   private readonly nativeMarks = new Map<string, NativeConversationMark>();
@@ -660,8 +665,10 @@ export class SessionManager {
     const worker = deferredClaude ? undefined : await this.ensureWorker(id);
     if (this.restartingSessions.has(id)) throw new Error("正在切换模型，请稍候");
     const schema = worker?.getConfigSchema() ?? CLAUDE_CONFIG_SCHEMA;
+    const options = configOptionsForModel(schema.options,
+      config.model === undefined ? record.config.model : config.model);
     for (const [key, value] of entries) {
-      const option = schema.options.find((item) => item.id === key);
+      const option = options.find((item) => item.id === key);
       if (!option) throw new Error(`${record.agent} 不支持配置项：${key}`);
       if (!option.mutable) throw new Error(`${record.agent}.${key} 只能在建会话时设置`);
       if (value === null && !option.values.some((item) => item.value === null)) {
@@ -710,8 +717,8 @@ export class SessionManager {
 
   async remove(id: string): Promise<SessionRecord | undefined> {
     this.assertWritableTranscript(id);
-    if (this.checkingSessions.has(id) || this.restartingSessions.has(id)) {
-      throw new Error("会话正在续接，请稍候再移除");
+    if (this.checkingSessions.has(id) || this.restartingSessions.has(id) || this.nativeRefreshes.has(id)) {
+      throw new SessionBusyError("会话正在续接，请稍候再移除");
     }
     const record = this.sessions.get(id);
     if (!record) return undefined;
@@ -1033,7 +1040,17 @@ export class SessionManager {
    * 起新进程以同一原生 ID 续接，有外部新消息时先广播 external_messages_added。
    * 已释放会话没有旧 worker 可停；指纹缺失/比对失败时活会话照常发送，已释放会话仍必须重建 worker。
    */
-  private async refreshBeforeSend(id: string): Promise<void> {
+  private refreshBeforeSend(id: string): Promise<void> {
+    const existing = this.nativeRefreshes.get(id);
+    if (existing) return existing;
+    const pending = this.refreshNativeBeforeSend(id).finally(() => {
+      if (this.nativeRefreshes.get(id) === pending) this.nativeRefreshes.delete(id);
+    });
+    this.nativeRefreshes.set(id, pending);
+    return pending;
+  }
+
+  private async refreshNativeBeforeSend(id: string): Promise<void> {
     this.assertWritableTranscript(id);
     await this.releases.get(id);
     await this.pendingMarkReads.get(id);
@@ -1109,6 +1126,7 @@ export class SessionManager {
   private async ensureWorker(id: string): Promise<Driver> {
     this.assertWritableTranscript(id);
     await this.releases.get(id);
+    await this.nativeRefreshes.get(id);
     const existing = this.workers.get(id);
     if (existing) return existing;
     const record = this.sessions.get(id);

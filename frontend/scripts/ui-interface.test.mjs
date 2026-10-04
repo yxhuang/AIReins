@@ -60,7 +60,7 @@ test("U1：长闸门路径换行并完整保留", () => {
 });
 test("U2：手机深色发送箭头改深底色，身份填充保留", () => {
   assert.match(rule(".cfg-bar .send-btn"), /color:\s*light-dark\(#fff,\s*var\(--bg\)\)/);
-  for (const agent of ["codex", "kimi"]) assert.match(rule(`.agent-${agent} .cfg-bar .send-btn`), new RegExp(`background:\\s*var\\(--agent-${agent}\\)`));
+  for (const agent of ["codex", "kimi"]) assert.match(rule(`.agent-${agent} .cfg-bar .send-btn`), new RegExp(`background(?:-color)?:\\s*var\\(--agent-${agent}\\)`));
 });
 test("U3：触屏折叠按钮补 44px 命中区而不改视觉高度", () => {
   for (const cls of ["tool-head", "thought-head", "gate-fold"]) assert.match(rule(`.${cls}::after`), /min-height:\s*44px/);
@@ -152,9 +152,9 @@ test("桌面底栏1：模型与审批共享 30px 浅底胶囊，模型按内容�
 test("桌面底栏2：发送与空输入中断共享圆形身份色，桌面直径 32px", () => {
   const body = sharedRule(".cfg-bar .send-btn");
   assert.match(body, /border-radius:\s*50%/);
-  assert.match(body, /background:\s*var\(--agent-claude\)/);
+  assert.match(body, /background(?:-color)?:\s*var\(--agent-claude\)/);
   assert.match(body, /color:\s*light-dark\(#fff,\s*var\(--bg\)\)/);
-  for (const agent of ["codex", "kimi"]) assert.match(sharedRule(`.agent-${agent} .cfg-bar .send-btn`), new RegExp(`background:\\s*var\\(--agent-${agent}\\)`));
+  for (const agent of ["codex", "kimi"]) assert.match(sharedRule(`.agent-${agent} .cfg-bar .send-btn`), new RegExp(`background(?:-color)?:\\s*var\\(--agent-${agent}\\)`));
   assert.match(desktopRule(".cfg-bar .send-btn"), /width:\s*32px/);
   assert.match(desktopRule(".cfg-bar .send-btn"), /height:\s*32px/);
   assert.match(desktopRule(".cfg-bar .send-btn svg"), /width:\s*20px/);
@@ -169,7 +169,7 @@ test("桌面底栏3：独立中断钮用身份色，手机中断钮与命中区�
   const body = desktopRule(".cfg-bar .composer-interrupt");
   assert.match(body, /background:\s*var\(--agent-claude\)/);
   assert.match(body, /color:\s*light-dark\(#fff,\s*var\(--bg\)\)/);
-  for (const agent of ["codex", "kimi"]) assert.match(desktopRule(`.agent-${agent} .cfg-bar .composer-interrupt`), new RegExp(`background:\\s*var\\(--agent-${agent}\\)`));
+  for (const agent of ["codex", "kimi"]) assert.match(desktopRule(`.agent-${agent} .cfg-bar .composer-interrupt`), new RegExp(`background(?:-color)?:\\s*var\\(--agent-${agent}\\)`));
   assert.match(desktopRule(".cfg-bar .composer-interrupt::after"), /content:\s*none/);
   assert.match(sharedRule(".composer-interrupt"), /width:\s*30px/);
   assert.match(sharedRule(".composer-interrupt"), /border-radius:\s*50%/);

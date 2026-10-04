@@ -435,3 +435,23 @@ await t("normalizeQuestions：otherSupported 每题优先、事件级兜底，�
 
 console.log(`✅ effective/ask 前端逻辑回归全过（${pass} 例）`);
 process.exit(process.exitCode ?? 0);
+
+await t("任意问题键不读取对象原型且完整提交，初始提问卡可渲染", async () => {
+  const React = (await import("react")).default;
+  globalThis.React = React;
+  const { renderToStaticMarkup } = await import("react-dom/server");
+  const { QuestionBlock } = await import("../src/components/StreamItems.tsx");
+  for (const question of ["constructor", "toString", "__proto__"]) {
+    const q = { question, multiSelect: true, options: [{ label: "A" }, { label: "B" }] };
+    assert.equal(allAnswered([q], {}), false);
+    const selected = toggleOption(toggleOption({}, q, "B"), q, "A");
+    assert.equal(allAnswered([q], selected), true);
+    const answers = buildQuestionAnswers([q], selected);
+    assert.ok(Object.hasOwn(answers, question));
+    assert.equal(answers[question], "A,B");
+    assert.equal(Object.getPrototypeOf(answers), Object.prototype);
+    assert.ok(renderToStaticMarkup(React.createElement(QuestionBlock, { item: { agent: "claude", requestId: "prototype", questions: [q] }, sessionId: "test", dead: false })).includes(question));
+    const custom = setOtherText(toggleOther({}, {}, q).other, q, " 自定义答案 ");
+    assert.equal(buildQuestionAnswers([q], {}, custom)[question], "自定义答案");
+  }
+});

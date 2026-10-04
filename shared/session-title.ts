@@ -1,14 +1,22 @@
 // 会话标题：列表字段优先，缺省时用首条 user_message 派生。
-// 所有空白（含换行）压成单空格后按显示宽度截断（CJK/全角计 2，其余计 1，上限 30，超出加 …）；
+// 所有空白（含换行）压成单空格；保留完整标题，由界面按可用宽度显示省略号。
 // 首条消息还没到时返回占位「新会话」。
 export function sessionTitle(session: { title?: string; customTitle?: string }, events?: { type: string; payload: Record<string, unknown> }[]): string {
   if (session.customTitle?.trim()) return session.customTitle.trim();
-  if (session.title !== undefined) return session.title;
   const firstUser = events?.find((event) => event.type === "user_message");
-  const text = firstUser ? String(firstUser.payload.text ?? "") : "";
+  const command = firstUser?.payload.command;
+  const commandText = command && typeof command === "object" && "name" in command && typeof command.name === "string"
+    ? `/${command.name}${"arguments" in command && typeof command.arguments === "string" ? ` ${command.arguments}` : ""}`
+    : "";
+  const text = firstUser ? String(firstUser.payload.text ?? commandText) : "";
   const flat = text.replace(/\s+/g, " ").trim();
+  if (session.title !== undefined) {
+    // 旧服务端会把自动标题截到显示宽度 30；已有首条消息时可安全补全。
+    // 只补全完全匹配旧截断规则的标题，保持其他列表字段的优先级。
+    return flat && session.title === truncateDisplayWidth(flat, 30) ? flat : session.title;
+  }
   if (!flat) return "新会话";
-  return truncateDisplayWidth(flat, 30);
+  return flat;
 }
 
 // 按显示宽度截断：CJK/全角字符计 2，其余计 1；超出上限时截断并追加 …。

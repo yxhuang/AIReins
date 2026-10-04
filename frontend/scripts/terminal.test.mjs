@@ -4,6 +4,8 @@ import { strict as assert } from "node:assert";
 
 const {
   isTerminalToggleKey,
+  isTerminalPasteKey,
+  createTermTitlebarGesture,
   TERM_ACTIVE_STORAGE_KEY,
   TERM_MIN_WIDTH,
   TERM_MAIN_MIN_WIDTH,
@@ -31,6 +33,122 @@ t("Ctrl+Backquote requires exactly Ctrl and physical Backquote", () => {
   }
   assert.equal(isTerminalToggleKey({ ...key, ctrlKey: false }), false);
   assert.equal(isTerminalToggleKey({ ...key, code: "KeyQ" }), false);
+});
+
+t("粘贴按键交给浏览器：Ctrl+V、Ctrl+Shift+V、Cmd+V；普通 V 与其他控制键仍交给终端", () => {
+  const key = { code: "KeyV", ctrlKey: true, metaKey: false, altKey: false, shiftKey: false };
+  assert.equal(isTerminalPasteKey(key), true);
+  assert.equal(isTerminalPasteKey({ ...key, shiftKey: true }), true);
+  assert.equal(isTerminalPasteKey({ ...key, ctrlKey: false, metaKey: true }), true);
+  assert.equal(isTerminalPasteKey({ ...key, ctrlKey: false }), false);
+  assert.equal(isTerminalPasteKey({ ...key, altKey: true }), false);
+  assert.equal(isTerminalPasteKey({ ...key, metaKey: true }), false);
+  for (const code of ["KeyC", "KeyD", "Backquote", "Enter"]) {
+    assert.equal(isTerminalPasteKey({ ...key, code }), false);
+  }
+});
+
+const swipeFixture = () => {
+  const changes = [];
+  const state = { mobile: true, atTop: false };
+  const gesture = createTermTitlebarGesture({
+    isMobile: () => state.mobile,
+    isAtTop: () => state.atTop,
+    onHiddenChange: (hidden) => changes.push(hidden),
+  });
+  const point = (y, x = 0, identifier = 1) => [{ identifier, clientX: x, clientY: y }];
+  return { gesture, changes, state, point };
+};
+
+t("手机顶栏：上滑不到阈值保留，达到 48px 隐藏且不重复触发", () => {
+  const { gesture, changes, point } = swipeFixture();
+  gesture.start(point(200));
+  gesture.move(point(175));
+  gesture.move(point(153));
+  assert.deepEqual(changes, []);
+  gesture.move(point(152));
+  gesture.move(point(80));
+  assert.deepEqual(changes, [true]);
+});
+
+t("手机顶栏：下拉先滚输出，到达顶部后的额外 48px 才恢复", () => {
+  const { gesture, changes, state, point } = swipeFixture();
+  gesture.start(point(200));
+  gesture.move(point(100));
+  gesture.end();
+  gesture.start(point(100));
+  gesture.move(point(200));
+  assert.deepEqual(changes, [true], "非顶部下拉不恢复");
+  state.atTop = true;
+  gesture.move(point(247));
+  assert.deepEqual(changes, [true], "滚到顶部之前的距离不能计入阈值");
+  gesture.move(point(248));
+  assert.deepEqual(changes, [true, false]);
+});
+
+t("手机顶栏：可跨手势恢复，但多次短滑不能累计成一次长滑", () => {
+  const { gesture, changes, state, point } = swipeFixture();
+  for (let i = 0; i < 3; i++) {
+    gesture.start(point(200));
+    gesture.move(point(170));
+    gesture.end();
+  }
+  assert.deepEqual(changes, []);
+  gesture.start(point(200));
+  gesture.move(point(150));
+  gesture.end();
+  state.atTop = true;
+  gesture.start(point(100));
+  gesture.move(point(150));
+  assert.deepEqual(changes, [true, false]);
+});
+
+t("手机顶栏：离开顶部或反向移动后重新累计下拉力度", () => {
+  const { gesture, changes, state, point } = swipeFixture();
+  gesture.start(point(300));
+  gesture.move(point(250));
+  state.atTop = true;
+  gesture.move(point(290));
+  state.atTop = false;
+  gesture.move(point(310));
+  state.atTop = true;
+  gesture.move(point(340));
+  gesture.move(point(335));
+  gesture.move(point(370));
+  assert.deepEqual(changes, [true]);
+  gesture.move(point(383));
+  assert.deepEqual(changes, [true, false]);
+});
+
+t("手机顶栏：横向、多指、手指身份变化不触发；桌面也不触发", () => {
+  const { gesture, changes, state, point } = swipeFixture();
+  gesture.start(point(200));
+  gesture.move(point(190, 80));
+  gesture.move(point(100, 80));
+  gesture.start([...point(200), ...point(200, 20, 2)]);
+  gesture.move(point(100));
+  gesture.start(point(200));
+  gesture.move([...point(170), ...point(170, 20, 2)]);
+  gesture.move(point(100));
+  gesture.start(point(200));
+  gesture.move(point(100, 0, 2));
+  state.mobile = false;
+  gesture.start(point(200));
+  gesture.move(point(100));
+  assert.deepEqual(changes, []);
+});
+
+t("手机顶栏：重新进入或结束确认的 reset 显示顶栏并取消在途手势", () => {
+  const { gesture, changes, state, point } = swipeFixture();
+  gesture.start(point(200));
+  gesture.move(point(100));
+  gesture.reset();
+  state.atTop = true;
+  gesture.move(point(200));
+  assert.deepEqual(changes, [true, false]);
+  gesture.start(point(200));
+  gesture.move(point(152));
+  assert.deepEqual(changes, [true, false, true]);
 });
 
 // ══ clampPanelWidth ══

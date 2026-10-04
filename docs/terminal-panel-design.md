@@ -207,7 +207,7 @@ REST（沿用现有 `{code, msg, data}` 包装）：
 
 WS `/ws/terminal`（与 `/ws` 同一套 Host / Origin / Tailscale 身份检查；能力位为 false 时拒绝升级），全部 JSON 文本帧（PTY 输出本就是 UTF-8 字符串，不再做二进制分帧，偏离 §3 原建议，换实现简单）：
 
-- 上行 `{type:"attach", terminalId}`：服务端先回 `{type:"attached", terminalId, omitted}`（`omitted` = scrollback 因 256KB 上限丢掉的字节数，>0 时前端顶部提示「已省略较早输出」），再发一条 `{type:"data", terminalId, data}` 装当前全部 scrollback（回放帧会剥掉 OSC 4/10/11/12 颜色查询与 CSI DA 询问序列，见 `stripReplayQueries`——重放会让 xterm 重新应答、应答字节被 shell 当输入回显成垃圾；实时推送不剥），之后实时推送。同一连接可 attach 多个；重复 attach 同一 id 视为重新回放（前端先 `reset()` 再写）。上行 `{type:"detach", terminalId}` 解除该连接对它的订阅（PTY 与 scrollback 保留），前端切换 shell 时对切走的终端发送。
+- 上行 `{type:"attach", terminalId}`：服务端先回 `{type:"attached", terminalId, omitted}`（`omitted` = scrollback 因 256KB 上限丢掉的字节数，>0 时前端顶部提示「已省略较早输出」），再发一条 `{type:"data", terminalId, data}` 装当前全部 scrollback（回放帧会剥掉 OSC 4/10/11/12 颜色查询与 CSI DA 与 DSR/CPR（5n/6n/?6n）询问序列，见 `stripReplayQueries`——重放会让 xterm 重新应答、应答字节被 shell 当输入回显成垃圾；实时推送不剥），之后实时推送。同一连接可 attach 多个；重复 attach 同一 id 视为重新回放（前端先 `reset()` 再写）。上行 `{type:"detach", terminalId}` 解除该连接对它的订阅（PTY 与 scrollback 保留），前端切换 shell 时对切走的终端发送。
 - 上行 `{type:"input", terminalId, data}`、`{type:"resize", terminalId, cols, rows}`。
 - 下行 `{type:"data", terminalId, data}`、`{type:"exit", terminalId, exitCode}`、`{type:"error", terminalId?, message}`（未知 id、已退出等）。
 - 服务端每终端保留最近 256KB 输出；进程退出后记录保留（`exited: true`），直到 server 重启。server 重启 = 全部终端结束，这是已知行为。
@@ -221,5 +221,9 @@ WS `/ws/terminal`（与 `/ws` 同一套 Host / Origin / Tailscale 身份检查�
 - 激活终端 id 存 localStorage `workbench-term-active`（按设备）；刷新/重进面板优先重连它，已退出或不存在回落第一个未退出终端，都没有新建 bash。
 - 标题栏保留原 `Segmented.term-shells` bash / PowerShell 滑块，value 跟随激活标签的 kind。点另一侧优先切到本面板内最近激活过的该 kind 存活终端；没有激活记录则选注册表第一个该 kind 存活终端；都没有才新建，cwd 规则与「＋」一致。
 - 「＋」固定在标签条右端，一键新建当前激活标签同 kind 的终端；没有激活标签时新建 bash。cwd 仍优先跟随当前所看会话，否则用默认 cwd；不弹 shell 菜单。
+- 「＋」右侧为最大化 / 还原按钮，两者图标均为 22px。最大化仅铺满 `.workspace`（主会话 + 终端区域），保留左侧栏；主会话保持挂载，终端重新 fit 并同步 PTY 尺寸，还原沿用之前的分栏宽度。窄屏已铺满，不显示此按钮。
+- Bash / PowerShell 均支持 `Ctrl+V`、`Ctrl+Shift+V`（Mac 为 `Cmd+V`）：绕过 xterm 键盘控制序列，交给浏览器原生 paste 事件与 xterm 粘贴处理。终端内容区右键直接粘贴，移动端保留快捷键栏的「粘贴」按钮；右键 / 按钮读剪贴板被拒绝或不可用时弹出输入框，手动粘贴后确认。粘贴沿用 xterm 的换行归一与 bracketed paste。
+- 标签默认宽度为 128px，可继续收缩，触控标签仍保留 116px 最小宽度和 44px 点击目标。最大化按钮在窄屏及无悬停的触控设备上隐藏，覆盖手机横屏。
+- 手机终端内容区单指上滑累计 48px 后隐藏第一行标题栏，标签行保留；下滑只有在 xterm 输出视口已到顶部（`viewportY === 0`）时才累计，继续下拉 48px 后显示标题栏。横向手势、多指手势和点击忽略，不拦截 xterm 滚动；每次手势重新累计，重新打开、切换标签、显示结束确认或切换窄屏状态时恢复标题栏。
 - 每个标签右侧「×」：存活终端复用标题栏的行内二次确认，非激活标签先切到它再确认；只有点击「确认结束」才调用 kill。已退出标签直接从本面板条上移除，并切到最近的存活邻居（同距离右侧优先）；没有存活邻居则清空激活态。注册表接口不变。
 - 标签为等宽可收缩的 Chrome 圆角与反向圆弧脚，带 shell 图标、标题省略与相邻分隔线；标签区独立横向滚动。激活标签「×」常显，其他标签悬停或键盘聚焦时显示。窄屏点击区域至少 44px，cwd 让位，滑块保留。

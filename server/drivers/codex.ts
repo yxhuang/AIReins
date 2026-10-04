@@ -1,4 +1,5 @@
 import type {
+  ConfigOptionValue,
   ConfigOptionId,
   DriverConfigSchema,
   DriverOptions,
@@ -13,6 +14,7 @@ import { isRiskyConfig, mergeSessionConfig } from "../session-config.js";
 import { BaseDriver, errorMessage, parseJsonLine, userMessageText, withTimeout } from "./base.js";
 import { StdioRpcProbe } from "./rpc-probe.js";
 import { CODEX_COMMANDS, codexSkillInputs, codexSkillsForCwd, parseCodexCommand } from "../codex-commands.js";
+import { configOptionsForModel, modelConfigPatch } from "../../shared/model-config.js";
 
 interface PendingRpc {
   resolve(value: any): void;
@@ -43,7 +45,8 @@ const APPROVAL_METHODS = new Set([
   "item/permissions/requestApproval",
 ]);
 
-const CODEX_EFFORTS = ["minimal", "low", "medium", "high", "xhigh"];
+// 仅用于没有能力字段的旧版 app-server；新版严格采用模型返回的档位。
+const LEGACY_CODEX_EFFORTS = ["minimal", "low", "medium", "high", "xhigh"];
 
 interface CodexModelInfo {
   id?: string;
@@ -51,6 +54,7 @@ interface CodexModelInfo {
   displayName?: string;
   description?: string;
   defaultReasoningEffort?: string;
+  supportedReasoningEfforts?: { reasoningEffort: string; description?: string }[];
   isDefault?: boolean;
 }
 
@@ -112,7 +116,27 @@ export function codexConfigSchemaFromModels(
   const configuredEffort = typeof effectiveConfig?.model_reasoning_effort === "string"
     ? effectiveConfig.model_reasoning_effort
     : undefined;
-  const builtInEffort = CODEX_EFFORTS.includes(effectiveModel?.defaultReasoningEffort ?? "")
+  const followEffort: ConfigOptionValue = { value: null, label: "跟随 Codex 配置" };
+  const legacyEfforts = [followEffort, ...LEGACY_CODEX_EFFORTS.map(value => ({ value, label: value }))];
+  const valuesByModel: Record<string, ConfigOptionValue[]> = {};
+  const defaultsByModel: Record<string, string | null> = {};
+  for (const model of models) {
+    const id = model.model ?? model.id;
+    if (!id) continue;
+    const seen = new Set<string>();
+    valuesByModel[id] = model.supportedReasoningEfforts === undefined ? legacyEfforts : [followEffort,
+      ...model.supportedReasoningEfforts.filter(item => {
+        if (!item.reasoningEffort || seen.has(item.reasoningEffort)) return false;
+        seen.add(item.reasoningEffort); return true;
+      }).map(item => ({ value: item.reasoningEffort, label: item.reasoningEffort,
+        ...(item.description ? { description: item.description } : {}) })),
+    ];
+    defaultsByModel[id] = valuesByModel[id].some(item => item.value === model.defaultReasoningEffort)
+      ? model.defaultReasoningEffort! : null;
+  }
+  const effectiveModelId = effectiveModel?.model ?? effectiveModel?.id;
+  const efforts = effectiveModelId ? valuesByModel[effectiveModelId] ?? legacyEfforts : legacyEfforts;
+  const builtInEffort = efforts.some(item => item.value === effectiveModel?.defaultReasoningEffort)
     ? effectiveModel!.defaultReasoningEffort!
     : null;
   // effectiveConfig === undefined 表示 config/read 不可用；此时宁可报告未知，也不猜内建默认值。
@@ -141,9 +165,10 @@ export function codexConfigSchemaFromModels(
         id: "effort",
         name: "推理强度",
         values: [
-          { value: null, label: "跟随 Codex 配置" },
-          ...CODEX_EFFORTS.map((value) => ({ value, label: value })),
+          ...efforts,
         ],
+        valuesByModel,
+        defaultsByModel,
         default: defaultEffort,
         mutable: true,
       },
@@ -238,8 +263,9 @@ export class CodexDriver extends BaseDriver {
       effectiveConfig,
     );
     this.validateConfig(this.config);
-    const modelOption = this.configSchema.options.find((option) => option.id === "model");
-    const effortOption = this.configSchema.options.find((option) => option.id === "effort");
+    const resolvedOptions = configOptionsForModel(this.configSchema.options, this.config.model);
+    const modelOption = resolvedOptions.find((option) => option.id === "model");
+    const effortOption = resolvedOptions.find((option) => option.id === "effort");
     this.config = {
       model: this.config.model ?? modelOption?.default,
       effort: this.config.effort ?? effortOption?.default,
@@ -345,6 +371,9 @@ export class CodexDriver extends BaseDriver {
   }
 
   async setConfig(config: SessionConfig): Promise<SessionConfig> {
+    if (config.model !== undefined) {
+      config = { ...modelConfigPatch(this.configSchema.options, this.config, config.model), ...config };
+    }
     this.validateConfig(config);
     this.config = mergeSessionConfig(this.config, config);
     this.config.permissionMode ??= "on-request";
@@ -669,7 +698,7 @@ export class CodexDriver extends BaseDriver {
   }
 
   private configDefault(id: "model" | "effort"): string | null {
-    return this.configSchema.options.find((option) => option.id === id)?.default ?? null;
+    return configOptionsForModel(this.configSchema.options, this.config.model).find((option) => option.id === id)?.default ?? null;
   }
 
   private capturePendingConfig(): ApplyingConfig | undefined {
@@ -728,9 +757,11 @@ export class CodexDriver extends BaseDriver {
   }
 
   private validateConfig(config: SessionConfig): void {
+    const options = configOptionsForModel(this.configSchema.options,
+      config.model === undefined ? this.config.model : config.model);
     for (const [id, value] of Object.entries(config)) {
       if (value === undefined || value === null) continue;
-      const option = this.configSchema.options.find((item) => item.id === id);
+      const option = options.find((item) => item.id === id);
       if (!option) throw new Error(`Codex 不支持配置项：${id}`);
       // 仅兼容当前旧会话；不再提供为新会话选择旧策略的入口。
       if (id === "permissionMode" && ["never", "untrusted"].includes(value)

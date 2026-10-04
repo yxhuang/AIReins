@@ -1,4 +1,5 @@
 import type { AgentKind, ConfigOptionId, DriverConfigOption, EffectiveSource, SessionRecord } from "./types";
+export { configOptionsForModel, modelConfigPatch } from "../../shared/model-config";
 
 /** 新建表单显式提交用户指定的默认模式，兼容尚未重启的服务端。 */
 export function newSessionConfig(agent: AgentKind): Partial<Record<ConfigOptionId, string>> {

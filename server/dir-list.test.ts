@@ -38,4 +38,26 @@ try {
   else process.env.HOME = previousHome;
 }
 
+// Exact limits must distinguish complete output from an omitted eligible entry.
+const limited = join(fixture, "limited");
+await mkdir(limited);
+await Promise.all(Array.from({ length: 1000 }, (_, n) => mkdir(join(limited, `dir-${String(n).padStart(4, "0")}`))));
+await writeFile(join(limited, "zzz-not-a-directory.txt"), "");
+assert.equal((await listDirectories(limited)).truncated, false, "恰好1000个目录且尾部仅不合格文件，仍完整");
+await mkdir(join(limited, "dir-overflow"));
+const overflow = await listDirectories(limited);
+assert.equal(overflow.dirs.length, 1000);
+assert.equal(overflow.truncated, true, "第1001个合格目录必须标截断");
+await Promise.all(Array.from({ length: 1000 }, (_, n) => writeFile(join(limited, `file-${String(n).padStart(4, "0")}`), "")));
+const mixed = await listDirectories(limited, { files: true });
+assert.equal(mixed.dirs.length, 1000);
+assert.equal(mixed.files?.length, 1000, "目录超限仍需收齐文件");
+assert.equal(mixed.truncated, true);
+const fileLimited = join(fixture, "file-limited");
+await mkdir(fileLimited);
+await Promise.all(Array.from({ length: 1000 }, (_, n) => writeFile(join(fileLimited, `${n}.txt`), "")));
+assert.equal((await listDirectories(fileLimited, { files: true })).truncated, false);
+await writeFile(join(fileLimited, "overflow.txt"), "");
+assert.equal((await listDirectories(fileLimited, { files: true })).truncated, true);
+
 console.log("dir-list: 过滤、排序、符号链接、parent、缺省及错误路径通过");

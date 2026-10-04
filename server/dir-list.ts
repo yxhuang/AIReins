@@ -69,17 +69,18 @@ export async function listDirectories(rawPath?: string, options: { files?: boole
       }
       if (dirs.length === MAX_DIRS) {
         truncated = true;
+        if (!options.files || files.length === MAX_FILES) break;
         continue;
       }
       dirs.push({ name: entry.name, path: child });
     } else if (isFile && options.files === true) {
       if (files.length === MAX_FILES) {
         truncated = true;
+        if (dirs.length === MAX_DIRS) break;
         continue;
       }
       files.push({ name: entry.name, path: child });
     }
-    if (dirs.length === MAX_DIRS && (!options.files || files.length === MAX_FILES)) break;
   }
   return {
     path,

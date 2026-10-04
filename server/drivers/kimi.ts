@@ -701,7 +701,7 @@ export class KimiDriver extends BaseDriver {
     void terminal.done.then(() => this.replyResult(id, {
       exitCode: terminal.exitCode ?? null,
       signal: terminal.signal ?? null,
-    }));
+    })).catch(() => { /* worker 已停止时，迟到的终端回复无需再发送。 */ });
   }
 
   private handleTerminalRelease(id: string | number, params: Record<string, any>): void {

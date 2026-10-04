@@ -121,7 +121,7 @@ webhook 地址就是密钥：文件权限设为 600，也不要写进日志或�
 - `POST /api/sessions`：创建会话，统一配置见下文
 - `POST /api/snapshot/preflight`：建会话前检查 cwd 是否需要及能够自动快照
 - `GET /api/fs/dirs?path=<绝对路径>&files=1`：只读列出一级子目录；省略 `path` 时使用 `~/dev`（不存在则 `$HOME`）；带 `files=1` 时同层普通文件一并列出（供「+」附件的电脑文件选择）
-- `POST /api/uploads?sessionId=<id>&name=<文件名>`：上传附件，请求体为原始字节（非 multipart）；保存到 `~/.workbench/uploads/<sessionId>/`，返回 `{path,name,size,mimeType}`
+- `POST /api/uploads?sessionId=<id>&name=<文件名>`：上传附件，请求体为原始字节（非 multipart）；保存到 `~/.workbench/uploads/<sessionId>/`，返回 `{path,name,size,mimeType}` 同秒同名文件通过 `wx` 原子预留路径，再用该文件描述符写流；并发上传各自保留，失败只删除自己的半截文件。
 - `GET /api/uploads/file?path=<绝对路径>`：读取上传目录内的文件字节（缩略图用）；只允许 `~/.workbench/uploads/` 之下
 - `GET /api/sessions`
 - `GET /api/sessions/:id`
@@ -142,7 +142,7 @@ webhook 地址就是密钥：文件权限设为 600，也不要写进日志或�
 - `uri` 仅为协议链接：WSL 返回 `vscode://vscode-remote/wsl+<distro>/<encoded-path>`，其他 Linux 返回 `vscode://file/<encoded-path>`；路径分段编码，非绝对路径或控制字符返回 null。后端不启动 VSCode，不写 settings；文件可以尚未创建。Hooks 等在编辑器保存后重新打开面板查看，某些配置需下次续接。插件/策略提供的 Hooks 仍按原来源展示，不伪装成用户 settings 中的条目。
 - 新菜单只用于 Claude；Rewind 没有接入：虽然协议有 `rewind_files {user_message_id,dry_run}`，当前 worker 未启用 SDK 文件检查点且 wb 事件没有原生用户 UUID，实测 `canRewind:false,error:"File rewinding is not enabled."`，无法提供可信的文件/消息预览。扩展的会话回退另走宿主 fork + resume 截点，不能直接移植。调查表与冒烟证据已归档到 `~/dev/_notes/backups/workbench-local-docs-20261002.tgz`（`.work-orders/2026-10-01-slash-ext-report.md`、`scratch/slash-ext/`）。
 - `GET /api/sessions/:id/files?q=<关键词>&limit=<默认50>`：在会话 `cwd` 内检索可引用的普通文件
-- `DELETE /api/sessions/:id`：停止 worker；删注册表条目，并删 wb 自己的副本（transcript、未被引用的附件）；三家原生记录不动
+- `DELETE /api/sessions/:id`：停止 worker；删注册表条目，并删 wb 自己的副本（transcript、未被引用的附件）；三家原生记录不动。响应的 `transcriptsDeleted:true` 仅指 wb 副本，`workbenchTranscriptPreserved:false`、`nativeTranscriptPreserved:true` 如实报告；续接/检查中的移除返回 400 / 40063，IO 错误仍返回 500。
 - `GET /api/history`：只读列出三家 CLI 自己保存的所有来源会话；没有用户消息的会话隐藏，`empty` 单独计数（分页为本页扫描计数），`skipped` 记录损坏/不可读候选。命中 delegate 元数据的条目附带 `dispatch:{runId,name}`，UUID 和 `session_...` 原样匹配；派单映射只读全部目录的 `run.json`/旧 `meta.json`，缓存 30 秒。
 - `GET /api/history/:agent/:nativeSessionId/messages`：从最新消息向前分页读取完整原生历史
 - `GET /api/meta`：server/CLI 实测版本、按请求入口计算的终端能力位、三 driver 能力位与配置 schema
@@ -334,7 +334,7 @@ REST 沿用 `{code,msg,data,request_id}` 信封：
 
 `TerminalInfo = {id:string, cwd:string, shell:string, cols:number, rows:number, createdAt:string, exited:boolean, exitCode:number|null}`。
 
-`/ws/terminal` 是独立的 JSON 文本帧通道，一个连接可订阅多个终端。上行 `{type:"attach",terminalId}` 后，服务端依次发送 `{type:"attached",terminalId,omitted}`、`{type:"data",terminalId,data}`（当前全部回放），随后推送实时 `{type:"data",terminalId,data}`。重复 attach 同一 id 会重新回放。**回放帧会剥掉 OSC 4/10/11/12 颜色查询与 CSI DA 询问序列**（`stripReplayQueries`）：查询无视觉效果，但重放时 xterm 会重新应答，应答字节进 PTY 输入被 shell 回显成垃圾；实时推送不剥。每终端只保留最近 256KB 输出，`omitted` 为此前丢弃的字节数。上行还支持 `{type:"input",terminalId,data}` 和 `{type:"resize",terminalId,cols,rows}`。进程退出发送 `{type:"exit",terminalId,exitCode}`；未知 id、已退出或参数无效发送 `{type:"error",terminalId?,message}`。连接断开仅解除订阅，不结束 PTY。
+`/ws/terminal` 是独立的 JSON 文本帧通道，一个连接可订阅多个终端。上行 `{type:"attach",terminalId}` 后，服务端依次发送 `{type:"attached",terminalId,omitted}`、`{type:"data",terminalId,data}`（当前全部回放），随后推送实时 `{type:"data",terminalId,data}`。重复 attach 同一 id 会重新回放。**回放帧会剥掉 OSC 4/10/11/12 颜色查询与 CSI DA 与 DSR/CPR（5n/6n/?6n）询问序列**（`stripReplayQueries`）：查询无视觉效果，但重放时 xterm 会重新应答，应答字节进 PTY 输入被 shell 回显成垃圾；实时推送不剥。每终端只保留最近 256KB 输出，`omitted` 为此前丢弃的字节数。上行还支持 `{type:"input",terminalId,data}` 和 `{type:"resize",terminalId,cols,rows}`。进程退出发送 `{type:"exit",terminalId,exitCode}`；未知 id、已退出或参数无效发送 `{type:"error",terminalId?,message}`。连接断开仅解除订阅，不结束 PTY。
 
 ## 委派前自动快照
 
@@ -506,7 +506,7 @@ Claude 跳过 meta/sidechain，按 assistant 内容块顺序输出文字与 `too
 
 `resumeCommand` 是带 cwd 的原生续接命令，cwd 做 shell 单引号转义：Claude `cd '<cwd>' && claude --resume <id>`，Codex `cd '<cwd>' && codex resume <id>`，Kimi `cd '<cwd>' && kimi -S <id>`。
 
-已释放会话再发消息时走与「别处续聊」完全相同的续接路径（`refreshBeforeSend`）：比对原生指纹、起新进程以同一原生 ID 续接、有外部新增时先广播 `external_messages_added`，成功后清除 `released`；区别只是没有旧 worker 可停。`set_config`、`set_remote_control` 等需要 worker 的 WS 操作经 `ensureWorker` 先按同一路径拉起再执行；`interrupt` / `permission_resolved` 对已释放会话直接报「worker 已释放」。续接失败广播 `session_error`（`source:"external_resume"`），保持 `released` 与 `idle`，不标 `dead`，下次发送可重试。
+已释放会话再发消息时走与「别处续聊」完全相同的续接路径（`refreshBeforeSend`）：比对原生指纹、起新进程以同一原生 ID 续接、有外部新增时先广播 `external_messages_added`，成功后清除 `released`；区别只是没有旧 worker 可停。`set_config`、`set_remote_control` 等需要 worker 的 WS 操作经 `ensureWorker` 先按同一路径拉起再执行；`interrupt` / `permission_resolved` 对已释放会话直接报「worker 已释放」。续接失败广播 `session_error`（`source:"external_resume"`），保持 `released` 与 `idle`，不标 `dead`，下次发送可重试。 同一会话的原生检查/恢复共用一个在途 Promise；并发发送与需要 worker 的菜单操作不会重复创建续接进程。失败清除在途任务，后续调用可重试；菜单操作会等待恢复完成后再取 worker。
 
 退出释放：server 收到 SIGTERM/SIGINT（`wb stop`/`wb restart`、托盘退出）时，先停掉全部 worker（停服期间不再起新 worker），再把停止成功、有 `nativeSessionId`、没有待处理闸门、且原生存档已落盘（Claude 须发过消息或是导入续接）的会话按释放处理（`reason:"shutdown"`，不检查 idle，进行中的回合随进程中断），其余标 `dead`。正常释放记录仍按 `released:true` + `nativeSessionId` 恢复为 `idle`+`released`，下次发送原地续接。最近已同步的原生指纹随注册表以内部字段 `releasedMark` 保存，释放及异常退出恢复共用 `nativeMarks`、`promptedSessions` 与续接路径；连续重启且未发送也保留指纹，停服期间的外部续聊在首次发送时照常补成 `external_messages_added`。
 
@@ -876,7 +876,7 @@ Codex 输入框 `$` 在光标 token 处打开名称+描述面板，支持过滤�
 - 启动恢复前，仅清理登记为 Claude 的 `.ndjson` 副本：结构为 `type:"tool_call_updated"`、payload 自有 `partialInput` 且 `inputComplete !== true` 的遗留行。Codex/Kimi 整份保留，末尾有效行始终保留，不重编 seq。分块读取；只有有可删行的文件才写临时文件，保留权限并 fsync 后 rename。每次记录 files / rewrittenFiles / removedLines / removedBytes 汇总，第二次无变化不重写。
 - `getEventsAfter` 的待补发区间必须从 `afterSeq+1` 连续到当前 seq，否则 `requiresSnapshot:true` 且 `events:[]`；WS 发送 `resync_required`。snapshot 采用服务端 seq，允许事件有空号，未决审批照原事件重建。前端缺口处理不变。
 - 派单列表、详情、parent 与历史共享按 root 缓存的扫描（完成后 2 秒 TTL、并发复用同一 Promise）；详情附件仍按需读取，元数据最长约 2 秒延迟。历史多页并发刷新共用扫描。会话派单链接在 backgroundCount>0 或有链接时 3 秒刷新，否则 30 秒；重新可见立即查询。隐藏页停止列表/详情秒级时钟与链接定时器。
-- 大 JSON 响应保留原 gzip 判断、level 1、响应头及信封；gzip 使用异步 zlib，整个进程压缩并发为 1，失败不阻塞后续队列。transcript 读取与 JSON 处理仍同步。
+- 大 JSON 响应与静态资源共享 gzip 接受判定，显式 `q=0` 不压缩；动态响应保留大小阈值、level 1、响应头及信封。gzip 使用异步 zlib，整个进程压缩并发为 1，失败不阻塞后续队列。transcript 读取与 JSON 处理仍同步。
 - 历史消息引用和派生条目按数组引用缓存，历史组件与 Markdown memo；新增历史、工具结果替换采用新数组，Focus view 更新过滤结果。文字、思考、tool_call_updated 与 raw_event 按帧合并通知，事件仍逐条应用且保留 seq；完成、审批、错误立即通知。
 
 

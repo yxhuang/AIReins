@@ -12,10 +12,11 @@ import { useStore } from "../useStore";
 import { LauncherMenu } from "./LauncherMenu";
 import { SettingsMenu } from "./SettingsMenu";
 import { ConfigPills, type MenuGroup } from "./ConfigMenu";
-import { newSessionConfig, pillText } from "../config-view";
+import { configOptionsForModel, modelConfigPatch, newSessionConfig, pillText } from "../config-view";
 import { DirectoryBrowser } from "./DirectoryBrowser";
 import { HistoryView } from "./HistoryView";
 import { PageView } from "./PageView";
+import { SidebarResize } from "./SidebarResize";
 
 const AGENT_LABELS: Record<AgentKind, string> = {
   claude: "claude",
@@ -212,10 +213,11 @@ export function Sidebar({ collapsed, onToggle, newOpen, onNewOpenChange, returnT
               {/* 收起即卸载表单、丢掉未提交的输入，所以叫「取消」而不是「收起」 */}
               <svg className="new-session-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
               <span className="new-session-label">{newOpen ? "取消新建" : "新建会话"}</span>
+              <span className="new-session-label-compact" aria-hidden="true">{newOpen ? "取消" : "新建"}</span>
             </button>
             {/* chatgpt.com 禁止 iframe（X-Frame-Options: SAMEORIGIN），只能开独立窗口；已开就切过去，不重载丢页面 */}
-            <button type="button" className="btn btn-new sidebar-chatgpt" title="打开 ChatGPT 网页版（独立窗口，再点切回该窗口）" onClick={openChatGPT}>
-              ChatGPT ↗
+            <button type="button" className="btn btn-new sidebar-chatgpt" aria-label="打开 ChatGPT 网页版" title="打开 ChatGPT 网页版（独立窗口，再点切回该窗口）" onClick={openChatGPT}>
+              ChatGPT <span className="sidebar-chatgpt-arrow" aria-hidden="true">↗</span>
             </button>
           </div>
           {/* 手机列表页右上角的文件 / 终端 / 派单（桌面隐藏）；放在新建行之后，网格里排到最右列 */}
@@ -275,6 +277,7 @@ export function Sidebar({ collapsed, onToggle, newOpen, onNewOpenChange, returnT
           </div>
         </div>
       </div>
+      <SidebarResize collapsed={collapsed} usageOpen={currentPageId === "ai-usage" && !collapsed} onToggle={onToggle} />
     </aside>
   );
 }
@@ -787,7 +790,7 @@ function SessionRow({
       >
         {/* 单行：身份图标 · 标题 ……… 闸门徽标 · ! · 状态灯 · 时间。状态文字不再常显，放进状态灯的 title */}
         <AgentIcon agent={session.agent} label={AGENT_LABELS[session.agent]} />
-        <span className="row-title">{title}</span>
+        <span className="row-title" title={title}>{title}</span>
         <span className="row-meta">
           {pending > 0 && (
             <span className="gate-badge" title={`${pending} 个闸门等待处理`}>
@@ -1156,6 +1159,7 @@ function NewConfigPills({
   selected: Partial<Record<ConfigOptionId, string>>;
   onChange: Dispatch<SetStateAction<Partial<Record<ConfigOptionId, string>>>>;
 }) {
+  const modelOptions = configOptionsForModel(options, selected.model);
   const build = (option: DriverConfigOption) => {
     // default 为 null 的那条 values 项带后端给的「跟随 … 配置」标签，优先用它
     const followLabel = option.values.find((v) => v.value === null)?.label ?? "跟随配置";
@@ -1170,11 +1174,15 @@ function NewConfigPills({
           .filter((v): v is { value: string; label: string } => v.value !== null)
           .map((v) => ({ value: v.value, label: v.label })),
       ],
-      onSelect: (value) => onChange((prev) => ({ ...prev, [option.id]: value })),
+      onSelect: (value) => onChange((prev) => {
+        if (option.id !== "model") return { ...prev, [option.id]: value };
+        const patch = modelConfigPatch(options, prev, value || null);
+        return { ...prev, model: value, ...(patch.effort === null ? { effort: "" } : {}) };
+      }),
     };
     return { group, text: pillText(option, selected[option.id]) };
   };
-  const byId = (id: ConfigOptionId) => options.find((o) => o.id === id);
+  const byId = (id: ConfigOptionId) => modelOptions.find((o) => o.id === id);
   const main = [byId("model"), byId("effort")].filter((o): o is DriverConfigOption => Boolean(o)).map(build);
   const perm = byId("permissionMode");
   return (

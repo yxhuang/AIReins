@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -62,6 +62,26 @@ try {
   const again = await saveUpload("sess-1", "photo.PNG", Readable.from([payload]));
   assert.notEqual(again.path, saved.path);
   assert.match(again.path, /-\d+-photo\.PNG$/);
+
+  // Concurrent same-name requests must reserve distinct paths before asynchronous writes.
+  const contents = Array.from({ length: 8 }, (_, n) => Buffer.alloc(1024, 65 + n));
+  const concurrent = await Promise.all(contents.map(content => saveUpload("sess-concurrent", "same.txt", Readable.from([content]))));
+  assert.equal(new Set(concurrent.map(item => item.path)).size, contents.length);
+  for (const [n, item] of concurrent.entries()) assert.deepEqual(await readFile(item.path), contents[n]);
+
+  // A failed request must remove only its own reserved file, never its concurrent sibling.
+  const aborted = new Readable({ read() { this.push(Buffer.from("partial")); this.destroy(new Error("input aborted")); } });
+  const [bad, good] = await Promise.allSettled([
+    saveUpload("sess-aborted", "same.txt", aborted),
+    saveUpload("sess-aborted", "same.txt", Readable.from([payload])),
+  ]);
+  assert.equal(bad.status, "rejected");
+  assert.equal(good.status, "fulfilled");
+  if (good.status === "fulfilled") {
+    assert.deepEqual(await readFile(good.value.path), payload);
+    const { readdir } = await import("node:fs/promises");
+    assert.equal((await readdir(join(uploadsRoot(), "sess-aborted"))).length, 1);
+  }
 
   // 超限 413 且不留半截文件
   const dir = join(uploadsRoot(), "sess-big");

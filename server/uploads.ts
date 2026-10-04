@@ -1,4 +1,4 @@
-import { createWriteStream, existsSync, mkdirSync } from "node:fs";
+import { createWriteStream, mkdirSync, openSync } from "node:fs";
 import { realpath, rm, stat } from "node:fs/promises";
 import { basename, extname, join, resolve, sep } from "node:path";
 import type { Readable } from "node:stream";
@@ -78,10 +78,14 @@ export function uploadsRoot(): string {
 }
 
 /** 同秒同名冲突时在时间戳后追加 -1、-2 … */
-function availablePath(dir: string, stamp: string, name: string): string {
+function reservePath(dir: string, stamp: string, name: string): { path: string; fd: number } {
   for (let index = 0; ; index++) {
     const candidate = join(dir, `${stamp}${index === 0 ? "" : `-${index}`}-${name}`);
-    if (!existsSync(candidate)) return candidate;
+    try {
+      return { path: candidate, fd: openSync(candidate, "wx", 0o600) };
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+    }
   }
 }
 
@@ -100,10 +104,10 @@ export async function saveUpload(sessionId: string, rawName: string, body: Reada
   const name = sanitizeUploadName(rawName);
   const dir = join(uploadsRoot(), sessionId);
   mkdirSync(dir, { recursive: true, mode: 0o700 });
-  const path = availablePath(dir, uploadTimestamp(), name);
+  const { path, fd } = reservePath(dir, uploadTimestamp(), name);
   let size = 0;
   let failed: Error | null = null;
-  const writer = createWriteStream(path, { mode: 0o600 });
+  const writer = createWriteStream(path, { fd, autoClose: true });
   try {
     await new Promise<void>((resolvePromise, reject) => {
       body.on("data", (chunk: Buffer) => {

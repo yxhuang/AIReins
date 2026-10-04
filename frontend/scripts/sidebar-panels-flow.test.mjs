@@ -690,7 +690,7 @@ t("等待处理：旧会话未决闸门优先且不重复，异常 dead 未决�
     assert.ok(html.includes("等待处理（2）"));
     for (const id of ["old-gate", "dead-gate"]) {
       // 行标题只出现一次（不重复进主列表）；⋮ 按钮 aria-label 含标题但不算行
-      assert.equal((html.match(new RegExp(`<span class="row-title">sidebar-${id}</span>`, "g")) ?? []).length, 1);
+      assert.equal((html.match(new RegExp(`<span class="row-title"[^>]*>sidebar-${id}</span>`, "g")) ?? []).length, 1);
       assert.ok(html.indexOf(`sidebar-${id}`) < html.indexOf("sidebar-recent"));
     }
   }, { pending: { "old-gate": 1, "dead-gate": 1 }, currentId: "old-gate" });

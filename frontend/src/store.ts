@@ -1486,7 +1486,7 @@ export class Store {
    * 活改会话配置（WS set_config）。不做乐观更新：控件进入发送中态，
    * 等 config_updated 广播回来才更新显示；失败走 WS error 帧。
    */
-  setConfig(sessionId: string, config: Partial<Record<ConfigOptionId, string>>): void {
+  setConfig(sessionId: string, config: Partial<Record<ConfigOptionId, string | null>>): void {
     const keys = Object.keys(config) as ConfigOptionId[];
     if (keys.length === 0) return;
     const pending = this.configPending.get(sessionId) ?? new Set<ConfigOptionId>();
