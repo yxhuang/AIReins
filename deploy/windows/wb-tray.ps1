@@ -63,6 +63,11 @@ public static class WbNative {
     [DllImport("user32.dll", CharSet=CharSet.Unicode)]
     private static extern IntPtr SendMessageTimeout(IntPtr h, uint msg, IntPtr w, IntPtr l,
         uint flags, uint timeout, out IntPtr result);
+    // 页面标题见 frontend/src/host-connections.ts 的 workbenchWindowTitle；旧格式留给未刷新的页面。
+    // 整串匹配：普通 Chrome 标签页的窗口标题带「 - Google Chrome」后缀，不会被认成工作台。
+    private static readonly System.Text.RegularExpressions.Regex WbTitle = new System.Text.RegularExpressions.Regex(
+        @"^(?:\(\d+\) 个闸门待处理 · )?Workbench · (?:本机|远程 \S+)$|^workbench$| · workbench$");
+    public static bool IsWbTitle(string t) { return WbTitle.IsMatch(t); }
     public static IntPtr[] Windows() {
         var hits = new List<IntPtr>();
         EnumWindows(delegate(IntPtr h, IntPtr p) {
@@ -71,8 +76,7 @@ public static class WbNative {
             GetClassName(h, cls, cls.Capacity);
             GetWindowText(h, title, title.Capacity);
             string t = title.ToString();
-            if (cls.ToString() == "Chrome_WidgetWin_1" &&
-                (t == "workbench" || t.EndsWith(" · workbench", StringComparison.Ordinal))) hits.Add(h);
+            if (cls.ToString() == "Chrome_WidgetWin_1" && IsWbTitle(t)) hits.Add(h);
             return true;
         }, IntPtr.Zero);
         // EnumWindows 包含隐藏窗口；仅忘记已经消失的 hwnd。
