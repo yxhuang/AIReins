@@ -4,7 +4,7 @@
 
 ## 另一台电脑安装
 
-在它自己的 WSL/Linux 中准备 Node 22 和与本机相同的 Agent 环境，clone 本仓库，运行 `npm install`。已有 `wb` 命令时运行 `wb`；没有全局入口时，在仓库目录运行 `bash bin/workbench`。CLI 安装、登录和本地工作目录属于那台电脑，clone 仓库不会复制这些状态。
+在它自己的 WSL/Linux 中 clone 本仓库，进入仓库运行 `bash install.sh`；依赖要求见 [新电脑安装](../README.md#新电脑安装)。脚本安装 `wb` 命令，WSL 下也安装 Windows 托盘与快捷方式；完成后手动固定到任务栏。`git pull` 后重跑同一命令即可更新。CLI 安装、登录和本地工作目录属于那台电脑，clone 仓库不会复制这些状态；Tailscale 远程入口仍须单独配置。
 
 ## 双向连接
 

@@ -1,18 +1,18 @@
 # Workbench Windows 托盘
 
-在 **Windows PowerShell 5.1** 中安装（安装器只复制文件和修改快捷方式，不启动服务）：
+通常由仓库根的 `bash install.sh` 调用。也可在 **Windows PowerShell 5.1** 中手动安装（只复制文件、创建或更新快捷方式，不启动托盘、Chrome 或服务；将示例用户名与路径换成实际值）：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File "\\wsl.localhost\ubuntu\home\user\dev\workbench\deploy\windows\install-tray.ps1"
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "\\wsl.localhost\ubuntu\home\<用户名>\workbench\deploy\windows\install-tray.ps1" -Distro ubuntu -WbPath '/home/<用户名>/workbench/bin/workbench'
 ```
 
 路径包含 `dev`，直接在 PowerShell 中用引号包住完整路径即可；不要经 `cmd /c start` 转发。如果 UNC 路径无法访问，可把 `deploy/windows/` 中的两个 `.ps1` 和 `deploy/workbench.ico` 复制到同一个 Windows 本地目录，再运行：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File "C:\wb-tray\install-tray.ps1" -SourceDir "C:\wb-tray"
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "C:\wb-tray\install-tray.ps1" -SourceDir "C:\wb-tray" -Distro ubuntu -WbPath '~/.local/bin/workbench'
 ```
 
-安装器按当前用户开始菜单、所有用户开始菜单、桌面的顺序寻找 `Workbench 工作台.lnk`；也可加 `-ShortcutPath "C:\完整路径\Workbench 工作台.lnk"`。同名任务栏固定项一并更新；直接把工作台窗口固定到任务栏生成的 Chrome 固定项（如 `Google Chrome (2).lnk`，按任务栏 ID `Chrome.127.0.0.1_/` 识别）也改成走托盘、换成工作台图标。快捷方式都写入同一个任务栏 ID，工作台窗口因此归到固定项那一格，不再另起一个 Chrome 图标。找不到固定项时，从修改后的快捷方式重新固定。所有用户开始菜单如报权限不足，在管理员 PowerShell 重跑。
+安装器按当前用户开始菜单、所有用户开始菜单、桌面的顺序寻找 `Workbench 工作台.lnk`；都找不到时，在当前用户开始菜单和桌面各新建一项。找到已有项时只改已有项，不额外建桌面图标。也可加 `-ShortcutPath "C:\完整路径\Workbench 工作台.lnk"`，显式指定的文件必须已存在。同名任务栏固定项一并更新；直接把工作台窗口固定到任务栏生成的 Chrome 固定项（如 `Google Chrome (2).lnk`，按任务栏 ID `Chrome.127.0.0.1_/` 识别）也改成走托盘、换成工作台图标。快捷方式都写入同一个任务栏 ID，工作台窗口因此归到固定项那一格，不再另起一个 Chrome 图标。找不到固定项时，从安装后的快捷方式固定。所有用户开始菜单如报权限不足，在管理员 PowerShell 重跑。找不到 Google Chrome 时仅警告，安装后需自行安装 Chrome。
 
 点击快捷方式会创建托盘并打开工作台；托盘已在运行时，快捷方式/任务栏固定项只把「显示主窗口」经纯消息窗口（标题 `Workbench.Tray.Show.<发行版>.<端口>`）转交给托盘执行：隐藏或最小化的窗口被显示、还原并抬到前台，没有窗口时托盘重开。10-03 起备用实例不再自己抬窗——tray.log 证实它对隐藏窗口的 SW_SHOW 从不生效（8 次全败，托盘自己执行同样的调用 6 次全成），且它的补显示看门狗会把用户刚收起的窗口重新放出来。最小化照常缩到任务栏；点 × 会关闭 Chrome 页面，WSL 服务和会话继续运行，第一次会有气泡提示。托盘左键单击切换显隐：窗口露在最上面时收到托盘（任务栏按钮消失），隐藏、最小化或被完全遮挡时显示并抬到前台，没有窗口时重开。双击只执行一次切换；打开/退出/冷启动等忙碌期间点的单击不再丢弃，忙段结束后按当时窗口状态补一次切换（同一忙段只补一次；10-03 前是冷启动期间的补点直接丢弃）。右键「打开工作台」始终打开或恢复窗口。启动失败时托盘保留，「打开工作台」会重试启动服务。默认 Chrome 配置保留登录状态和页面偏好。
 
@@ -22,9 +22,9 @@ powershell -ExecutionPolicy Bypass -File "C:\wb-tray\install-tray.ps1" -SourceDi
 
 托盘与备用实例的每次启动、打开、显隐、退出步骤和失败都追加到 `%LOCALAPPDATA%\workbench\tray.log`（带进程号，超过 1MB 从头写），单击的受理/挂起/丢弃和备用实例的转交也记在里面，出现退不掉、窗口闪退等问题时先看它。托盘在 Chrome 新建窗口约 0.5 秒时对它设图标、显示、抢前台，会让 Chrome 随后把窗口隐藏（10-02 对照实验确认，表现为「闪一下缩回托盘」），所以托盘新开的窗口不再抬起，图标推迟到 1.5 秒再设；另留兜底：新开后 3 秒内窗口被外部隐藏就补显示一次。抬已有窗口也可能被 Chrome 收回（10-03 日志：显示后约 0.2 秒又被藏起），所以托盘抬窗后 0.3 秒再校验一次，被藏就补显示一次。
 
-安装器把脚本及图标复制到 `%LOCALAPPDATA%\workbench\`，生成 ASCII 的隐藏启动器，运行系统 `powershell.exe` 5.1。两个 `.ps1` 必须保存为 UTF-8 **带 BOM**。脚本默认端口 `8790`、发行版 `ubuntu`；需调整时，在该目录的 `launcher.vbs` 中给 `-File` 后的脚本参数追加 `-Port 8791 -Distro ubuntu`，重装会重置这项修改。
+安装器把脚本及图标复制到 `%LOCALAPPDATA%\workbench\`，生成 ASCII 的隐藏启动器，运行系统 `powershell.exe` 5.1。两个 `.ps1` 必须保存为 UTF-8 **带 BOM**。安装器的 `-Distro` 与 `-WbPath` 会写入启动器；省略时沿用托盘默认值 `ubuntu` 与 `~/.local/bin/workbench`。发行版仅接受字母、数字、`_ . -`；WSL 路径须以 `/` 或 `~` 开头，且仅含字母、数字、`_ . / = + ~ -`。端口默认 `8790`；需调整时，在该目录的 `launcher.vbs` 中给 `-File` 后的脚本参数追加 `-Port 8791`，重装会重置这项手动修改。
 
-还原：安装器修改前会打印每个快捷方式的目标、参数、图标、工作目录和备份路径；将对应 `%LOCALAPPDATA%\workbench\shortcut-backups\<散列>.lnk` 复制回打印的原路径即可（开始菜单和任务栏各自还原），也可在快捷方式属性里填回原值。`bin/workbench-win` 保留作无托盘备用入口。还原快捷方式不会结束已运行的托盘；需要时先用托盘「退出」。
+还原：已有快捷方式修改前会打印目标、参数、图标、工作目录和备份路径；将对应 `%LOCALAPPDATA%\workbench\shortcut-backups\<散列>.lnk` 复制回打印的原路径即可（开始菜单和任务栏各自还原），也可在快捷方式属性里填回原值。新建项会打印「新建」，不做备份。`bin/workbench-win` 保留作无托盘备用入口。还原快捷方式不会结束已运行的托盘；需要时先用托盘「退出」。
 
 **仓库修改后必须重跑安装器才生效**，并退出旧托盘实例、重新启动。Windows 可能缓存任务栏图标；更新后仍显示旧图标时，取消固定再从新快捷方式固定。Chrome 的标题栏和任务栏图标行为需在 Windows 侧验收。
 

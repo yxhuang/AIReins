@@ -1,6 +1,6 @@
 ﻿<#
 .SYNOPSIS
-    安装 Workbench 工作台托盘脚本并更新已有快捷方式。
+    安装 Workbench 工作台托盘脚本并创建或更新快捷方式。
 .NOTES
     Windows PowerShell 5.1；本文件必须是 UTF-8 带 BOM。
     只复制文件及更新快捷方式，不启动托盘、Chrome 或 WSL 服务。
@@ -9,11 +9,15 @@
 param(
     [string]$ShortcutPath,
     [string]$SourceDir,
+    [ValidatePattern('^[A-Za-z0-9_.-]+$')][string]$Distro,
+    [ValidatePattern('^[~/][A-Za-z0-9_./=+~-]*$')][string]$WbPath,
     # Chrome 给 --app=http://127.0.0.1:<端口>/ 窗口的任务栏 ID（与端口无关）。快捷方式带上同一个 ID，
     # 窗口才会归到固定项那一格，而不是另起一个 Chrome 图标。
     [string]$AppId = 'Chrome.127.0.0.1_/'
 )
 $ErrorActionPreference = 'Stop'
+# 经 WSL 调用时输出走管道，系统代码页（GBK）中文会在 UTF-8 终端里乱码。
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 Add-Type -TypeDefinition @'
 using System;
 using System.Runtime.InteropServices;
@@ -64,6 +68,18 @@ public static class WbLink {
 $shortcutName = 'Workbench 工作台.lnk'
 $installDir = Join-Path $env:LOCALAPPDATA 'workbench'
 
+# 与 wb-tray.ps1 的 Resolve-Chrome 使用相同候选；只检查，不启动 Chrome。
+$chromeFound = $false
+foreach ($candidate in @(
+    "$env:ProgramFiles\Google\Chrome\Application\chrome.exe",
+    "${env:ProgramFiles(x86)}\Google\Chrome\Application\chrome.exe",
+    "$env:LOCALAPPDATA\Google\Chrome\Application\chrome.exe"
+)) {
+    if (Test-Path -LiteralPath $candidate -PathType Leaf) { $chromeFound = $true; break }
+}
+if (-not $chromeFound) { $chromeFound = $null -ne (Get-Command chrome.exe -ErrorAction SilentlyContinue) }
+if (-not $chromeFound) { Write-Warning '没有找到 Google Chrome，请安装 Google Chrome（工作台窗口用 chrome --app 打开）。' }
+
 # 默认仓库布局：脚本在 windows/，图标在它的上一层 deploy/。
 # -SourceDir 可指 windows/、deploy/，或把脚本与图标放一起的本地目录。
 if (-not $SourceDir) { $SourceDir = $PSScriptRoot }
@@ -103,10 +119,22 @@ function Find-Shortcut {
             Select-Object -First 1
         if ($hit) { return $hit.FullName }
     }
-    throw "开始菜单和桌面都没找到「$shortcutName」，请用 -ShortcutPath 指定。"
+    return $null
 }
 $mainShortcut = Find-Shortcut
-$targets = @($mainShortcut)
+$newShortcuts = @()
+if ($mainShortcut) {
+    $targets = @($mainShortcut)
+} else {
+    foreach ($root in @(
+        "$env:APPDATA\Microsoft\Windows\Start Menu\Programs",
+        [Environment]::GetFolderPath('Desktop')
+    )) {
+        New-Item -ItemType Directory -Path $root -Force | Out-Null
+        $newShortcuts += Join-Path $root $shortcutName
+    }
+    $targets = @($newShortcuts)
+}
 $pinnedDir = "$env:APPDATA\Microsoft\Internet Explorer\Quick Launch\User Pinned\TaskBar"
 $pinned = @()
 if (Test-Path -LiteralPath $pinnedDir -PathType Container) {
@@ -128,13 +156,18 @@ Copy-Item -LiteralPath $scriptSource -Destination (Join-Path $installDir 'wb-tra
 Copy-Item -LiteralPath $iconSource -Destination (Join-Path $installDir 'workbench.ico') -Force
 # 路径从 VBS 自身推导，用户名含中文时仍能保持脚本内容为纯 ASCII。
 # 显式选 System32\WindowsPowerShell，保证用系统 5.1，不被 PATH 中的 pwsh 替换。
+$trayArguments = ''
+if ($PSBoundParameters.ContainsKey('Distro')) { $trayArguments += " -Distro $Distro" }
+if ($PSBoundParameters.ContainsKey('WbPath')) { $trayArguments += " -WbPath $WbPath" }
 $vbs = @'
 Set fso = CreateObject("Scripting.FileSystemObject")
 here = fso.GetParentFolderName(WScript.ScriptFullName)
 Set sh = CreateObject("WScript.Shell")
 ps = sh.ExpandEnvironmentStrings("%SystemRoot%") & "\System32\WindowsPowerShell\v1.0\powershell.exe"
-sh.Run """" & ps & """ -NoLogo -NoProfile -NonInteractive -STA -ExecutionPolicy Bypass -File """ & here & "\wb-tray.ps1""", 0, False
+sh.Run """" & ps & """ -NoLogo -NoProfile -NonInteractive -STA -ExecutionPolicy Bypass -File """ & here & "\wb-tray.ps1""__WB_ARGS__", 0, False
 '@
+# VBS 字符串中的双引号必须写成两个；参数校验保证生成内容仍为 ASCII。
+$vbs = $vbs.Replace('__WB_ARGS__', $trayArguments.Replace('"', '""'))
 $launcher = Join-Path $installDir 'launcher.vbs'
 Set-Content -LiteralPath $launcher -Value $vbs -Encoding ASCII
 $shell = New-Object -ComObject WScript.Shell
@@ -144,17 +177,21 @@ New-Item -ItemType Directory -Path $backupDir -Force | Out-Null
 foreach ($target in $targets) {
     $shortcut = $shell.CreateShortcut($target)
     Write-Host "快捷方式：$target"
-    Write-Host "  原目标：$($shortcut.TargetPath)"
-    Write-Host "  原参数：$($shortcut.Arguments)"
-    Write-Host "  原图标：$($shortcut.IconLocation)"
-    Write-Host "  原工作目录：$($shortcut.WorkingDirectory)"
-    # 按完整路径区分开始菜单 / 固定项；重跑时保留首次安装前的备份。
-    $hash = [System.Security.Cryptography.SHA256]::Create()
-    try { $key = [BitConverter]::ToString($hash.ComputeHash([Text.Encoding]::UTF8.GetBytes($target))).Replace('-', '') }
-    finally { $hash.Dispose() }
-    $backup = Join-Path $backupDir "$key.lnk"
-    if (-not (Test-Path -LiteralPath $backup)) { Copy-Item -LiteralPath $target -Destination $backup }
-    Write-Host "  还原备份：$backup（复制回上面的快捷方式路径）"
+    if ($newShortcuts -contains $target) {
+        Write-Host '  新建'
+    } else {
+        Write-Host "  原目标：$($shortcut.TargetPath)"
+        Write-Host "  原参数：$($shortcut.Arguments)"
+        Write-Host "  原图标：$($shortcut.IconLocation)"
+        Write-Host "  原工作目录：$($shortcut.WorkingDirectory)"
+        # 按完整路径区分开始菜单 / 固定项；重跑时保留首次安装前的备份。
+        $hash = [System.Security.Cryptography.SHA256]::Create()
+        try { $key = [BitConverter]::ToString($hash.ComputeHash([Text.Encoding]::UTF8.GetBytes($target))).Replace('-', '') }
+        finally { $hash.Dispose() }
+        $backup = Join-Path $backupDir "$key.lnk"
+        if (-not (Test-Path -LiteralPath $backup)) { Copy-Item -LiteralPath $target -Destination $backup }
+        Write-Host "  还原备份：$backup（复制回上面的快捷方式路径）"
+    }
     $shortcut.TargetPath = "$env:SystemRoot\System32\wscript.exe"
     $shortcut.Arguments = "`"$launcher`""
     $shortcut.WorkingDirectory = $installDir
@@ -176,6 +213,7 @@ foreach ($target in $targets) {
     Write-Host "  任务栏 ID：$AppId"
     Write-Host "  新图标：$($saved.IconLocation)"
 }
-if ($pinned.Count -eq 0) { Write-Host '未找到同名任务栏固定项：请从修改后的快捷方式重新固定到任务栏。' }
+if ($pinned.Count -eq 0) { Write-Host '未找到同名任务栏固定项：请从安装后的快捷方式固定到任务栏。' }
+else { Write-Host '已有任务栏固定项已更新，无需重新固定。' }
 Write-Host "已安装到 $installDir。请点「Workbench 工作台」启动。"
 Write-Host '仓库修改不会自动更新安装副本；以后需重跑此安装器，再退出旧托盘实例并重新启动。'

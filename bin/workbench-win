@@ -4,8 +4,7 @@
 # 注意两个坑（都来自之前做 AOE 面板快捷方式时的教训）：
 #   1. 必须先 cd 到 /mnt/c 再调 cmd.exe，否则 cmd 对 WSL 路径会告警；
 #      同时这也绕开了仓库路径里 `dev` 的 `=` 被 cmd 解析截断的问题。
-#   2. 用绝对路径调 workbench —— `bash -lc` 走的是 login shell，
-#      不保证 ~/.local/bin 一定在 PATH 里。
+#   2. 用本脚本同目录的 workbench，不依赖用户名或 ~/.local/bin 的 PATH。
 set -uo pipefail
 
 URL="http://127.0.0.1:${WORKBENCH_PORT:-8790}/"
@@ -13,7 +12,7 @@ URL="http://127.0.0.1:${WORKBENCH_PORT:-8790}/"
 # 用 Chrome 应用窗口（--app，同 ai-usage 面板）打开，不开普通标签页；
 # 所以关掉 workbench 自带的 open_browser，免得多开一个标签。
 # 经 cmd 的 start 启动：直接跑 chrome.exe 的话，Chrome 冷启动时 wsl.exe 会一直挂着等它、黑窗口不关。
-if WORKBENCH_NO_OPEN=1 /home/user/.local/bin/workbench; then
+if WORKBENCH_NO_OPEN=1 "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/workbench"; then
   cd /mnt/c && cmd.exe /c start "" chrome "--app=$URL" >/dev/null 2>&1 \
     || cmd.exe /c start "" "$URL" >/dev/null 2>&1   # 没装 Chrome 时退回默认浏览器
 else

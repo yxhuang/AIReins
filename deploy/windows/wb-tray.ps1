@@ -18,7 +18,8 @@
 [CmdletBinding()]
 param(
     [ValidateRange(1, 65535)][int]$Port = 8790,
-    [ValidatePattern('^[A-Za-z0-9_.-]+$')][string]$Distro = 'ubuntu'
+    [ValidatePattern('^[A-Za-z0-9_.-]+$')][string]$Distro = 'ubuntu',
+    [ValidatePattern('^[~/][A-Za-z0-9_./=+~-]*$')][string]$WbPath = '~/.local/bin/workbench'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -242,7 +243,7 @@ function Test-Service {
 
 function Ensure-Service {
     Write-TrayLog 'ensure service'
-    Invoke-Wsl "WORKBENCH_NO_OPEN=1 WORKBENCH_PORT=$Port /home/user/.local/bin/workbench"
+    Invoke-Wsl "WORKBENCH_NO_OPEN=1 WORKBENCH_PORT=$Port $WbPath"
     $clock = [System.Diagnostics.Stopwatch]::StartNew()
     do {
         try { $null = Get-WbApi '/api/meta' 1; return } catch { $lastError = $_.Exception.Message }
@@ -531,7 +532,7 @@ function Exit-Workbench {
         $script:Tray.Visible = $false
         $stopError = $null
         if ($servicePresent) {
-            try { Invoke-Wsl "WORKBENCH_PORT=$Port /home/user/.local/bin/workbench stop" }
+            try { Invoke-Wsl "WORKBENCH_PORT=$Port $WbPath stop" }
             catch { $stopError = $_.Exception.Message; Write-TrayLog "exit: stop failed: $stopError" }
         }
         Write-TrayLog 'exit: done'
