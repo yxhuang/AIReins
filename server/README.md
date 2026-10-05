@@ -16,7 +16,7 @@ npm run server
 - 注册表：`~/.workbench/sessions.json`
 - 统一事件 transcript：`~/.workbench/transcripts/<sessionId>.ndjson`
 - 非 Git 工作目录的委派前快照：`~/.workbench/snapshots/<basename>-<pathHash>/`
-- 各家 CLI 自有 transcript：完全由原生 CLI 管理；Workbench 从不删除
+- 各家 CLI 自有 transcript：由原生 CLI 管理；普通「移除」保留。用户明确确认「彻底删除」时，Codex 经正式 `codex delete --force <UUID>` 删除单个原生会话；Claude/Kimi 当前未开放此操作。
 
 服务启动会把已释放或符合安全恢复条件的异常退出记录载入为 `idle + released`，下一次发送原地续接；包括原状态已被旧代码写成 `dead`、PID 已清空，但能通过系统启动时间证明旧 worker 全部消失的记录。不会接管旧进程。其余记录保持 `dead`，transcript 损坏优先为 `error`。新建续接也可传原生 `resumeSessionId`；Claude 使用 `--resume`，Codex 使用 `thread/resume`，Kimi 使用 `session/resume`。
 
@@ -132,6 +132,10 @@ webhook 地址就是密钥：文件权限设为 600，也不要写进日志或�
 - `GET /api/sessions/:id/commands`：当前活动会话的实时归一命令表
 - `POST /api/sessions/:id/release`：释放会话 worker（见「三家 CLI 原生历史」末尾「释放」小节）
 - `PATCH /api/sessions/:id`：侧栏会话组织字段。请求体只接受 `{pinned?: boolean, customTitle?: string, groupId?: string|null}`，逐字段校验类型，未知字段 400 / 40070；`customTitle` trim 后 ≤200 字符，空串删除该键（恢复自动标题，显示标题始终是 `customTitle` 优先，集中取标题在 `shared/session-title.ts`）；`groupId` 必须指向已存在分组或 `null`。会话不存在 404 / 40401。响应 `{session}`。组织变更不推进会话 seq、不更新 `lastActivityAt`、不广播 transcript 事件，也不写三家原生记录；`pinned/customTitle/groupId` 直接存 `sessions.json` 注册表条目，沿用现有原子写/延迟刷盘。
+
+原生标题通过 driver metadata 的 `nativeTitle` 同步，折叠空白、最多200字符，非字符串、空串与重复通知忽略；注册表持久化，并复用 `session_organization_updated` 控制帧同步所有页面，不推进 seq 或活动时间。显示优先级为手动 `customTitle` → `nativeTitle` → 首条输入。原生标题晚于列表/快照请求到达时，客户端保留更新后的标题和较新的运行状态。Codex 读取新建/续接响应的 `thread.name` 并接收 `thread/name/updated.threadName`；Kimi 接收 `session_info_update.title`。Claude 接收人工标题通知，并按当前 cwd 和原生 UUID 精确定位 `.jsonl`，只读尾部最多256KiB的 `ai-title.aiTitle`；首轮结果后短期监听该文件的变化，75ms防抖，找到标题立即关闭，最多30秒，进程停止/退出也关闭，不轮询。超过监听窗口的标题留待下轮读取。Kimi ACP 未开放概括接口，其原生标题可能仍为首条输入。
+
+Workbench 新建的 Codex 会话在首个 `item/completed.userMessage` 后、没有手动或原生标题时，复用 0.160.0 TUI 的自动标题流程，最多尝试一次。它在主会话现有 app-server 内另建 `ephemeral:true, threadSource:"thread_title"` 的只读线程，使用 TUI 原 prompt（整体≤960 UTF-8 bytes）、JSON schema 与标题归一化（≤36 Unicode 字符）。OpenAI provider + ChatGPT 登录 + 模型目录支持时用 `gpt-5.6-luna / low`，否则沿用当前模型和原生配置档位；这是额外的一次原生模型请求。禁用工具、MCP、plugins、hooks、skills 注入、环境访问和委派；辅助通知与审批请求不进入主 transcript、用量、状态、会话列表或派单树。生成全过程上限30秒，失败静默、不重试；取消/超时只中断辅助回合，再 unsubscribe（各最多1秒），晚到的辅助线程也立即 unsubscribe。手动改名取消生成，写回前再读主线程名称；已有名称不覆盖。写回仅通过拥有主线程的同一 app-server 的 `thread/name/set`，不另起 writer，不直接修改原生文件或全局配置。ephemeral 线程不物化到 `~/.codex/sessions`。源码出处与隔离验证见 `.work-orders/2026-10-05-codex-auto-title/REPORT.md`、`spikes/PROTOCOL-NOTES.md`。
 - `GET /api/session-groups` → `{groups}`；`POST /api/session-groups` 请求体只接受 `{name}`（trim 后 1–200 字符）→ 201 `{group}`；`PATCH /api/session-groups/:id` 同样只接受 `{name}` → `{group}`；`DELETE /api/session-groups/:id` 先把成员会话的 `groupId` 清掉并写回注册表，再删分组 → `{groups}`。分组 `{id,name,createdAt}` 持久化在 `~/.workbench/session-groups.json`（与注册表同一 tmp+rename 原子写，分组单独一个文件：它跨会话引用，跟会话条目分开写）。分组不存在 404 / 40471。以上组织变更都会广播 WS 控制帧 `session_organization_updated {sessions, groups}`（无 seq、不受会话订阅过滤），其他已打开页面据此同步；启动清理 `pruneStorage` 保留 pinned 或有 groupId 的会话，用户主动整理的不因超龄被清。
 - `GET /api/sessions/:id/info/:kind`：输入框「/」菜单的只读查看，仅 Claude 会话。kind 为 `mcp` / `hooks` / `permissions` / `context`，分别转发 control_request `mcp_status` / `get_hooks_listing` / `list_permission_rules` / `get_context_usage`；`plugins` 没有对应 control_request，与 VSCode 扩展同样在会话 cwd 下跑 `claude plugin list --json`，`data` 为 `{plugins:[{id,version,scope,enabled,projectEnabled,installPath,…}]}`，不需要 worker（dead 会话也可查）；其余`data` 是 CLI 的 response 原样（`context` 只保留 categories、totalTokens、maxTokens、percentage、model、autoCompactThreshold、isAutoCompactEnabled，原样约 50KB）。已释放会话按 `ensureWorker` 先拉起；dead、非 Claude、未知 kind 或 CLI 报错返回 400 / 40063，15 秒超时。返回结构见 `spikes/PROTOCOL-NOTES.md` §10。
 - `GET /api/prefs` / `PUT /api/prefs`：服务端偏好，当前只有 `idleReleaseMinutes`（整数 0–1440 分钟，0 = 关闭空闲自动释放；校验失败 400）
@@ -874,7 +878,7 @@ Codex 输入框 `$` 在光标 token 处打开名称+描述面板，支持过滤�
 
 ### 性能接口契约（P0 / P1）
 
-- `GET /api/sessions` 的每个列表项增加 `title: string` 与 `pendingGateCount: number`。标题取首条 `user_message.payload.text`，空白压成单空格，按显示宽度 30 截断（CJK/全角计 2，其余计 1，超出加 `…`）；首条为空或尚无消息时为“新会话”。前后端共用 `shared/session-title.ts`。审批数来自内存未决闸门集合；dead 会话固定为 0。新的 `user_message` 事件还带顶层 `title`，用于未加载会话的实时标题（包括首条为空的情况）。
+- `GET /api/sessions` 的每个列表项增加 `title: string` 与 `pendingGateCount: number`。标题优先取手动标题、原生标题，再取首条 `user_message.payload.text`；空白压成单空格，保留完整文本，界面按可用宽度截短；首条为空或尚无消息时为“新会话”。前后端共用 `shared/session-title.ts`。审批数来自内存未决闸门集合；dead 会话固定为 0。新的 `user_message` 事件还带顶层 `title`，使用相同优先级，用于未加载会话的实时标题（包括首条为空的情况）。
 - 前端启动只取当前打开会话的 snapshot；未加载会话的标题和跨会话审批徽标以列表字段及 WS 实时事件维护，重连重新取列表校准。已加载会话在全局 `/ws` 上发送 `{type:"replay", sessionId, afterSeq}`，服务端补发 ring 内 `seq > afterSeq` 的持久事件，再发送 `{type:"replay_complete", sessionId, currentSeq}`；超出 ring 则发送 `resync_required`，客户端取 snapshot。旧 `/ws?sessionId=...&afterSeq=...` 连接补发仍可使用。
 - 首连与重连对齐期间的实时帧先缓存，补发完成后排序去重。snapshot 在途期间也缓存事件，落地后只追加大于 snapshot seq 的持久事件；普通 seq 缺口复用在途请求。仅显式强制刷新、`resync_required` 或 WS 重连可作废在途 snapshot。
 - Claude 只含 `toolCallId`、`partialInput` 的 `tool_call_updated` 标为顶层 `ephemeral:true`，`seq` 取当前持久游标，不写 transcript、不进 ring；仅 WS 实时发送，同一调用常规最多每 100ms 一次（保留最新值）。工具完成、最终 `inputComplete` 参数、审批、回合结束或错误前强制推出待发更新，该边界推出不受 100ms 限制。前端只更新实时卡片参数，跳过缺口检测且不推进游标。最终参数事件仍持久化；临时状态不支持回放或崩溃恢复。Codex/Kimi 更新保持原契约；旧 Claude transcript 在本轮启动恢复前按下面规则清理。
@@ -975,3 +979,11 @@ Codex 输入框 `$` 在光标 token 处打开名称+描述面板，支持过滤�
 - Claude 执行端自身的 `session` 纳入原生子代理候选，其子代理附带 `parent.runId` 指向该派单，继续归属外层 Codex/Kimi 主树。既有 Claude 主会话子代理扫描规则保持。
 - 回归：`server/dispatches-claude-runtime.test.ts` 使用伪造 run 目录和真实 Codex 父 ID，核对三棵主树、Claude 派单/子代理归属、标题、详情、消息与历史。持久机械冒烟夹具在 `.work-orders/2026-10-03-delegate-claude-runtime-trees/smoke/`。
 - server 改动尚未提交，需用户执行 `wb restart` 后生效；当前服务未重启。Claude 真调用、续接与桌面/手机真机布局待用户确认。
+
+## 单会话彻底删除（2026-10-05）
+
+`DELETE /api/sessions/:id/permanent` 必须提交 JSON `{ "confirmNativeSessionId": "原生会话 UUID" }`。专用路径防止新前端向旧后端请求时退化成普通移除；原 DELETE 路径带 `permanent` 查询参数返回400。缺失/不匹配的确认、未知/不支持的原生身份返回400/40064；忙碌/并发/同原生历史有其他WB引用返回400/40063；目标不存在404/40401。
+
+只接受空闲或已结束、无后台任务/审批/续接的Codex/Kimi会话；校验原生ID、历史目录与文件身份，阻止并发操作和同ID续接，等待worker停止并确认退出，Codex再调用 `codex delete --force <UUID>`（30秒超时，无shell插值）。Kimi通过独立短生命周期ACP进程初始化，核验 `agentCapabilities.sessionCapabilities.delete`，调用 `session/delete`（20秒超时）；遵循 `KIMI_CODE_HOME`，历史读取根目录不一致时拒绝操作。正式CLI负责原生历史及索引，服务端确认Codex原生文件或Kimi整个会话目录已不存在后才移除WB记录与独占附件；共用附件沿用引用保护。返回 `nativeTranscriptPreserved:false`。原生失败保留WB记录，Claude不提供菜单入口，后端明确拒绝，不调用项目purge或工作树rm；Kimi能力缺失或RPC失败保留WB记录。
+
+隔离CLI、HTTP及UI证据见 `.work-orders/2026-10-05-permanent-session-delete/REPORT.md`。真实CLI隔离测试不涉及用户历史；生产后端尚未重启。

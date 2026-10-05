@@ -163,6 +163,8 @@ export interface WorkerProcessIdentity {
 export interface SessionRecord {
   pinned?: boolean;
   customTitle?: string;
+  /** 原生 CLI 标题或其正式标题概括接口返回值；手动标题始终优先。 */
+  nativeTitle?: string;
   groupId?: string;
   /** Only tail snapshots carry reducers computed from the complete transcript. */
   snapshotState?: SessionSnapshotState;
@@ -224,6 +226,7 @@ export interface DriverCapabilities {
 export interface DriverCallbacks {
   emit(type: EventType, payload?: Record<string, unknown>): UnifiedEvent | undefined;
   metadata(metadata: {
+    nativeTitle?: string;
     nativeSessionId?: string;
     nativeTranscriptPath?: string;
     config?: SessionConfig;

@@ -18,6 +18,20 @@ await check("自定义标题优先；清空恢复自动标题与事件回退", (
   assert.equal(sessionTitle({ title: "自动", customTitle: "" }), "自动");
   assert.equal(sessionTitle({ customTitle: "   " }, [{ type: "user_message", payload: { text: "原始消息" } }]), "原始消息");
 });
+await check("原生概括广播不推进seq，旧列表与快照不能覆盖新标题", async () => {
+  const value = new Store(); value.sessions = [session({ seq: 8, status: "running" })];
+  let finish;
+  globalThis.fetch = () => new Promise(resolve => { finish = resolve; });
+  const pending = value.refreshSessions();
+  value.handleFrame({ type: "session_organization_updated", sessions: [session({ seq: 4, nativeTitle: "修复托盘入口", title: "修复托盘入口" })], groups: [] });
+  assert.equal(sessionTitle(value.session("organized")), "修复托盘入口");
+  assert.equal(value.session("organized").seq, 8);
+  assert.equal(value.session("organized").status, "running");
+  finish(response({ sessions: [session({ seq: 8 })] }));
+  await pending;
+  assert.equal(sessionTitle(value.session("organized")), "修复托盘入口");
+  assert.equal(sessionTitle({ nativeTitle: "原生概括", customTitle: "手动命名" }), "手动命名");
+});
 await check("自动标题保留完整文字，已有首条消息时补全旧截断标题", () => {
   const full = "拉宽侧栏后要显示更多完整会话标题内容和后面的详细信息";
   const events = [{ type: "user_message", payload: { text: `  ${full}\n后续内容  ` } }];

@@ -14,6 +14,7 @@ import { pickWindowsDirectory, pickWindowsFile, WindowsPickerError, windowsPicke
 import { normalizeFileQuery, searchFiles } from "./file-search.js";
 import { getWorkFile, getWorkContent, saveWorkFile, WorkFileError, TEXT_LIMIT } from "./work-files.js";
 import { HistoryIndex, HistoryQueryError } from "./history.js";
+import { NativeDeleteError } from "./native-session-delete.js";
 import { getMeta, getServerHostName, SERVER_VERSION } from "./meta.js";
 import { feishuSender, GateNotifier, larkCliSender, loadNotifyConfig, type NotifyConfig } from "./notify.js";
 import { checkPageHealth, proxyPage, readLinks, scanPages } from "./pages.js";
@@ -676,6 +677,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       const mcpMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/mcp$/);
       const claudeMenuMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/(thinking|tasks\/stop|side-question)$/);
       const detailMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)$/);
+      const permanentDeleteMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/permanent$/);
       const historyMessagesMatch = url.pathname.match(/^\/api\/history\/([^/]+)\/([^/]+)\/messages$/);
       const pageHealthMatch = url.pathname.match(/^\/api\/pages\/([^/]+)\/health$/);
       const pageProxyMatch = url.pathname.match(/^\/pages\/([^/]+)(\/.*)?$/);
@@ -809,12 +811,23 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
         const session = manager.get(id);
         if (!session) throw new ApiError(404, 40401, `会话不存在：${id}`);
         await respond(response, 200, 0, "success", { session }, requestId);
-      } else if (method === "DELETE" && detailMatch) {
-        const id = decodeURIComponent(detailMatch[1]);
+      } else if (method === "DELETE" && (detailMatch || permanentDeleteMatch)) {
+        const id = decodeURIComponent((permanentDeleteMatch || detailMatch)![1]);
+        const permanent = Boolean(permanentDeleteMatch);
+        if (permanent) {
+          if (!manager.get(id)) throw new ApiError(404, 40401, `会话不存在：${id}`);
+          const body = await readJson(request, 4096);
+          if (!body || typeof body !== "object" || !("confirmNativeSessionId" in body) || body.confirmNativeSessionId !== manager.get(id)?.nativeSessionId
+            || typeof body.confirmNativeSessionId !== "string") {
+            throw new ApiError(400, 40064, "请确认要彻底删除的原生会话 ID");
+          }
+        }
+        if (!permanent && url.searchParams.has("permanent")) throw new ApiError(400, 40064, "彻底删除必须使用专用接口");
         let removed;
-        try { removed = await manager.remove(id); }
+        try { removed = await manager.remove(id, permanent); }
         catch (error) {
           if (error instanceof SessionBusyError) throw new ApiError(400, 40063, error.message);
+          if (error instanceof NativeDeleteError) throw new ApiError(400, 40064, error.message);
           throw error;
         }
         if (!removed) throw new ApiError(404, 40401, `会话不存在：${id}`);
@@ -823,7 +836,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
           transcriptsDeleted: true,
           nativeTranscriptPath: removed.nativeTranscriptPath,
           workbenchTranscriptPreserved: false,
-          nativeTranscriptPreserved: true,
+          nativeTranscriptPreserved: !permanent,
         }, requestId);
       } else if (pageProxyMatch) {
         const page = pagesById.get(decodeURIComponent(pageProxyMatch[1]));

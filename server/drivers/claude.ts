@@ -1,7 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
-import { readFileSync } from "node:fs";
-import { basename } from "node:path";
+import { closeSync, fstatSync, openSync, readFileSync, readSync, watch, type FSWatcher } from "node:fs";
+import { homedir } from "node:os";
+import { basename, join } from "node:path";
 import { createInterface } from "node:readline";
 import type {
   DriverConfigSchema,
@@ -227,6 +228,84 @@ export class ClaudeDriver extends BaseDriver {
   private menuModels: unknown;
   private menuReportedModel?: string;
   private readonly sideRequestIds = new Set<string>();
+  private titleWatcher?: FSWatcher;
+  private titleWatchTimeout?: NodeJS.Timeout;
+  private titleReadDebounce?: NodeJS.Timeout;
+  private foundNativeAiTitle = false;
+
+  private nativeTitlePath(): string | undefined {
+    const id = this.reportedNativeSessionId;
+    if (!id || !/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(id)) return undefined;
+    let slug = this.cwd.replace(/[^a-zA-Z0-9]/g, "-");
+    if (slug.length > 200) {
+      let hash = 0;
+      for (let index = 0; index < this.cwd.length; index++) hash = (hash << 5) - hash + this.cwd.charCodeAt(index) | 0;
+      slug = `${slug.slice(0, 200)}-${Math.abs(hash).toString(36)}`;
+    }
+    const root = process.env.WORKBENCH_CLAUDE_HISTORY_DIR
+      || join(process.env.CLAUDE_CONFIG_DIR || join(homedir(), ".claude"), "projects");
+    return join(root, slug, `${id}.jsonl`);
+  }
+
+  private readNativeTitle(): void {
+    if (this.foundNativeAiTitle) return;
+    const path = this.nativeTitlePath();
+    if (!path) return;
+    try {
+      const fd = openSync(path, "r");
+      try {
+        const stat = fstatSync(fd);
+        if (!stat.isFile()) return;
+        const start = Math.max(0, stat.size - 256 * 1024);
+        const buffer = Buffer.alloc(stat.size - start);
+        const count = readSync(fd, buffer, 0, buffer.length, start);
+        const lines = buffer.subarray(0, count).toString("utf8").split("\n");
+        if (start > 0) lines.shift();
+        for (const line of lines.reverse()) {
+          const record = parseJsonLine(line);
+          if (record?.type !== "ai-title" || record.sessionId !== this.reportedNativeSessionId
+            || typeof record.aiTitle !== "string" || !record.aiTitle.trim()) continue;
+          this.foundNativeAiTitle = true;
+          this.closeTitleWatcher();
+          this.callbacks.metadata({ nativeTitle: record.aiTitle, nativeTranscriptPath: path });
+          break;
+        }
+      } finally { closeSync(fd); }
+    } catch { /* CLI may not have created or flushed its native record yet. */ }
+  }
+
+  private watchNativeTitle(): void {
+    this.readNativeTitle();
+    if (this.foundNativeAiTitle || this.titleWatcher) return;
+    const path = this.nativeTitlePath();
+    if (!path) return;
+    try {
+      this.titleWatcher = watch(path, { persistent: false }, () => {
+        if (this.titleReadDebounce) clearTimeout(this.titleReadDebounce);
+        this.titleReadDebounce = setTimeout(() => this.readNativeTitle(), 75);
+        this.titleReadDebounce.unref();
+      });
+      this.titleWatcher.on("error", () => this.closeTitleWatcher());
+      this.titleWatchTimeout = setTimeout(() => this.closeTitleWatcher(), 30_000);
+      this.titleWatchTimeout.unref();
+      this.readNativeTitle(); // Cover an append between the first read and watch registration.
+    } catch { /* Exact file absent: leave the next turn to retry, never scan other sessions. */ }
+  }
+
+  private closeTitleWatcher(): void {
+    this.titleWatcher?.close();
+    this.titleWatcher = undefined;
+    if (this.titleWatchTimeout) clearTimeout(this.titleWatchTimeout);
+    if (this.titleReadDebounce) clearTimeout(this.titleReadDebounce);
+    this.titleWatchTimeout = this.titleReadDebounce = undefined;
+  }
+
+  protected handleProcessExit(): void { this.closeTitleWatcher(); }
+
+  async stop(): Promise<void> {
+    this.closeTitleWatcher();
+    await super.stop();
+  }
 
   async start(): Promise<void> {
     this.config = {
@@ -457,11 +536,17 @@ export class ClaudeDriver extends BaseDriver {
       this.callbacks.emit("raw_event", { source: "stdout", raw: line });
       return;
     }
+    if (message.type === "system" && message.subtype === "session_title_changed"
+      && this.reportedNativeSessionId && typeof message.session_id === "string"
+      && message.session_id !== this.reportedNativeSessionId) return;
     if (message.type === "system" && message.subtype === "control_request_progress"
       && this.sideRequestIds.has(String(message.request_id))) return;
     if (typeof message.session_id === "string" && message.session_id !== this.reportedNativeSessionId) {
+      this.closeTitleWatcher();
+      this.foundNativeAiTitle = false;
       this.reportedNativeSessionId = message.session_id;
       this.callbacks.metadata({ nativeSessionId: message.session_id });
+      this.readNativeTitle();
     }
 
     if (message.type === "system" && message.subtype === "init") {
@@ -490,6 +575,13 @@ export class ClaudeDriver extends BaseDriver {
       }
       if (this.commands.length === 0 && Array.isArray(message.slash_commands)) {
         this.updateCommands(message.slash_commands.map((name: unknown) => ({ name })));
+      }
+      return;
+    }
+
+    if (message.type === "system" && message.subtype === "session_title_changed") {
+      if (typeof message.title === "string" && message.title.trim()) {
+        this.callbacks.metadata({ nativeTitle: message.title });
       }
       return;
     }
@@ -651,6 +743,7 @@ export class ClaudeDriver extends BaseDriver {
     }
 
     if (message.type === "result") {
+      this.watchNativeTitle();
       if (message.usage || message.modelUsage) {
         this.callbacks.emit("usage_updated", {
           usage: message.usage ?? {},

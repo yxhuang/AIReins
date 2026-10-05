@@ -54,6 +54,7 @@ type ListPhase = "loading" | "ready" | "error";
  * 分页用 nextCursor +「加载更多」；扫描未完成时提示并沿游标重试，不当错误。
  */
 export function HistoryView() {
+  const historyRevision = useStore(value => value.historyRevision);
   const importedSessionKeys = useStore(selectImportedSessionKeys, shallowEqual);
   const now = useStore(selectHistoryNow);
   const [agentFilter, setAgentFilter] = useState<AgentKind | "">("");
@@ -126,7 +127,7 @@ export function HistoryView() {
   // agent/q 变化 → 从头重拉（cursor 作废）；来源筛选是前端侧过滤，不重拉
   useEffect(() => {
     void load();
-  }, [load]);
+  }, [load, historyRevision]);
 
   const importedKeys = useMemo(
     () => new Set(importedSessionKeys),

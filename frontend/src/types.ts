@@ -129,6 +129,7 @@ export interface SessionOrganizationPatch {
 export interface SessionRecord {
   pinned?: boolean;
   customTitle?: string;
+  nativeTitle?: string;
   groupId?: string;
   title?: string;
   pendingGateCount?: number;

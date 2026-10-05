@@ -126,6 +126,7 @@ export class Store {
   /** 侧栏面板：historyOpen 与 currentPageId 互斥，保留右侧当前会话。 */
   historyOpen = false;
   historySelection: HistorySession | null = null;
+  historyRevision = 0;
   dispatchesOpen = false;
   termOpen = false;
   filesOpen = false;
@@ -1725,7 +1726,8 @@ export class Store {
   private mergeSessionSummary(incoming: SessionRecord, live?: SessionRecord, preserveOrganization = false): SessionRecord {
     const summary = live && live.seq > incoming.seq ? live : incoming;
     const organization = preserveOrganization && live ? live : incoming;
-    return { ...summary, pinned: organization.pinned, customTitle: organization.customTitle, groupId: organization.groupId };
+    return { ...summary, title: organization.title, nativeTitle: organization.nativeTitle,
+      pinned: organization.pinned, customTitle: organization.customTitle, groupId: organization.groupId };
   }
 
   async refreshSessionGroups(): Promise<void> {
@@ -1781,9 +1783,18 @@ export class Store {
    * （与左栏同序：有未决闸门的优先，其余按最后活动时间倒序），无剩余则回空态。
    * 失败抛错由调用方展示。
    */
-  async remove(id: string): Promise<void> {
-    const agent = this.session(id)?.agent ?? "";
-    const result = await deleteSession(id);
+  async remove(id: string, permanently = false): Promise<void> {
+    const session = this.session(id);
+    const agent = session?.agent ?? "";
+    if (permanently && !session?.nativeSessionId) throw new Error("没有原生会话 ID，无法彻底删除。");
+    const result = await deleteSession(id, permanently ? session?.nativeSessionId : undefined);
+    if (permanently && result.nativeTranscriptPreserved !== false) throw new Error("服务端未确认原生历史已删除，请刷新后核查会话状态。");
+    if (permanently) {
+      this.historyRevision++;
+      if (this.historySelection?.agent === agent && this.historySelection.nativeSessionId === session?.nativeSessionId) {
+        this.historySelection = null;
+      }
+    }
     this.removed.add(id);
     this.sessions = this.sessions.filter((s) => s.id !== id);
     this.data.delete(id);
@@ -1824,7 +1835,7 @@ export class Store {
       this.navigate(next?.id ?? null);
     }
     // 删除只动注册表：明示原生对话记录仍在，可凭原生 id 续接
-    this.removalNotice = {
+    this.removalNotice = permanently ? { message: "已彻底删除此会话的 Workbench 记录及原生本地历史。" } : {
       message: `已从工作台移除。${agent} 的原生对话记录仍在，可新建会话时填入原生 id 续接。`,
       ...(result.nativeTranscriptPath ? { path: result.nativeTranscriptPath } : {}),
     };

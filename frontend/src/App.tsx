@@ -176,7 +176,7 @@ export function App() {
           </button>
         </div>
       )}
-      {/* 删除成功一次性提示：说清原生记录仍在；路径有则等宽小字附上 */}
+      {/* 按移除/彻底删除显示真实结果；保留的原生路径有则附上 */}
       {removalNotice && (
         <div className="toast removal-notice" role="status">
           <span>{removalNotice.message}</span>

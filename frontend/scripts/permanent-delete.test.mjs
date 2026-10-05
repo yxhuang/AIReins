@@ -1,0 +1,42 @@
+import assert from "node:assert/strict";
+import React from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+globalThis.React = React;
+globalThis.WebSocket = { CONNECTING: 0, OPEN: 1, CLOSING: 2, CLOSED: 3 };
+const { Store } = await import("../src/store.ts");
+const { PermanentDeleteConfirm } = await import("../src/components/PermanentDeleteConfirm.tsx");
+const session = { id:"wb-delete",agent:"codex",agentId:"main",cwd:"/tmp",status:"idle",seq:0,
+  nativeSessionId:"11111111-1111-4111-8111-111111111111",title:"要删除的会话",config:{},riskyMode:false,
+  createdAt:new Date().toISOString(),lastActivityAt:new Date().toISOString(),transcriptPath:"/tmp/wb.ndjson" };
+const html = renderToStaticMarkup(React.createElement(PermanentDeleteConfirm, {session,busy:false,error:null,onCancel(){},onConfirm(){}}));
+assert.ok(html.includes('role="dialog"') && html.includes('aria-modal="true"'));
+assert.ok(html.includes(session.title) && html.includes(session.nativeSessionId));
+assert.ok(html.includes("无法恢复") && html.includes("原生本地历史"));
+assert.ok(html.includes('data-autofocus="true"'), "cancel receives default focus");
+const kimiHtml = renderToStaticMarkup(React.createElement(PermanentDeleteConfirm, {session:{...session,agent:"kimi",nativeSessionId:`session_${session.nativeSessionId}`},busy:false,error:null,onCancel(){},onConfirm(){}}));
+assert.ok(!kimiHtml.includes("未开放") && !kimiHtml.includes("disabled="), "Kimi can confirm permanent deletion");
+const store = new Store();
+store.sessions = [session];
+store.historySelection = {agent:"codex",nativeSessionId:session.nativeSessionId};
+store.setDraft(session.id,"draft to erase");
+let sent;
+globalThis.fetch = async (path,init) => {
+  sent = {path,init};
+  return {json:async()=>({code:0,data:{nativeTranscriptPreserved:false}})};
+};
+await store.remove(session.id,true);
+assert.equal(sent.path,"/api/sessions/wb-delete/permanent");
+assert.deepEqual(JSON.parse(sent.init.body),{confirmNativeSessionId:session.nativeSessionId});
+assert.equal(store.session(session.id),undefined);
+assert.equal(store.getDraft(session.id),"");
+assert.equal(store.historySelection,null);
+assert.equal(store.historyRevision,1);
+assert.ok(store.removalNotice.message.includes("彻底删除"));
+assert.ok(!store.removalNotice.message.includes("仍在"));
+assert.equal(store.removalNotice.path,undefined);
+const failed = new Store();
+failed.sessions = [session];
+globalThis.fetch = async()=>({json:async()=>({code:40064,msg:"native delete rejected"})});
+await assert.rejects(failed.remove(session.id,true),/native delete rejected/);
+assert.ok(failed.session(session.id));
+console.log("Permanent deletion UI/store: identified modal, confirmed API, history/draft cleanup and failure preservation passed");

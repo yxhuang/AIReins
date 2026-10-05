@@ -233,9 +233,11 @@ export function fetchSnapshotPreflight(cwd: string): Promise<SnapshotPreflight> 
 }
 
 /** 停 worker，移除注册表与 wb 副本；各家 CLI 的原生 transcript 不受影响。 */
-export function deleteSession(id: string): Promise<{ nativeTranscriptPath?: string }> {
-  return call<{ nativeTranscriptPath?: string }>(`/api/sessions/${encodeURIComponent(id)}`, {
+export function deleteSession(id: string, confirmedNativeId?: string): Promise<{ nativeTranscriptPath?: string; nativeTranscriptPreserved?: boolean }> {
+  return call(`/api/sessions/${encodeURIComponent(id)}${confirmedNativeId ? "/permanent" : ""}`, {
     method: "DELETE",
+    ...(confirmedNativeId ? { headers: { "content-type": "application/json" },
+      body: JSON.stringify({ confirmNativeSessionId: confirmedNativeId }), signal: AbortSignal.timeout(45_000) } : {}),
   });
 }
 

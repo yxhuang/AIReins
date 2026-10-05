@@ -133,7 +133,7 @@ export function FilePanel({ onClose }: { onClose: () => void }) {
         {notice.reason && <p>{notice.reason}</p>}
         {notice.copied !== null && <p className="dir-copy-status">{notice.copied ? "路径已复制。" : <>无法自动复制，请手动复制：<span className="mono">{notice.path}</span></>}</p>}
       </div>}
-      {preview ? <FilePreview key={preview.target.path} preview={preview} source={source} /> : <DirectoryContents initialPath={directoryInitialPath} includeFiles allowWindowsPicker showBreadcrumbs={false}
+      {preview ? <FilePreview key={preview.target.path} preview={preview} source={source} /> : <DirectoryContents initialPath={directoryInitialPath} includeFiles allowWindowsPicker
         navigationHistory={directoryHistory} registerBrowserBack={registerBrowserBack}
         onPathChange={path => { store.fileDirectory = path; }}
         onSelectFile={path => { setNotice(null); void store.openFilePreview({ path, root: store.fileDirectory ?? session?.cwd ?? "/", sessionId: session?.id }); }} />}

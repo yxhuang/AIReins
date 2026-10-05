@@ -785,8 +785,6 @@ body.resizing {
 .dir-address-separator { padding: 0 3px; color: var(--text-muted); }
 .dir-address-edit { flex: 1; min-width: 18px; padding: 0; border: 0; background: transparent; cursor: text; }
 .dir-address-edit:disabled { cursor: default; }
-.dir-breadcrumbs { display: flex; flex-shrink: 0; gap: 4px; overflow-x: auto; min-width: 0; }
-.dir-breadcrumbs .btn { flex-shrink: 0; white-space: nowrap; }
 .dir-recent-toggle { display: flex; flex: 0 0 36px; align-items: center; justify-content: center; padding: 0; border: 0; border-left: 1px solid var(--border); border-radius: 0 var(--radius) var(--radius) 0; background: transparent; color: var(--text-muted); cursor: pointer; }
 .dir-recent-toggle:hover:not(:disabled), .dir-recent-toggle[aria-expanded="true"] { background: var(--surface-sunk); color: var(--text); }
 .dir-recent-toggle:focus-visible { outline-offset: -2px; }
@@ -871,7 +869,6 @@ body.resizing {
 
 @media (pointer: coarse) {
   .dir-entry { min-height: 44px; }
-  .dir-breadcrumbs .btn { min-height: 44px; }
   .dir-address { min-height: 46px; }
   .dir-address-path, .dir-address-crumbs button { min-height: 44px; }
   .dir-address-crumbs button, .dir-address-edit { min-width: 44px; }
@@ -986,6 +983,11 @@ body.resizing {
 .row-menu-divider { height: 1px; margin: 4px 6px; background: var(--border); }
 /* 「删除」用 --danger 冷调洋红（语义是「销毁」，与「拒绝/错误」同类，不是审批不用暖色） */
 .row-menu-danger, .row-menu-item.row-menu-danger svg { color: var(--danger); }
+.permanent-delete-overlay { z-index: 180; }
+.permanent-delete-dialog { width: min(480px, 100%); }
+.permanent-delete-body { padding: 16px; overflow-y: auto; overflow-wrap: anywhere; }
+.permanent-delete-body p { margin: 0 0 12px; }
+.permanent-delete-body p:last-child { margin-bottom: 0; }
 /* 分组子屏：手机/桌面统一为菜单内切换下一屏（覆盖主屏，「返回」切回） */
 .row-menu-subscreen {
   position: absolute; inset: 0; overflow-y: auto;

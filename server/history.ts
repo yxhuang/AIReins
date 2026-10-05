@@ -7,7 +7,7 @@ import type { AgentKind } from "./types.js";
 import { dispatchSessionMap, type DispatchSession } from "./dispatches.js";
 
 export function kimiHistoryRoot(): string {
-  return process.env.WORKBENCH_KIMI_HISTORY_DIR || join(homedir(), ".kimi-code", "sessions");
+  return process.env.WORKBENCH_KIMI_HISTORY_DIR || join(process.env.KIMI_CODE_HOME || join(homedir(), ".kimi-code"), "sessions");
 }
 
 export type HistorySource = "interactive" | "workbench" | "unknown";

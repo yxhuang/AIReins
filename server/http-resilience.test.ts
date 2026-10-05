@@ -27,13 +27,29 @@ const sessions = Array.from({ length: 100 }, (_, n) => ({
 }));
 await writeFile(sessions[0]!.transcriptPath, "");
 await writeFile(join(home, "sessions.json"), JSON.stringify(sessions));
+const permanentId = "11111111-1111-4111-8111-111111111111";
+const codexHome = join(home, "codex");
+const permanentPath = join(codexHome, "sessions", `rollout-${permanentId}.jsonl`);
+await mkdir(join(codexHome, "sessions"), { recursive: true });
+await writeFile(permanentPath, JSON.stringify({ type: "session_meta", payload: { id: permanentId, cwd: home } }) + "\n");
+await writeFile(sessions[1]!.transcriptPath, "");
+await writeFile(join(home, "sessions.json"), JSON.stringify(sessions.map((session, index) => index === 1
+  ? { ...session, nativeSessionId: permanentId, nativeTranscriptPath: permanentPath } : session)));
+await writeFile(join(bin, "codex"), `#!/usr/bin/env node
+const fs = require('node:fs'), p = require('node:path');
+if (process.argv[2] === 'delete') {
+ if (process.argv[3] !== '--force' || process.argv[4] !== '${permanentId}') process.exit(2);
+ fs.unlinkSync(p.join(process.env.CODEX_HOME, 'sessions', 'rollout-${permanentId}.jsonl'));
+} else fs.writeSync(1, 'fixture 1.0\\n');
+`, { mode: 0o700 });
 const listener = createServer();
 listener.listen(0, "127.0.0.1");
 await once(listener, "listening");
 const port = (listener.address() as { port: number }).port;
 await new Promise<void>(resolve => listener.close(() => resolve()));
 const child = spawn(process.execPath, ["--import", "tsx", join(root, "server/index.ts")], {
-  cwd: root, env: { ...process.env, WORKBENCH_HOME: home, WORKBENCH_PORT: String(port), PATH: `${bin}:${process.env.PATH}` },
+  cwd: root, env: { ...process.env, WORKBENCH_HOME: home, WORKBENCH_PORT: String(port), PATH: `${bin}:${process.env.PATH}`,
+    CODEX_HOME: codexHome, WORKBENCH_CODEX_HISTORY_DIR: join(codexHome, "sessions") },
   stdio: ["ignore", "pipe", "pipe"],
 });
 const closed = new Promise<void>(resolve => child.once("close", () => resolve()));
@@ -96,6 +112,22 @@ try {
   assert.equal(result.workbenchTranscriptPreserved, false);
   assert.equal(result.nativeTranscriptPreserved, true);
   await assert.rejects(readFile(sessions[0]!.transcriptPath), { code: "ENOENT" });
+  assert.equal(await readFile(nativePath, "utf8"), "native history must remain\n");
+  const permanentUrl = `${base}/api/sessions/${sessions[1]!.id}/permanent`;
+  for (const body of [{}, { confirmNativeSessionId: "wrong-id" }]) {
+    const response = await fetch(permanentUrl, { method: "DELETE", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+    assert.equal(response.status, 400, "permanent deletion requires matching explicit confirmation");
+    assert.equal((await fetch(`${base}/api/sessions/${sessions[1]!.id}`)).status, 200);
+    assert.ok(await readFile(permanentPath));
+  }
+  const legacyQuery = await fetch(`${base}/api/sessions/${sessions[1]!.id}?permanent=true`, { method: "DELETE" });
+  assert.equal(legacyQuery.status, 400, "query parameter must never downgrade permanent deletion to ordinary remove");
+  const permanentResponse = await fetch(permanentUrl, { method: "DELETE", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ confirmNativeSessionId: permanentId }) });
+  assert.equal(permanentResponse.status, 200);
+  assert.equal((await permanentResponse.json()).data.nativeTranscriptPreserved, false);
+  await assert.rejects(readFile(permanentPath), { code: "ENOENT" });
+  await assert.rejects(readFile(sessions[1]!.transcriptPath), { code: "ENOENT" });
   assert.equal(await readFile(nativePath, "utf8"), "native history must remain\n");
   console.log("HTTP resilience: malformed upgrade, gzip negotiation, truthful delete contract passed");
 } finally {

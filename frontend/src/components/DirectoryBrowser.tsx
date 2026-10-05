@@ -56,9 +56,11 @@ interface DirectoryBrowserProps {
   mode?: "dir" | "file";
   /** file 模式下点击文件条目触发；随后浏览器自行 onClose */
   onSelectFile?: (path: string, name: string) => void;
+  /** 地址栏左侧显示 Windows 浏览窗口按钮（仍需后端声明 windowsDirectoryPicker） */
+  allowWindowsPicker?: boolean;
 }
 
-export function DirectoryBrowser({ initialPath, onSelect, onClose, mode = "dir", onSelectFile }: DirectoryBrowserProps) {
+export function DirectoryBrowser({ initialPath, onSelect, onClose, mode = "dir", onSelectFile, allowWindowsPicker = false }: DirectoryBrowserProps) {
   const fileMode = mode === "file";
   const closeButton = useRef<HTMLButtonElement>(null);
   useEffect(() => { closeButton.current?.focus(); }, []);
@@ -70,7 +72,7 @@ export function DirectoryBrowser({ initialPath, onSelect, onClose, mode = "dir",
         <h2>{fileMode ? "选择文件" : "选择工作目录"}</h2>
         <button ref={closeButton} className="btn" type="button" title="取消并返回" onClick={onClose}>取消</button>
       </div>
-      <DirectoryContents initialPath={initialPath} includeFiles={fileMode}
+      <DirectoryContents initialPath={initialPath} includeFiles={fileMode} allowWindowsPicker={allowWindowsPicker}
         onSelectDirectory={fileMode ? undefined : onSelect}
         onSelectFile={(path, name) => { onSelectFile?.(path, name); onClose(); }} />
     </div>
@@ -78,13 +80,12 @@ export function DirectoryBrowser({ initialPath, onSelect, onClose, mode = "dir",
 }
 
 /** 弹窗与右侧面板共用导航、请求和列表；宿主决定点击文件后的行为。 */
-export function DirectoryContents({ initialPath, includeFiles, onSelectFile, onSelectDirectory, allowWindowsPicker = false, showBreadcrumbs = true, onPathChange, navigationHistory, registerBrowserBack }: {
+export function DirectoryContents({ initialPath, includeFiles, onSelectFile, onSelectDirectory, allowWindowsPicker = false, onPathChange, navigationHistory, registerBrowserBack }: {
   initialPath: string;
   includeFiles: boolean;
   onSelectFile: (path: string, name: string) => void;
   onSelectDirectory?: (path: string) => void;
   allowWindowsPicker?: boolean;
-  showBreadcrumbs?: boolean;
   onPathChange?: (path: string) => void;
   navigationHistory?: RefObject<string[]>;
   registerBrowserBack?: (back: () => boolean) => () => void;
@@ -117,10 +118,6 @@ export function DirectoryContents({ initialPath, includeFiles, onSelectFile, onS
   const [savedCwd] = useState(() => {
     try { return localStorage.getItem("workbench-last-cwd") ?? ""; } catch { return ""; }
   });
-  const breadcrumbs = useRef<HTMLElement>(null);
-  useEffect(() => {
-    if (breadcrumbs.current) breadcrumbs.current.scrollLeft = breadcrumbs.current.scrollWidth;
-  }, [listing?.path]);
   useEffect(() => {
     if (addressCrumbs.current) addressCrumbs.current.scrollLeft = addressCrumbs.current.scrollWidth;
     if (addressEditing) { addressInput.current?.focus(); addressInput.current?.select(); }
@@ -215,7 +212,8 @@ export function DirectoryContents({ initialPath, includeFiles, onSelectFile, onS
           const parent = result.path.slice(0, result.path.lastIndexOf("/")) || "/";
           recordPath(parent);
           onSelectFile(result.path, result.path.slice(result.path.lastIndexOf("/") + 1));
-        } else await load(result.path);
+        } else if (onSelectDirectory) onSelectDirectory(result.path);
+        else await load(result.path);
       }
     } catch (cause) {
       if (id === requestId.current) setError(cause instanceof Error ? cause.message : String(cause));
@@ -237,7 +235,7 @@ export function DirectoryContents({ initialPath, includeFiles, onSelectFile, onS
                 <path d="M3.5 8h17a1.5 1.5 0 0 1 1.5 1.7l-1.2 9A1.5 1.5 0 0 1 19.3 20H4.7a1.5 1.5 0 0 1-1.5-1.3L2 9.7A1.5 1.5 0 0 1 3.5 8Z" fill="currentColor" fillOpacity=".5" />
               </svg>
             </button>}
-            {includeFiles && listing && !addressEditing ? <div className="dir-address-path">
+            {listing && !addressEditing ? <div className="dir-address-path">
               <nav ref={addressCrumbs} className="dir-address-crumbs" aria-label="地址栏目录层级"
                 title="点击目录层级跳转；横向滚动查看上级；点击空白处编辑路径"
                 onClick={event => { if (!(event.target as HTMLElement).closest("button")) editAddress(); }}
@@ -263,7 +261,7 @@ export function DirectoryContents({ initialPath, includeFiles, onSelectFile, onS
                   event.preventDefault();
                   event.stopPropagation();
                   if (!busy && address.trim()) void load(normalizeDirectoryPath(address));
-                } else if (event.key === "Escape" && includeFiles && listing) {
+                } else if (event.key === "Escape" && listing) {
                   event.preventDefault();
                   event.stopPropagation();
                   setAddress(listing.path);
@@ -294,12 +292,6 @@ export function DirectoryContents({ initialPath, includeFiles, onSelectFile, onS
           <button className="btn" type="button" title="可粘贴 Windows 或 Linux 文件夹地址，按 Enter 或点击前往" disabled={busy || !address.trim()}
             onClick={() => void load(normalizeDirectoryPath(address))}>前往</button>
         </div>
-        {showBreadcrumbs && !includeFiles && listing && <nav className="dir-breadcrumbs" aria-label="目录层级" ref={breadcrumbs}>
-          {directoryBreadcrumbs(listing.path).map(crumb => <button type="button" className="btn" key={crumb.path}
-            title={crumb.path} disabled={busy || crumb.path === listing.path}
-            aria-current={crumb.path === listing.path ? "location" : undefined}
-            onClick={() => void load(crumb.path)}>{crumb.label}</button>)}
-        </nav>}
         <div className="dir-nav">
           <button className="btn" type="button" title="返回当前目录的上一级" disabled={!listing?.parent || busy} onClick={() => { if (listing?.parent) void load(listing.parent); }}>上一级</button>
           <button className="btn" type="button" title="打开 WSL 主目录" disabled={busy} onClick={() => void load()}>WSL</button>

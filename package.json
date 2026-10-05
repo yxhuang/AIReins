@@ -13,6 +13,7 @@
     "test:mentions": "node --import tsx frontend/scripts/mentions.test.mjs",
     "test:file-panel": "node --import tsx frontend/scripts/file-panel.test.mjs",
     "test:store": "node --import tsx frontend/scripts/store-flow.test.mjs",
+    "test:session-titles": "node --import tsx server/session-native-title.test.ts && node --import tsx server/codex-title.test.ts && node --import tsx server/native-title-drivers.test.ts && node --import tsx frontend/scripts/session-organization-flow.test.mjs",
     "test:attach": "node --import tsx frontend/scripts/attach-flow.test.mjs",
     "test:pages": "node --import tsx frontend/scripts/pages-flow.test.mjs",
     "test:resume": "node --import tsx frontend/scripts/resume-config-flow.test.mjs",

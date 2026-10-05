@@ -6,8 +6,10 @@ import { readClaudeEffectiveSettings, type ClaudeEffectiveSettings } from "./cla
 import { ClaudePlugins, type ClaudePlugin } from "./claude-plugins.js";
 import { createDriver, DRIVER_CAPABILITIES } from "./drivers/index.js";
 import { CLAUDE_CONFIG_SCHEMA } from "./drivers/claude.js";
+import { CodexDriver } from "./drivers/codex.js";
 import { log } from "./logger.js";
 import { NativeConversationReader, type NativeConversationChange, type NativeConversationMark } from "./native-conversation.js";
+import { deleteNativeSession, validateNativeDelete } from "./native-session-delete.js";
 import {
   cleanSessionConfig,
   configFromCreateInput,
@@ -96,6 +98,7 @@ export class SessionManager {
   /** 移除会话时在后台停的进程；shutdown 要等它们，免得退出时留下孤儿 CLI。 */
   private readonly backgroundStops = new Set<Promise<void>>();
   private readonly checkingSessions = new Set<string>();
+  private readonly deletingSessions = new Set<string>();
   /** 同会话的原生检查/恢复共享一个在途任务，避免并发菜单操作重复起 worker。 */
   private readonly nativeRefreshes = new Map<string, Promise<void>>();
   /** 发过消息的会话：Claude 原生存档要到首条消息后才落盘，没发过的切换配置时不能续接 */
@@ -202,6 +205,7 @@ export class SessionManager {
   }
 
   updateOrganization(id: string, value: unknown): SessionRecord {
+    this.assertWritableTranscript(id);
     const session = this.sessions.get(id);
     if (!session) throw new SessionOrganizationError(`会话不存在：${id}`, 404, 40401);
     const patch = parseOrganizationPatch(value);
@@ -210,6 +214,8 @@ export class SessionManager {
     if (patch.customTitle !== undefined) {
       if (patch.customTitle) session.customTitle = patch.customTitle;
       else delete session.customTitle;
+      const worker = this.workers.get(id);
+      if (patch.customTitle && worker instanceof CodexDriver) worker.cancelAutomaticTitle();
     }
     if (patch.groupId !== undefined) {
       if (patch.groupId) session.groupId = patch.groupId;
@@ -305,6 +311,10 @@ export class SessionManager {
   }
 
   async create(input: CreateSessionInput): Promise<SessionRecord> {
+    if (input.resumeSessionId && [...this.sessions.values()].some(record => record.agent === input.agent
+      && record.nativeSessionId === input.resumeSessionId && this.deletingSessions.has(record.id))) {
+      throw new SessionBusyError("原生会话正在彻底删除，无法续接。");
+    }
     if (this.stopping) throw new Error("Workbench 正在退出");
     this.validateCwd(input.cwd);
     const id = ulid();
@@ -388,6 +398,7 @@ export class SessionManager {
       resumeSessionId: input.resumeSessionId,
       callbacks,
     });
+    if (record.customTitle && worker instanceof CodexDriver) worker.cancelAutomaticTitle();
     this.workers.set(id, worker);
     const startup = (async () => {
       try {
@@ -715,13 +726,47 @@ export class SessionManager {
     await this.requireWorker(id).interrupt();
   }
 
-  async remove(id: string): Promise<SessionRecord | undefined> {
+  async remove(id: string, permanently = false): Promise<SessionRecord | undefined> {
     this.assertWritableTranscript(id);
     if (this.checkingSessions.has(id) || this.restartingSessions.has(id) || this.nativeRefreshes.has(id)) {
       throw new SessionBusyError("会话正在续接，请稍候再移除");
     }
     const record = this.sessions.get(id);
     if (!record) return undefined;
+    if (permanently) {
+      validateNativeDelete(record);
+      if (this.stopping || this.startups.has(id) || !["idle", "dead", "error"].includes(record.status)) {
+        throw new SessionBusyError("请先停止当前执行，等会话空闲或结束后再彻底删除。");
+      }
+      if (record.backgroundTasks?.length || this.pendingGates.get(id)?.size
+        || this.thinkingUpdates.has(id) || this.sideQuestions.has(id)) {
+        throw new SessionBusyError("会话有后台任务、待处理审批或菜单操作，请处理完成后再彻底删除。");
+      }
+      if ([...this.sessions.values()].some(other => other.id !== id && other.agent === record.agent
+        && other.nativeSessionId === record.nativeSessionId)) {
+        throw new SessionBusyError("另一条 Workbench 会话引用同一原生历史，请先移除其他引用。");
+      }
+      this.deletingSessions.add(id);
+      try {
+        const worker = this.workers.get(id);
+        this.workers.delete(id); // Late callbacks cannot write deleted native history back.
+        try {
+          if (worker) await worker.stop();
+          if ((worker?.child && worker.child.exitCode === null && worker.child.signalCode === null)
+            || (record.processId && !oldWorkerGone(record))) {
+            throw new SessionBusyError("会话进程尚未确认退出，未执行彻底删除。");
+          }
+        } catch (error) {
+          if (worker) this.workers.set(id, worker);
+          throw error;
+        }
+        record.processId = undefined;
+        record.processIdentity = undefined;
+        record.released = true;
+        this.persistRegistry();
+        await deleteNativeSession(record);
+      } finally { this.deletingSessions.delete(id); }
+    }
     const worker = this.workers.get(id);
     // 不等进程退出（Claude 不响应 stdin 关闭，要等满 2 秒兜底）；会话先删，之后的回调因找不到会话而被忽略
     if (worker) {
@@ -904,7 +949,7 @@ export class SessionManager {
       return event;
     }
     if (type === "user_message" && !this.titles.has(id)) this.titles.set(id, sessionTitle({}, [event]));
-    if (type === "user_message") event.title = this.titles.get(id);
+    if (type === "user_message") event.title = sessionTitle({ ...session, title: this.titles.get(id) });
     session.lastActivityAt = timestamp;
     appendTranscript(session.transcriptPath, event);
     const ring = this.rings.get(id) ?? [];
@@ -1168,6 +1213,7 @@ export class SessionManager {
       resumeSessionId: nativeSessionId,
       callbacks,
     });
+    if (record.customTitle && replacement instanceof CodexDriver) replacement.cancelAutomaticTitle();
     const restoreRemote = record.agent === "claude"
       && ["connected", "reconnecting", "connecting"].includes(record.remoteControl?.status ?? "")
       && !this.claudeSettingsResolver(record.cwd).remoteControlAtStartup;
@@ -1279,6 +1325,10 @@ export class SessionManager {
         const session = this.sessions.get(id);
         if (!session || !current()) return;
         const before = JSON.stringify(session);
+        const nativeTitle = typeof metadata.nativeTitle === "string"
+          ? metadata.nativeTitle.replace(/\s+/g, " ").trim().slice(0, 200) : "";
+        const titleChanged = Boolean(nativeTitle && nativeTitle !== session.nativeTitle);
+        if (titleChanged) session.nativeTitle = nativeTitle;
         if (metadata.nativeSessionId) session.nativeSessionId = metadata.nativeSessionId;
         if (metadata.nativeTranscriptPath) session.nativeTranscriptPath = metadata.nativeTranscriptPath;
         if (metadata.config) this.applyConfig(session, metadata.config);
@@ -1290,6 +1340,7 @@ export class SessionManager {
         if (metadata.backgroundTasks && JSON.stringify(session.backgroundTasks ?? []) !== JSON.stringify(metadata.backgroundTasks)) this.setBackgroundTasks(id, metadata.backgroundTasks);
         this.trackWorkerProcess(session, worker());
         if (JSON.stringify(session) !== before) this.persistRegistry();
+        if (titleChanged) this.organizationUpdated();
       },
       commands: (commands) => {
         if (!this.sessions.has(id) || !current()) return;
@@ -1328,6 +1379,7 @@ export class SessionManager {
   }
 
   private assertWritableTranscript(id: string): void {
+    if (this.deletingSessions.has(id)) throw new SessionBusyError("会话正在彻底删除，请稍候。");
     if (this.damagedTranscripts.has(id)) throw new Error(`transcript 损坏，禁止继续写入：${this.sessions.get(id)?.transcriptPath}`);
   }
 

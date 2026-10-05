@@ -727,6 +727,13 @@ export class KimiDriver extends BaseDriver {
   private handleSessionUpdate(params: Record<string, any>): void {
     const update = params.update ?? {};
     const type = update.sessionUpdate;
+    if (type === "session_info_update") {
+      if (this.nativeSessionId && typeof params.sessionId === "string" && params.sessionId !== this.nativeSessionId) return;
+      if (typeof update.title === "string" && update.title.trim()) {
+        this.callbacks.metadata({ nativeTitle: update.title });
+      }
+      return;
+    }
     if (type === "config_option_update") {
       this.updateConfigOptions(update.configOptions ?? []);
       this.callbacks.metadata({ config: { ...this.config } });
@@ -788,10 +795,7 @@ export class KimiDriver extends BaseDriver {
       this.callbacks.commands(commands);
       return;
     }
-    const quiet = new Set([
-      "session_info_update",
-    ]);
-    if (!quiet.has(type)) this.callbacks.emit("raw_event", { source: "kimi", update });
+    this.callbacks.emit("raw_event", { source: "kimi", update });
   }
 
   private request(method: string, params: unknown): Promise<any> {

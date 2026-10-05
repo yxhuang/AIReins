@@ -3,7 +3,7 @@ import { open } from "node:fs/promises";
 import { closeSync, fstatSync, openSync, readSync, readdirSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
-import { mergeHistoryMessages, parseHistoryMessages, type HistoryMessage } from "./history.js";
+import { kimiHistoryRoot, mergeHistoryMessages, parseHistoryMessages, type HistoryMessage } from "./history.js";
 import type { AgentKind, SessionRecord } from "./types.js";
 
 const MAX_TAIL_BYTES = 4 * 1024 * 1024;
@@ -33,7 +33,7 @@ export class NativeConversationReader {
     this.roots = {
       claude: process.env.WORKBENCH_CLAUDE_HISTORY_DIR || join(homedir(), ".claude", "projects"),
       codex: process.env.WORKBENCH_CODEX_HISTORY_DIR || join(homedir(), ".codex", "sessions"),
-      kimi: process.env.WORKBENCH_KIMI_HISTORY_DIR || join(homedir(), ".kimi-code", "sessions"),
+      kimi: kimiHistoryRoot(),
       ...roots,
     };
   }

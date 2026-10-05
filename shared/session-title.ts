@@ -1,8 +1,9 @@
-// 会话标题：列表字段优先，缺省时用首条 user_message 派生。
+// 会话标题：手动命名、原生标题、列表字段依次优先，缺省时用首条 user_message 派生。
 // 所有空白（含换行）压成单空格；保留完整标题，由界面按可用宽度显示省略号。
 // 首条消息还没到时返回占位「新会话」。
-export function sessionTitle(session: { title?: string; customTitle?: string }, events?: { type: string; payload: Record<string, unknown> }[]): string {
+export function sessionTitle(session: { title?: string; customTitle?: string; nativeTitle?: string }, events?: { type: string; payload: Record<string, unknown> }[]): string {
   if (session.customTitle?.trim()) return session.customTitle.trim();
+  if (session.nativeTitle?.trim()) return session.nativeTitle.trim();
   const firstUser = events?.find((event) => event.type === "user_message");
   const command = firstUser?.payload.command;
   const commandText = command && typeof command === "object" && "name" in command && typeof command.name === "string"

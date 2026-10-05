@@ -4,7 +4,6 @@ import { relativeTime, relativeTimeShort, sessionTitle } from "../format";
 import { AgentIcon } from "./AgentIcon";
 import { isInlineSvg } from "../pages";
 import type { CreateSessionInput } from "../api";
-import { pickWindowsDirectory } from "../api";
 import { store, type Store } from "../store";
 import { selectSidebarSections, sidebarStatusDot } from "../sidebar-sessions";
 import { lockSidebarSwipe, normalizeSidebarTitle, sidebarSwipeOffset } from "../sidebar-menu";
@@ -21,6 +20,7 @@ import { HistoryView } from "./HistoryView";
 import { PageView } from "./PageView";
 import { SidebarResize } from "./SidebarResize";
 import { shortSessionTitle, SidebarSessionTitle } from "./SessionTitle";
+import { PermanentDeleteConfirm } from "./PermanentDeleteConfirm";
 
 const AGENT_LABELS: Record<AgentKind, string> = {
   claude: "claude",
@@ -442,6 +442,7 @@ function SessionRow({
   onSwipeChange: (id: string | null) => void;
 }) {
   const [confirming, setConfirming] = useState(false);
+  const [permanently, setPermanently] = useState(false);
   const [busy, setBusy] = useState(false);
   // 主回合已结束但还有后台任务（委派的 codex 等）在跑：仍算「正在工作」
   const backgroundBusy = session.status === "idle" && (session.backgroundTasks?.length ?? 0) > 0;
@@ -615,7 +616,7 @@ function SessionRow({
     setBusy(true);
     setError(null);
     try {
-      await store.remove(session.id);
+      await store.remove(session.id, permanently);
       // 成功后该行随列表一起卸载，无需清状态
     } catch (e) {
       // 失败留在确认态：错误就地显示，可重试或取消
@@ -629,10 +630,11 @@ function SessionRow({
     // 焦点还给这一行（等下一轮渲染后按钮重新挂载）
     requestAnimationFrame(() => rowRef.current?.focus());
   };
-  const beginConfirm = () => {
+  const beginConfirm = (permanent = false) => {
     onSwipeChange(null);
     closeMenu();
     setError(null);
+    setPermanently(permanent);
     setConfirming(true);
   };
 
@@ -641,7 +643,8 @@ function SessionRow({
       onSelect: () => void runMenuAction(() => store.patchSession(session.id, { pinned: !session.pinned })) },
     { id: "rename", label: "重命名", icon: "rename", shortcut: "R", onSelect: startRename },
     { id: "move", label: "移到分组", icon: "folder", trailing: "›", onSelect: () => setMenuScreen("group") },
-    { id: "delete", label: "删除", icon: "delete", shortcut: "D", danger: true, divider: true, onSelect: beginConfirm },
+    { id: "delete", label: "移除", icon: "delete", shortcut: "D", divider: true, onSelect: () => beginConfirm() },
+    ...(session.agent === "claude" ? [] : [{ id: "permanent-delete", label: "彻底删除", icon: "delete" as const, danger: true, onSelect: () => beginConfirm(true) }]),
   ];
   const groupItems: SidebarMenuItem[] = [
     { id: "back", label: "返回", icon: "back", onSelect: () => setMenuScreen("main") },
@@ -660,6 +663,8 @@ function SessionRow({
   ];
 
   if (confirming) {
+    if (permanently) return <PermanentDeleteConfirm session={session} busy={busy} error={error}
+      onCancel={cancelConfirm} onConfirm={() => void confirm()} />;
     const running = session.status === "starting" || session.status === "running";
     return (
       <div
@@ -684,7 +689,7 @@ function SessionRow({
             disabled={busy}
             onClick={() => void confirm()}
           >
-            {busy ? "移除中…" : "确认删除"}
+            {busy ? "移除中…" : "确认移除"}
           </button>
           <button
             type="button"
@@ -1029,8 +1034,6 @@ function NewSessionForm({ onDone }: { onDone: () => void }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [browseOpen, setBrowseOpen] = useState(false);
-  const [pickerBusy, setPickerBusy] = useState(false);
-  const nativePicker = meta?.capabilities.windowsDirectoryPicker === true;
   const browseButtonRef = useRef<HTMLButtonElement>(null);
   const submitBtnRef = useRef<HTMLButtonElement>(null);
   // 三个配置下拉的已选值；"" = 跟随配置（不传该字段）。切 agent 时整体重置。
@@ -1045,7 +1048,7 @@ function NewSessionForm({ onDone }: { onDone: () => void }) {
   });
 
   const submit = async () => {
-    if (!cwd.trim() || busy || pickerBusy) return;
+    if (!cwd.trim() || busy) return;
     setBusy(true);
     setError(null);
     // 只把非默认（非「跟随配置」）的字段放进 config
@@ -1103,7 +1106,7 @@ function NewSessionForm({ onDone }: { onDone: () => void }) {
       </div>
       <div className="new-field">
         <label htmlFor="new-session-cwd">工作目录（Windows / Linux 路径）</label>
-        <p className="new-hint">可直接粘贴 Windows 文件夹路径，自动转换；点“浏览”可查看目录。</p>
+        <p className="new-hint">可直接粘贴 Windows 文件夹路径，自动转换；点“浏览…”选择目录，地址栏左侧文件夹按钮可调用 Windows 选择窗口。</p>
         <div className="cwd-input-row">
           <input
             id="new-session-cwd"
@@ -1114,20 +1117,8 @@ function NewSessionForm({ onDone }: { onDone: () => void }) {
             className="mono"
             required
           />
-          <button ref={browseButtonRef} type="button" className="btn" disabled={pickerBusy} onClick={async () => {
-            if (!nativePicker) { setBrowseOpen(true); return; }
-            setPickerBusy(true);
-            setError(null);
-            try {
-              const result = await pickWindowsDirectory(normalizeDirectoryPath(cwd));
-              if (result.path) setCwd(result.path);
-            } catch (cause) {
-              setError(cause instanceof Error ? cause.message : String(cause));
-              setBrowseOpen(true);
-            } finally { setPickerBusy(false); browseButtonRef.current?.focus(); }
-          }}>{pickerBusy ? "选择中…" : "浏览…"}</button>
+          <button ref={browseButtonRef} type="button" className="btn" onClick={() => setBrowseOpen(true)}>浏览…</button>
         </div>
-        {nativePicker && <button type="button" className="btn" disabled={pickerBusy} onClick={() => setBrowseOpen(true)}>网页浏览…</button>}
       </div>
       {/* 首条消息 + 配置胶囊：与会话输入框同一形态（胶囊直接显示当前值，点开选） */}
       <div className="composer-box">
@@ -1147,7 +1138,7 @@ function NewSessionForm({ onDone }: { onDone: () => void }) {
         type="submit"
         className="btn btn-primary"
         ref={submitBtnRef}
-        disabled={busy || pickerBusy || !cwd.trim()}
+        disabled={busy || !cwd.trim()}
         title={!cwd.trim() ? "请先填写工作目录" : undefined}
       >
         {busy ? "创建中…" : "创建并进入"}
@@ -1157,6 +1148,7 @@ function NewSessionForm({ onDone }: { onDone: () => void }) {
       {browseOpen && (
         <DirectoryBrowser
           initialPath={cwd}
+          allowWindowsPicker
           onSelect={(path) => { setCwd(path); setBrowseOpen(false); requestAnimationFrame(() => browseButtonRef.current?.focus()); }}
           onClose={() => { setBrowseOpen(false); requestAnimationFrame(() => browseButtonRef.current?.focus()); }}
         />

@@ -21,6 +21,59 @@ interface PendingRpc {
   reject(error: Error): void;
 }
 
+interface TitleRequest {
+  threadId: string;
+  turnId: string;
+  response?: string;
+  completed: boolean;
+  cancelled: boolean;
+  resolve(): void;
+  reject(error: Error): void;
+}
+
+// Codex rust-v0.160.0: tui/src/app/thread_title.rs:29-31,279-304,412-436.
+const TITLE_MODEL = "gpt-5.6-luna";
+const TITLE_PREFIX = "Generate a concise, single-line task title of at most 36 characters and under five words where possible. "
+  + "Start with an imperative verb. Capitalize only the first word unless the user's language, proper nouns, acronyms, or code terms require otherwise. "
+  + "Preserve ticket references exactly. Write in the user's language. Do not use quotes, markdown, or trailing punctuation. Do not answer the request.\n\nUser prompt:\n";
+
+function titlePrompt(text: string): string {
+  const bytes = Buffer.from(text.trim());
+  let end = Math.min(bytes.length, 960 - Buffer.byteLength(TITLE_PREFIX));
+  while (end < bytes.length && (bytes[end]! & 0xc0) === 0x80) end--;
+  return TITLE_PREFIX + bytes.subarray(0, end).toString("utf8");
+}
+
+function parseTitle(response?: string): string | undefined {
+  if (!response || Buffer.byteLength(response) > 8192) return;
+  try {
+    const value = JSON.parse(response);
+    if (!value || typeof value.title !== "string" || Object.keys(value).length !== 1) return;
+    const title = value.title.trim().replace(/^["'`“”‘’]+|["'`“”‘’]+$/g, "")
+      .replace(/\s+/g, " ").replace(/[.?!]+$/g, "").trimEnd();
+    return title ? [...title].slice(0, 36).join("") : undefined;
+  } catch { return; }
+}
+
+// Same tool isolation as tui/src/temporary_structured_request.rs:65-99.
+function titleConfig(effective: Record<string, any>): Record<string, unknown> {
+  return {
+    ...Object.fromEntries([
+      "apps", "code_mode", "code_mode_only", "context_management", "current_time_reminder",
+      "deferred_executor", "enable_fanout", "goals", "hooks", "image_generation", "memories",
+      "multi_agent", "multi_agent_v2", "plugins", "request_permissions_tool", "shell_snapshot",
+      "shell_tool", "standalone_web_search", "token_budget", "tool_suggest", "unified_exec", "view_image",
+    ].map(name => [`features.${name}`, false])),
+    "cloud.skills.enabled": false,
+    "skills.include_instructions": false,
+    "tools.experimental_request_user_input.enabled": false,
+    "tools.update_plan.enabled": false,
+    web_search: "disabled",
+    default_permissions: ":read_only",
+    mcp_servers: Object.fromEntries(Object.keys(effective.mcp_servers ?? {}).map(name => [name, { enabled: false }])),
+  };
+}
+
 interface CodexPermission {
   rpcId: string | number;
   method: string;
@@ -56,6 +109,7 @@ interface CodexModelInfo {
   defaultReasoningEffort?: string;
   supportedReasoningEfforts?: { reasoningEffort: string; description?: string }[];
   isDefault?: boolean;
+  hidden?: boolean;
 }
 
 interface CodexEffectiveConfig {
@@ -223,6 +277,13 @@ export class CodexDriver extends BaseDriver {
   private clearEffortNextTurn = false;
   private readonly pendingConfigFields = new Set<ConfigOptionId>();
   private applyingConfig?: ApplyingConfig;
+  private nativeTitle?: string;
+  private modelProvider = "openai";
+  private titleModelAvailable = false;
+  private titleAttempted = false;
+  private titleRequest?: TitleRequest;
+  private titleTask?: Promise<void>;
+  private readonly titleThreadIds = new Set<string>();
 
   constructor(options: DriverOptions) {
     super(options);
@@ -236,7 +297,8 @@ export class CodexDriver extends BaseDriver {
     this.spawnProcess("codex", ["app-server", "--stdio"]);
     const initialized = await withTimeout(this.request("initialize", {
       clientInfo: { name: "workbench", title: "Workbench", version: "0.1.0" },
-      capabilities: null,
+      // Temporary thread isolation uses experimental empty capability/environment fields.
+      capabilities: { experimentalApi: true },
     }), 15_000, "Codex initialize");
     if (!initialized) throw new Error("Codex initialize 未返回 result");
     this.notify("initialized", {});
@@ -255,13 +317,14 @@ export class CodexDriver extends BaseDriver {
       });
     }
     const models = await withTimeout(this.request("model/list", {
-      limit: 100,
-      includeHidden: false,
+      // TUI app_server_session.rs:599-609 includes hidden models for its title catalog.
+      includeHidden: true,
     }), 15_000, "Codex model/list");
     this.configSchema = codexConfigSchemaFromModels(
-      Array.isArray(models?.data) ? models.data : [],
+      Array.isArray(models?.data) ? models.data.filter((model: CodexModelInfo) => !model.hidden) : [],
       effectiveConfig,
     );
+    this.titleModelAvailable = Array.isArray(models?.data) && models.data.some((model: CodexModelInfo) => model.model === TITLE_MODEL);
     this.validateConfig(this.config);
     const resolvedOptions = configOptionsForModel(this.configSchema.options, this.config.model);
     const modelOption = resolvedOptions.find((option) => option.id === "model");
@@ -295,6 +358,8 @@ export class CodexDriver extends BaseDriver {
       }), 15_000, "Codex thread/start");
     this.threadId = result?.thread?.id ?? result?.id ?? this.resumeSessionId ?? "";
     if (!this.threadId) throw new Error("Codex 未返回 thread id");
+    this.nativeTitle = result?.thread?.name;
+    this.modelProvider = result?.modelProvider ?? "openai";
     this.config = {
       model: typeof result?.model === "string" ? result.model : this.config.model ?? null,
       effort: typeof result?.reasoningEffort === "string"
@@ -305,6 +370,7 @@ export class CodexDriver extends BaseDriver {
     this.callbacks.metadata({
       nativeSessionId: this.threadId,
       nativeTranscriptPath: result?.thread?.path,
+      nativeTitle: result?.thread?.name,
       config: { ...this.config },
     });
     this.callbacks.status("idle");
@@ -526,6 +592,9 @@ export class CodexDriver extends BaseDriver {
   }
 
   async stop(): Promise<void> {
+    this.stopping = true;
+    this.cancelAutomaticTitle();
+    try { await withTimeout(this.titleTask ?? Promise.resolve(), 2_500, "Codex title shutdown"); } catch { /* best effort */ }
     this.cancelUserInputs();
     if (this.threadId && this.child?.stdin.writable) {
       try {
@@ -555,6 +624,7 @@ export class CodexDriver extends BaseDriver {
       this.callbacks.emit("raw_event", { source: "codex", raw: message });
       return;
     }
+    if (this.handleTitleNotification(message.method, message.params ?? {}, message.id)) return;
     if (APPROVAL_METHODS.has(message.method) && Object.hasOwn(message, "id")) {
       const requestId = `codex:${String(message.id)}`;
       this.permissions.set(requestId, { rpcId: message.id, method: message.method, params: message.params ?? {} });
@@ -609,7 +679,113 @@ export class CodexDriver extends BaseDriver {
   }
 
   protected handleProcessExit(): void {
+    this.cancelAutomaticTitle();
+    for (const pending of this.rpc.values()) pending.reject(new Error("Codex worker exited"));
+    this.rpc.clear();
     this.userInputs.clear();
+  }
+
+  /** Codex-only: a Workbench manual title supersedes any pending automatic result. */
+  cancelAutomaticTitle(): void {
+    this.titleAttempted = true;
+    if (this.titleRequest) {
+      this.titleRequest.cancelled = true;
+      this.titleRequest.reject(new Error("Title cancelled"));
+    }
+  }
+
+  private handleTitleNotification(method: string, params: Record<string, any>, rpcId?: string | number): boolean {
+    const job = this.titleRequest;
+    if (method === "thread/started" && params.thread?.ephemeral && params.thread?.threadSource === "thread_title") {
+      this.titleThreadIds.add(params.thread.id);
+      if (job) job.threadId = params.thread.id;
+      else void withTimeout(this.request("thread/unsubscribe", { threadId: params.thread.id }), 1_000, "Codex late title unsubscribe").catch(() => {});
+      return true;
+    }
+    if (!this.titleThreadIds.has(params.threadId)) return false;
+    if (rpcId !== undefined) {
+      // Fail closed: this hidden thread never exposes tools or approval gates to WB.
+      this.send({ jsonrpc: "2.0", id: rpcId, error: { code: -32601, message: "Tools disabled for title generation" } });
+      job?.reject(new Error("Unexpected title tool request"));
+    } else if (job && params.threadId === job.threadId && !job.cancelled) {
+      const turnId = params.turn?.id ?? params.turnId;
+      if (turnId && !job.turnId) job.turnId = turnId;
+      if (turnId === job.turnId) {
+        if (method === "item/completed" && params.item?.type === "agentMessage") {
+          if (typeof params.item.text === "string" && Buffer.byteLength(params.item.text) <= 8192) job.response = params.item.text;
+          else job.reject(new Error("Invalid title response"));
+        } else if (method === "turn/completed") {
+          job.completed = true;
+          if (params.turn?.status === "completed") job.resolve();
+          else job.reject(new Error("Title turn failed"));
+        }
+      }
+    }
+    return true; // Includes late notifications after cleanup.
+  }
+
+  private async cleanupTitle(job: TitleRequest): Promise<void> {
+    if (!job.threadId) return;
+    if (job.turnId && !job.completed) {
+      try { await withTimeout(this.request("turn/interrupt", { threadId: job.threadId, turnId: job.turnId }), 1_000, "Codex title interrupt"); } catch { /* silent fallback */ }
+    }
+    try { await withTimeout(this.request("thread/unsubscribe", { threadId: job.threadId }), 1_000, "Codex title unsubscribe"); } catch { /* silent fallback */ }
+  }
+
+  private async generateAutomaticTitle(text: string): Promise<void> {
+    let job!: TitleRequest;
+    const completed = new Promise<void>((resolve, reject) => {
+      job = { threadId: "", turnId: "", cancelled: false, completed: false, resolve, reject };
+    });
+    void completed.catch(() => {}); // Cancellation may arrive before turn/start replies.
+    this.titleRequest = job;
+    const currentModel = this.config.model;
+    const run = async () => {
+      // TUI fails closed when effective MCP config cannot be read.
+      const effective = await this.request("config/read", { cwd: this.cwd, includeLayers: false });
+      if (job.cancelled || !effective?.config || !currentModel) return;
+      const account = await this.request("account/read", { refreshToken: false }).catch(() => undefined);
+      if (job.cancelled) return;
+      const model = this.modelProvider === "openai" && account?.account?.type === "chatgpt" && this.titleModelAvailable
+        ? TITLE_MODEL : currentModel;
+      const started = await this.request("thread/start", {
+        cwd: this.cwd, model, modelProvider: this.modelProvider,
+        ephemeral: true, threadSource: "thread_title", approvalPolicy: "never", approvalsReviewer: "user",
+        sandbox: "read-only", runtimeWorkspaceRoots: [], environments: [], dynamicTools: [], selectedCapabilityRoots: [],
+        config: titleConfig(effective.config),
+      });
+      job.threadId = started?.thread?.id ?? job.threadId;
+      if (!job.threadId) throw new Error("Missing title thread ID");
+      this.titleThreadIds.add(job.threadId);
+      if (job.cancelled) { await this.cleanupTitle(job); return; }
+      if (started?.sandbox?.type !== "readOnly" || started?.approvalPolicy !== "never") throw new Error("Title thread is not read-only");
+      const turn = await this.request("turn/start", {
+        threadId: job.threadId,
+        input: [{ type: "text", text: titlePrompt(text), text_elements: [] }],
+        ...(model === TITLE_MODEL ? { effort: "low" } : {}),
+        outputSchema: { type: "object", properties: { title: { type: "string", minLength: 1, maxLength: 36 } }, required: ["title"], additionalProperties: false },
+      });
+      job.turnId = turn?.turn?.id ?? job.turnId;
+      if (job.cancelled) { await this.cleanupTitle(job); return; }
+      await completed;
+      const title = parseTitle(job.response);
+      if (!title || job.cancelled || this.nativeTitle) return;
+      const original = await this.request("thread/read", { threadId: this.threadId, includeTurns: false });
+      if (job.cancelled || this.nativeTitle || original?.thread?.name) return;
+      await this.request("thread/name/set", { threadId: this.threadId, name: title });
+      if (!job.cancelled) {
+        this.nativeTitle = title;
+        this.callbacks.metadata({ nativeTitle: title });
+      }
+    };
+    try {
+      await withTimeout(run(), 30_000, "Codex automatic title");
+    } catch { /* Network/quota/protocol errors keep the existing first-input fallback. */ }
+    finally {
+      job.cancelled = true;
+      await this.cleanupTitle(job);
+      if (this.titleRequest === job) this.titleRequest = undefined;
+    }
   }
 
   private cancelUserInputs(): void {
@@ -622,6 +798,16 @@ export class CodexDriver extends BaseDriver {
   }
 
   private handleNotification(method: string, params: Record<string, any>): void {
+    if (method === "thread/name/updated") {
+      if (params.threadId === this.threadId && typeof params.threadName === "string") {
+        if (params.threadName.trim()) {
+          this.nativeTitle = params.threadName;
+          this.cancelAutomaticTitle();
+        }
+        this.callbacks.metadata({ nativeTitle: params.threadName });
+      }
+      return;
+    }
     if (method === "item/agentMessage/delta") {
       this.callbacks.emit("agent_text_delta", { text: params.delta ?? "", itemId: params.itemId });
       return;
@@ -643,6 +829,14 @@ export class CodexDriver extends BaseDriver {
     }
     if (method === "item/completed") {
       const item = params.item ?? {};
+      if (params.threadId === this.threadId && item.type === "userMessage" && !this.titleAttempted) {
+        this.titleAttempted = true;
+        const text = Array.isArray(item.content) ? item.content.filter((part: any) => part.type === "text" && typeof part.text === "string")
+          .map((part: any) => part.text).join(" ") : "";
+        if (!this.resumeSessionId && !this.nativeTitle && !this.stopping && text.trim()) {
+          this.titleTask = this.generateAutomaticTitle(text);
+        }
+      }
       if (this.isToolItem(item.type)) {
         this.callbacks.emit("tool_call_completed", {
           toolCallId: item.id,
