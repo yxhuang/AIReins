@@ -247,6 +247,11 @@ function Test-Service {
 
 function Ensure-Service {
     Write-TrayLog 'ensure service'
+    # 冷启动要几秒且没有窗口；不提示的话用户会再点任务栏按钮，把随后打开的窗口点成最小化（tray.log 10-05 23:36）。
+    if ($script:Tray -and -not (Test-Port)) {
+        $script:Tray.ShowBalloonTip(5000, 'Workbench 工作台', '正在启动工作台，几秒后自动打开窗口，无需重复点击。',
+            [System.Windows.Forms.ToolTipIcon]::Info)
+    }
     Invoke-Wsl "WORKBENCH_NO_OPEN=1 WORKBENCH_PORT=$Port $WbPath"
     $clock = [System.Diagnostics.Stopwatch]::StartNew()
     do {
