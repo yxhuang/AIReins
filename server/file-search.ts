@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
-import { realpath, stat } from "node:fs/promises";
-import { isAbsolute, relative, resolve, sep, win32 } from "node:path";
+import { constants } from "node:fs";
+import { access, realpath, stat } from "node:fs/promises";
+import { delimiter, dirname, isAbsolute, join, relative, resolve, sep, win32 } from "node:path";
 
 const SEARCH_TIMEOUT_MS = 3_000;
 const SEARCH_MAX_BUFFER = 8 * 1024 * 1024;
@@ -76,11 +77,22 @@ async function listCandidates(cwd: string): Promise<string[]> {
   }
 
   try {
-    const output = await run("rg", [
+    const args = [
       "--files", "--hidden", "--null", "--no-messages",
       "--glob", "!.git", "--glob", "!.git/**",
       "--glob", "!node_modules", "--glob", "!node_modules/**",
-    ], cwd, true);
+    ];
+    let output: string;
+    try {
+      output = await run("rg", args, cwd, true);
+    } catch (error) {
+      if ((error as CommandError).code !== "ENOENT") throw error;
+      // Standalone Codex ships rg outside PATH; resolve its launcher symlink
+      // so upgrades do not leave Workbench pinned to an old release.
+      const bundledRg = await findCodexRipgrep();
+      if (!bundledRg) throw new Error("找不到 rg 或 Codex 自带的 rg，无法检索非 Git 目录");
+      output = await run(bundledRg, args, cwd, true);
+    }
     return splitNull(output);
   } catch (error) {
     const commandError = error as CommandError;
@@ -89,6 +101,20 @@ async function listCandidates(cwd: string): Promise<string[]> {
     }
     throw new Error(`文件枚举失败：${commandError.message}`);
   }
+}
+
+async function findCodexRipgrep(): Promise<string | null> {
+  for (const directory of (process.env.PATH ?? "").split(delimiter).filter(Boolean)) {
+    try {
+      const codex = await realpath(join(directory, "codex"));
+      const candidate = resolve(dirname(codex), "../codex-path/rg");
+      await access(candidate, constants.X_OK);
+      if ((await stat(candidate)).isFile()) return candidate;
+    } catch {
+      // Continue through PATH entries without a standalone Codex installation.
+    }
+  }
+  return null;
 }
 
 function run(command: string, args: string[], cwd: string, allowNoMatches = false): Promise<string> {

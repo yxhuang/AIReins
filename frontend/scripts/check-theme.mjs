@@ -20,7 +20,7 @@ assert.equal(tokens.get("--chrome"), "light-dark(#F0EEE6, #262624)", "C1 外框�
 
 let checked = 0;
 for (const [, selector, body] of css.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
-  if (!/\.(?:dir-[\w-]+|page-nav(?:-[\w-]+)?|page-icon)\b/.test(selector)) continue;
+  if (!/\.(?:dir-[\w-]+|page-nav(?:-[\w-]+)?|page-icon|host-[\w-]+)\b/.test(selector)) continue;
   assert.doesNotMatch(body, /var\(\s*--gate(?:-[\w-]+)?\b/, `${selector.trim()} 不得使用闸门色`);
   assert.doesNotMatch(body, /#[\da-f]{3,8}\b|\b(?:rgb|rgba|hsl|hsla|light-dark)\(/i,
     `${selector.trim()} 必须复用颜色令牌`);

@@ -425,16 +425,16 @@ t("同 hash 条目只发 popstate 也恢复会话；外部 hash 不沿用旧 sta
   assert.equal(s.currentId, "external"); noRightPanel(s);
   s.backFromSession(); assert.equal(window.location.hash, "#/"); // 外部 hash 不能证明来源
 });
-t("桌面终端/文件开关不写 history，派单/页面关闭保留原 hash push 语义", () => {
+t("桌面面板关闭消耗本次面板历史，再次后退可继续正常导航", () => {
   const h = navigationHarness({ mobile: false }); const { s } = h;
   s.navigate("session-a"); const length = h.history.length;
   for (let i = 0; i < 3; i++) {
-    s.setTerminalOpen(true); s.setTerminalOpen(false); s.setFilesOpen(true); s.setFilesOpen(false);
+    s.setTerminalOpen(true); s.setTerminalOpen(false); h.flush(); s.setFilesOpen(true); s.setFilesOpen(false); h.flush();
   }
-  assert.equal(h.history.length, length); assert.equal(h.history.state, null);
-  s.toggleDispatches(); s.closeDispatches(); assert.equal(h.history.length, length + 2);
-  s.navigatePage("ai-usage"); s.closeSidebarPanel(); assert.equal(h.history.length, length + 4);
-  assert.equal(h.backCalls, 0); assert.equal(s.currentId, "session-a");
+  noRightPanel(s); assert.equal(window.location.hash, "#/session/session-a");
+  s.toggleDispatches(); s.closeDispatches(); h.flush(); noRightPanel(s);
+  s.navigatePage("ai-usage"); s.closeSidebarPanel(); h.flush(); assert.equal(s.currentPageId, null);
+  assert.equal(s.currentId, "session-a"); h.back(); assert.equal(s.currentId, null);
 });
 
 const asyncTest = async (name, fn) => {
@@ -530,13 +530,15 @@ await asyncTest("桌面开着派单/历史/页面面板刷新，主区仍停在�
       globalThis.fetch = async (path) => ({ json: async () => ({ code: 0, data: path === "/api/meta"
         ? { capabilities: {}, drivers: {} }
         : { sessions: alive ? [{ id: "session-a", seq: 0 }] : [] } }) });
-      const { s } = navigationHarness({ mobile: false, hash });
+      const h = navigationHarness({ mobile: false, hash });
+      const { s } = h;
       s.connect = () => {}; s.startClock = () => {}; s.refreshPages = async () => {};
       await s.init();
       assert.equal(s.currentId, alive ? "session-a" : null, hash);
       assert.equal(window.location.hash, hash, "面板保持打开");
       if (hash === "#/dispatches") {
         s.closeDispatches();
+        h.flush();
         assert.equal(window.location.hash, alive ? "#/session/session-a" : "#/");
       }
     }
@@ -620,7 +622,7 @@ t("复核6：桌面选择、换选和返回列表不写 history", () => {
   s.navigateHistory(); const length = h.history.length;
   s.selectHistory(previewItem("first")); s.selectHistory(previewItem("second"));
   s.backToHistoryList(); assert.equal(s.historySelection, null); assert.ok(s.historyOpen);
-  assert.equal(h.history.length, length); assert.equal(h.history.state, null);
+  assert.equal(h.history.length, length); assert.equal(h.history.state.workbenchDesktopPanels.route.historySelection, null);
 });
 globalThis.window = originalWindow;
 
@@ -736,7 +738,8 @@ t("历史打开：主列表外 released / dead 会话保留打开入口与现有
         assert.ok(preview.includes("打开会话"));
         store.navigate(session.id);
         const main = mainOf(renderApp());
-        assert.ok(main.includes(session.title));
+        assert.ok(main.includes(`class="session-title" title="${session.title.slice(0, 12)}…"`));
+        assert.ok(!main.includes(session.title), "主区标题不再放入完整长标题");
         if (status === "dead") {
           assert.ok(main.includes("新建会话并续接"));
           assert.ok(!render().includes(session.title), "dead 打开后仍仅从历史进入");

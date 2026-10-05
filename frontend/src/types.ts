@@ -223,10 +223,12 @@ interface DriverMeta extends DriverCapabilities {
 
 export interface MetaInfo {
   serverVersion: string;
+  /** 执行主机的真实名称；旧后端没有此字段。 */
+  hostName?: string;
   /** server 进程 cwd：新建会话表单 cwd 预填的最后一级回退 */
   defaultCwd: string;
   cliVersions: Record<AgentKind, string>;
-  capabilities: { terminal: boolean };
+  capabilities: { terminal: boolean; windowsDirectoryPicker?: boolean };
   drivers: Record<AgentKind, DriverMeta>;
 }
 
@@ -298,14 +300,33 @@ export interface SnapshotPreflight {
   snapshotPath: string | null;
 }
 
+export interface DirectoryEntry {
+  name: string;
+  path: string;
+  size?: number | null;
+  /** Unix 毫秒；兼容尚未更新的服务端或不可读元数据。 */
+  modifiedAt?: number | null;
+}
+
 /** GET /api/fs/dirs 的 data：一级子目录及可返回的逻辑父路径；files=1 时多带同层普通文件列表。 */
 export interface DirectoryListing {
   path: string;
   parent: string | null;
-  dirs: { name: string; path: string }[];
+  dirs: DirectoryEntry[];
   truncated: boolean;
   /** 仅 files=1 时返回：同层普通文件（隐藏文件不列） */
-  files?: { name: string; path: string }[];
+  files?: DirectoryEntry[];
+}
+
+export interface WorkFileTarget { path: string; root: string; sessionId?: string }
+export interface WorkFile {
+  path: string; name: string; size: number;
+  kind: "text" | "markdown" | "csv" | "tsv" | "html" | "image" | "pdf" | "unsupported";
+  mimeType: string; text?: string; version?: string; editable: boolean; reason?: string;
+}
+export interface FilePreviewState {
+  target: WorkFileTarget; file: WorkFile | null; draft: string;
+  loading: boolean; saving: boolean; error: string | null; loadId: number;
 }
 
 /** 三家 CLI 原生历史会话的可识别创建来源；unknown 如实显示「未知」，不猜。 */

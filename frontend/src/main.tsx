@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import { App } from "./App";
 import { store } from "./store";
 import { applyBodyFontSize, readBodyFontSize } from "./body-font";
+import { initializeHostConnections, workbenchWindowTitle } from "./host-connections";
 import "./styles.css";
 
 // 重新 build 后旧页面按需加载的 chunk（如 TerminalPanel）已不存在，import 失败会让整页白屏/黑屏：
@@ -18,6 +19,8 @@ window.addEventListener("vite:preloadError", (event) => {
 });
 
 applyBodyFontSize(readBodyFontSize());
+initializeHostConnections();
+document.title = workbenchWindowTitle(window.location.href, 0);
 void store.init();
 
 createRoot(document.getElementById("root")!).render(

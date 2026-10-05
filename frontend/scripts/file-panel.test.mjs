@@ -5,12 +5,50 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { Store, store } from "../src/store.ts";
 import { insertFileMention, planFileMention, FilePanel } from "../src/components/FilePanel.tsx";
 import { DirectoryBrowser } from "../src/components/DirectoryBrowser.tsx";
+import { directoryBreadcrumbs, directoryEntryDate, directoryEntrySize, normalizeDirectoryPath, recentDirectoryPaths, sortedDirectoryEntries } from "../src/directory-path.ts";
 import { DispatchPanel } from "../src/components/DispatchPanel.tsx";
 import { FILE_WIDTH_OPTIONS } from "../src/components/SidePanelResize.tsx";
 import { clampPanelWidth } from "../src/terminal.ts";
 import { extractMentionTokens, mentionQueryAt } from "../src/mentions.ts";
 
 const session = { cwd: "/a/b", status: "idle" };
+const sortable = { path: "/a", parent: "/", truncated: false,
+  dirs: [{ name: "dir10", path: "/a/dir10", size: null, modifiedAt: 10 }, { name: "dir2", path: "/a/dir2", size: null, modifiedAt: 2 }],
+  files: [{ name: "file2", path: "/a/file2", size: 20, modifiedAt: 1 }, { name: "unknown", path: "/a/unknown" },
+    { name: "file10", path: "/a/file10", size: 1, modifiedAt: 20 }, { name: "file0", path: "/a/file0", size: 0, modifiedAt: 5 }] };
+const originalOrder = JSON.stringify(sortable);
+const sortedNames = (key, direction) => sortedDirectoryEntries(sortable, true, { key, direction }).map(entry => entry.name);
+assert.deepEqual(sortedNames("name", "asc"), ["dir2", "dir10", "file0", "file2", "file10", "unknown"]);
+assert.deepEqual(sortedNames("size", "desc"), ["dir2", "dir10", "file2", "file10", "file0", "unknown"]);
+assert.deepEqual(sortedNames("size", "asc"), ["dir2", "dir10", "file0", "file10", "file2", "unknown"]);
+assert.deepEqual(sortedNames("modifiedAt", "desc"), ["dir10", "dir2", "file10", "file0", "file2", "unknown"]);
+assert.equal(sortedDirectoryEntries(sortable, false, { key: "name", direction: "asc" }).length, 2);
+assert.equal(JSON.stringify(sortable), originalOrder, "排序不修改原始接口结果");
+assert.equal(directoryEntrySize(0), "0 B");
+assert.equal(directoryEntrySize(null), "—");
+assert.equal(directoryEntrySize(2048), "2 KB");
+assert.equal(directoryEntryDate(undefined), "—");
+assert.match(directoryEntryDate(0), /1970/);
+assert.deepEqual(directoryBreadcrumbs("/mnt/c/Users/user/中文"), [
+  { label: "C:", path: "/mnt/c" }, { label: "Users", path: "/mnt/c/Users" },
+  { label: "user", path: "/mnt/c/Users/user" }, { label: "中文", path: "/mnt/c/Users/user/中文" },
+]);
+assert.deepEqual(directoryBreadcrumbs("/"), [{ label: "/", path: "/" }]);
+assert.deepEqual(directoryBreadcrumbs("/home/a").map(crumb => crumb.path), ["/", "/home", "/home/a"]);
+assert.deepEqual(recentDirectoryPaths([
+  { cwd: "/old", lastActivityAt: "2026-10-01" }, { cwd: "/new", lastActivityAt: "2026-10-04" },
+  { cwd: "/new", lastActivityAt: "2026-10-03" }, { cwd: "bad-relative", lastActivityAt: "bad" },
+], ["", "/last", String.raw`C:\Projects`]), ["/last", "/mnt/c/Projects", "/new", "/old"]);
+for (const [input, expected] of [
+  [String.raw`C:\Users\user\Documents\Work\资料\示例项目`, "/mnt/c/Users/user/Documents/Work/资料/示例项目"],
+  [String.raw`  "D:\My Projects\中文目录"  `, "/mnt/d/My Projects/中文目录"],
+  ["c:/Users/user/", "/mnt/c/Users/user/"],
+  ["E:\\", "/mnt/e/"],
+  ["  /home/user/my project  ", "/home/user/my project"],
+  [String.raw`/home/user/back\slash`, String.raw`/home/user/back\slash`],
+  ["C:relative", "C:relative"],
+  ["", ""],
+]) assert.equal(normalizeDirectoryPath(input), expected, input);
 assert.deepEqual(planFileMention(session, true, "/a/b/src/x.ts"), { path: "src/x.ts", reason: null });
 assert.equal(planFileMention({ ...session, cwd: "/a/b/" }, true, "/a/b/x.ts").path, "x.ts");
 assert.equal(planFileMention({ ...session, cwd: "/" }, true, "/src/x.ts").path, "src/x.ts");
@@ -97,7 +135,18 @@ assert.ok(fileHtml.includes('aria-label="目录与文件列表"'));
 assert.ok(fileHtml.includes('title="收起面板"'));
 assert.ok(!fileHtml.includes('aria-modal'));
 assert.ok(!fileHtml.includes('选定此目录'));
-for (const label of ["上一级", "主目录", "Windows"]) assert.ok(fileHtml.includes(label));
+for (const label of ["上一级", "WSL", "Windows"]) assert.ok(fileHtml.includes(label));
+assert.ok(!fileHtml.includes('aria-label="Windows 浏览窗口"'), "能力未确认时不显示原生入口");
+const previousMeta = store.meta;
+store.meta = { capabilities: { windowsDirectoryPicker: true } };
+fileHtml = renderToStaticMarkup(React.createElement(FilePanel, { onClose() {} }));
+assert.ok(fileHtml.includes('aria-label="Windows 浏览窗口"'), "本机文件面板接入原生浏览入口");
+const directoryHtml = renderToStaticMarkup(React.createElement(DirectoryBrowser, { initialPath: "/a/b", onSelect() {}, onClose() {} }));
+assert.ok(!directoryHtml.includes('aria-label="Windows 浏览窗口"'), "原有目录弹窗不重复增加原生入口");
+store.meta = { capabilities: { windowsDirectoryPicker: false } };
+fileHtml = renderToStaticMarkup(React.createElement(FilePanel, { onClose() {} }));
+assert.ok(!fileHtml.includes('aria-label="Windows 浏览窗口"'), "远程入口仍只提供网页浏览");
+store.meta = previousMeta;
 storage.set(FILE_WIDTH_OPTIONS.storageKey, "360");
 fileHtml = renderToStaticMarkup(React.createElement(FilePanel, { onClose() {} }));
 assert.ok(fileHtml.includes('width:360px'));
@@ -114,5 +163,36 @@ for (const mode of ["dir", "file"]) {
   assert.ok(html.includes('aria-modal="true"'));
   assert.equal(html.includes("选定此目录"), mode === "dir");
   assert.equal(html.includes('aria-label="目录与文件列表"'), mode === "file");
+  assert.ok(html.includes('aria-label="目录路径"'));
+  assert.ok(html.includes("前往"));
 }
 console.log("✅ file panel：相对路径、边界插入、复制降级判定、三面板互斥、一次性请求与宽度隔离通过");
+
+const navigatorDescriptor = Object.getOwnPropertyDescriptor(globalThis, "navigator");
+const previousPreview = store.filePreview;
+const pdfPreview = { target: { path: "/a/b/中文.pdf", root: "/a/b" }, loadId: 1, draft: "", loading: false, saving: false, error: null,
+  file: { path: "/a/b/中文.pdf", name: "中文.pdf", kind: "pdf", size: 120, editable: false, mimeType: "application/pdf" } };
+try {
+  store.filePreview = pdfPreview;
+  Object.defineProperty(globalThis, "navigator", { configurable: true, value: { pdfViewerEnabled: true } });
+  const pdfHtml = renderToStaticMarkup(React.createElement(FilePanel, { onClose() {} }));
+  assert.ok(pdfHtml.includes('title="PDF 文件预览"') && pdfHtml.includes("<iframe"), "支持 PDF 时通过 iframe 导航到原生查看器");
+  assert.ok(pdfHtml.includes('role="toolbar"') && pdfHtml.indexOf("外部打开") < pdfHtml.indexOf("<iframe"), "文件操作集中在顶栏");
+  const labels = [">返回<", ">引用<", ">复制路径<", ">外部打开<"];
+  assert.ok(labels.every((label, i) => pdfHtml.indexOf(label) >= 0 && (i === 0 || pdfHtml.indexOf(labels[i - 1]) < pdfHtml.indexOf(label))), "顶栏操作顺序符合要求");
+  for (const removed of ["重新读取", "下载", "file-preview-path", "字节", "只读", "使用浏览器 PDF"]) assert.ok(!pdfHtml.includes(removed), removed);
+  store.filePreview = { ...pdfPreview, file: { ...pdfPreview.file, kind: "markdown", text: "# 内容", editable: true, version: "v1" }, draft: "# 内容" };
+  const markdownHtml = renderToStaticMarkup(React.createElement(FilePanel, { onClose() {} }));
+  assert.ok(markdownHtml.includes('aria-label="文件显示方式"') && markdownHtml.includes("segmented-slider"), "文本预览使用终端同款滑动切换");
+  assert.ok(markdownHtml.includes('aria-label="下载"') && !markdownHtml.includes('aria-label="外部打开"'), "普通文本只保留一个下载入口");
+  store.filePreview = pdfPreview;
+  Object.defineProperty(globalThis, "navigator", { configurable: true, value: { pdfViewerEnabled: false } });
+  const fallbackHtml = renderToStaticMarkup(React.createElement(FilePanel, { onClose() {} }));
+  assert.ok(!fallbackHtml.includes("<iframe") && !fallbackHtml.includes("<object"), "不支持内嵌时不留下空白查看区");
+  assert.ok(fallbackHtml.includes("未启用内嵌 PDF") && fallbackHtml.includes("外部打开"));
+} finally {
+  store.filePreview = previousPreview;
+  if (navigatorDescriptor) Object.defineProperty(globalThis, "navigator", navigatorDescriptor);
+  else delete globalThis.navigator;
+}
+console.log("✅ 文件顶栏操作顺序、简洁 PDF 界面、原生查看器入口及能力回退");

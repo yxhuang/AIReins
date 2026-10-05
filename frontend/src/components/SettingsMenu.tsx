@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { useAnchoredMenu } from "./useAnchoredMenu";
 import { Segmented } from "./Segmented";
 import { WorkbenchStorage } from "./WorkbenchStorage";
+import { HostConnectionSettings } from "./HostSwitcher";
 import { BODY_FONT_MAX, BODY_FONT_MIN, BODY_FONT_STEP, BODY_FONT_STORAGE_KEY, TERM_FONT_MAX, TERM_FONT_MIN, TERM_FONT_STORAGE_KEY, applyBodyFontSize, bodyFontSize, readBodyFontSize, readTermFontSize, termFontSize } from "../body-font";
 import { fetchClaudeStartupSettings, fetchPrefs, fetchSessions, restartWorkbench, saveClaudeStartupSettings, savePrefs } from "../api";
 import { restartAndReconnect, restartBusyCount } from "../restart";
@@ -354,6 +355,10 @@ export function SettingsMenu() {
               ))}
             </section>
           ))}
+          <section className="settings-group">
+            <h3 className="settings-group-title">主机与连接</h3>
+            <HostConnectionSettings />
+          </section>
           <section className="settings-group">
             <h3 className="settings-group-title">Workbench</h3>
             <WorkbenchStorage dialogOpen={storageDialogOpen} onDialogOpenChange={setStorageDialogOpen} />

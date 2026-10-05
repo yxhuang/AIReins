@@ -51,8 +51,8 @@ export function LauncherMenu({ collapsed }: { collapsed: boolean }) {
         : [...groups].map(([group, items]) => <section className="settings-group" key={group}>
           <h3 className="settings-group-title">{group}</h3>
           {items.map((link, index) => <a className="launcher-link" key={index} href={link.url} target="_blank" rel="noopener noreferrer" onClick={() => close(true)}>
-            <span className="launcher-link-icon" aria-hidden="true">{link.icon ?? "↗"}</span>
-            <span className="launcher-link-name">{link.name}</span><span aria-hidden="true">↗</span>
+            {link.icon && <span className="launcher-link-icon" aria-hidden="true">{link.icon}</span>}
+            <span className="launcher-link-name">{link.name}</span>
           </a>)}
         </section>)}
     </div>}

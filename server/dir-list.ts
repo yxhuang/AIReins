@@ -8,13 +8,21 @@ const MAX_FILES = 1_000;
 
 export class DirListError extends Error {}
 
+export interface DirectoryEntry {
+  name: string;
+  path: string;
+  /** files=1 时补充；文件夹大小不累加，读取失败为 null。 */
+  size?: number | null;
+  modifiedAt?: number | null;
+}
+
 export interface DirectoryListing {
   path: string;
   parent: string | null;
-  dirs: { name: string; path: string }[];
+  dirs: DirectoryEntry[];
   truncated: boolean;
   /** 仅在 files=1 时返回：当前目录的普通文件（同样隐藏文件不列出） */
-  files?: { name: string; path: string }[];
+  files?: DirectoryEntry[];
 }
 
 /** 目录浏览器「主目录」按钮的落点：~/dev（用户的项目根），不存在时退回 $HOME。 */
@@ -81,6 +89,24 @@ export async function listDirectories(rawPath?: string, options: { files?: boole
       }
       files.push({ name: entry.name, path: child });
     }
+  }
+  if (options.files === true) {
+    // 只 stat 已收集的条目；限制并发，避免 Windows/网络盘上同时发起上千次读取。
+    const visible = [...dirs, ...files];
+    let next = 0;
+    await Promise.all(Array.from({ length: Math.min(8, visible.length) }, async () => {
+      while (next < visible.length) {
+        const index = next++;
+        const entry = visible[index]!;
+        entry.size = null;
+        entry.modifiedAt = null;
+        try {
+          const info = await stat(entry.path);
+          entry.size = index < dirs.length ? null : info.isFile() ? info.size : null;
+          entry.modifiedAt = info.mtimeMs;
+        } catch { /* 枚举后消失或 stat 不可读时保留名称，不伪造元数据。 */ }
+      }
+    }));
   }
   return {
     path,

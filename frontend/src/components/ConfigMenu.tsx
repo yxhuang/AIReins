@@ -259,18 +259,26 @@ interface BuiltPill {
 }
 
 /** 一行胶囊：模型+推理强度合成一个（「Opus 5.5 High」），审批模式单独一个靠右。 */
+const COMPACT_PERMISSION_LABELS: Record<string, string> = {
+  "Ask for approval": "Ask",
+  "Approve for me": "Auto",
+  "Full access": "Full",
+};
+
 export function ConfigPills({
   main,
   perm,
   permMode,
   cwd,
   placement = "up",
+  beforePerm,
 }: {
   main: BuiltPill[];
   perm: BuiltPill | null;
   permMode: string;
   cwd?: string;
   placement?: "up" | "down";
+  beforePerm?: ReactNode;
 }) {
   return (
     <div className="cfg-pills">
@@ -290,14 +298,18 @@ export function ConfigPills({
           groups={main.map((m) => m.group)}
         />
       )}
+      {beforePerm}
       {perm && (
         <ConfigPill
           kind="perm"
           icon={<PermissionIcon mode={permMode} />}
-          title={perm.reason ?? perm.group.title}
+          title={[`${perm.group.title}：${perm.text}`, perm.reason].filter(Boolean).join("；")}
           placement={placement}
           align="right"
-          label={<span>{perm.text}</span>}
+          label={<span className="cfg-perm-label">
+            <span className="cfg-perm-full">{perm.text}</span>
+            <span className="cfg-perm-short">{COMPACT_PERMISSION_LABELS[perm.text] ?? perm.text}</span>
+          </span>}
           groups={[perm.group]}
         />
       )}

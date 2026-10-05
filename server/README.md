@@ -120,7 +120,9 @@ webhook 地址就是密钥：文件权限设为 600，也不要写进日志或�
 
 - `POST /api/sessions`：创建会话，统一配置见下文
 - `POST /api/snapshot/preflight`：建会话前检查 cwd 是否需要及能够自动快照
-- `GET /api/fs/dirs?path=<绝对路径>&files=1`：只读列出一级子目录；省略 `path` 时使用 `~/dev`（不存在则 `$HOME`）；带 `files=1` 时同层普通文件一并列出（供「+」附件的电脑文件选择）
+- `GET /api/fs/dirs?path=<绝对路径>&files=1`：只读列出一级子目录；省略 `path` 时使用 `~/dev`（不存在则 `$HOME`）；带 `files=1` 时同层普通文件一并列出，并为文件/目录补充 `size` 和 `modifiedAt`（Unix 毫秒）。普通文件大小为字节，文件夹大小为 `null`，不递归累加；无法 stat 时字段为 `null`，保留可列出的名称。只对已收集的条目读取元数据，并发最多8个；文件夹/文件分别最多1000个，超限标记 `truncated`。不带 `files=1` 的目录选择模式保持原返回与读取范围。
+- `POST /api/fs/pick-directory`：仅本机监听允许，WSL＋Windows PowerShell 7 可用时 `GET /api/meta` 返回 `capabilities.windowsDirectoryPicker:true`；远程始终为false且POST返回403。JSON `{path?:string}` 指定起点，Windows盘符与 `/mnt/<盘符>` 支持，Linux cwd/空值从 Windows 用户目录打开。通过固定 PowerShell 程序调用现代 WinForms `FolderBrowserDialog`，路径以环境变量传入，单实例，进程内120秒自动退出（后端130秒超时，前端135秒）。取消返回 `{path:null}`；选定盘符目录后映射并检查可浏览性，返回 `{path:"/mnt/c/..."}`；已有窗口409，输入/目录不合法400，调用失败/超时503。保留所有原有 Host/Origin 检查，不启动常驻 Windows 服务。
+- `POST /api/fs/pick-file`：右侧文件面板的原生 Windows 浏览入口；与目录选择共享上述本机能力、起点、单窗口、取消及超时规则。调用 WinForms `OpenFileDialog`，`All files (*.*)|*.*` 显示所有扩展名，仅选一个既有文件；返回映射到 `/mnt/<盘符>/...` 并经 `stat` 确认为普通文件的路径。预览仍由工作文件接口独立检查授权根与 realpath，不因原生选择而放宽读取权限。
 - `POST /api/uploads?sessionId=<id>&name=<文件名>`：上传附件，请求体为原始字节（非 multipart）；保存到 `~/.workbench/uploads/<sessionId>/`，返回 `{path,name,size,mimeType}` 同秒同名文件通过 `wx` 原子预留路径，再用该文件描述符写流；并发上传各自保留，失败只删除自己的半截文件。
 - `GET /api/uploads/file?path=<绝对路径>`：读取上传目录内的文件字节（缩略图用）；只允许 `~/.workbench/uploads/` 之下
 - `GET /api/sessions`
@@ -145,7 +147,7 @@ webhook 地址就是密钥：文件权限设为 600，也不要写进日志或�
 - `DELETE /api/sessions/:id`：停止 worker；删注册表条目，并删 wb 自己的副本（transcript、未被引用的附件）；三家原生记录不动。响应的 `transcriptsDeleted:true` 仅指 wb 副本，`workbenchTranscriptPreserved:false`、`nativeTranscriptPreserved:true` 如实报告；续接/检查中的移除返回 400 / 40063，IO 错误仍返回 500。
 - `GET /api/history`：只读列出三家 CLI 自己保存的所有来源会话；没有用户消息的会话隐藏，`empty` 单独计数（分页为本页扫描计数），`skipped` 记录损坏/不可读候选。命中 delegate 元数据的条目附带 `dispatch:{runId,name}`，UUID 和 `session_...` 原样匹配；派单映射只读全部目录的 `run.json`/旧 `meta.json`，缓存 30 秒。
 - `GET /api/history/:agent/:nativeSessionId/messages`：从最新消息向前分页读取完整原生历史
-- `GET /api/meta`：server/CLI 实测版本、按请求入口计算的终端能力位、三 driver 能力位与配置 schema
+- `GET /api/meta`：server/CLI 实测版本、按请求入口计算的终端能力位、三 driver 能力位与配置 schema；`hostName` 为执行主机名称，优先用既有 `remote.json` 的 Tailscale 域名机器名，否则用 Node `hostname()`，供主机菜单显示「机器名（本机）」。新增字段需要后端重启，旧前端可忽略。
 - `POST /api/restart`：无请求体，返回 HTTP 202，信封 `{code:0,msg:"accepted",data:{restarting:true},request_id}`；表示已接受，不表示重启已完成。沿用两个入口的 Host / Origin 校验，远程入口还须 Tailscale 身份白名单；不新增豁免。同一进程内重复请求仍回 202，只启动一次重启。
 - `GET /api/pages`：启动时已注册的扩展页面列表
 - `GET /api/pages/:id/health`：限时探测一个扩展页面的目标服务
@@ -188,6 +190,14 @@ Claude 菜单按扩展分成「上下文 / 模型 / 自定义 / 设置 / 支持�
 Kimi 配置探测仍通过 `session/new` 读取 configOptions。探测进程关闭后，仅定位本次返回的 sessionId：历史根取 `WORKBENCH_KIMI_HISTORY_DIR` 或 `~/.kimi-code/sessions`；只有一个匹配目录、`state.json.id` 相同且完整 `agents/main/wire.jsonl` 仅含 `metadata / permission.set_mode / profile.bind / runtime.set_binding` 时才删除，并清除 `.index-dirty` 中以该 ID 开头的普通标记文件。异常、身份不符、对话或未知记录均保留并记日志；既有空会话只隐藏，不批量删除。
 
 `GET /api/fs/dirs` 的 `data` 为 `{path,parent,dirs:[{name,path}],truncated}`；带 `files=1` 时追加 `files:[{name,path}]`（同层普通文件，含指向文件的有效符号链接，同样最多 1000 项，目录或文件任一达到上限都会置 `truncated:true`）；`files` 只接受 `1`/`0`，其他值返回 HTTP 400、错误码 `40036`。路径先规范化；根目录 `/` 的 `parent` 为 `null`。不限制浏览根目录，包括 `/mnt/c/...`；隐藏目录不列出，指向目录的有效符号链接会列出，断链和无权限条目跳过。子目录按名称排序，最多返回 1000 项，更多时 `truncated:true`。路径无效、不存在、不是目录或无权限读取时返回 HTTP 400、错误码 `40035`。
+
+`GET /api/fs/file?path=<绝对路径>&root=<当前目录>&sessionId=<可选会话ID>` 返回信封 `data:{path,name,size,kind,mimeType,text?,version?,editable,reason?}`。`kind` 为 `text|markdown|csv|tsv|html|image|pdf|unsupported`；文本（包括未知扩展的有效文本）、Markdown、CSV/TSV、HTML 使用严格 UTF-8，可保留 BOM，最多 1 MiB。NUL/控制字符、无效 UTF-8、Office 或超限文件返回 `unsupported` 与原因，不返回文本/版本；图片、PDF 仅预览，最多 32 MiB。只读文本仍可预览，但 `editable:false`。
+
+`root` 是当前浏览目录或会话 cwd，不能授予权限：授权根仅为 `$HOME`、已存在的 `/mnt/<单字母盘符>` 目录、已存在 `sessionId` 的服务端 cwd。路径支持 POSIX 与 `C:\\...`，拒绝相对路径、控制字符和 `..`。逻辑目标与真实目标都须位于 root；root 的真实路径也须位于对应授权根，内部符号链接可用，逃逸链接、目录/FIFO等非普通文件被拒绝。读取通过 `NOFOLLOW|NONBLOCK` fd 检查身份与真实路径；依赖 Linux/WSL 的 `/proc/self/fd`。全部接口沿用现有 Host、远程登录白名单以及写操作 Origin 检查。
+
+`POST /api/fs/file` JSON 为 `{path,root,sessionId?,version,text}`，显式保存上述可编辑文本，返回更新后的同一 metadata（含 `text/version`）。文本最多 1 MiB；为容纳 JSON 转义，请求体独立上限为 6 MiB + 64 KiB，并严格解码 UTF-8，其他 JSON 路由仍为 1 MiB。版本包含内容 hash 与文件身份/元数据；同一 inode 的保存串行执行，磁盘内容、身份、时间或权限变化返回 HTTP 409。写入同目录唯一 `wx` 临时文件、保留权限、fsync 后 rename；内部符号链接保留，更新其真实目标。失败只清理本次创建的临时文件，rename 前的失败保留原件。目录 fd 锚定临时与目标名称，并在 rename 前复核目标、根和父目录，减少路径置换竞态；外部程序未参与本进程锁，最后检查到 rename 之间仍存在无法由 Node 原生 API 原子消除的窗口，不能承诺与外部写者绝对无冲突。
+
+`GET /api/fs/content?path=...&root=...&sessionId=...` 返回字节，最多 32 MiB，`download=1` 作为完整附件下载；不支持格式也可在此上限内下载。图片/PDF/HTML 默认 inline，其余作为 octet-stream 附件；响应 `no-store`、`nosniff`。HTML、SVG和下载响应带 `CSP: sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src data:`，不执行脚本，也不加载相对图片/CSS。PDF inline 支持单一 `bytes=start-end`、`bytes=start-` 或 `bytes=-suffix` Range，有效返回 206/Content-Range，无效返回 416/`bytes */size`；下载忽略 Range。文件接口错误分别返回 HTTP 400/403/404/409/413/415，错误码为 `status*100+90`；JSON格式/请求体超限沿用 `40000/41300`。真实设备的 PDF 嵌入能力由浏览器决定，前端保留下载回退。
 
 `POST /api/uploads` 的查询参数 `sessionId` 必须是已存在的会话（否则 404/`40401`），`name` 必须非空（否则 400/`40070`）。请求体是附件原始字节；服务端只按查询参数里的文件名存盘：取 basename、替换路径分隔符与控制字符、去掉首尾部点和空白、限长 120 字符，保存为 `~/.workbench/uploads/<sessionId>/<YYYYMMDD-HHMMSS>-<清洗名>`（同秒同名追加 `-1` 等序号；目录 0700、文件 0600）。单文件上限 25 MB，超限返回 413/`41301` 且不留半截文件。成功返回 `data` 为 `{path,name,size,mimeType}`，`mimeType` 仅按扩展名判断（png/jpg/jpeg/gif/webp/heic/pdf/office 等常见扩展，未知为 `application/octet-stream`）。
 
@@ -680,6 +690,8 @@ Claude 的 model/effort 切换优先热切换：模型走 `set_model`，effort �
 安全边界以会话 `cwd` 的真实路径为准：任何 `..` 路径段、NUL、cwd 外的 POSIX 绝对路径以及 Windows/UNC 绝对路径都会以 HTTP 400 拒绝；cwd 内绝对路径会先归一为相对查询。候选文件先做词法 containment，再 `realpath` 后做第二次 containment；普通文件和指向 cwd 内普通文件的符号链接可返回，断链、目录、特殊文件及目标逃出 cwd 的符号链接全部跳过。
 
 ## 斜杠命令与 `@` 引用
+
+`GET /api/sessions/:id/files?q=&limit=60` 为输入框提供 cwd 内相对文件路径；空查询列出文件，输入名称按路径子串匹配（不区分大小写）。Git 目录使用 `git ls-files` 并遵守 Git 忽略规则；其他目录使用 `rg --files --hidden`。服务 PATH 没有 `rg` 时，从 PATH 中 Codex 启动器的真实安装目录寻找 standalone 自带的 `../codex-path/rg`，沿软链接跟随版本升级。两者均不可用时明确报错；不修改系统 PATH、不安装工具。两种枚举都排除 `.git`、`node_modules` 和逃出 cwd 的符号链接。
 
 `GET /api/sessions/:id/commands` 返回：
 

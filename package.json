@@ -27,8 +27,9 @@
     "test:markdown": "node --import tsx frontend/scripts/markdown.test.mjs",
     "test:tool-summary": "node --import tsx frontend/scripts/tool-summary.test.mjs",
     "test": "npm run test:mentions && npm run test:file-panel && npm run test:store && npm run test:attach && npm run test:pages && npm run test:resume && npm run test:effective-ask && npm run test:history && npm run test:sidebar-panels && npm run test:dispatch-flow && npm run test:render-items && npm run test:snapshot && npm run test:reconnect && npm run test:terminal && npm run test:font-scale && npm run test:server && npm run test:markdown && npm run test:tool-summary && npm run test:restart && npm run test:perf-round2",
-    "test:sidebar-panels": "node --import tsx frontend/scripts/sidebar-panels-flow.test.mjs",
+    "test:sidebar-panels": "node --import tsx frontend/scripts/sidebar-panels-flow.test.mjs && node --import tsx frontend/scripts/panel-back.test.mjs",
     "test:restart": "node --import tsx frontend/scripts/restart-flow.test.mjs",
+    "test:hosts": "node --import tsx frontend/scripts/host-connections.test.mjs",
     "test:dispatch-flow": "node --import tsx frontend/scripts/dispatch-flow.test.mjs",
     "test:perf-round2": "node --import tsx frontend/scripts/performance-round2.test.mjs"
   },

@@ -64,15 +64,15 @@ export function DispatchView({ terminalOpen = false }: { terminalOpen?: boolean 
     <section className="dispatch-view" aria-label="派单流程图">
       {error && <p className="dispatch-error" role="alert">派单加载失败：{error}（稍后自动重试）</p>}
       <section className="dispatch-panel" aria-label="派单拓扑">
-        <div className="dispatch-panel-head"><strong>派单主体</strong><span>{!loaded ? "正在加载…" : running ? `${running} 单运行中 · ${forests.length} 棵树` : forests.length ? `${forests.length} 棵树 · 最近结束` : "现在没有派单"}</span></div>
+        <div className="dispatch-panel-head"><strong>派单主体</strong><span>{!loaded ? "正在加载…" : running ? `${running} 单运行中 · ${forests.length} 棵树` : forests.length ? `${forests.length} 棵树 · 最近结束` : "0 单"}</span></div>
         {forests.length ? forests.map((forest) => {
           const roots = forest.runs.filter((run) => !dispatchParent(run, runs) && run.parent?.agent === forest.agent);
           return <DispatchTree key={forest.id} agent={forest.agent} groups={groupDispatches(forest.runs, now)}
             title={forest.title} dispatchers={dispatcherSessions(roots, sessions)} model={dispatcherModel(roots, sessions)}
             highlighted={highlighted} now={now} />;
         }) : null}
+        {loaded && !error && !forests.length && <p className="dispatch-empty">现在没有派单</p>}
       </section>
-      {loaded && !error && !forests.length && <p className="dispatch-empty">现在没有派单</p>}
       {highlighted.size > 0 && <p className="dispatch-note dispatch-highlight-note">已标出从会话跳转的 {highlighted.size} 张派单。</p>}
       <DispatchHistory />
     </section>

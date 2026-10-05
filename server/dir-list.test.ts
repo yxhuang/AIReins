@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, stat, symlink, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DirListError, listDirectories } from "./dir-list.js";
@@ -22,6 +22,21 @@ assert.deepEqual(listing.dirs, ["alpha", "link-to-alpha", "zeta"].map((name) => 
 assert.equal(listing.truncated, false);
 assert.equal((await listDirectories("/")).parent, null);
 assert.equal((await listDirectories(join(fixture, "link-to-alpha"))).path, join(fixture, "link-to-alpha"));
+
+const modified = new Date("2026-10-04T12:00:00Z");
+await utimes(join(fixture, "file.txt"), modified, modified);
+await symlink(join(fixture, "file.txt"), join(fixture, "linked-file.txt"));
+const details = await listDirectories(fixture, { files: true });
+for (const file of details.files ?? []) {
+  assert.equal(file.size, 4, "普通文件及内部链接的大小来自 stat");
+  assert.equal(file.modifiedAt, modified.getTime(), "修改时间使用 Unix 毫秒");
+}
+assert.equal(details.files?.length, 2);
+for (const dir of details.dirs) {
+  assert.equal(dir.size, null, "不把目录 inode 大小当成目录内容大小");
+  assert.equal(dir.modifiedAt, (await stat(dir.path)).mtimeMs);
+}
+assert.ok(!("modifiedAt" in (await listDirectories(fixture)).dirs[0]!), "目录选择模式不额外读取元数据");
 
 for (const path of ["relative", "", join(fixture, "missing"), join(fixture, "file.txt")]) {
   await assert.rejects(listDirectories(path), DirListError);

@@ -1,8 +1,10 @@
 import React, { createContext, memo, isValidElement, useContext, useEffect, useState, type ReactNode } from "react";
-import Markdown from "react-markdown";
+import Markdown, { defaultUrlTransform } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { mentionSegments } from "../mentions";
 import { highlightCode, highlightLanguage } from "../code-highlight";
+import { resolveLocalFileLink } from "../file-preview";
+import { store } from "../store";
 
 function codeText(node: ReactNode): string {
   if (typeof node === "string" || typeof node === "number") return String(node);
@@ -23,6 +25,18 @@ function copyCode(button: HTMLButtonElement, text: string) {
 }
 
 const StreamingContext = createContext(false);
+const FileLinkContext = createContext<{ cwd: string; sessionId?: string } | undefined>(undefined);
+
+function MessageLink({ href, children }: { href?: string; children?: ReactNode }) {
+  const context = useContext(FileLinkContext);
+  const path = href ? resolveLocalFileLink(href, context?.cwd) : null;
+  if (context && path) return <a href={href} title={`打开文件：${path}`} onClick={event => {
+    event.preventDefault();
+    const root = path.startsWith(`${context.cwd.replace(/\/$/, "")}/`) ? context.cwd : path.slice(0, path.lastIndexOf("/")) || "/";
+    void store.openFilePreview({ path, root, sessionId: context.sessionId });
+  }}>{children}</a>;
+  return <a href={href} target="_blank" rel="noopener noreferrer">{children}</a>;
+}
 
 function MarkdownCodeBlock({ children }: { children?: ReactNode }) {
   const streaming = useContext(StreamingContext);
@@ -51,20 +65,23 @@ function MarkdownCodeBlock({ children }: { children?: ReactNode }) {
 
 // 保持组件身份稳定，流式 token 更新不会卸载并重建代码块。
 const markdownComponents: React.ComponentProps<typeof Markdown>["components"] = {
-  a: ({ children, node: _node, ...props }) => <a {...props} target="_blank" rel="noopener noreferrer">{children}</a>,
+  a: MessageLink,
   table: ({ children, node: _node, ...props }) => <div className="markdown-table-scroll"><table {...props}>{children}</table></div>,
   pre: MarkdownCodeBlock,
 };
 
-export const MarkdownMessage = memo(function MarkdownMessage({ text, streaming = false }: { text: string; streaming?: boolean }) {
+export const MarkdownMessage = memo(function MarkdownMessage({ text, streaming = false, cwd, sessionId }: { text: string; streaming?: boolean; cwd?: string; sessionId?: string }) {
   return (
     <div className="markdown-message">
       <StreamingContext value={streaming}>
+      <FileLinkContext value={cwd ? { cwd, sessionId } : undefined}>
       <Markdown
         skipHtml
         remarkPlugins={[remarkGfm]}
         components={markdownComponents}
+        urlTransform={(url, key) => key === "href" && cwd && resolveLocalFileLink(url, cwd) ? url : defaultUrlTransform(url)}
       >{text}</Markdown>
+      </FileLinkContext>
       </StreamingContext>
     </div>
   );

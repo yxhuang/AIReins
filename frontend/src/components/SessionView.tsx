@@ -23,6 +23,8 @@ import { AgentIcon, VSCodeIcon } from "./AgentIcon";
 import { SessionDispatchBadge, SessionDispatchLink, useSessionDispatches } from "./SessionDispatchLink";
 import { PanelActions, PanelMenuItems } from "./PanelActions";
 import { PageIcon } from "./Sidebar";
+import { shortSessionTitle } from "./SessionTitle";
+import { ContextUsage } from "./ContextUsage";
 
 const selectMeta = (value: Store) => value.meta;
 const selectWsState = (value: Store) => value.wsState;
@@ -39,6 +41,7 @@ export function SessionView({ session, mobileTail, usage }: { session: SessionRe
   const dead = session.status === "dead";
   const selectData = useCallback((value: Store) => value.data.get(session.id), [session.id]);
   const data = useStore(selectData);
+  const title = shortSessionTitle(sessionTitle(session, data?.events));
   const wsState = useStore(selectWsState);
   // 三家均按原生会话身份查询派单；后台任务计数仍由 Claude 原生事件提供。
   const backgroundCount = session.agent === "claude" ? session.backgroundTasks?.length ?? 0 : 0;
@@ -161,12 +164,12 @@ export function SessionView({ session, mobileTail, usage }: { session: SessionRe
         </button>
         <div className="session-head-main">
           <AgentIcon agent={session.agent} label={session.agent} />
-          <span className="session-title" title={sessionTitle(session, data?.events)}>{sessionTitle(session, data?.events)}</span>
+          <span className="session-title" title={title}>{title}</span>
           <span className="session-model mono"><ConfigSummary session={session} /></span>
           <span className="session-cwd mono" title={session.cwd}>{compactCwd(session.cwd)}</span>
         </div>
         <div className="mobile-title">
-          <span className="mobile-title-text">{sessionTitle(session, data?.events)}</span>
+          <span className="mobile-title-text">{title}</span>
         </div>
         <div className="session-head-actions">
           <SessionDispatchLink runs={dispatchRuns} backgroundCount={backgroundCount} desktop />
@@ -214,7 +217,7 @@ export function SessionView({ session, mobileTail, usage }: { session: SessionRe
             const continues = (next?.kind === "text" || next?.kind === "thought" || next?.kind === "tool" || next?.kind === "tool-group") && next.turn === item.turn;
             const dot = item.kind === "tool" ? ` timeline-${item.status}` : "";
             const view = item.kind === "text"
-              ? <TextBlockView item={item} streaming={isLast && running} />
+              ? <TextBlockView item={item} streaming={isLast && running} cwd={session.cwd} sessionId={session.id} />
               : item.kind === "thought" ? <ThoughtBlockView item={item} /> : <ToolCard item={item} agent={session.agent} cwd={session.cwd} />;
             return <div key={item.key} className={`timeline-item${continues ? " timeline-continues" : ""}${dot}`}>{view}</div>;
           }
@@ -222,7 +225,7 @@ export function SessionView({ session, mobileTail, usage }: { session: SessionRe
             case "user":
               return <UserBlockView key={item.key} item={item} />;
             case "external-history":
-              return <ExternalHistoryView key={item.key} item={item} agent={session.agent} cwd={session.cwd} />;
+              return <ExternalHistoryView key={item.key} item={item} agent={session.agent} cwd={session.cwd} sessionId={session.id} />;
             case "gate": {
               // AskUserQuestion 渲染为提问选择卡片；与普通闸门共用 pendingGates/贴条机制
               const Block = item.questions?.length ? QuestionBlock : GateBlock;
@@ -532,6 +535,7 @@ function ConfigControls({ session }: { session: SessionRecord }) {
       perm={perm ? build(perm) : null}
       permMode={session.config?.permissionMode ?? perm?.default ?? ""}
       cwd={session.cwd}
+      beforePerm={<ContextUsage session={session} />}
     />
   );
 }
@@ -652,7 +656,6 @@ function ConfigStatus({ session }: { session: SessionRecord }) {
   );
 }
 
-// usage 按 driver 能力位分家渲染，不强行归一。
 /** 被拒引用恢复为可再次手动发送的附件；已上传文件沿用原路径，不重新上传。 */
 export function restoreComposerInput(currentText: string, attachments: Attachment[], restored: { text: string; mentions: Mention[]; version: number }): { text: string; attachments: Attachment[] } | null {
   if (currentText.trim() !== "") return null;
@@ -694,6 +697,8 @@ function Composer({ session, dead, errored }: { session: SessionRecord; dead: bo
   // IME 组合输入期间：不触发检索、不弹/不更新面板、Enter 不当确认（很多输入法用 Enter 上屏组合串）
   const [composing, setComposing] = useState(false);
   const [files, setFiles] = useState<string[]>([]);
+  const [filesLoading, setFilesLoading] = useState(false);
+  const [filesError, setFilesError] = useState<string | null>(null);
   const [skills, setSkills] = useState<CodexSkillInfo[]>([]);
   const [skillError, setSkillError] = useState<string | null>(null);
   const [skillsLoading, setSkillsLoading] = useState(false);
@@ -831,23 +836,29 @@ function Composer({ session, dead, errored }: { session: SessionRecord; dead: bo
 
   // @ 检索：250ms 防抖 + 序号作废旧响应；检索结果同时写进存在性缓存
   useEffect(() => {
+    const seq = ++searchSeq.current;
+    let cancelled = false;
+    setFiles([]);
+    setFilesError(null);
+    setFilesLoading(mentionOpen);
     if (!mentionOpen) {
-      setFiles([]);
       return;
     }
-    const seq = ++searchSeq.current;
     const timer = setTimeout(() => {
       fetchFiles(session.id, mentionQuery ?? "")
         .then((list) => {
-          if (searchSeq.current !== seq) return; // 晚到的旧响应丢弃
+          if (cancelled || searchSeq.current !== seq) return; // 晚到的旧响应丢弃
           store.noteFiles(session.id, list);
           setFiles(list);
+          setFilesLoading(false);
         })
-        .catch(() => {
-          if (searchSeq.current === seq) setFiles([]);
+        .catch((error: unknown) => {
+          if (cancelled || searchSeq.current !== seq) return;
+          setFilesError(error instanceof Error ? error.message : String(error));
+          setFilesLoading(false);
         });
     }, 250);
-    return () => clearTimeout(timer);
+    return () => { cancelled = true; clearTimeout(timer); };
     // store 是模块级单例，不进依赖
   }, [mentionOpen, mentionQuery, session.id]);
 
@@ -1194,6 +1205,10 @@ function Composer({ session, dead, errored }: { session: SessionRecord; dead: bo
       }
     }
     if (mentionOpen) {
+      if (e.key === "Enter" && !e.shiftKey && filesLoading) {
+        e.preventDefault(); // 等待候选时 Enter 不意外发送未完成的引用
+        return;
+      }
       if (e.key === "ArrowDown" || e.key === "ArrowUp") {
         e.preventDefault();
         if (files.length > 0) {
@@ -1305,11 +1320,15 @@ function Composer({ session, dead, errored }: { session: SessionRecord; dead: bo
         </div>
       )}
       {mentionOpen && (
-        <div className="cmd-panel" role="listbox" aria-label="文件引用" ref={listRef}>
-          {files.length === 0 && <div className="cmd-empty">没有匹配的文件</div>}
+        <div className="cmd-panel file-mention-panel" role="listbox" aria-label="文件引用" ref={listRef}>
+          <div className="cmd-section" title={session.cwd}>文件 · {session.cwd}</div>
+          {filesLoading && <div className="cmd-empty" role="status">正在检索文件…</div>}
+          {filesError && <div className="cmd-empty config-error" role="alert">文件检索失败：{filesError}</div>}
+          {!filesLoading && !filesError && files.length === 0 && <div className="cmd-empty">没有匹配的文件</div>}
           {files.map((file, i) => (
             <div
               key={file}
+              title={file}
               role="option"
               aria-selected={i === selM}
               className={`cmd-item${i === selM ? " selected" : ""}`}

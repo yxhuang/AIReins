@@ -34,10 +34,10 @@ export function useAnchoredMenu({ open, rootRef, buttonRef, panelRef, close, ini
       }
     };
     const onPointerDown = (e: PointerEvent) => {
-      if (!rootRef.current?.contains(e.target as Node)) closeRef.current(false);
+      if (!rootRef.current?.contains(e.target as Node) && !panelRef.current?.contains(e.target as Node)) closeRef.current(false);
     };
     const onFocusIn = (e: FocusEvent) => {
-      if (!trapFocus && !rootRef.current?.contains(e.target as Node)) closeRef.current(false);
+      if (!trapFocus && !rootRef.current?.contains(e.target as Node) && !panelRef.current?.contains(e.target as Node)) closeRef.current(false);
     };
     document.addEventListener("keydown", onKeyDown);
     document.addEventListener("pointerdown", onPointerDown);

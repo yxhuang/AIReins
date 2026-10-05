@@ -13,9 +13,12 @@ import type {
   SessionOrganizationPatch,
   SessionStatus,
   UnifiedEvent,
+  FilePreviewState,
+  WorkFileTarget,
 } from "./types";
 import { createSession, deleteSession, fetchCommands, fetchEarlierEvents, fetchFiles, fetchMeta, fetchPages, fetchSessions, fetchSnapshot, releaseSession, type CreateSessionInput } from "./api";
 import { createSessionGroup, deleteSessionGroup, fetchSessionGroups, patchSession, renameSessionGroup } from "./api";
+import { fetchWorkFile, saveWorkFile } from "./api";
 import { sessionTitle } from "../../shared/session-title";
 import { extractMentionTokens, stripMentionCandidates } from "./mentions";
 import { partitionPages, type SkippedPage } from "./pages";
@@ -73,6 +76,13 @@ interface MobileSource {
 interface MobileEntry extends MobileSource {
   version: 1;
 }
+type DesktopPanelSide = "sidebar" | "right";
+interface DesktopPanelEntry {
+  version: 1;
+  id: string;
+  route: MobileRoute;
+  order: DesktopPanelSide[];
+}
 function mobileEntryId(): string {
   // HTTP 局域网入口也可用，不依赖仅安全上下文提供的 crypto.randomUUID。
   return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -119,6 +129,14 @@ export class Store {
   dispatchesOpen = false;
   termOpen = false;
   filesOpen = false;
+  /** 只保留当前文件；收起、切会话、手机后退都保留草稿，重新打开可继续。 */
+  filePreview: FilePreviewState | null = null;
+  fileDirectory: string | null = null;
+  /** 当前目录浏览器注册；侧键先沿成功访问的目录返回，再退出侧栏。 */
+  fileBrowserBack: (() => boolean) | null = null;
+  private fileLoad: AbortController | null = null;
+  private fileUnloadBound = false;
+  private fileLoadSequence = 0;
   /** 文件面板发给 Composer 的一次性请求；模块加载不依赖 DOM。 */
   fileMentionRequest: { sessionId: string; path: string; version: number } | null = null;
   private fileMentionSequence = 0;
@@ -126,6 +144,11 @@ export class Store {
   /** 只相信本次运行亲自 push 的相邻关系；刷新后的来源仍可 replace，但不盲目 back。 */
   private mobilePredecessors = new Map<string, string>();
   private mobileBackPending: string | null = null;
+  /** 桌面只保留一条面板历史；目录返回优先，否则关闭最近打开的一侧，不重放旧面板。 */
+  private desktopPanelOrder: DesktopPanelSide[] = [];
+  private desktopPanelEntryId: string | null = null;
+  private desktopBackPending = false;
+  private desktopDispatchHash = "#/dispatches";
   private sessionsLoaded = false;
   data = new Map<string, SessionData>();
   wsState: WsState = "closed";
@@ -277,7 +300,7 @@ export class Store {
       this.lastError = { message: error instanceof Error ? error.message : String(error) };
     }
     // 路由先于 meta 到达；能力确认后不能留下一个无法挂载的终端全屏。
-    if (this.isMobileNavigation() || this.readMobileEntry()) this.onHashChange();
+    if (this.isMobileNavigation() || this.readMobileEntry() || this.readDesktopPanelEntry()) this.onHashChange();
     await Promise.all([this.refreshSessions(), this.refreshSessionGroups()]);
     if (panelRestore) {
       if (restored && !this.currentId && this.sessions.some((x) => x.id === restored)) {
@@ -286,6 +309,7 @@ export class Store {
         if (this.beforeDispatches) this.beforeDispatches = { ...this.beforeDispatches, hash: `#/session/${encodeURIComponent(restored)}`, currentId: restored };
       }
     } else if (restored && this.currentId === restored && !this.sessions.some((x) => x.id === restored)) this.navigate(null);
+    if (!this.isMobileNavigation() && !this.readMobileEntry()) this.syncDesktopPanels();
     this.startClock();
     await this.refreshPages();
     if (this.currentId) await this.ensureLoaded(this.currentId);
@@ -294,6 +318,21 @@ export class Store {
   }
 
   private onHashChange = (): void => {
+    const desktop = this.readDesktopPanelEntry();
+    if (desktop) {
+      const terminalDisabled = desktop.route.termOpen && this.meta?.capabilities.terminal === false;
+      const route = terminalDisabled ? { ...desktop.route, termOpen: false } : desktop.route;
+      if (this.isMobileNavigation()) {
+        this.desktopPanelOrder = [];
+        this.replaceMobileEntry(route);
+      } else {
+        this.desktopPanelOrder = [...desktop.order];
+        this.desktopDispatchHash = desktop.route.hash;
+      }
+      this.applyMobileRoute(route);
+      if (terminalDisabled && !this.isMobileNavigation()) this.syncDesktopPanels();
+      return;
+    }
     const saved = this.readMobileEntry();
     // 以实际离开来源条目为准；延迟 hashchange 不应解除下一次 back 的锁。
     if (this.mobileBackPending && saved?.id !== this.mobileBackPending) this.mobileBackPending = null;
@@ -361,9 +400,92 @@ export class Store {
   }
 
   private onPopState = (): void => {
+    if (!this.isMobileNavigation() && !this.readMobileEntry()) {
+      if (this.desktopBackPending) {
+        this.desktopBackPending = false;
+        this.syncDesktopPanels();
+      } else if (!this.readDesktopPanelEntry() && this.filesOpen && !this.filePreview && this.fileBrowserBack?.()) {
+        // 浏览器已退到面板前的条目；恢复面板这一条，再由目录浏览器处理返回。
+        this.syncDesktopPanels();
+        return;
+      } else if (this.closeLatestDesktopPanel()) return;
+      this.onHashChange();
+      return;
+    }
     if (this.mobileBackPending && this.readMobileEntry()?.id !== this.mobileBackPending) this.mobileBackPending = null;
     if (this.isMobileNavigation() || this.readMobileEntry()) this.onHashChange();
   };
+
+  private readDesktopPanelEntry(): DesktopPanelEntry | null {
+    const entry = window.history?.state?.workbenchDesktopPanels;
+    return entry?.version === 1 && typeof entry.id === "string" && entry.route?.hash === window.location.hash
+      && Array.isArray(entry.order) && entry.order.every((side: unknown) => side === "sidebar" || side === "right")
+      ? entry : null;
+  }
+
+  private desktopPanelActive(side: DesktopPanelSide): boolean {
+    return side === "sidebar" ? this.historyOpen || this.currentPageId !== null
+      : this.filesOpen || this.termOpen || this.dispatchesOpen;
+  }
+
+  private desktopPanelHash(): string {
+    return this.dispatchesOpen ? this.desktopDispatchHash : this.historyOpen ? "#/history"
+      : this.currentPageId ? `#/page/${encodeURIComponent(this.currentPageId)}`
+      : this.currentId ? `#/session/${encodeURIComponent(this.currentId)}` : "#/";
+  }
+
+  private syncDesktopPanels(opened?: DesktopPanelSide): void {
+    this.desktopPanelOrder = this.desktopPanelOrder.filter(side => this.desktopPanelActive(side));
+    for (const side of ["sidebar", "right"] as const) {
+      if (this.desktopPanelActive(side) && !this.desktopPanelOrder.includes(side)) this.desktopPanelOrder.push(side);
+    }
+    if (opened) this.desktopPanelOrder = [...this.desktopPanelOrder.filter(side => side !== opened), opened];
+    const hash = this.desktopPanelHash();
+    if (!window.history?.pushState) { window.location.hash = hash; return; }
+    const previous = this.readDesktopPanelEntry();
+    if (!this.desktopPanelOrder.length) {
+      if (previous && this.desktopPanelEntryId === previous.id && !this.desktopBackPending) {
+        this.desktopBackPending = true;
+        window.history.back();
+      } else if (previous && !this.desktopBackPending) {
+        const { workbenchDesktopPanels: _desktop, workbenchNavigation: _mobile, ...state } = window.history.state ?? {};
+        window.history.replaceState(state, "", hash);
+      }
+      return;
+    }
+    const route = { ...this.captureMobileRoute(), hash };
+    const entry: DesktopPanelEntry = { version: 1, id: previous?.id ?? mobileEntryId(), route, order: [...this.desktopPanelOrder] };
+    const { workbenchNavigation: _mobile, workbenchDesktopPanels: _desktop, ...state } = window.history.state ?? {};
+    if (previous) window.history.replaceState({ ...state, workbenchDesktopPanels: entry }, "", hash);
+    else {
+      const base = this.currentId ? `#/session/${encodeURIComponent(this.currentId)}` : "#/";
+      window.history.replaceState(state, "", base);
+      window.history.pushState({ ...state, workbenchDesktopPanels: entry }, "", hash);
+      this.desktopPanelEntryId = entry.id;
+    }
+  }
+
+  private closeLatestDesktopPanel(): boolean {
+    this.desktopPanelOrder = this.desktopPanelOrder.filter(side => this.desktopPanelActive(side));
+    const side = this.desktopPanelOrder.pop();
+    if (!side) return false;
+    if (side === "sidebar") {
+      this.historyOpen = false;
+      this.historySelection = null;
+      this.currentPageId = null;
+    } else {
+      this.filesOpen = false;
+      this.termOpen = false;
+      this.dispatchesOpen = false;
+      this.beforeDispatches = null;
+    }
+    const { workbenchNavigation: _mobile, workbenchDesktopPanels: _desktop, ...state } = window.history.state ?? {};
+    const base = this.currentId ? `#/session/${encodeURIComponent(this.currentId)}` : "#/";
+    window.history.replaceState(state, "", base);
+    this.syncDesktopPanels();
+    this.notify();
+    return true;
+  }
 
   private mobileRouteFromHash(hash: string): MobileRoute {
     const session = hash.match(/^#\/session\/([^/]+)$/)?.[1];
@@ -410,7 +532,8 @@ export class Store {
   }
 
   private writeMobileEntry(entry: MobileEntry): void {
-    window.history.replaceState({ ...window.history.state, workbenchNavigation: entry }, "", entry.route.hash);
+    const { workbenchDesktopPanels: _desktop, ...state } = window.history.state ?? {};
+    window.history.replaceState({ ...state, workbenchNavigation: entry }, "", entry.route.hash);
   }
 
   private replaceMobileEntry(route: MobileRoute, source?: MobileSource): MobileEntry {
@@ -503,22 +626,27 @@ export class Store {
   navigatePage(id: string): void {
     const hash = `#/page/${encodeURIComponent(id)}`;
     if (this.isMobileNavigation()) { this.pushMobileRoute(hash); return; }
-    window.location.hash = hash;
-    this.onHashChange();
+    this.currentPageId = id;
+    this.historyOpen = false;
+    this.historySelection = null;
+    this.syncDesktopPanels("sidebar");
+    this.notify();
   }
 
   navigateHistory(): void {
     if (this.isMobileNavigation()) { this.pushMobileRoute("#/history"); return; }
-    window.location.hash = "#/history";
-    this.onHashChange();
+    this.historyOpen = true;
+    this.currentPageId = null;
+    this.historySelection = null;
+    this.syncDesktopPanels("sidebar");
+    this.notify();
   }
 
   toggleDispatches(): void {
     if (this.dispatchesOpen) this.closeDispatches();
     else {
       if (this.isMobileNavigation()) { this.pushMobileRoute("#/dispatches"); return; }
-      window.location.hash = "#/dispatches";
-      this.onHashChange();
+      this.navigateDispatches();
     }
   }
 
@@ -530,12 +658,23 @@ export class Store {
       else this.pushMobileRoute(hash);
       return;
     }
-    window.location.hash = hash;
-    this.onHashChange();
+    this.dispatchesOpen = true;
+    this.filesOpen = false;
+    this.termOpen = false;
+    this.desktopDispatchHash = hash;
+    this.syncDesktopPanels("right");
+    this.notify();
   }
 
   closeDispatches(): void {
     if (this.isMobileNavigation()) { this.returnMobileRoute(this.currentId ? `#/session/${encodeURIComponent(this.currentId)}` : "#/"); return; }
+    if (this.desktopPanelOrder.includes("right")) {
+      this.dispatchesOpen = false;
+      this.beforeDispatches = null;
+      this.syncDesktopPanels();
+      this.notify();
+      return;
+    }
     const previous = this.beforeDispatches;
     this.currentId = previous?.currentId ?? null;
     window.location.hash = previous?.hash ?? "#/";
@@ -550,10 +689,10 @@ export class Store {
       else if (this.termOpen) this.returnMobileRoute(this.currentId ? `#/session/${encodeURIComponent(this.currentId)}` : "#/");
       return;
     }
-    if (open && this.dispatchesOpen) this.closeDispatches();
-    if (open) this.filesOpen = false;
+    if (open) { this.filesOpen = false; this.dispatchesOpen = false; this.beforeDispatches = null; }
     this.termOpen = open;
     this.syncDesktopMobilePanel();
+    this.syncDesktopPanels(open ? "right" : undefined);
     this.notify();
   }
 
@@ -563,15 +702,77 @@ export class Store {
       else if (this.filesOpen) this.returnMobileRoute(this.currentId ? `#/session/${encodeURIComponent(this.currentId)}` : "#/");
       return;
     }
-    if (open && this.dispatchesOpen) this.closeDispatches();
-    if (open) this.termOpen = false;
+    if (open) { this.termOpen = false; this.dispatchesOpen = false; this.beforeDispatches = null; }
     this.filesOpen = open;
     this.syncDesktopMobilePanel();
+    this.syncDesktopPanels(open ? "right" : undefined);
     this.notify();
   }
 
   requestFileMention(sessionId: string, path: string): void {
     this.fileMentionRequest = { sessionId, path, version: ++this.fileMentionSequence };
+    this.notify();
+  }
+
+  private canReplaceFile(): boolean {
+    if (this.filePreview?.saving) return false;
+    const preview = this.filePreview;
+    return !preview?.file?.editable || preview.draft === preview.file.text ||
+      window.confirm("文件有未保存修改。放弃修改并离开此文件？");
+  }
+
+  async openFilePreview(target: WorkFileTarget): Promise<void> {
+    if (!this.canReplaceFile()) return;
+    if (!this.fileUnloadBound && typeof window !== "undefined") {
+      window.addEventListener("beforeunload", event => {
+        const preview = this.filePreview;
+        if (preview?.file?.editable && (preview.saving || preview.draft !== preview.file.text)) {
+          event.preventDefault(); event.returnValue = "";
+        }
+      });
+      this.fileUnloadBound = true;
+    }
+    this.fileLoad?.abort();
+    const abort = new AbortController(); this.fileLoad = abort;
+    const preview: FilePreviewState = { target, file: null, draft: "", loading: true, saving: false, error: null, loadId: ++this.fileLoadSequence };
+    this.filePreview = preview;
+    this.fileDirectory = target.root;
+    this.setFilesOpen(true);
+    this.notify();
+    try {
+      const file = await fetchWorkFile(target, AbortSignal.any([abort.signal, AbortSignal.timeout(10_000)]));
+      if (this.filePreview !== preview) return;
+      this.filePreview = { ...preview, file, draft: file.text ?? "", loading: false };
+    } catch (error) {
+      if (this.filePreview !== preview || abort.signal.aborted) return;
+      this.filePreview = { ...preview, loading: false, error: error instanceof Error ? error.message : String(error) };
+    }
+    this.notify();
+  }
+
+  clearFilePreview(): boolean {
+    if (!this.canReplaceFile()) return false;
+    this.fileLoad?.abort(); this.filePreview = null; this.notify(); return true;
+  }
+
+  updateFileDraft(draft: string): void {
+    if (!this.filePreview?.file?.editable || this.filePreview.saving) return;
+    this.filePreview = { ...this.filePreview, draft }; this.notify();
+  }
+
+  async saveFilePreview(): Promise<void> {
+    const previous = this.filePreview;
+    if (!previous?.file?.editable || !previous.file.version || previous.saving) return;
+    const saving = { ...previous, saving: true, error: null };
+    this.filePreview = saving; this.notify();
+    try {
+      const file = await saveWorkFile(previous.target, previous.file.version, previous.draft);
+      if (this.filePreview !== saving) return;
+      this.filePreview = { ...previous, file, draft: file.text ?? previous.draft, saving: false, error: null };
+    } catch (error) {
+      if (this.filePreview !== saving) return;
+      this.filePreview = { ...previous, saving: false, error: error instanceof Error ? error.message : String(error) };
+    }
     this.notify();
   }
 
@@ -584,7 +785,12 @@ export class Store {
 
   closeSidebarPanel(returnToList = false): void {
     if (this.isMobileNavigation()) { this.returnMobileRoute(this.currentId ? `#/session/${encodeURIComponent(this.currentId)}` : "#/"); return; }
-    this.navigate(returnToList ? null : this.currentId);
+    this.historyOpen = false;
+    this.currentPageId = null;
+    this.historySelection = null;
+    if (returnToList) this.currentId = null;
+    this.syncDesktopPanels();
+    this.notify();
   }
 
   selectHistory(item: HistorySession): void {
@@ -599,6 +805,7 @@ export class Store {
     }
     this.historySelection = item;
     this.syncMobileRoute();
+    if (!this.isMobileNavigation()) this.syncDesktopPanels();
     this.notify();
   }
 
@@ -618,6 +825,7 @@ export class Store {
     }
     this.historySelection = null;
     this.syncMobileRoute();
+    if (!this.isMobileNavigation()) this.syncDesktopPanels();
     this.notify();
   }
 

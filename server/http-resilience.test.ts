@@ -50,6 +50,11 @@ try {
       if (output.includes('"message":"workbench server started"')) { clearTimeout(timer); resolve(); }
     });
   });
+  // 畸形路径必须在启动任何 Windows 程序前拒绝；跨站请求沿用现有访问控制。
+  const invalidPicker = await fetch(`${base}/api/fs/pick-directory`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ path: 42 }) });
+  assert.ok([400, 403].includes(invalidPicker.status), "不可用环境返回403，可用环境在启动前返回400");
+  const foreignPicker = await fetch(`${base}/api/fs/pick-directory`, { method: "POST", headers: { origin: "https://other.example", "content-type": "application/json" }, body: "{}" });
+  assert.equal(foreignPicker.status, 403);
   for (const [encoding, expected] of [["gzip;q=0", null], ["gzip;q=0.0, br", null], ["GZIP;Q=0", null], ["br", null], ["gzip;q=0.5", "gzip"], ["GZIP", "gzip"]] as const) {
     const response = await fetch(`${base}/api/sessions`, { headers: { "accept-encoding": encoding } });
     assert.equal(response.headers.get("content-encoding"), expected, `API ${encoding}`);

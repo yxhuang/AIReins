@@ -10,9 +10,11 @@ import { checkAccess, loadRemoteConfig, localPolicy, remotePolicy, type AccessPo
 import { DispatchQueryError, getDispatch, getDispatchLog, getDispatchMessages, listDispatches, listDispatchHistory, listParentDispatches } from "./dispatches.js";
 import { log } from "./logger.js";
 import { DirListError, listDirectories } from "./dir-list.js";
+import { pickWindowsDirectory, pickWindowsFile, WindowsPickerError, windowsPickerEnabled } from "./windows-directory-picker.js";
 import { normalizeFileQuery, searchFiles } from "./file-search.js";
+import { getWorkFile, getWorkContent, saveWorkFile, WorkFileError, TEXT_LIMIT } from "./work-files.js";
 import { HistoryIndex, HistoryQueryError } from "./history.js";
-import { getMeta, SERVER_VERSION } from "./meta.js";
+import { getMeta, getServerHostName, SERVER_VERSION } from "./meta.js";
 import { feishuSender, GateNotifier, larkCliSender, loadNotifyConfig, type NotifyConfig } from "./notify.js";
 import { checkPageHealth, proxyPage, readLinks, scanPages } from "./pages.js";
 import { pruneStorage, workbenchHome } from "./persistence.js";
@@ -382,7 +384,8 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       const meta = await getMeta();
       await respond(response, 200, 0, "success", {
         ...meta,
-        capabilities: { terminal: terminalEnabled(policy, REMOTE_CONFIG) },
+        hostName: getServerHostName(REMOTE_CONFIG?.origin),
+        capabilities: { terminal: terminalEnabled(policy, REMOTE_CONFIG), windowsDirectoryPicker: windowsPickerEnabled(policy.kind === "local") },
       }, requestId);
     } else if (method === "GET" && url.pathname === "/api/storage") {
       await respond(response, 200, 0, "success", getStorageStats(manager), requestId);
@@ -446,6 +449,18 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       } catch (error) {
         throw asTerminalApiError(error);
       }
+    } else if (method === "POST" && ["/api/fs/pick-directory", "/api/fs/pick-file"].includes(url.pathname)) {
+      if (!windowsPickerEnabled(policy.kind === "local")) throw new ApiError(403, 40300, "Windows 选择窗口仅在本机入口可用");
+      const input = await readJson(request);
+      if (!input || typeof input !== "object" || Array.isArray(input)) throw new ApiError(400, 40000, "请求体必须是 JSON 对象");
+      try {
+        const picker = url.pathname === "/api/fs/pick-file" ? pickWindowsFile : pickWindowsDirectory;
+        await respond(response, 200, 0, "success", await picker((input as { path?: unknown }).path), requestId);
+      } catch (error) {
+        if (error instanceof WindowsPickerError) throw new ApiError(error.status, error.status * 100, error.message);
+        if (error instanceof DirListError) throw new ApiError(400, 40035, error.message);
+        throw error;
+      }
     } else if (method === "GET" && url.pathname === "/api/fs/dirs") {
       try {
         const files = url.searchParams.get("files");
@@ -455,6 +470,59 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
         await respond(response, 200, 0, "success", await listDirectories(url.searchParams.get("path") ?? undefined, { files: files === "1" }), requestId);
       } catch (error) {
         if (error instanceof DirListError) throw new ApiError(400, 40035, error.message);
+        throw error;
+      }
+    } else if (((method === "GET" || method === "POST") && url.pathname === "/api/fs/file") || (method === "GET" && url.pathname === "/api/fs/content")) {
+      try {
+        const body = method === "POST" ? await readJson(request, TEXT_LIMIT * 6 + 64 * 1024, true) : {
+          path: url.searchParams.get("path"), root: url.searchParams.get("root"), sessionId: url.searchParams.get("sessionId") ?? undefined,
+        };
+        if (!body || typeof body !== "object" || Array.isArray(body)) throw new WorkFileError(400, "请求必须包含 path 和 root");
+        const input = body as { path: string; root: string; sessionId?: string; version: string; text: string };
+        if (input.sessionId !== undefined && (typeof input.sessionId !== "string" || !input.sessionId)) throw new WorkFileError(400, "sessionId 必须是非空字符串");
+        const session = input.sessionId === undefined ? undefined : manager.get(input.sessionId);
+        if (input.sessionId !== undefined && !session) throw new WorkFileError(404, "会话不存在");
+        const options = { sessionCwd: session?.cwd };
+        if (url.pathname === "/api/fs/file") {
+          const file = method === "POST" ? await saveWorkFile(input, options) : await getWorkFile(input, options);
+          await respond(response, 200, 0, "success", file, requestId);
+        } else {
+          const download = url.searchParams.get("download");
+          if (download !== null && download !== "1") throw new WorkFileError(400, "download 只接受 1");
+          const { file, bytes } = await getWorkContent(input, options);
+          const attachment = download === "1" || !["image", "pdf", "html"].includes(file.kind);
+          const headers: Record<string, string | number> = {
+            "content-type": attachment ? "application/octet-stream" : file.mimeType,
+            "cache-control": "no-store", "x-content-type-options": "nosniff",
+            "content-disposition": `${attachment ? "attachment" : "inline"}; filename*=UTF-8''${encodeURIComponent(file.name).replace(/['()*]/g, character => `%${character.charCodeAt(0).toString(16).toUpperCase()}`)}`,
+          };
+          if (file.kind === "html" || file.mimeType === "image/svg+xml" || attachment) headers["content-security-policy"] = "sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src data:";
+          let start = 0;
+          let end = bytes.length - 1;
+          let status = 200;
+          if (file.kind === "pdf" && !attachment) {
+            headers["accept-ranges"] = "bytes";
+            const range = request.headers.range;
+            if (range !== undefined) {
+              const match = /^bytes=(\d*)-(\d*)$/.exec(range);
+              if (!match || (!match[1] && !match[2]) || (match[1] && !Number.isSafeInteger(Number(match[1]))) || (match[2] && !Number.isSafeInteger(Number(match[2])))) {
+                response.writeHead(416, { ...headers, "content-range": `bytes */${bytes.length}`, "content-length": 0 }); response.end(); return;
+              }
+              start = match[1] ? Number(match[1]) : Math.max(0, bytes.length - Number(match[2]));
+              end = match[1] && match[2] ? Math.min(Number(match[2]), bytes.length - 1) : bytes.length - 1;
+              if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start > end || start >= bytes.length || (!match[1] && Number(match[2]) === 0)) {
+                response.writeHead(416, { ...headers, "content-range": `bytes */${bytes.length}`, "content-length": 0 }); response.end(); return;
+              }
+              status = 206;
+              headers["content-range"] = `bytes ${start}-${end}/${bytes.length}`;
+            }
+          }
+          const content = bytes.subarray(start, end + 1);
+          response.writeHead(status, { ...headers, "content-length": content.length });
+          response.end(content);
+        }
+      } catch (error) {
+        if (error instanceof WorkFileError) throw new ApiError(error.status, error.status * 100 + 90, error.message);
         throw error;
       }
     } else if (method === "POST" && url.pathname === "/api/uploads") {
@@ -995,17 +1063,25 @@ async function respond(
   response.end(body);
 }
 
-async function readJson(request: IncomingMessage): Promise<unknown> {
+async function readJson(request: IncomingMessage, limit = 1024 * 1024, strictUtf8 = false): Promise<unknown> {
   const chunks: Buffer[] = [];
   let size = 0;
-  for await (const chunk of request) {
+  // 超限时保留连接并排空剩余请求体，让413和后续keep-alive请求正常完成。
+  for await (const chunk of request.iterator({ destroyOnReturn: false })) {
     const buffer = Buffer.from(chunk);
     size += buffer.length;
-    if (size > 1024 * 1024) throw new ApiError(413, 41300, "请求体超过 1 MiB");
+    if (size > limit) break;
     chunks.push(buffer);
   }
+  if (size > limit) {
+    // 迭代器移除readable监听后再resume，否则连接仍停留在暂停状态。
+    request.resume();
+    throw new ApiError(413, 41300, `请求体超过 ${limit === 1024 * 1024 ? "1 MiB" : "文件保存请求大小限制"}`);
+  }
   try {
-    return JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}");
+    const bytes = Buffer.concat(chunks);
+    const text = strictUtf8 ? new TextDecoder("utf-8", { fatal: true }).decode(bytes) : bytes.toString("utf8");
+    return JSON.parse(text || "{}");
   } catch {
     throw new ApiError(400, 40000, "请求体不是有效 JSON");
   }

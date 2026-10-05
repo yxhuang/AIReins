@@ -3,6 +3,7 @@ import { useLayoutEffect, useRef } from "react";
 interface SegmentedOption<Value extends string> {
   value: Value;
   label: string;
+  title?: string;
   disabled?: boolean;
 }
 
@@ -69,6 +70,7 @@ export function Segmented<Value extends string>({
         const selected = option.value === value;
         return (
           <button key={option.value} type="button"
+            title={option.title}
             className={`segmented-option ${buttonClassName}${selected ? " active" : ""}`}
             role={role === "radiogroup" ? "radio" : undefined}
             aria-checked={role === "radiogroup" ? selected : undefined}

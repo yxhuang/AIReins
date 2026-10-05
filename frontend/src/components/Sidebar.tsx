@@ -4,6 +4,7 @@ import { relativeTime, relativeTimeShort, sessionTitle } from "../format";
 import { AgentIcon } from "./AgentIcon";
 import { isInlineSvg } from "../pages";
 import type { CreateSessionInput } from "../api";
+import { pickWindowsDirectory } from "../api";
 import { store, type Store } from "../store";
 import { selectSidebarSections, sidebarStatusDot } from "../sidebar-sessions";
 import { lockSidebarSwipe, normalizeSidebarTitle, sidebarSwipeOffset } from "../sidebar-menu";
@@ -11,12 +12,15 @@ import { SidebarActionMenu, type SidebarMenuItem } from "./SidebarActionMenu";
 import { useStore } from "../useStore";
 import { LauncherMenu } from "./LauncherMenu";
 import { SettingsMenu } from "./SettingsMenu";
+import { HostSwitcher } from "./HostSwitcher";
 import { ConfigPills, type MenuGroup } from "./ConfigMenu";
 import { configOptionsForModel, modelConfigPatch, newSessionConfig, pillText } from "../config-view";
 import { DirectoryBrowser } from "./DirectoryBrowser";
+import { normalizeDirectoryPath } from "../directory-path";
 import { HistoryView } from "./HistoryView";
 import { PageView } from "./PageView";
 import { SidebarResize } from "./SidebarResize";
+import { shortSessionTitle, SidebarSessionTitle } from "./SessionTitle";
 
 const AGENT_LABELS: Record<AgentKind, string> = {
   claude: "claude",
@@ -163,11 +167,7 @@ export function Sidebar({ collapsed, onToggle, newOpen, onNewOpenChange, returnT
   return (
     <aside className={`sidebar${pageOpen && !collapsed ? " sidebar-page-open" : ""}`} ref={sidebarRef}>
       <div className="sidebar-head">
-        <span className="brand" aria-label="workbench">
-          <span className="brand-mark" aria-hidden="true">wb</span>
-          <span className="brand-line" aria-hidden="true" />
-          <span className="brand-name" aria-hidden="true">Workbench</span>
-        </span>
+        <HostSwitcher />
         {/* Chrome --app 窗口和主屏幕 PWA 没有地址栏和刷新键 */}
         <button
           type="button"
@@ -465,6 +465,7 @@ function SessionRow({
   const renameGuard = useRef(false);
   const data = store.data.get(session.id);
   const title = sessionTitle(session, data?.events);
+  const shortTitle = shortSessionTitle(title);
   const [swipeOffset, setSwipeOffset] = useState<number | null>(null);
   const swiping = useRef(false);
   const dot = sidebarStatusDot(session, pending, now);
@@ -709,7 +710,7 @@ function SessionRow({
             ref={renameRef}
             className="session-title-input"
             defaultValue={session.customTitle ?? title}
-            aria-label={`重命名会话 ${title}`}
+            aria-label={`重命名会话 ${shortTitle}`}
             disabled={renameBusy}
             onKeyDown={(e) => {
               e.stopPropagation();
@@ -734,7 +735,7 @@ function SessionRow({
         className="session-swipe-more"
         tabIndex={swipeOpen ? 0 : -1}
         aria-hidden={!swipeOpen}
-        aria-label={`会话 ${title} 的操作`}
+        aria-label={`会话 ${shortTitle} 的操作`}
         onClick={(e) => {
           const rect = e.currentTarget.getBoundingClientRect();
           openMenu(rect.left, rect.bottom + 4);
@@ -790,7 +791,7 @@ function SessionRow({
       >
         {/* 单行：身份图标 · 标题 ……… 闸门徽标 · ! · 状态灯 · 时间。状态文字不再常显，放进状态灯的 title */}
         <AgentIcon agent={session.agent} label={AGENT_LABELS[session.agent]} />
-        <span className="row-title" title={title}>{title}</span>
+        <SidebarSessionTitle text={title} />
         <span className="row-meta">
           {pending > 0 && (
             <span className="gate-badge" title={`${pending} 个闸门等待处理`}>
@@ -820,7 +821,7 @@ function SessionRow({
       <button
         type="button"
         className="session-row-more"
-        aria-label={`会话 ${title} 的操作`}
+        aria-label={`会话 ${shortTitle} 的操作`}
         aria-haspopup="menu"
         aria-expanded={menuAt !== null}
         onClick={toggleMenuAt}
@@ -830,7 +831,7 @@ function SessionRow({
       {menuAt && (
         <SidebarActionMenu
           position={menuAt}
-          label={`会话 ${title} 的操作`}
+          label={`会话 ${shortTitle} 的操作`}
           items={mainItems}
           submenuItems={menuScreen === "group" ? groupItems : menuScreen === "new-group" ? newGroupItems : undefined}
           error={menuError}
@@ -1028,6 +1029,8 @@ function NewSessionForm({ onDone }: { onDone: () => void }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [browseOpen, setBrowseOpen] = useState(false);
+  const [pickerBusy, setPickerBusy] = useState(false);
+  const nativePicker = meta?.capabilities.windowsDirectoryPicker === true;
   const browseButtonRef = useRef<HTMLButtonElement>(null);
   const submitBtnRef = useRef<HTMLButtonElement>(null);
   // 三个配置下拉的已选值；"" = 跟随配置（不传该字段）。切 agent 时整体重置。
@@ -1042,7 +1045,7 @@ function NewSessionForm({ onDone }: { onDone: () => void }) {
   });
 
   const submit = async () => {
-    if (!cwd.trim() || busy) return;
+    if (!cwd.trim() || busy || pickerBusy) return;
     setBusy(true);
     setError(null);
     // 只把非默认（非「跟随配置」）的字段放进 config
@@ -1053,7 +1056,7 @@ function NewSessionForm({ onDone }: { onDone: () => void }) {
     const input: CreateSessionInput = {
       snapshot: "skip",
       agent,
-      cwd: cwd.trim(),
+      cwd: normalizeDirectoryPath(cwd),
       ...(Object.keys(config).length > 0 ? { config } : {}),
       ...(message.trim() ? { initialMessage: message.trim() } : {}),
     };
@@ -1099,19 +1102,32 @@ function NewSessionForm({ onDone }: { onDone: () => void }) {
         ))}
       </div>
       <div className="new-field">
-        <label htmlFor="new-session-cwd">工作目录（绝对路径）</label>
+        <label htmlFor="new-session-cwd">工作目录（Windows / Linux 路径）</label>
+        <p className="new-hint">可直接粘贴 Windows 文件夹路径，自动转换；点“浏览”可查看目录。</p>
         <div className="cwd-input-row">
           <input
             id="new-session-cwd"
             type="text"
             value={cwd}
             onChange={(e) => setCwd(e.target.value)}
-            placeholder="/home/you/project"
+            placeholder={"C:\\Users\\… 或 /home/you/project"}
             className="mono"
             required
           />
-          <button ref={browseButtonRef} type="button" className="btn" onClick={() => setBrowseOpen(true)}>浏览…</button>
+          <button ref={browseButtonRef} type="button" className="btn" disabled={pickerBusy} onClick={async () => {
+            if (!nativePicker) { setBrowseOpen(true); return; }
+            setPickerBusy(true);
+            setError(null);
+            try {
+              const result = await pickWindowsDirectory(normalizeDirectoryPath(cwd));
+              if (result.path) setCwd(result.path);
+            } catch (cause) {
+              setError(cause instanceof Error ? cause.message : String(cause));
+              setBrowseOpen(true);
+            } finally { setPickerBusy(false); browseButtonRef.current?.focus(); }
+          }}>{pickerBusy ? "选择中…" : "浏览…"}</button>
         </div>
+        {nativePicker && <button type="button" className="btn" disabled={pickerBusy} onClick={() => setBrowseOpen(true)}>网页浏览…</button>}
       </div>
       {/* 首条消息 + 配置胶囊：与会话输入框同一形态（胶囊直接显示当前值，点开选） */}
       <div className="composer-box">
@@ -1131,7 +1147,7 @@ function NewSessionForm({ onDone }: { onDone: () => void }) {
         type="submit"
         className="btn btn-primary"
         ref={submitBtnRef}
-        disabled={busy || !cwd.trim()}
+        disabled={busy || pickerBusy || !cwd.trim()}
         title={!cwd.trim() ? "请先填写工作目录" : undefined}
       >
         {busy ? "创建中…" : "创建并进入"}

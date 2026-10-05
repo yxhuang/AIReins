@@ -1,0 +1,28 @@
+import assert from "node:assert/strict";
+import { pickWindowsDirectory, pickWindowsFile, PICKER_SCRIPT, pickerStartPath, windowsPickerEnabled, WindowsPickerError } from "./windows-directory-picker.js";
+
+assert.equal(windowsPickerEnabled(false), false, "远程入口不弹出主机窗口");
+assert.equal(pickerStartPath("/mnt/c/Users/user/中文目录"), String.raw`C:\Users\user\中文目录`);
+assert.equal(pickerStartPath("/mnt/d"), "D:\\");
+assert.equal(pickerStartPath("C:/a b/中文"), String.raw`C:\a b\中文`);
+assert.equal(pickerStartPath("/home/user"), "");
+assert.throws(() => pickerStartPath("C:\\x\0"), WindowsPickerError);
+assert.throws(() => pickerStartPath(42), WindowsPickerError);
+assert.throws(() => pickerStartPath("relative"), WindowsPickerError);
+assert.deepEqual(await pickWindowsDirectory("/home/user", async () => '{"path":null}'), { path: null });
+assert.deepEqual(await pickWindowsFile("/mnt/c/Users", async () => '{"path":null}'), { path: null });
+assert.match(PICKER_SCRIPT, /OpenFileDialog/);
+assert.match(PICKER_SCRIPT, /All files \(\*\.\*\)\|\*\.\*/);
+assert.match(PICKER_SCRIPT, /FolderBrowserDialog/, "新建 cwd 继续支持选目录");
+await assert.rejects(pickWindowsFile("", async () => '{"path":"relative"}'), /盘符/);
+await assert.rejects(pickWindowsDirectory("", async () => 'garbage'), /返回无效结果/);
+await assert.rejects(pickWindowsDirectory("", async () => '{"path":"relative"}'), /盘符/);
+await assert.rejects(pickWindowsDirectory("", async () => { throw new Error("failure"); }), /返回无效结果/);
+let release!: (value: string) => void;
+const first = pickWindowsDirectory("", () => new Promise(resolve => { release = resolve; }));
+await assert.rejects(pickWindowsDirectory("", async () => '{"path":null}'), error => error instanceof WindowsPickerError && error.status === 409);
+await assert.rejects(pickWindowsFile("", async () => '{"path":null}'), error => error instanceof WindowsPickerError && error.status === 409, "目录与文件选择共享单窗口限制");
+release('{"path":null}');
+await first;
+assert.deepEqual(await pickWindowsDirectory("", async () => '{"path":null}'), { path: null }, "取消/报错后可以再次打开");
+console.log("✅ Windows picker：起点转换、远程关闭、输入校验、取消、无效结果、单窗口及错误后重试通过");

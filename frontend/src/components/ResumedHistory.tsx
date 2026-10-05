@@ -18,14 +18,15 @@ export const ResumedHistory = memo(function ResumedHistory({ session, streamRef 
   if (!session.resumedFrom) return null;
   return <PagedHistory key={`${session.resumedFrom.agent}:${session.resumedFrom.nativeSessionId}`}
     agent={session.resumedFrom.agent} nativeSessionId={session.resumedFrom.nativeSessionId}
-    cwd={session.cwd} streamRef={streamRef} imported startAtEnd initialCursor={session.resumedFrom.historyCursor} />;
+    cwd={session.cwd} sessionId={session.id} streamRef={streamRef} imported startAtEnd initialCursor={session.resumedFrom.historyCursor} />;
 }, (previous, next) => previous.streamRef === next.streamRef && previous.session.cwd === next.session.cwd
   && previous.session.resumedFrom?.agent === next.session.resumedFrom?.agent
   && previous.session.resumedFrom?.nativeSessionId === next.session.resumedFrom?.nativeSessionId
   && previous.session.resumedFrom?.historyCursor === next.session.resumedFrom?.historyCursor);
 
-export const PagedHistory = memo(function PagedHistory({ agent, nativeSessionId, cwd, streamRef, imported = false, startAtEnd = false, initialCursor }: {
+export const PagedHistory = memo(function PagedHistory({ agent, nativeSessionId, cwd, sessionId, streamRef, imported = false, startAtEnd = false, initialCursor }: {
   agent: AgentKind; nativeSessionId: string; cwd: string;
+  sessionId?: string;
   streamRef: RefObject<HTMLDivElement | null>; imported?: boolean;
   /** 首页加载后滚到底（历史页预览：首屏是最后几轮） */
   startAtEnd?: boolean;
@@ -167,7 +168,7 @@ export const PagedHistory = memo(function PagedHistory({ agent, nativeSessionId,
               部分页受单次读取窗口限制，个别消息可能不完整。
             </p>
           )}
-          <HistoryTimeline messages={state.messages} agent={agent} cwd={cwd} />
+          <HistoryTimeline messages={state.messages} agent={agent} cwd={cwd} sessionId={sessionId} />
           <div className="session-history-divider" role="separator" ref={dividerRef}>
             {imported ? "以上为导入前的历史对话" : "以上为原生历史记录"}
           </div>

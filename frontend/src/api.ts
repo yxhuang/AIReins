@@ -38,6 +38,16 @@ export function fetchMeta(): Promise<MetaInfo> {
   return call<MetaInfo>("/api/meta");
 }
 
+export function pickWindowsDirectory(path: string): Promise<{ path: string | null }> {
+  return call("/api/fs/pick-directory", { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ path }), signal: AbortSignal.timeout(135_000) });
+}
+
+export function pickWindowsFile(path: string): Promise<{ path: string | null }> {
+  return call("/api/fs/pick-file", { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ path }), signal: AbortSignal.timeout(135_000) });
+}
+
 export function fetchDispatches(signal?: AbortSignal): Promise<{ dispatches: DispatchRun[] }> {
   return call("/api/dispatches?limit=50", { signal });
 }
@@ -69,6 +79,21 @@ export function fetchDirectories(path?: string, files?: boolean): Promise<Direct
   if (files) params.set("files", "1");
   const query = params.toString();
   return call<DirectoryListing>(`/api/fs/dirs${query ? `?${query}` : ""}`);
+}
+
+function workFileQuery(target: import("./types").WorkFileTarget): string {
+  const query = new URLSearchParams({ path: target.path, root: target.root });
+  if (target.sessionId) query.set("sessionId", target.sessionId);
+  return query.toString();
+}
+export function fetchWorkFile(target: import("./types").WorkFileTarget, signal?: AbortSignal): Promise<import("./types").WorkFile> {
+  return call(`/api/fs/file?${workFileQuery(target)}`, { signal });
+}
+export function saveWorkFile(target: import("./types").WorkFileTarget, version: string, text: string): Promise<import("./types").WorkFile> {
+  return call("/api/fs/file", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...target, version, text }) });
+}
+export function workFileContentUrl(target: import("./types").WorkFileTarget, download = false): string {
+  return `/api/fs/content?${workFileQuery(target)}${download ? "&download=1" : ""}`;
 }
 
 /**
@@ -251,8 +276,9 @@ export function killTerminal(id: string): Promise<{ ok: true }> {
 /** 释放会话 worker（停进程、保留会话）；返回带 cwd 的原生续接命令。 */
 /** 「/」菜单的只读查看（仅 Claude）：已释放会话会先拉起 worker。 */
 export type SessionInfoKind = "mcp" | "hooks" | "permissions" | "context" | "plugins" | "status" | "memory" | "instructions" | "skills" | "sandbox" | "usage" | "output" | "settings" | "export";
-export function fetchSessionInfo(id: string, kind: SessionInfoKind): Promise<unknown> {
-  return call<unknown>(`/api/sessions/${encodeURIComponent(id)}/info/${kind}`, { signal: AbortSignal.timeout(kind === "output" ? 40_000 : 20_000) });
+export function fetchSessionInfo(id: string, kind: SessionInfoKind, signal?: AbortSignal): Promise<unknown> {
+  const timeout = AbortSignal.timeout(kind === "output" ? 40_000 : 20_000);
+  return call<unknown>(`/api/sessions/${encodeURIComponent(id)}/info/${kind}`, { signal: signal ? AbortSignal.any([signal, timeout]) : timeout });
 }
 
 export function manageSessionMcp(id: string, action: "toggle" | "reconnect", serverName: string, enabled?: boolean): Promise<unknown> {

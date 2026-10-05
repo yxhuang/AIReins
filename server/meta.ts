@@ -1,7 +1,16 @@
 import { spawn } from "node:child_process";
+import { hostname } from "node:os";
 import { getDriverMetadata } from "./drivers/index.js";
 
 export const SERVER_VERSION = "0.1.0";
+
+export function getServerHostName(remoteOrigin?: string): string {
+  try {
+    const host = remoteOrigin ? new URL(remoteOrigin).hostname : "";
+    if (host.endsWith(".ts.net")) return host.split(".")[0] || hostname();
+  } catch { /* 配置不可用时使用实际系统名字。 */ }
+  return hostname();
+}
 
 let cached: Promise<Record<string, unknown>> | undefined;
 

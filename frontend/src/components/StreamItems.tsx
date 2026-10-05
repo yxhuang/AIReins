@@ -83,14 +83,14 @@ function MentionImage({ mention }: { mention: ImageMention }) {
   );
 }
 
-export const TextBlockView = memo(function TextBlockView({ item, streaming }: { item: TextBlock; streaming: boolean }) {
+export const TextBlockView = memo(function TextBlockView({ item, streaming, cwd, sessionId }: { item: TextBlock; streaming: boolean; cwd?: string; sessionId?: string }) {
   return (
     <div className="text-block">
-      <MarkdownMessage text={item.text} streaming={streaming} />
+      <MarkdownMessage text={item.text} streaming={streaming} cwd={cwd} sessionId={sessionId} />
       {streaming && <span className="cursor" aria-hidden="true">▍</span>}
     </div>
   );
-}, (previous, next) => previous.item.text === next.item.text && previous.streaming === next.streaming);
+}, (previous, next) => previous.item.text === next.item.text && previous.streaming === next.streaming && previous.cwd === next.cwd && previous.sessionId === next.sessionId);
 
 export const ThoughtBlockView = memo(function ThoughtBlockView({ item }: { item: ThoughtBlock }) {
   const [open, setOpen] = useState(false);
