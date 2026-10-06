@@ -1,5 +1,7 @@
 import { createReadStream, statSync } from "node:fs";
-import { spawn } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
+import { homedir } from "node:os";
+import { promisify } from "node:util";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { join, resolve } from "node:path";
 import type { Duplex } from "node:stream";
@@ -18,6 +20,7 @@ import { NativeDeleteError } from "./native-session-delete.js";
 import { getMeta, getServerHostName, SERVER_VERSION } from "./meta.js";
 import { appWindowEnabled, findWindowsChrome, openAppWindow, AppWindowError } from "./app-window.js";
 import { getTailscalePeers } from "./tailscale-peers.js";
+import { busySessionCount, createPowerOff } from "./power-off.js";
 import { feishuSender, GateNotifier, larkCliSender, loadNotifyConfig, type NotifyConfig } from "./notify.js";
 import { checkPageHealth, proxyPage, readLinks, scanPages } from "./pages.js";
 import { pruneStorage, workbenchHome } from "./persistence.js";
@@ -98,6 +101,11 @@ try {
   log("warn", "storage prune failed", { message: error instanceof Error ? error.message : String(error) });
 }
 const manager = new SessionManager();
+// 关机走用户的 win-shutdown（默认 60 秒后 /sg /f，abort 取消）；不在 PATH 假设上，直接用固定位置。
+const powerOff = createPowerOff({
+  busy: () => busySessionCount(manager.list()),
+  run: (args) => promisify(execFile)(join(homedir(), ".local/bin/win-shutdown"), args, { timeout: 30_000 }),
+});
 const terminals = new TerminalRegistry(process.cwd());
 const history = new HistoryIndex();
 const pages = scanPages();
@@ -444,6 +452,10 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
         });
       }
       await respond(response, 202, 0, "accepted", { restarting: true }, requestId);
+    } else if (url.pathname === "/api/power-off" && ["GET", "POST", "DELETE"].includes(method)) {
+      const status = method === "POST" ? await powerOff.request() : method === "DELETE" ? await powerOff.cancel() : powerOff.status();
+      if (method !== "GET") log("info", "power-off", { method, state: status.state, busy: status.busy, error: status.error });
+      await respond(response, 200, 0, "success", status, requestId);
     } else if (url.pathname === "/api/terminals" && method === "GET") {
       requireTerminalEnabled(policy);
       await respond(response, 200, 0, "success", { terminals: terminals.list() }, requestId);

@@ -163,6 +163,16 @@ export function restartWorkbench(signal?: AbortSignal): Promise<{ restarting: bo
   return call("/api/restart", { method: "POST", signal });
 }
 
+export interface PowerOffStatus {
+  state: "idle" | "waiting" | "scheduled";
+  busy: number;
+  error?: string;
+}
+
+export function powerOff(method: "GET" | "POST" | "DELETE" = "GET"): Promise<PowerOffStatus> {
+  return call("/api/power-off", { method });
+}
+
 export function fetchStorage(signal?: AbortSignal): Promise<StorageStats> {
   return call("/api/storage", { signal });
 }

@@ -1,4 +1,4 @@
-import { useEffect, useRef, type RefObject } from "react";
+import { useEffect, useRef, type KeyboardEvent as ReactKeyboardEvent, type RefObject } from "react";
 
 /** 设置与直达共用非模态浮层：Esc 返回按钮，外点保留目标焦点。 */
 export function useAnchoredMenu({ open, rootRef, buttonRef, panelRef, close, initialFocus, trapFocus = false }: {
@@ -48,4 +48,25 @@ export function useAnchoredMenu({ open, rootRef, buttonRef, panelRef, close, ini
       document.removeEventListener("focusin", onFocusIn);
     };
   }, [open, rootRef, buttonRef, panelRef, initialFocus, trapFocus]);
+}
+
+/** 设置里的模态弹层（清理存储、关机）：Esc 关闭，Tab 在弹层内循环，键盘事件不外泄给设置浮层。 */
+export function modalKeyDown(event: ReactKeyboardEvent, dialog: HTMLElement | null, close: () => void) {
+  event.stopPropagation();
+  if (event.key === "Escape") {
+    event.preventDefault();
+    close();
+    return;
+  }
+  if (event.key !== "Tab") return;
+  const focusables = dialog?.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled)');
+  if (!focusables?.length) { event.preventDefault(); dialog?.focus(); return; }
+  const first = focusables.item(0);
+  const last = focusables.item(focusables.length - 1);
+  const active = document.activeElement;
+  if (event.shiftKey && (active === first || !dialog?.contains(active))) {
+    event.preventDefault(); last.focus();
+  } else if (!event.shiftKey && (active === last || !dialog?.contains(active))) {
+    event.preventDefault(); first.focus();
+  }
 }

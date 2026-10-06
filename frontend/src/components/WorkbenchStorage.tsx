@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { cleanStorage, fetchStorage } from "../api";
 import { store } from "../store";
+import { modalKeyDown } from "./useAnchoredMenu";
 import type { StorageStats } from "../types";
 
 function formatBytes(bytes: number): string {
@@ -97,25 +98,7 @@ export function WorkbenchStorage({ dialogOpen, onDialogOpenChange }: {
         }}>清理…</button>
     </div>
     {dialogOpen && createPortal(
-      <div className="dir-overlay storage-overlay" onKeyDown={(event) => {
-        event.stopPropagation();
-        if (event.key === "Escape") {
-          event.preventDefault();
-          closeDialog();
-          return;
-        }
-        if (event.key !== "Tab") return;
-        const focusables = dialog.current?.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled)');
-        if (!focusables?.length) { event.preventDefault(); dialog.current?.focus(); return; }
-        const first = focusables.item(0);
-        const last = focusables.item(focusables.length - 1);
-        const active = document.activeElement;
-        if (event.shiftKey && (active === first || !dialog.current?.contains(active))) {
-          event.preventDefault(); last.focus();
-        } else if (!event.shiftKey && (active === last || !dialog.current?.contains(active))) {
-          event.preventDefault(); first.focus();
-        }
-      }}>
+      <div className="dir-overlay storage-overlay" onKeyDown={(event) => modalKeyDown(event, dialog.current, closeDialog)}>
         <div className="dir-dialog storage-dialog" ref={dialog} tabIndex={-1} role="dialog"
           aria-modal="true" aria-labelledby="storage-clean-title" aria-describedby="storage-clean-description">
           <div className="dir-heading">

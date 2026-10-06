@@ -11,7 +11,7 @@
 ## 双向连接
 
 1. 两台电脑各自准备可访问的 Tailscale WB HTTPS 地址。WSL 新电脑可由 `bash install.sh` 自动配置；其他环境参考 [后端远程入口配置](../server/README.md#远程入口配置-workbenchremotejson)。Serve、身份白名单与 Host/Origin 校验继续生效，每台电脑使用自己的入口。Windows 登录后按需启动参考 [REMOTE.md](../deploy/windows/REMOTE.md)。
-2. 在每台电脑的本机 WB 中，点击左上角 wb 品牌按钮，从「Tailscale 上的其他电脑」选择对方，即可保存地址并切换；↗ 则保存并在独立窗口打开（Chrome App 窗口内打开的新窗口与 WB 在任务栏归为一组；中键仍开浏览器标签页）。每次打开菜单只发现一次，列出同一 tailnet 中尚未保存的 Windows/Linux/macOS 电脑，在线优先；离线电脑置灰并标「离线」，仍可点击。「设置 → 主机与连接」和「管理主机…」也可手动添加：支持完整地址（例如 `https://other-pc.tailxxxx.ts.net`）、裸 MagicDNS 名（可带末尾 `/` 或 `.`）、Tailscale IPv4/IPv6 和机器名。裸 MagicDNS 直接补全 HTTPS；IP 或机器名在点击添加时查询 Tailscale 设备，机器名不区分大小写，可匹配设备名称或 MagicDNS 首段。补全成功会显示「已补全为 …」；找不到时提示原因且不保存，多台同名时提示改用 IP 或完整地址，避免添加错电脑。最终保存的地址仍只接受完整 HTTPS MagicDNS origin，不带路径、查询、fragment、账号密码或自定义端口，最多保存 16 台。
+2. 在每台电脑的本机 WB 中，点击左上角 wb 品牌按钮，从「Tailscale 上的其他电脑」选择对方，即可保存地址并切换；↗ 则保存并在独立窗口打开（Chrome App 窗口内打开的新窗口与 WB 在任务栏归为一组；中键仍开浏览器标签页）。每次打开菜单只发现一次，列出同一 tailnet 中尚未保存的 Windows/Linux/macOS 电脑，在线优先；离线电脑置灰并标「离线」，仍可点击。「管理主机…」（设置 → Workbench → 主机与连接也会打开同一菜单）可手动添加：支持完整地址（例如 `https://other-pc.tailxxxx.ts.net`）、裸 MagicDNS 名（可带末尾 `/` 或 `.`）、Tailscale IPv4/IPv6 和机器名。裸 MagicDNS 直接补全 HTTPS；IP 或机器名在点击添加时查询 Tailscale 设备，机器名不区分大小写，可匹配设备名称或 MagicDNS 首段。补全成功会显示「已补全为 …」；找不到时提示原因且不保存，多台同名时提示改用 IP 或完整地址，避免添加错电脑。最终保存的地址仍只接受完整 HTTPS MagicDNS origin，不带路径、查询、fragment、账号密码或自定义端口，最多保存 16 台。
 3. 点击品牌按钮选择目标，当前页面整页跳到目标 WB；每行的 ↗ 在普通浏览器中另开标签页，在 WB App 窗口中左键另开 popup 窗口，同时查看两台电脑。中键及修饰键沿用浏览器默认行为。
 4. 从本机 WB 进入远程时，带上发起浏览器的本机返回入口，远程菜单可选「本机」返回。直接在手机或独立浏览器打开远程地址时，没有本机返回入口。
 

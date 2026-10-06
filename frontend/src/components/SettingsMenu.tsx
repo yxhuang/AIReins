@@ -1,11 +1,11 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { useAnchoredMenu } from "./useAnchoredMenu";
+import { modalKeyDown, useAnchoredMenu } from "./useAnchoredMenu";
 import { Segmented } from "./Segmented";
 import { WorkbenchStorage } from "./WorkbenchStorage";
-import { HostConnectionSettings } from "./HostSwitcher";
+import { OPEN_HOST_MENU_EVENT } from "./HostSwitcher";
 import { BODY_FONT_MAX, BODY_FONT_MIN, BODY_FONT_STEP, BODY_FONT_STORAGE_KEY, TERM_FONT_MAX, TERM_FONT_MIN, TERM_FONT_STORAGE_KEY, applyBodyFontSize, bodyFontSize, readBodyFontSize, readTermFontSize, termFontSize } from "../body-font";
-import { fetchClaudeStartupSettings, fetchPrefs, fetchSessions, restartWorkbench, saveClaudeStartupSettings, savePrefs } from "../api";
+import { fetchClaudeStartupSettings, fetchPrefs, fetchSessions, powerOff, restartWorkbench, saveClaudeStartupSettings, savePrefs, type PowerOffStatus } from "../api";
 import { restartAndReconnect, restartBusyCount } from "../restart";
 import { store } from "../store";
 import {
@@ -38,66 +38,65 @@ interface SettingGroup {
   items: SettingItem[];
 }
 
-/* 分组 + 条目结构，后续加组/加条目只动这张表 */
-const SETTING_GROUPS: SettingGroup[] = [
-  {
-    id: "appearance",
-    label: "外观",
-    items: [
-      {
-        id: "theme",
-        label: "主题",
-        options: [
-          { value: "system", label: "跟随系统" },
-          { value: "light", label: "浅色" },
-          { value: "dark", label: "深色" },
-        ],
-      },
-      {
-        id: "font-scale",
-        label: "字号",
-        options: [
-          { value: "small", label: "小" },
-          { value: "default", label: "默认" },
-          { value: "large", label: "大" },
-          { value: "xlarge", label: "特大" },
-        ],
-      },
-      {
-        id: "body-font",
-        label: "正文字号",
-        options: [],
-      },
-      {
-        id: "term-font",
-        label: "终端字号",
-        options: [],
-      },
-    ],
-  },
-  {
-    id: "sessions",
-    label: "会话",
-    items: [
-      {
-        id: "remote-control-startup",
-        label: "Remote Control 默认开启",
-        options: [],
-      },
-      {
-        id: "idle-release",
-        label: "空闲自动释放（分钟）",
-        options: [
-          { value: "0", label: "关闭" },
-          { value: "15", label: "15" },
-          { value: "30", label: "30" },
-          { value: "60", label: "60" },
-          { value: "120", label: "120" },
-        ],
-      },
-    ],
-  },
-];
+/* 分组 + 条目结构，后续加条目只动这两张表；渲染顺序见 SettingsMenu 的面板 */
+const APPEARANCE_GROUP: SettingGroup = {
+  id: "appearance",
+  label: "外观",
+  items: [
+    {
+      id: "theme",
+      label: "主题",
+      options: [
+        { value: "system", label: "跟随系统" },
+        { value: "light", label: "浅色" },
+        { value: "dark", label: "深色" },
+      ],
+    },
+    {
+      id: "font-scale",
+      label: "字号",
+      options: [
+        { value: "small", label: "小" },
+        { value: "default", label: "默认" },
+        { value: "large", label: "大" },
+        { value: "xlarge", label: "特大" },
+      ],
+    },
+    {
+      id: "body-font",
+      label: "正文字号",
+      options: [],
+    },
+    {
+      id: "term-font",
+      label: "终端字号",
+      options: [],
+    },
+  ],
+};
+
+const SESSIONS_GROUP: SettingGroup = {
+  id: "sessions",
+  label: "会话",
+  items: [
+    {
+      id: "remote-control-startup",
+      label: "Remote Control 默认开启",
+      options: [],
+    },
+    {
+      id: "idle-release",
+      label: "空闲自动释放（分钟）",
+      options: [
+        { value: "0", label: "关闭" },
+        { value: "15", label: "15" },
+        { value: "30", label: "30" },
+        { value: "60", label: "60" },
+        { value: "120", label: "120" },
+      ],
+    },
+  ],
+};
 
 /* 隐私模式下 localStorage 访问器本身就会抛异常，读写都必须 try/catch；
    取不到一律按跟随系统渲染，不能白屏。index.html 的内联脚本用同一个 key。 */
@@ -140,6 +139,15 @@ export function SettingsMenu() {
   const restartPending = useRef(false);
   const restartAbort = useRef<AbortController | null>(null);
   const restartDialog = useRef<HTMLDivElement>(null);
+  const [power, setPower] = useState<PowerOffStatus | null>(null);
+  const [powerError, setPowerError] = useState("");
+  const powerPending = useRef(false);
+  /** 关机确认弹层打开时存当时的忙会话数，关闭为 null。 */
+  const [powerConfirm, setPowerConfirm] = useState<number | null>(null);
+  const powerButton = useRef<HTMLButtonElement>(null);
+  const powerDialog = useRef<HTMLDivElement>(null);
+  const dialogOpen = storageDialogOpen || powerConfirm !== null;
+  const powerActive = power !== null && power.state !== "idle";
 
   useEffect(() => () => restartAbort.current?.abort(), []);
   useEffect(() => {
@@ -200,14 +208,73 @@ export function SettingsMenu() {
     };
   }, [open]);
 
+  // 关机状态在服务端；打开菜单读一次，等待/已排定时每 3 秒刷新
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    const load = () => powerOff().then((status) => { if (!cancelled) setPower(status); }).catch(() => { /* 保持当前显示 */ });
+    void load();
+    const timer = powerActive ? setInterval(load, 3000) : undefined;
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [open, powerActive]);
+
+  const togglePowerOff = async () => {
+    if (powerPending.current) return;
+    powerPending.current = true;
+    setPowerError("");
+    try {
+      if (powerActive) {
+        setPower(await powerOff("DELETE"));
+        return;
+      }
+      setPowerConfirm((await powerOff()).busy);
+    } catch (error) {
+      setPowerError(error instanceof Error ? error.message : String(error));
+    } finally {
+      powerPending.current = false;
+    }
+  };
+
+  useEffect(() => {
+    if (powerConfirm !== null) powerDialog.current?.querySelector<HTMLButtonElement>("button")?.focus();
+  }, [powerConfirm !== null]);
+
+  const closePowerConfirm = () => {
+    setPowerConfirm(null);
+    // 等设置面板的 inert 移除后，把焦点交回关机按钮。
+    requestAnimationFrame(() => powerButton.current?.focus());
+  };
+
+  const confirmPowerOff = async () => {
+    if (powerPending.current) return;
+    powerPending.current = true;
+    try {
+      setPower(await powerOff("POST"));
+    } catch (error) {
+      setPowerError(error instanceof Error ? error.message : String(error));
+    } finally {
+      powerPending.current = false;
+      closePowerConfirm();
+    }
+  };
+
+  const openHostMenu = () => {
+    close(false);
+    window.dispatchEvent(new Event(OPEN_HOST_MENU_EVENT));
+  };
+
   const close = (returnFocus: boolean) => {
     setStorageDialogOpen(false);
+    setPowerConfirm(null);
     setOpen(false);
     if (returnFocus) gearRef.current?.focus();
   };
 
   useAnchoredMenu({
-    open: open && !storageDialogOpen, rootRef, buttonRef: gearRef, panelRef, close,
+    open: open && !dialogOpen, rootRef, buttonRef: gearRef, panelRef, close,
     initialFocus: 'button[aria-checked="true"]', trapFocus: true,
   });
 
@@ -295,78 +362,86 @@ export function SettingsMenu() {
     return [...item.options, { value: idleRelease, label: idleRelease }];
   };
 
+  const renderGroup = (group: SettingGroup, footer?: ReactNode) => (
+    <section className={`settings-group settings-group-${group.id}`} key={group.id}>
+      <h3 className="settings-group-title">{group.label}</h3>
+      {group.items.map((item) => (
+        item.id === "remote-control-startup" ? (
+          <div className="settings-item" key={item.id}>
+            <div className="settings-row">
+              <span className="settings-item-label" id={`settings-item-${item.id}`}>{item.label}</span>
+              <button type="button" role="switch" aria-checked={rcStartup === true}
+                aria-labelledby={`settings-item-${item.id}`} aria-describedby="settings-rc-hint"
+                className="settings-switch" disabled={rcStartup === null || rcSaving}
+                title={rcSaving ? "保存中…" : rcStartup === null ? (rcError ? "读取失败" : "读取中…") : rcStartup ? "已开启" : "已关闭"}
+                onClick={() => void toggleRcStartup()}>
+                <span className={`slash-switch${rcStartup ? " on" : ""}`} aria-hidden="true" />
+              </button>
+            </div>
+            <span className="settings-hint" id="settings-rc-hint">仅对新建、续接或释放后再发送的会话生效。</span>
+            {rcError && <span className="new-error" role="alert">{rcError}</span>}
+          </div>
+        ) : item.id === "body-font" ? (
+          <div className="settings-item" key={item.id}>
+            <div className="settings-row">
+              <label className="settings-item-label" htmlFor="settings-body-font">{item.label}</label>
+              <span className="settings-range-value">{bodySize}px</span>
+            </div>
+            <input id="settings-body-font" className="settings-range" type="range"
+              min={BODY_FONT_MIN} max={BODY_FONT_MAX} step={BODY_FONT_STEP} value={bodySize}
+              onChange={(e) => choose(item.id, e.target.value)} />
+          </div>
+        ) : item.id === "term-font" ? (
+          <div className="settings-item" key={item.id}>
+            <div className="settings-row">
+              <label className="settings-item-label" htmlFor="settings-term-font">{item.label}</label>
+              <span className="settings-range-value">{termSize}px</span>
+            </div>
+            <input id="settings-term-font" className="settings-range" type="range"
+              min={TERM_FONT_MIN} max={TERM_FONT_MAX} step={1} value={termSize}
+              onChange={(e) => choose(item.id, e.target.value)} />
+            <span className="settings-hint">只对这台设备生效，电脑和手机分开记。</span>
+          </div>
+        ) : (
+          <div className="settings-item" key={item.id}>
+            <span className="settings-item-label" id={`settings-item-${item.id}`}>{item.label}</span>
+            <Segmented
+              className="settings-seg"
+              options={optionsFor(item)}
+              value={selectedValue(item.id)}
+              onChange={(value) => item.id === "theme" ? chooseTheme(value as ThemeChoice) : choose(item.id, value)}
+              role="radiogroup"
+              ariaLabelledby={`settings-item-${item.id}`}
+            />
+          </div>
+        )
+      ))}
+      {footer}
+    </section>
+  );
+
   return (
     <div className="settings" ref={rootRef}>
       {open && (
-        <div className="settings-panel" ref={panelRef} role="dialog" aria-label="设置" inert={storageDialogOpen}>
-          {SETTING_GROUPS.map((group) => (
-            <section className="settings-group" key={group.id}>
-              <h3 className="settings-group-title">{group.label}</h3>
-              {group.items.map((item) => (
-                item.id === "remote-control-startup" ? (
-                  <div className="settings-item" key={item.id}>
-                    <div className="settings-row">
-                      <span className="settings-item-label" id={`settings-item-${item.id}`}>{item.label}</span>
-                      <button type="button" role="switch" aria-checked={rcStartup === true}
-                        aria-labelledby={`settings-item-${item.id}`} aria-describedby="settings-rc-hint"
-                        className="settings-switch" disabled={rcStartup === null || rcSaving}
-                        title={rcSaving ? "保存中…" : rcStartup === null ? (rcError ? "读取失败" : "读取中…") : rcStartup ? "已开启" : "已关闭"}
-                        onClick={() => void toggleRcStartup()}>
-                        <span className={`slash-switch${rcStartup ? " on" : ""}`} aria-hidden="true" />
-                      </button>
-                    </div>
-                    <span className="settings-hint" id="settings-rc-hint">仅对新建、续接或释放后再发送的会话生效。</span>
-                    {rcError && <span className="new-error" role="alert">{rcError}</span>}
-                  </div>
-                ) : item.id === "body-font" ? (
-                  <div className="settings-item" key={item.id}>
-                    <div className="settings-row">
-                      <label className="settings-item-label" htmlFor="settings-body-font">{item.label}</label>
-                      <span className="settings-range-value">{bodySize}px</span>
-                    </div>
-                    <input id="settings-body-font" className="settings-range" type="range"
-                      min={BODY_FONT_MIN} max={BODY_FONT_MAX} step={BODY_FONT_STEP} value={bodySize}
-                      onChange={(e) => choose(item.id, e.target.value)} />
-                  </div>
-                ) : item.id === "term-font" ? (
-                  <div className="settings-item" key={item.id}>
-                    <div className="settings-row">
-                      <label className="settings-item-label" htmlFor="settings-term-font">{item.label}</label>
-                      <span className="settings-range-value">{termSize}px</span>
-                    </div>
-                    <input id="settings-term-font" className="settings-range" type="range"
-                      min={TERM_FONT_MIN} max={TERM_FONT_MAX} step={1} value={termSize}
-                      onChange={(e) => choose(item.id, e.target.value)} />
-                    <span className="settings-hint">只对这台设备生效，电脑和手机分开记。</span>
-                  </div>
-                ) : (
-                  <div className="settings-item" key={item.id}>
-                    <span className="settings-item-label" id={`settings-item-${item.id}`}>{item.label}</span>
-                    <Segmented
-                      className="settings-seg"
-                      options={optionsFor(item)}
-                      value={selectedValue(item.id)}
-                      onChange={(value) => item.id === "theme" ? chooseTheme(value as ThemeChoice) : choose(item.id, value)}
-                      role="radiogroup"
-                      ariaLabelledby={`settings-item-${item.id}`}
-                    />
-                  </div>
-                )
-              ))}
-            </section>
-          ))}
-          <section className="settings-group">
-            <h3 className="settings-group-title">主机与连接</h3>
-            <HostConnectionSettings />
-          </section>
+        <div className="settings-panel" ref={panelRef} role="dialog" aria-label="设置" inert={dialogOpen}>
+          {renderGroup(SESSIONS_GROUP, <WorkbenchStorage dialogOpen={storageDialogOpen} onDialogOpenChange={setStorageDialogOpen} />)}
           <section className="settings-group">
             <h3 className="settings-group-title">Workbench</h3>
-            <WorkbenchStorage dialogOpen={storageDialogOpen} onDialogOpenChange={setStorageDialogOpen} />
+            <button type="button" className="settings-action settings-hosts" onClick={openHostMenu} aria-haspopup="menu">
+              主机与连接（Tailscale）
+            </button>
             <button type="button" className="settings-action" disabled={restartState !== "idle"}
               onClick={() => void restart()}>
               <span aria-hidden="true">↻</span>{restartState === "checking" ? "检查会话中…" : "重启 Workbench"}
             </button>
+            <button type="button" className="settings-action settings-power" ref={powerButton} aria-haspopup={powerActive ? undefined : "dialog"}
+              onClick={() => void togglePowerOff()}>
+              <span aria-hidden="true">⏻</span>{power?.state === "waiting" ? `等待 ${power.busy} 个会话完成后关机 · 取消`
+                : power?.state === "scheduled" ? "已发出关机（约 60 秒）· 取消" : "关机"}
+            </button>
+            {(power?.error || powerError) && <span className="new-error" role="alert">{power?.error || powerError}</span>}
           </section>
+          {renderGroup(APPEARANCE_GROUP)}
         </div>
       )}
       <button
@@ -381,6 +456,26 @@ export function SettingsMenu() {
       >
         <GearIcon />
       </button>
+      {powerConfirm !== null && createPortal(
+        <div className="dir-overlay storage-overlay" onKeyDown={(event) => modalKeyDown(event, powerDialog.current, closePowerConfirm)}>
+          <div className="dir-dialog storage-dialog" ref={powerDialog} tabIndex={-1} role="dialog"
+            aria-modal="true" aria-labelledby="power-off-title" aria-describedby="power-off-description">
+            <div className="dir-heading">
+              <h2 id="power-off-title">关闭这台电脑</h2>
+            </div>
+            <p id="power-off-description">{powerConfirm > 0
+              ? `有 ${powerConfirm} 个会话正在运行或带有后台任务。确认后先等它们全部完成，再自动关机，不再询问。`
+              : "当前没有会话在运行，确认后约 60 秒关机。"}</p>
+            <p className="settings-hint">关机前可在设置里点同一按钮取消。Windows 会强制关闭程序，未保存的内容会丢失。</p>
+            <div className="dir-actions">
+              <button type="button" className="btn" onClick={closePowerConfirm}>取消</button>
+              <button type="button" className="btn btn-danger" onClick={() => void confirmPowerOff()}>
+                {powerConfirm > 0 ? "等完成后关机" : "确认关机"}
+              </button>
+            </div>
+          </div>
+        </div>, document.body,
+      )}
       {(restartState === "restarting" || restartState === "failed") && createPortal(
         <div className="dir-overlay restart-overlay" onKeyDown={(event) => {
           event.stopPropagation();

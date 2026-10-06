@@ -158,6 +158,7 @@ Workbench 新建的 Codex 会话在首个 `item/completed.userMessage` 后、没
 - `GET /api/meta`：server/CLI 实测版本、按请求入口计算的终端能力位、三 driver 能力位与配置 schema；`hostName` 为执行主机名称，优先用既有 `remote.json` 的 Tailscale 域名机器名，否则用 Node `hostname()`，供主机菜单显示「机器名（本机）」。新增字段需要后端重启，旧前端可忽略。
 - `GET /api/tailscale/peers`：只读发现其他 Windows/Linux/macOS 电脑，沿用现有 Host/Origin 与远程 Tailscale 身份白名单，不增加豁免。`execFile` 不经 shell 调用 `tailscale status --json`（5 秒超时，输出最多 1 MiB），优先 PATH，WSL 未找到时回退 `/mnt/c/Program Files/Tailscale/tailscale.exe`。成功信封 `data:{peers:[{name,origin,online,os,ips}]}`，仅含前端可接受的 HTTPS MagicDNS 地址，排除自身、手机及非法域名，在线优先后按名字排序。未安装、未运行、超时或坏 JSON 都返回 HTTP 200、`code:0`、`data:{peers:[],reason:"可读原因"}`。发现不探测目标 WB 是否可用；后端重启后生效。
 - `POST /api/restart`：无请求体，返回 HTTP 202，信封 `{code:0,msg:"accepted",data:{restarting:true},request_id}`；表示已接受，不表示重启已完成。沿用两个入口的 Host / Origin 校验，远程入口还须 Tailscale 身份白名单；不新增豁免。同一进程内重复请求仍回 202，只启动一次重启。
+- `GET|POST|DELETE /api/power-off`：关机。信封 `data:{state:"idle"|"waiting"|"scheduled",busy,error?}`，`busy` 为 running、starting 或带后台任务的会话数（比重启多算 starting）。POST 时无忙会话立即执行 `~/.local/bin/win-shutdown`（默认 60 秒后 `/sg /f`），否则进入 `waiting`，每 5 秒检查一次，全部空闲后自动执行、不再确认；重复 POST 不重复执行。DELETE 取消等待；已排定时执行 `win-shutdown abort`。失败回到 `idle` 并带 `error`。等待状态只在内存，WB 重启即丢失。远程入口可用，沿用同样的 Host/Origin 与 Tailscale 身份白名单。
 - `GET /api/pages`：启动时已注册的扩展页面列表
 - `GET /api/pages/:id/health`：限时探测一个扩展页面的目标服务
 

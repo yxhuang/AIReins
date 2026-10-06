@@ -2807,7 +2807,7 @@ body.resizing {
   animation: settings-pop 0.12s ease-out;
 }
 
-/* 桌面设置面板两栏：左「外观」，右「会话 + 主机与连接 + Workbench」。
+/* 桌面设置面板两栏：左「会话（含存储）+ Workbench」，右「外观」。
    .sidebar 有 overflow:hidden，540px 会被裁，所以改 fixed 贴左下（10 侧栏内边距 + 2 底栏内边距 + 按钮 + 8 间距） */
 @media (min-width: 721px) {
   .app:not(.sidebar-collapsed) .sidebar-foot .settings > .settings-panel {
@@ -2815,9 +2815,8 @@ body.resizing {
     width: 540px; max-height: calc(100vh - 80px);
     display: grid; grid-template-columns: 1fr 1fr; column-gap: 14px; align-items: start;
   }
-  .settings > .settings-panel > .settings-group:first-child { grid-row: span 3; }
-  .settings > .settings-panel > .settings-group:not(:first-child) { grid-column: 2; border-left: 1px solid var(--border); padding-left: 14px; }
-  .settings > .settings-panel > .settings-group:nth-child(2) { border-top: none; }
+  .settings > .settings-panel > .settings-group { grid-column: 1; }
+  .settings > .settings-panel > .settings-group-appearance { grid-column: 2; grid-row: 1 / span 2; border-top: none; border-left: 1px solid var(--border); padding-left: 14px; }
   /* 异步存储明细最多按三行预留，避免底部锚定的菜单加载后向上跳。 */
   .settings > .settings-panel .settings-storage-breakdown { min-height: 3lh; }
 }
@@ -2902,6 +2901,8 @@ body.resizing {
 .settings-action:disabled { cursor: default; opacity: 0.6; }
 
 .settings-storage { margin-bottom: 12px; }
+.settings-hosts { margin-bottom: 8px; }
+.settings-power { margin-top: 8px; }
 .settings-storage-breakdown { overflow-wrap: anywhere; }
 .storage-overlay { z-index: 100; }
 .storage-dialog { overflow-y: auto; }

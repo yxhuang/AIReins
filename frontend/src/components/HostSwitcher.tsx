@@ -74,6 +74,9 @@ export function HostConnectionSettings() {
   </div>;
 }
 
+/** 设置里的「主机与连接」派发此事件，直接打开顶部 wb 主机菜单。 */
+export const OPEN_HOST_MENU_EVENT = "workbench-open-host-menu";
+
 export function HostSwitcher() {
   const connections = useConnections();
   const hostName = useStore(value => value.meta?.hostName);
@@ -116,6 +119,11 @@ export function HostSwitcher() {
         if (!controller.signal.aborted) setPeers(result.peers.filter(peer => normalizeRemoteOrigin(peer.origin) === peer.origin));
       }).catch(() => { /* 发现失败静默，手动添加始终可用。 */ });
   };
+  useEffect(() => {
+    const onOpen = () => openMenu();
+    window.addEventListener(OPEN_HOST_MENU_EVENT, onOpen);
+    return () => window.removeEventListener(OPEN_HOST_MENU_EVENT, onOpen);
+  }, []);
   useAnchoredMenu({ open, rootRef, buttonRef, panelRef, close,
     initialFocus: managing ? "input" : '[aria-checked="true"], [role="menuitemradio"]', trapFocus: true });
   useLayoutEffect(() => {
