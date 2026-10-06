@@ -16,6 +16,7 @@ import { getWorkFile, getWorkContent, saveWorkFile, WorkFileError, TEXT_LIMIT } 
 import { HistoryIndex, HistoryQueryError } from "./history.js";
 import { NativeDeleteError } from "./native-session-delete.js";
 import { getMeta, getServerHostName, SERVER_VERSION } from "./meta.js";
+import { appWindowEnabled, findWindowsChrome, openAppWindow, AppWindowError } from "./app-window.js";
 import { getTailscalePeers } from "./tailscale-peers.js";
 import { feishuSender, GateNotifier, larkCliSender, loadNotifyConfig, type NotifyConfig } from "./notify.js";
 import { checkPageHealth, proxyPage, readLinks, scanPages } from "./pages.js";
@@ -52,6 +53,8 @@ const STATIC_ROOT = process.env.WORKBENCH_STATIC_DIR
   : resolve(fileURLToPath(new URL("../frontend/dist", import.meta.url)));
 const LOCAL_POLICY = localPolicy(PORT);
 const REMOTE_CONFIG = readRemoteConfig();
+// 测试设 WORKBENCH_NO_APP_WINDOW=1，避免真的启动 Chrome。
+const APP_CHROME = process.env.WORKBENCH_NO_APP_WINDOW ? null : findWindowsChrome();
 
 /** 配置错误不影响本机入口。 */
 function readRemoteConfig(): RemoteConfig | null {
@@ -387,8 +390,18 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       await respond(response, 200, 0, "success", {
         ...meta,
         hostName: getServerHostName(REMOTE_CONFIG?.origin),
-        capabilities: { terminal: terminalEnabled(policy, REMOTE_CONFIG), windowsDirectoryPicker: windowsPickerEnabled(policy.kind === "local") },
+        capabilities: { terminal: terminalEnabled(policy, REMOTE_CONFIG), windowsDirectoryPicker: windowsPickerEnabled(policy.kind === "local"),
+          appWindow: appWindowEnabled(policy, APP_CHROME) },
       }, requestId);
+    } else if (method === "POST" && url.pathname === "/api/open-app-window") {
+      if (policy.kind !== "local") throw new ApiError(403, 40300, "仅本机入口可打开 WB 窗口");
+      try {
+        await openAppWindow(policy, PORT, await readJson(request, 32 * 1024), APP_CHROME);
+      } catch (error) {
+        if (error instanceof AppWindowError) throw new ApiError(error.status, error.status * 100, error.message);
+        throw error;
+      }
+      await respond(response, 200, 0, "success", { opened: true }, requestId);
     } else if (method === "GET" && url.pathname === "/api/tailscale/peers") {
       await respond(response, 200, 0, "success", await getTailscalePeers(), requestId);
     } else if (method === "GET" && url.pathname === "/api/storage") {

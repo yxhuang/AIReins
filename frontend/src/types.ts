@@ -231,7 +231,7 @@ export interface MetaInfo {
   /** 旧后端可省略；历史目录输入用来展开 ~。 */
   homeDir?: string;
   cliVersions: Record<AgentKind, string>;
-  capabilities: { terminal: boolean; windowsDirectoryPicker?: boolean };
+  capabilities: { terminal: boolean; windowsDirectoryPicker?: boolean; appWindow?: boolean };
   drivers: Record<AgentKind, DriverMeta>;
 }
 

@@ -53,6 +53,10 @@ Claude stdout 的 `bridge_state`、控制应答驱动胶囊状态；未知 state
 
 另外，静态资源响应带 `X-Frame-Options: DENY` 和 `Content-Security-Policy: frame-ancestors 'none'`，不允许别的网站嵌入 workbench。
 
+`POST /api/open-app-window` 接收 `{ target }`，沿用上述 Host/Origin 校验，且只接受本机监听入口；远程监听即使身份合法也返回 403。`target` 只允许 `policy.origins` 中的本机 WB/Vite 入口，不接受远程主机、账号密码、任意网站、控制字符或其他本机端口。仅 WSL 且找到 Windows Chrome 时可用：只读查找 Program Files、Program Files (x86) 和 LOCALAPPDATA 的 Chrome 安装目录；WSL 未继承 LOCALAPPDATA 时查看标准 Windows 用户目录。
+
+启动使用 `execFile`，无 shell，唯一参数为 `--app=http://127.0.0.1:<本机端口>/#wb-goto=<编码目标>`，只等进程创建，不等 Chrome 退出。非法目标返回 400，不可用或启动失败返回 503；成功返回 `{ opened: true }`。`GET /api/meta.capabilities.appWindow` 按入口计算，远程恒为 false。前端只在本机初始化会话前恢复本机路径和会话路由。HTTP 测试设置 `WORKBENCH_NO_APP_WINDOW=1` 禁用启动器，合法请求也返回 503，避免真实启动 Chrome。
+
 远程入口的规则：
 
 - **Host**：必须是配置的 `origin` 主机名，或 `127.0.0.1:<port>`（Serve 转发可能改写 Host）。

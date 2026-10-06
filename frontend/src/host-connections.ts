@@ -124,6 +124,22 @@ export function hostNavigationUrl(target: string, value: HostConnections): strin
   return `${remote ?? local}/${TRANSFER_PREFIX}${encodeURIComponent(JSON.stringify(state))}`;
 }
 
+/** 只在本机页面消费启动 fragment，目标限制为此 WB 的本机入口。 */
+export function parseAppWindowRequest(href: string): string | null {
+  const page = new URL(href);
+  if (!normalizeLocalOrigin(page.origin) || page.hash.length > 32_768) return null;
+  const prefix = "#wb-goto=";
+  if (!page.hash.startsWith(prefix)) return null;
+  try {
+    const target = decodeURIComponent(page.hash.slice(prefix.length));
+    if (target.length > 4096 || /[\u0000-\u0020\u007f\\]/.test(target)) return null;
+    const url = new URL(target);
+    const local = normalizeLocalOrigin(url.origin) && (url.port === page.port || url.port === "5173");
+    if (url.username || url.password || !local) return null;
+    return url.href;
+  } catch { return null; }
+}
+
 let snapshot: HostConnections | null = null;
 const listeners = new Set<() => void>();
 function pageHref(): string {
@@ -145,6 +161,17 @@ export function initializeHostConnections(): void {
   snapshot = connectionsForPage(href, savedConnections(), transfer);
   persist(snapshot);
   const url = new URL(href);
+  if (normalizeLocalOrigin(url.origin) && url.hash.startsWith("#wb-goto=")) {
+    const target = parseAppWindowRequest(href);
+    url.hash = "";
+    if (target) {
+      const route = new URL(target);
+      url.pathname = route.pathname;
+      url.search = route.search;
+      url.hash = route.hash;
+    }
+    window.history.replaceState(window.history.state, "", url.href);
+  }
   if (url.hash.startsWith(TRANSFER_PREFIX)) {
     url.hash = "";
     window.history.replaceState(window.history.state, "", url.href);

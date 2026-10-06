@@ -3,12 +3,20 @@ import {
   normalizeRemoteOrigin, normalizeLocalOrigin, connectionLabel, workbenchWindowTitle,
   connectionsForPage, hostNavigationUrl, parseHostTransfer, normalizeConnections,
   initializeHostConnections, getHostConnections, saveHostConnections, subscribeHostConnections, HOST_CONNECTIONS_KEY,
-  connectionsWithRemote, resolveRemoteHostInput,
+  connectionsWithRemote, resolveRemoteHostInput, parseAppWindowRequest,
 } from '../src/host-connections.ts';
 
 const local = 'http://127.0.0.1:8790';
 const home = 'https://my-desktop.tailxxxx.ts.net';
 const other = 'https://other-pc.tailxxxx.ts.net';
+const appLink = target => `${local}/#wb-goto=${encodeURIComponent(target)}`;
+assert.equal(parseAppWindowRequest(appLink(`${local}/path?x=1#/session/a`)), `${local}/path?x=1#/session/a`);
+for (const bad of ['javascript:alert(1)', 'https://evil.test', 'http://127.0.0.1:9000/',
+  `${home}/path?x=1#/session/a`, 'http://user@localhost:8790/', `${local}/\n`, 'not-a-url']) {
+  assert.equal(parseAppWindowRequest(appLink(bad)), null, bad);
+}
+assert.equal(parseAppWindowRequest(`${home}/#wb-goto=${encodeURIComponent(local)}`), null, '远程页不消费本机启动 fragment');
+assert.equal(parseAppWindowRequest(`${local}/#wb-goto=broken%`), null);
 assert.equal(normalizeRemoteOrigin(`${home}/`), home);
 const laptop = 'https://my-laptop.tailxxxx.ts.net';
 const discoveredLaptop = { name: 'my-laptop', origin: laptop, online: true, os: 'windows',
@@ -52,6 +60,7 @@ const hop = hostNavigationUrl(home, initial);
 assert.equal(new URL(hop).origin, home);
 assert.equal(new URL(hop).search, '', '连接上下文只放 fragment，不发给服务端');
 assert.deepEqual(parseHostTransfer(hop), initial);
+assert.throws(() => hostNavigationUrl(`${home}/path?x=1#/session/remote`, initial), /目标/, '主机导航只接受 origin');
 const remote = connectionsForPage(`${home}/`, null, parseHostTransfer(hop));
 assert.equal(remote.localOrigin, local, '跨源后保留发起浏览器的本机入口');
 const returned = connectionsForPage(`${local}/`, remote, parseHostTransfer(hostNavigationUrl(local, remote)));
@@ -76,6 +85,8 @@ assert.deepEqual(connectionsForPage(`${home}/`, { localOrigin: local, remotes: f
   '列表满额时访问新主机不能静默删除已保存地址');
 assert.equal(parseHostTransfer(`${home}/#wb-connect=broken%`), null);
 assert.equal(parseHostTransfer(`${home}/#wb-connect=${'x'.repeat(9000)}`), null);
+assert.equal(parseHostTransfer(`${home}/#wb-connect=${encodeURIComponent(JSON.stringify({ padding: 'x'.repeat(8192) }))}`), null,
+  '有效 JSON 的连接 fragment 仍受 8192 长度限制');
 const hostile = normalizeConnections({ localOrigin: 'https://evil.test', remotes: [home, 'https://evil.test'], secret: 'do not carry' });
 assert.deepEqual(hostile, { localOrigin: null, remotes: [home] });
 assert.ok(!hostNavigationUrl(home, hostile).includes('secret'));
@@ -92,6 +103,20 @@ globalThis.window = {
 globalThis.localStorage = { getItem: key => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, value) };
 initializeHostConnections();
 assert.equal(replaced, `${home}/`, '启动消费 fragment，不干扰 store 的会话恢复');
+globalThis.window.location.href = appLink(`${local}/path?x=1#/session/local`);
+initializeHostConnections();
+assert.equal(replaced, `${local}/path?x=1#/session/local`, '本机 goto 在 store.init 前还原路由');
+globalThis.window.location.href = appLink('http://localhost:8790/#/session/alias');
+initializeHostConnections();
+assert.equal(replaced, `${local}/#/session/alias`, 'localhost 别名保持本机 App origin');
+globalThis.window.location.href = appLink(`${home}/path?x=1#/session/remote`);
+initializeHostConnections();
+assert.equal(replaced, `${local}/`, '远程 goto 目标被拒绝');
+globalThis.window.location.href = `${local}/#wb-goto=broken%`;
+initializeHostConnections();
+assert.equal(replaced, `${local}/`, '非法启动值被消费但不导航、不启动程序');
+globalThis.window.location.href = hop;
+initializeHostConnections();
 assert.equal(getHostConnections().localOrigin, local);
 assert.ok(storage.has(HOST_CONNECTIONS_KEY));
 globalThis.localStorage.setItem(HOST_CONNECTIONS_KEY, JSON.stringify({ localOrigin: local, remotes: fullHosts }));
@@ -111,7 +136,7 @@ assert.equal(handlers.size, 0, '最后一个订阅退出后移除真正注册的
 globalThis.localStorage.setItem = () => { throw Error('storage unavailable'); };
 assert.equal(saveHostConnections({ localOrigin: local, remotes: [home] }), false);
 assert.ok(getHostConnections().remotes.includes(home), '存储不可用时保留本页状态');
-const { fetchTailscalePeers } = await import('../src/api.ts');
+const { fetchTailscalePeers, openAppWindow } = await import('../src/api.ts');
 const originalFetch = globalThis.fetch;
 try {
   let requests = 0;
@@ -126,11 +151,41 @@ try {
   assert.equal(requests, 1, 'API 调用不自动重试');
   globalThis.fetch = async () => ({ json: async () => ({ code: 0, data: { peers: [], reason: '未检测到 Tailscale' } }) });
   assert.deepEqual(await fetchTailscalePeers(), { peers: [], reason: '未检测到 Tailscale' });
+  globalThis.fetch = async (path, init) => {
+    assert.equal(path, '/api/open-app-window');
+    assert.equal(init.method, 'POST');
+    assert.deepEqual(JSON.parse(init.body), { target: `${local}/#/session/a` });
+    assert.ok(init.signal);
+    return { json: async () => ({ code: 0, data: { opened: true } }) };
+  };
+  assert.deepEqual(await openAppWindow(`${local}/#/session/a`), { opened: true });
+  globalThis.fetch = async () => ({ json: async () => ({ code: 50300, msg: '无法启动 Chrome' }) });
+  await assert.rejects(openAppWindow(`${local}/`), /无法启动 Chrome/);
 } finally { globalThis.fetch = originalFetch; }
 globalThis.React = (await import('react')).default;
 globalThis.WebSocket = { CONNECTING: 0, OPEN: 1, CLOSING: 2, CLOSED: 3 };
 const { renderToStaticMarkup } = await import('react-dom/server');
-const { HostSwitcher, HostConnectionSettings, hostSwitchHasUnsentInput } = await import('../src/components/HostSwitcher.tsx');
+const { HostSwitcher, HostConnectionSettings, hostSwitchHasUnsentInput, openNewWindow } = await import('../src/components/HostSwitcher.tsx');
+let popups = 0, prevented = false;
+globalThis.window.open = (href, name, features) => {
+  popups++;
+  assert.equal(href, hop);
+  assert.equal(name, '_blank');
+  assert.match(features, /^popup,noopener,noreferrer,/);
+};
+const click = { currentTarget: { href: hop }, button: 0, preventDefault() { prevented = true; } };
+openNewWindow(click, false);
+assert.equal(prevented, false, '普通标签页保留链接默认行为');
+assert.equal(popups, 0);
+openNewWindow(click, true);
+assert.equal(prevented, true);
+assert.equal(popups, 1, 'standalone 左键保留 popup');
+for (const extra of [{ button: 1 }, { ctrlKey: true }, { metaKey: true }, { shiftKey: true }, { altKey: true }, { defaultPrevented: true }]) {
+  prevented = false;
+  openNewWindow({ ...click, ...extra }, true);
+  assert.equal(prevented, false, '中键、修饰键和已取消事件不拦截');
+}
+assert.equal(popups, 1);
 const { store } = await import('../src/store.ts');
 let firstMessage = '', attached = false;
 globalThis.document = { querySelector(selector) {
@@ -160,4 +215,4 @@ const hostSettings = renderToStaticMarkup(React.createElement(HostConnectionSett
 assert.ok(hostSettings.includes('Tailscale 地址'));
 assert.match(hostSettings, /type="text"/, 'IP 和机器名不被浏览器 URL 表单校验拦截');
 assert.ok(hostSettings.includes('Tailscale IP'), '两个共用入口提示支持 IP 与机器名');
-console.log('PASS: 主机地址与 IP/IPv6/机器名补全、裸 MagicDNS、无匹配及歧义、连接往返与存储保护');
+console.log('PASS: 主机地址补全、连接往返与存储保护、本机 App goto 解析与启动 API、标签页/popup 行为');

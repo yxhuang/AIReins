@@ -4,7 +4,7 @@ import {
   connectionLabel, connectionsWithRemote, getHostConnections, hostNavigationUrl,
   normalizeLocalOrigin, normalizeRemoteOrigin, resolveRemoteHostInput, saveHostConnections, subscribeHostConnections,
 } from "../host-connections";
-import { fetchTailscalePeers } from "../api";
+import { fetchTailscalePeers, openAppWindow } from "../api";
 import type { TailscalePeer } from "../../../server/tailscale-peers";
 import { store } from "../store";
 import { useStore } from "../useStore";
@@ -12,6 +12,13 @@ import { useAnchoredMenu } from "./useAnchoredMenu";
 
 function useConnections() {
   return useSyncExternalStore(subscribeHostConnections, getHostConnections, getHostConnections);
+}
+
+// App 的左键 popup 继承 app 名；普通浏览器及修饰键沿用链接默认行为。
+export function openNewWindow(event: MouseEvent<HTMLAnchorElement>, standalone: boolean) {
+  if (!standalone || event.defaultPrevented || event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+  event.preventDefault();
+  window.open(event.currentTarget.href, "_blank", `popup,noopener,noreferrer,width=${window.outerWidth},height=${window.outerHeight}`);
 }
 
 export function hostSwitchHasUnsentInput(): boolean {
@@ -70,9 +77,11 @@ export function HostConnectionSettings() {
 export function HostSwitcher() {
   const connections = useConnections();
   const hostName = useStore(value => value.meta?.hostName);
+  const appWindow = useStore(value => value.meta?.capabilities.appWindow);
   const [open, setOpen] = useState(false);
   const [managing, setManaging] = useState(false);
   const [error, setError] = useState("");
+  const [openingApp, setOpeningApp] = useState(false);
   const [peers, setPeers] = useState<TailscalePeer[]>([]);
   const discoveryRef = useRef<AbortController | null>(null);
   const [position, setPosition] = useState({ top: 52, left: 8 });
@@ -133,12 +142,6 @@ export function HostSwitcher() {
     if (!next) event.preventDefault();
     else event.currentTarget.href = hostNavigationUrl(origin, next);
   };
-  // 左键开独立窗口：Chrome --app 窗口里的 popup 继承同一 app 名，任务栏与 WB 归为一组；中键仍按浏览器默认开标签页。
-  const openNewWindow = (event: MouseEvent<HTMLAnchorElement>) => {
-    if (event.defaultPrevented || event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey) return;
-    event.preventDefault();
-    window.open(event.currentTarget.href, "_blank", `popup,noopener,noreferrer,width=${window.outerWidth},height=${window.outerHeight}`);
-  };
   const choose = (origin: string, discovered = false) => {
     if (origin === currentOrigin) { close(true); return; }
     if (store.filePreview?.saving) { setError("文件正在保存，完成后再切换主机。"); return; }
@@ -152,10 +155,27 @@ export function HostSwitcher() {
     ...(currentUnsaved ? [currentRemote, ...connections.remotes] : connections.remotes)
       .map(origin => ({ origin, name: connectionLabel(origin) })),
   ];
-  // Chrome/Edge 的 --app 与安装的 PWA 都报 standalone；普通标签页里不需要这个入口。
+  // Chrome/Edge 的 --app 与安装的 PWA 都报 standalone。
   const standalone = typeof window !== "undefined" && window.matchMedia?.("(display-mode: standalone)").matches;
   const brands = (navigator as Navigator & { userAgentData?: { brands: { brand: string }[] } }).userAgentData?.brands ?? [];
   const browserLabel = brands.some(b => b.brand === "Google Chrome") ? "在 Chrome 中打开" : "在浏览器中打开";
+  const mobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent) ||
+    (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+  const canOpenApp = !standalone && !mobile && isLocal && appWindow === true;
+  const openInApp = async () => {
+    if (openingApp) return;
+    if (store.filePreview?.saving) { setError("文件正在保存，完成后再打开 WB 窗口。"); return; }
+    if (hostSwitchHasUnsentInput() && !window.confirm("当前有未发送的输入或附件，仍要打开 WB 窗口并关闭这个标签页？")) return;
+    const target = window.location.href;
+    setOpeningApp(true);
+    setError("");
+    try {
+      await openAppWindow(target);
+      close(false);
+      try { window.close(); } catch { /* 浏览器不允许关闭时保留标签页。 */ }
+    } catch (error) { setError((error as Error).message); }
+    finally { setOpeningApp(false); }
+  };
   const knownOrigins = new Set([currentOrigin, ...connections.remotes]);
   const discovered = peers.filter(peer => {
     if (knownOrigins.has(peer.origin)) return false;
@@ -196,7 +216,8 @@ export function HostSwitcher() {
             <span className="host-menu-name">{name}</span>
           </button>
           <a role="menuitem" href={hostNavigationUrl(origin, connections)} target="_blank" rel="noopener noreferrer"
-            className="host-menu-new-window" aria-label={`在新窗口打开 ${name}`} title="在新窗口打开" onClick={openNewWindow}>↗</a>
+            className="host-menu-new-window" aria-label={`在新${standalone ? "窗口" : "标签页"}打开 ${name}`}
+            title={standalone ? "在新窗口打开" : "在新标签页打开"} onClick={event => openNewWindow(event, !!standalone)}>↗</a>
         </div>)}
         {discovered.length > 0 && <>
           <p className="host-menu-section">Tailscale 上的其他电脑</p>
@@ -207,17 +228,21 @@ export function HostSwitcher() {
             </button>
             <a role="menuitem" href={hostNavigationUrl(peer.origin, { ...connections, remotes: [...connections.remotes, peer.origin] })}
               target="_blank" rel="noopener noreferrer" className="host-menu-new-window"
-              aria-label={`在新窗口打开 ${peer.name}`} title="在新窗口打开"
-              onClick={event => { openNewTab(event, peer.origin); openNewWindow(event); }}
+              aria-label={`在新${standalone ? "窗口" : "标签页"}打开 ${peer.name}`} title={standalone ? "在新窗口打开" : "在新标签页打开"}
+              onClick={event => { openNewTab(event, peer.origin); openNewWindow(event, !!standalone); }}
               onAuxClick={event => { if (event.button === 1) openNewTab(event, peer.origin); }}>↗</a>
           </div>)}
         </>}
+        <button type="button" role="menuitem" className="host-menu-manage host-menu-list-action" onClick={() => setManaging(true)}>管理主机…</button>
         {connections.remotes.length === 0 && <p className="settings-hint">添加另一台电脑的 Tailscale 地址后即可切换。</p>}
         {!connections.localOrigin && <p className="settings-hint">从电脑的本机 Workbench 进入远程后，可在这里返回本机。</p>}
         {currentUnsaved && <p className="settings-hint" role="status">列表已满，当前主机暂未保存。原有地址已保留，可在主机与连接中管理。</p>}
         {standalone && <a role="menuitem" className="host-menu-manage host-menu-browser" href={window.location.href}
           target="_blank" rel="noopener noreferrer" onClick={() => close(false)}>{browserLabel}</a>}
-        <button type="button" role="menuitem" className="host-menu-manage" onClick={() => setManaging(true)}>管理主机…</button>
+        {canOpenApp && <button type="button" role="menuitem" className="host-menu-manage host-menu-browser"
+          title="用独立 WB 窗口打开当前页面，并关闭这个标签页" disabled={openingApp} onClick={() => void openInApp()}>
+          {openingApp ? "正在打开…" : "在 WB 窗口中打开"}
+        </button>}
       </>}
       {error && <p className="host-connection-notice" role="alert">{error}</p>}
     </div>, document.body)}

@@ -603,10 +603,11 @@ body.resizing {
 .host-menu-check { width: 16px; flex: 0 0 16px; color: var(--busy); }
 .host-menu-new-window { width: 44px; min-height: 44px; display: grid; place-items: center; text-decoration: none; flex-shrink: 0; }
 .host-menu-manage { display: block; width: 100%; min-height: 44px; margin-top: 6px; padding: 8px; border-top: 1px solid var(--border); text-align: left; }
-.host-menu-browser { box-sizing: border-box; text-decoration: none; }
+.host-menu-browser { display: flex; align-items: center; box-sizing: border-box; text-decoration: none; }
 /* 提示文字不撑宽菜单：宽度由主机名决定，提示随之换行 */
 .host-switch-panel:not(.managing) :is(.settings-hint, .host-connection-notice) { width: 0; min-width: 100%; }
-.host-menu-browser + .host-menu-manage { margin-top: 0; border-top: 0; }
+/* 管理主机属于机器列表末项：无分隔线，文字与机器名对齐（8px 内边距 + 16px 勾选列 + 8px 间距） */
+.host-menu-list-action { margin-top: 0; border-top: 0; padding-left: 32px; }
 @media (pointer: fine) { .host-menu-new-window { width: 34px; } }
 .host-menu-target:hover, .host-menu-new-window:hover, .host-menu-manage:hover, .host-remove:hover { background: var(--chrome); }
 .host-switch-panel :is(button, a, input):focus-visible { outline: 2px solid var(--busy); outline-offset: -2px; }

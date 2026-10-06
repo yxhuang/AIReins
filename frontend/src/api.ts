@@ -39,6 +39,11 @@ export function fetchMeta(): Promise<MetaInfo> {
   return call<MetaInfo>("/api/meta");
 }
 
+export function openAppWindow(target: string): Promise<{ opened: boolean }> {
+  return call("/api/open-app-window", { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ target }) });
+}
+
 export function fetchTailscalePeers(signal?: AbortSignal): Promise<TailscalePeersResult> {
   return call("/api/tailscale/peers", { signal });
 }
