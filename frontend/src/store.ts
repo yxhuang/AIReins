@@ -23,7 +23,6 @@ import { sessionTitle } from "../../shared/session-title";
 import { extractMentionTokens, stripMentionCandidates } from "./mentions";
 import { partitionPages, type SkippedPage } from "./pages";
 import { normalizeHistoryDirectory } from "./history";
-import { backendStorageKey, wsUrl } from "./backend";
 
 // 全局 WS 收全部会话实时事件；首连和重连按已加载会话的 afterSeq 补发。
 // 未加载会话只维护列表摘要；快照期间缓存事件，落地后追加更大的 seq。
@@ -297,7 +296,7 @@ export class Store {
     const panelRestore = /^#\/(?:dispatches|history$|page\/)/.test(window.location.hash)
       && !this.isMobileNavigation() && !this.readMobileEntry();
     if (!window.location.hash || panelRestore) {
-      try { restored = localStorage.getItem(backendStorageKey(LAST_SESSION_KEY)); } catch { /* 存储不可用就停在主页 */ }
+      try { restored = localStorage.getItem(LAST_SESSION_KEY); } catch { /* 存储不可用就停在主页 */ }
       if (restored && !panelRestore) window.history.replaceState(null, "", `#/session/${encodeURIComponent(restored)}`);
     }
     this.onHashChange();
@@ -396,8 +395,8 @@ export class Store {
     if (this.fileMentionRequest?.sessionId !== this.currentId) this.fileMentionRequest = null;
     if (this.currentId) void this.ensureLoaded(this.currentId);
     try {
-      if (this.currentId) localStorage.setItem(backendStorageKey(LAST_SESSION_KEY), this.currentId);
-      else localStorage.removeItem(backendStorageKey(LAST_SESSION_KEY));
+      if (this.currentId) localStorage.setItem(LAST_SESSION_KEY, this.currentId);
+      else localStorage.removeItem(LAST_SESSION_KEY);
     } catch { /* 忽略 */ }
     this.notify();
   };
@@ -583,8 +582,8 @@ export class Store {
     if (this.fileMentionRequest?.sessionId !== this.currentId) this.fileMentionRequest = null;
     if (this.currentId) void this.ensureLoaded(this.currentId);
     try {
-      if (this.currentId) localStorage.setItem(backendStorageKey(LAST_SESSION_KEY), this.currentId);
-      else localStorage.removeItem(backendStorageKey(LAST_SESSION_KEY));
+      if (this.currentId) localStorage.setItem(LAST_SESSION_KEY, this.currentId);
+      else localStorage.removeItem(LAST_SESSION_KEY);
     } catch { /* 忽略 */ }
     this.notify();
   }
@@ -1145,7 +1144,8 @@ export class Store {
     if (this.socket && this.socket.readyState <= WebSocket.OPEN) return;
     this.wsState = "connecting";
     this.notify();
-    const socket = new WebSocket(wsUrl("/ws"));
+    const protocol = window.location.protocol === "https:" ? "wss" : "ws";
+    const socket = new WebSocket(`${protocol}://${window.location.host}/ws`);
     this.socket = socket;
     for (const id of this.data.keys()) this.replayBuffers.set(id, []);
 

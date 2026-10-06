@@ -22,9 +22,4 @@ for (const value of ["null", "[]", "42"]) assert.equal(parseTailscalePeers(value
 assert.deepEqual(parseTailscalePeers('{"BackendState":"Stopped"}'), { peers: [], reason: "Tailscale 未运行" });
 assert.deepEqual(parseTailscalePeers('{"Peer":{}}'), { peers: [] });
 assert.equal(parseTailscalePeers(JSON.stringify({ Peer: { pc: { ...peer("pc"), HostName: "", TailscaleIPs: [42, "bad", "100.64.1.3"] } } })).peers[0]?.name, "pc");
-const owned = parseTailscalePeers(JSON.stringify({
-  Self: { ...peer("self"), UserID: 7 },
-  Peer: { mine: { ...peer("mine"), UserID: 7 }, shared: { ...peer("shared"), UserID: 8 }, unknown: peer("unknown") },
-})).peers;
-assert.deepEqual(owned.map(value => [value.name, value.owned ?? false]), [["mine", true], ["shared", false], ["unknown", false]], "只有与本机同 UserID 的电脑标为 owned");
 console.log("PASS: Tailscale 电脑发现、自身/手机排除、DNS 与前端兼容、排序、坏 JSON 和停止状态");

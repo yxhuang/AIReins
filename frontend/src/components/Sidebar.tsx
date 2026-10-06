@@ -21,7 +21,6 @@ import { PageView } from "./PageView";
 import { SidebarResize } from "./SidebarResize";
 import { shortSessionTitle, SidebarSessionTitle } from "./SessionTitle";
 import { PermanentDeleteConfirm } from "./PermanentDeleteConfirm";
-import { backendStorageKey } from "../backend";
 
 const AGENT_LABELS: Record<AgentKind, string> = {
   claude: "claude",
@@ -59,7 +58,7 @@ const selectPendingSignature = (value: Store) =>
 // 隐私模式下 localStorage 访问器本身就会抛异常，与主题读写同一纪律：try/catch 兜底。
 function readSavedCwd(): string {
   try {
-    return localStorage.getItem(backendStorageKey(CWD_STORAGE_KEY))?.trim() ?? "";
+    return localStorage.getItem(CWD_STORAGE_KEY)?.trim() ?? "";
   } catch {
     return "";
   }
@@ -1079,7 +1078,7 @@ function NewSessionForm({ onDone, initialCwd }: { onDone: () => void; initialCwd
       const session = await store.create(input);
       // 记忆本次 cwd，下次新建直接预填（localStorage 不可用就跳过）
       try {
-        localStorage.setItem(backendStorageKey(CWD_STORAGE_KEY), session.cwd);
+        localStorage.setItem(CWD_STORAGE_KEY, session.cwd);
       } catch {
         /* 仅本次不记忆 */
       }

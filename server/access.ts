@@ -16,17 +16,7 @@ export interface RemoteConfig {
 
 export type AccessPolicy =
   | { kind: "local"; hosts: ReadonlySet<string>; origins: ReadonlySet<string> }
-  | { kind: "remote"; hosts: ReadonlySet<string>; origin: string; logins: ReadonlySet<string>; peers: PeerOrigins };
-
-/**
- * 同一 tailnet 里本人其他电脑的 WB 源。手机主屏 App 只在安装时的源内全屏，
- * 所以切换主机时页面留在原源、API/WS 跨源指向目标电脑；目标电脑据此放行这些源。
- */
-export interface PeerOrigins {
-  has(origin: string): boolean;
-}
-
-export const NO_PEERS: PeerOrigins = { has: () => false };
+  | { kind: "remote"; hosts: ReadonlySet<string>; origin: string; logins: ReadonlySet<string> };
 
 const SAFE_METHODS = new Set(["GET", "HEAD"]);
 
@@ -37,24 +27,9 @@ export function localPolicy(port: number): AccessPolicy {
 }
 
 /** Host：Serve 转发时可能保持 ts.net 域名，也可能改写成后端地址，两种都认。 */
-export function remotePolicy(config: RemoteConfig, peers: PeerOrigins = NO_PEERS): AccessPolicy {
+export function remotePolicy(config: RemoteConfig): AccessPolicy {
   const hosts = [new URL(config.origin).host, `127.0.0.1:${config.port}`];
-  return { kind: "remote", hosts: new Set(hosts), origin: config.origin, logins: new Set(config.allowedLogins), peers };
-}
-
-/** 同 tailnet 的规范源（https://<机器名>.<同一 tailnet>.ts.net），且不是本机自己的源。 */
-export function sameTailnetPeerOrigin(ownOrigin: string, origin: string | undefined): origin is string {
-  if (!origin || origin === ownOrigin || !isTailnetOrigin(origin)) return false;
-  const own = new URL(ownOrigin).hostname, url = new URL(origin), other = url.hostname;
-  if (url.port) return false;
-  const suffix = own.slice(own.indexOf("."));
-  return other.endsWith(suffix) && !other.slice(0, -suffix.length).includes(".");
-}
-
-/** 可跨源读取响应的源：只有已确认的本人其他电脑；本源同源请求不需要 CORS。 */
-export function corsOrigin(policy: AccessPolicy, headers: IncomingHttpHeaders): string | null {
-  const origin = headers.origin;
-  return policy.kind === "remote" && sameTailnetPeerOrigin(policy.origin, origin) && policy.peers.has(origin) ? origin : null;
+  return { kind: "remote", hosts: new Set(hosts), origin: config.origin, logins: new Set(config.allowedLogins) };
 }
 
 /**
@@ -62,8 +37,7 @@ export function corsOrigin(policy: AccessPolicy, headers: IncomingHttpHeaders): 
  * 两个入口都先查 Host，挡 DNS 重绑定：恶意网页借重绑定连进来时，Host 是它自己的域名。
  * 本机：写操作和 WS 握手如果带 Origin，必须是本机页面（挡跨站伪造、WS 劫持）；
  *       不带 Origin 的是 curl / 脚本等本机进程，放行。
- * 远程：必须有 Serve 注入的身份头且在白名单里；写操作和 WS 握手必须带 Origin，且与配置的源完全相同，
- *       或是 policy.peers 确认过的同 tailnet 本人其他电脑的源（手机主屏 App 留在原源切换主机）。
+ * 远程：必须有 Serve 注入的身份头且在白名单里；写操作和 WS 握手必须带 Origin，且与配置的源完全相同。
  *       Serve 会剥掉客户端自带的同名头，所以经 Serve 来的身份头可信。绕过 Serve 直连这个端口的：
  *       网页过不了 Host 检查；本机进程能伪造头，但它们本来就能直连 8790，不扩大攻击面。
  */
@@ -90,9 +64,7 @@ export function checkAccess(
   if (!policy.logins.has(login)) {
     return `Tailscale 账号 ${login} 未授权：把它加进 ~/.workbench/remote.json 的 allowedLogins，然后 wb restart`;
   }
-  if (mutating && origin !== policy.origin && !(sameTailnetPeerOrigin(policy.origin, origin) && policy.peers.has(origin))) {
-    return `Origin 不匹配：${origin ?? "（空）"}，应为 ${policy.origin} 或同一 Tailscale 账号下其他电脑的地址`;
-  }
+  if (mutating && origin !== policy.origin) return `Origin 不匹配：${origin ?? "（空）"}，应为 ${policy.origin}`;
   return null;
 }
 

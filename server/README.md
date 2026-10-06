@@ -61,8 +61,7 @@ Claude stdout 的 `bridge_state`、控制应答驱动胶囊状态；未知 state
 
 - **Host**：必须是配置的 `origin` 主机名，或 `127.0.0.1:<port>`（Serve 转发可能改写 Host）。
 - **身份**：必须带 Serve 注入的 `Tailscale-User-Login` 头，且登录名在 `allowedLogins` 中。
-- **Origin**：写操作和 WS 握手必须带 Origin，且与配置的 `origin` 完全一致；唯一例外是**同一 Tailscale 账号下其他电脑的 WB 源**（`https://<机器名>.<同一 tailnet>.ts.net`，无端口），供手机主屏 App 留在安装时的源原地切换主机（见 [主机连接说明](../docs/host-connections.md#手机主屏-app-原地切换)）。是否本人电脑由 `PeerOriginCache`（`peer-origins.ts`）按 `tailscale status --json` 中与本机 `UserID` 相同的电脑判定：缓存 10 分钟，未知同 tailnet 源最快 15 秒重读一次，读取失败时旧列表最多再用 1 小时；其他账号的共享设备、非 tailnet 源一律不放行。身份头白名单不变。
-- **CORS**：仅对上述已确认的他机源回显 `Access-Control-Allow-Origin`（`Vary: Origin`）；`OPTIONS` 预检回 204（方法 GET/HEAD/POST/PUT/PATCH/DELETE，头 `content-type`，缓存 600 秒）。同源请求和本机入口不加 CORS 头。端到端回归 `server/peer-cors.test.ts`（PATH 中放假 `tailscale`）。
+- **Origin**：写操作和 WS 握手必须带 Origin，且与配置的 `origin` 完全一致。
 
 ### 远程入口配置 `~/.workbench/remote.json`
 
@@ -157,7 +156,7 @@ Workbench 新建的 Codex 会话在首个 `item/completed.userMessage` 后、没
 - `GET /api/history`：只读列出三家 CLI 自己保存的所有来源会话；没有用户消息的会话隐藏，`empty` 单独计数（分页为本页扫描计数），`skipped` 记录损坏/不可读候选。命中 delegate 元数据的条目附带 `dispatch:{runId,name}`，UUID 和 `session_...` 原样匹配；派单映射只读全部目录的 `run.json`/旧 `meta.json`，缓存 30 秒。
 - `GET /api/history/:agent/:nativeSessionId/messages`：从最新消息向前分页读取完整原生历史
 - `GET /api/meta`：server/CLI 实测版本、按请求入口计算的终端能力位、三 driver 能力位与配置 schema；`hostName` 为执行主机名称，优先用既有 `remote.json` 的 Tailscale 域名机器名，否则用 Node `hostname()`，供主机菜单显示「机器名（本机）」。新增字段需要后端重启，旧前端可忽略。
-- `GET /api/tailscale/peers`：只读发现其他 Windows/Linux/macOS 电脑，沿用现有 Host/Origin 与远程 Tailscale 身份白名单，不增加豁免。`execFile` 不经 shell 调用 `tailscale status --json`（5 秒超时，输出最多 1 MiB），优先 PATH，WSL 未找到时回退 `/mnt/c/Program Files/Tailscale/tailscale.exe`。成功信封 `data:{peers:[{name,origin,online,os,ips,owned?}]}`（`owned:true` 表示与本机同一 Tailscale 账号），仅含前端可接受的 HTTPS MagicDNS 地址，排除自身、手机及非法域名，在线优先后按名字排序。未安装、未运行、超时或坏 JSON 都返回 HTTP 200、`code:0`、`data:{peers:[],reason:"可读原因"}`。发现不探测目标 WB 是否可用；后端重启后生效。
+- `GET /api/tailscale/peers`：只读发现其他 Windows/Linux/macOS 电脑，沿用现有 Host/Origin 与远程 Tailscale 身份白名单，不增加豁免。`execFile` 不经 shell 调用 `tailscale status --json`（5 秒超时，输出最多 1 MiB），优先 PATH，WSL 未找到时回退 `/mnt/c/Program Files/Tailscale/tailscale.exe`。成功信封 `data:{peers:[{name,origin,online,os,ips}]}`，仅含前端可接受的 HTTPS MagicDNS 地址，排除自身、手机及非法域名，在线优先后按名字排序。未安装、未运行、超时或坏 JSON 都返回 HTTP 200、`code:0`、`data:{peers:[],reason:"可读原因"}`。发现不探测目标 WB 是否可用；后端重启后生效。
 - `POST /api/restart`：无请求体，返回 HTTP 202，信封 `{code:0,msg:"accepted",data:{restarting:true},request_id}`；表示已接受，不表示重启已完成。沿用两个入口的 Host / Origin 校验，远程入口还须 Tailscale 身份白名单；不新增豁免。同一进程内重复请求仍回 202，只启动一次重启。
 - `GET /api/pages`：启动时已注册的扩展页面列表
 - `GET /api/pages/:id/health`：限时探测一个扩展页面的目标服务
