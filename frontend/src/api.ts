@@ -3,13 +3,14 @@ import type { AgentKind, SessionGroup, SessionOrganizationPatch } from "./types"
 import { buildHistoryQuery, type HistoryQueryInput } from "./history";
 import type { DispatchRun } from "./dispatch-flow";
 import type { TailscalePeersResult } from "../../server/tailscale-peers";
+import { apiUrl } from "./backend";
 
 // REST 信封统一为 {code,msg,data,request_id}；code 非 0 时 msg 是中文错误消息。
 async function call<T>(path: string, init?: RequestInit): Promise<T> {
   let response: Response;
   try {
     // 10 秒超时；与调用方传入的 init 合并，不覆盖调用方已有的字段（如自带 signal）
-    response = await fetch(path, { ...init, signal: init?.signal ?? AbortSignal.timeout(10_000) });
+    response = await fetch(apiUrl(path), { ...init, signal: init?.signal ?? AbortSignal.timeout(10_000) });
   } catch (error) {
     if (error instanceof DOMException && error.name === "TimeoutError") {
       throw new Error(init?.signal ? "请求超时" : "请求超时（10 秒）");
@@ -103,7 +104,7 @@ export function saveWorkFile(target: import("./types").WorkFileTarget, version: 
   return call("/api/fs/file", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...target, version, text }) });
 }
 export function workFileContentUrl(target: import("./types").WorkFileTarget, download = false): string {
-  return `/api/fs/content?${workFileQuery(target)}${download ? "&download=1" : ""}`;
+  return apiUrl(`/api/fs/content?${workFileQuery(target)}${download ? "&download=1" : ""}`);
 }
 
 /**
@@ -124,7 +125,7 @@ export function uploadAttachment(
 
 /** uploads 目录内文件的直接字节地址（content-type 按扩展名），可作 <img src>；目录外一律 404。 */
 export function uploadsFileUrl(path: string): string {
-  return `/api/uploads/file?path=${encodeURIComponent(path)}`;
+  return apiUrl(`/api/uploads/file?path=${encodeURIComponent(path)}`);
 }
 
 export function fetchSessions(): Promise<SessionRecord[]> {

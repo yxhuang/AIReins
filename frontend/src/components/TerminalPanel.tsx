@@ -12,7 +12,6 @@ import {
   createTermTitlebarGesture,
   TERM_ACTIVE_STORAGE_KEY,
   TERM_SHORTCUT_KEYS,
-  buildTerminalWsUrl,
   buildTermTabs,
   initialTermState,
   pickBootTerminal,
@@ -25,6 +24,7 @@ import {
 import { store } from "../store";
 import { FONT_SCALE_EVENT } from "../font-scale";
 import { readTermFontSize } from "../body-font";
+import { backendStorageKey, wsUrl } from "../backend";
 
 /** xterm 主题字段 ← --term-* 令牌；通过 color 属性解析 light-dark()。 */
 const TERM_THEME_VARS: [keyof ITheme, string][] = [
@@ -97,7 +97,7 @@ interface TermRuntime {
 
 function readSavedActiveTerminalId(): string | null {
   try {
-    return localStorage.getItem(TERM_ACTIVE_STORAGE_KEY);
+    return localStorage.getItem(backendStorageKey(TERM_ACTIVE_STORAGE_KEY));
   } catch {
     return null;
   }
@@ -105,8 +105,8 @@ function readSavedActiveTerminalId(): string | null {
 
 function writeSavedActiveTerminalId(id: string | null): void {
   try {
-    if (id) localStorage.setItem(TERM_ACTIVE_STORAGE_KEY, id);
-    else localStorage.removeItem(TERM_ACTIVE_STORAGE_KEY);
+    if (id) localStorage.setItem(backendStorageKey(TERM_ACTIVE_STORAGE_KEY), id);
+    else localStorage.removeItem(backendStorageKey(TERM_ACTIVE_STORAGE_KEY));
   } catch {
     /* localStorage 不可用时仅本次会话生效 */
   }
@@ -271,7 +271,7 @@ export function TerminalPanel({ open, onClose }: { open: boolean; onClose: () =>
     const connect = () => {
       if (disposed) return;
       if (socket && socket.readyState <= WebSocket.OPEN) return;
-      const ws = new WebSocket(buildTerminalWsUrl(window.location.protocol, window.location.host));
+      const ws = new WebSocket(wsUrl("/ws/terminal"));
       socket = ws;
       ws.addEventListener("open", () => {
         if (socket !== ws || disposed) return;

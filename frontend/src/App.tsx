@@ -12,6 +12,7 @@ import { sessionTitle } from "./format";
 import { store, type Store } from "./store";
 import { shallowEqual, useStore } from "./useStore";
 import { workbenchWindowTitle } from "./host-connections";
+import { backendHref } from "./backend";
 
 const selectCurrentSession = (value: Store) =>
   value.currentId ? value.session(value.currentId) : undefined;
@@ -89,7 +90,7 @@ export function App() {
   // 标签页标题带上全局未决闸门总数：切走也能看到「有闸门在等你」。
   // 必须写在组件里而不是 store.notify()——store.ts 会被纯 node 测试 import，没有 document。
   useEffect(() => {
-    document.title = workbenchWindowTitle(window.location.href, pendingTotal);
+    document.title = workbenchWindowTitle(backendHref(), pendingTotal);
   }, [pendingTotal]);
 
   return (

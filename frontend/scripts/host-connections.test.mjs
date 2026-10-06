@@ -5,6 +5,7 @@ import {
   initializeHostConnections, getHostConnections, saveHostConnections, subscribeHostConnections, HOST_CONNECTIONS_KEY,
   connectionsWithRemote, resolveRemoteHostInput, parseAppWindowRequest,
 } from '../src/host-connections.ts';
+import { resolveBackendOrigin } from '../src/backend.ts';
 
 const local = 'http://127.0.0.1:8790';
 const home = 'https://my-desktop.tailxxxx.ts.net';
@@ -215,4 +216,12 @@ const hostSettings = renderToStaticMarkup(React.createElement(HostConnectionSett
 assert.ok(hostSettings.includes('Tailscale 地址'));
 assert.match(hostSettings, /type="text"/, 'IP 和机器名不被浏览器 URL 表单校验拦截');
 assert.ok(hostSettings.includes('Tailscale IP'), '两个共用入口提示支持 IP 与机器名');
+// 手机主屏 App 留在原源：只有远程页面可把后端指向另一台合法 ts.net 电脑。
+assert.equal(resolveBackendOrigin(`${home}/#/`, other), other, '远程页面原地连另一台电脑');
+assert.equal(resolveBackendOrigin(`${home}/`, home), null, '选的就是页面自己 = 同源');
+assert.equal(resolveBackendOrigin(`${local}/`, other), null, '本机页面不走跨源后端');
+assert.equal(resolveBackendOrigin(`${home}/`, 'https://pc.tail9999.ts.net'), null, '不同 tailnet 不原地切换（服务端不会放行）');
+for (const bad of [null, '', 'https://evil.example', 'http://other-pc.tailxxxx.ts.net', `${other}/path`, `${other}:8443`]) {
+  assert.equal(resolveBackendOrigin(`${home}/`, bad), null, `非法目标回落同源：${bad}`);
+}
 console.log('PASS: 主机地址补全、连接往返与存储保护、本机 App goto 解析与启动 API、标签页/popup 行为');

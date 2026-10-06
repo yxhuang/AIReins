@@ -9,6 +9,8 @@ export interface TailscalePeer {
   online: boolean;
   os: string;
   ips: string[];
+  /** 与本机同一 Tailscale 账号（UserID 相同）；跨源访问只放行这类电脑。 */
+  owned?: true;
 }
 
 export interface TailscalePeersResult {
@@ -46,6 +48,7 @@ export function parseTailscalePeers(text: string): TailscalePeersResult {
         name: typeof peer.HostName === "string" && peer.HostName.trim() ? peer.HostName.trim() : dns.split(".")[0]!,
         origin: `https://${dns}`, online: peer.Online === true, os: peer.OS,
         ips: Array.isArray(peer.TailscaleIPs) ? peer.TailscaleIPs.filter((ip): ip is string => typeof ip === "string" && isIP(ip) !== 0) : [],
+        ...(self && typeof self.UserID === "number" && peer.UserID === self.UserID ? { owned: true as const } : {}),
       });
     }
   }

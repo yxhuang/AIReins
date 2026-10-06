@@ -5,6 +5,7 @@ import {
   normalizeLocalOrigin, normalizeRemoteOrigin, resolveRemoteHostInput, saveHostConnections, subscribeHostConnections,
 } from "../host-connections";
 import { fetchTailscalePeers, openAppWindow } from "../api";
+import { backendHref, backendOrigin, canSwitchInPlace, switchBackendInPlace, withOwnBackend } from "../backend";
 import type { TailscalePeer } from "../../../server/tailscale-peers";
 import { store } from "../store";
 import { useStore } from "../useStore";
@@ -33,7 +34,7 @@ export function HostConnectionSettings() {
   const [notice, setNotice] = useState("");
   const [adding, setAdding] = useState(false);
   const inputId = useId();
-  const currentOrigin = new URL(window.location.href).origin;
+  const currentOrigin = backendHref();
   const write = (remotes: string[]) => {
     const saved = saveHostConnections({ ...connections, remotes });
     setNotice(saved ? "已保存。" : "浏览器无法保存设置，本页仍可使用这些地址。");
@@ -89,8 +90,9 @@ export function HostSwitcher() {
   const buttonRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const panelId = useId();
-  const currentOrigin = new URL(window.location.href).origin;
-  const label = connectionLabel(window.location.href);
+  // 远程页面可能原地连着另一台电脑：「当前主机」取实际连接的后端，而不是页面地址。
+  const currentOrigin = backendHref();
+  const label = connectionLabel(currentOrigin);
   const currentRemote = normalizeRemoteOrigin(currentOrigin);
   const currentUnsaved = currentRemote !== null && !connections.remotes.includes(currentRemote);
   const isLocal = normalizeLocalOrigin(currentOrigin) !== null;
@@ -140,7 +142,7 @@ export function HostSwitcher() {
   const openNewTab = (event: MouseEvent<HTMLAnchorElement>, origin: string) => {
     const next = remember(origin);
     if (!next) event.preventDefault();
-    else event.currentTarget.href = hostNavigationUrl(origin, next);
+    else event.currentTarget.href = withOwnBackend(hostNavigationUrl(origin, next));
   };
   const choose = (origin: string, discovered = false) => {
     if (origin === currentOrigin) { close(true); return; }
@@ -148,7 +150,10 @@ export function HostSwitcher() {
     if (hostSwitchHasUnsentInput() && !window.confirm("当前有未发送的输入或附件，仍要切换主机？")) return;
     // 未保存文件继续由 store 的 beforeunload 保护；这里不清空文件、草稿，也不停止 worker。
     const next = discovered ? remember(origin) : connections;
-    if (next) window.location.assign(hostNavigationUrl(origin, next));
+    if (!next) return;
+    // 远程页面原地换后端：手机主屏 App 跨源导航会被套上浏览器栏。
+    if (canSwitchInPlace(origin)) switchBackendInPlace(origin);
+    else window.location.assign(withOwnBackend(hostNavigationUrl(origin, next)));
   };
   const destinations = [
     ...(connections.localOrigin ? [{ origin: connections.localOrigin, name: localName ? `${localName}（本机）` : "本机" }] : []),
@@ -215,7 +220,7 @@ export function HostSwitcher() {
             <span className="host-menu-check" aria-hidden="true">{origin === currentOrigin ? "✓" : ""}</span>
             <span className="host-menu-name">{name}</span>
           </button>
-          <a role="menuitem" href={hostNavigationUrl(origin, connections)} target="_blank" rel="noopener noreferrer"
+          <a role="menuitem" href={withOwnBackend(hostNavigationUrl(origin, connections))} target="_blank" rel="noopener noreferrer"
             className="host-menu-new-window" aria-label={`在新${standalone ? "窗口" : "标签页"}打开 ${name}`}
             title={standalone ? "在新窗口打开" : "在新标签页打开"} onClick={event => openNewWindow(event, !!standalone)}>↗</a>
         </div>)}
@@ -226,7 +231,7 @@ export function HostSwitcher() {
               <span className="host-menu-check" aria-hidden="true" />
               <span className="host-menu-name">{peer.name}{!peer.online && <span className="host-menu-status">离线</span>}</span>
             </button>
-            <a role="menuitem" href={hostNavigationUrl(peer.origin, { ...connections, remotes: [...connections.remotes, peer.origin] })}
+            <a role="menuitem" href={withOwnBackend(hostNavigationUrl(peer.origin, { ...connections, remotes: [...connections.remotes, peer.origin] }))}
               target="_blank" rel="noopener noreferrer" className="host-menu-new-window"
               aria-label={`在新${standalone ? "窗口" : "标签页"}打开 ${peer.name}`} title={standalone ? "在新窗口打开" : "在新标签页打开"}
               onClick={event => { openNewTab(event, peer.origin); openNewWindow(event, !!standalone); }}
@@ -237,7 +242,8 @@ export function HostSwitcher() {
         {connections.remotes.length === 0 && <p className="settings-hint">添加另一台电脑的 Tailscale 地址后即可切换。</p>}
         {!connections.localOrigin && <p className="settings-hint">从电脑的本机 Workbench 进入远程后，可在这里返回本机。</p>}
         {currentUnsaved && <p className="settings-hint" role="status">列表已满，当前主机暂未保存。原有地址已保留，可在主机与连接中管理。</p>}
-        {standalone && <a role="menuitem" className="host-menu-manage host-menu-browser" href={window.location.href}
+        {standalone && <a role="menuitem" className="host-menu-manage host-menu-browser"
+          href={withOwnBackend(backendOrigin() ? `${currentOrigin}/${window.location.hash}` : window.location.href)}
           target="_blank" rel="noopener noreferrer" onClick={() => close(false)}>{browserLabel}</a>}
         {canOpenApp && <button type="button" role="menuitem" className="host-menu-manage host-menu-browser"
           title="用独立 WB 窗口打开当前页面，并关闭这个标签页" disabled={openingApp} onClick={() => void openInApp()}>

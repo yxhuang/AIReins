@@ -1,5 +1,6 @@
 // pages/ 扩展页面的纯逻辑（无 DOM 依赖，可单测；打桩测试见 scripts/pages-flow.test.mjs）。
 import type { PageHealth, PageManifest } from "./types";
+import { apiUrl } from "./backend";
 
 /** icon 是 emoji 文本或内联 SVG 字符串；SVG 以 <svg 开头（server 已校验 manifest 形状）。 */
 export function isInlineSvg(icon: string): boolean {
@@ -71,5 +72,5 @@ export function isLoopbackUrl(url: string): boolean {
 
 /** iframe 与「新标签页打开」用的地址：开了代理就走 workbench 自己的 /pages/<id>/（相对当前源，手机上也可用）。 */
 export function pageSrc(page: PageManifest): string {
-  return page.proxy ? `/pages/${encodeURIComponent(page.id)}/` : page.url;
+  return page.proxy ? apiUrl(`/pages/${encodeURIComponent(page.id)}/`) : page.url;
 }

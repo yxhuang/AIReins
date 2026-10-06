@@ -6,7 +6,8 @@ import type { Duplex } from "node:stream";
 import { fileURLToPath } from "node:url";
 import { acceptsGzip, compressResponse } from "./response-compression.js";
 import { WebSocket, WebSocketServer } from "ws";
-import { checkAccess, loadRemoteConfig, localPolicy, remotePolicy, type AccessPolicy, type RemoteConfig } from "./access.js";
+import { checkAccess, corsOrigin, loadRemoteConfig, localPolicy, remotePolicy, type AccessPolicy, type RemoteConfig } from "./access.js";
+import { PeerOriginCache } from "./peer-origins.js";
 import { DispatchQueryError, getDispatch, getDispatchLog, getDispatchMessages, listDispatches, listDispatchHistory, listParentDispatches } from "./dispatches.js";
 import { log } from "./logger.js";
 import { DirListError, listDirectories } from "./dir-list.js";
@@ -180,7 +181,22 @@ trackConnections(server);
 
 server.on("upgrade", (request, socket, head) => handleUpgrade(request, socket, head, LOCAL_POLICY));
 
+/** 远程入口收到同 tailnet 其他电脑页面发来的请求时，先确认对方是本人电脑再做同步的访问检查。 */
+async function ensurePeerOrigin(policy: AccessPolicy, request: IncomingMessage): Promise<void> {
+  if (policy.kind === "remote" && policy.peers instanceof PeerOriginCache) await policy.peers.ensure(request.headers.origin);
+}
+
 function handleUpgrade(request: IncomingMessage, socket: Duplex, head: Buffer, policy: AccessPolicy): void {
+  if (policy.kind === "remote" && request.headers.origin !== policy.origin) {
+    socket.on("error", () => { /* 等待确认期间客户端断开 */ });
+    void ensurePeerOrigin(policy, request).then(() => acceptUpgrade(request, socket, head, policy), () => socket.destroy());
+    return;
+  }
+  acceptUpgrade(request, socket, head, policy);
+}
+
+function acceptUpgrade(request: IncomingMessage, socket: Duplex, head: Buffer, policy: AccessPolicy): void {
+  if (socket.destroyed) return;
   if (shuttingDown) {
     socket.destroy();
     return;
@@ -320,7 +336,7 @@ server.on("error", (error) => {
 const remoteServer = REMOTE_CONFIG ? startRemoteListener(REMOTE_CONFIG) : null;
 
 function startRemoteListener(config: RemoteConfig): Server {
-  const policy = remotePolicy(config);
+  const policy = remotePolicy(config, new PeerOriginCache(config.origin, getTailscalePeers));
   const remote = createServer((request, response) => {
     void handleRequest(request, response, policy);
   });
@@ -381,10 +397,26 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
   const requestId = ulid();
   const started = Date.now();
   try {
+    await ensurePeerOrigin(policy, request);
+    const cors = corsOrigin(policy, request.headers);
+    if (cors) {
+      // 手机主屏 App 留在原电脑的源，API 跨源打到这台；只回显已确认的本人电脑源。
+      response.setHeader("access-control-allow-origin", cors);
+      response.setHeader("vary", "Origin");
+    }
     const denied = checkAccess(policy, request.method ?? "GET", request.headers, false);
     if (denied) throw new ApiError(403, 40300, denied);
     const url = new URL(request.url ?? "/", `http://${request.headers.host ?? `${HOST}:${PORT}`}`);
     const method = request.method ?? "GET";
+    if (cors && method === "OPTIONS") {
+      response.writeHead(204, {
+        "access-control-allow-methods": "GET, HEAD, POST, PUT, PATCH, DELETE",
+        "access-control-allow-headers": "content-type",
+        "access-control-max-age": "600",
+      });
+      response.end();
+      return;
+    }
     if (method === "GET" && url.pathname === "/api/meta") {
       const meta = await getMeta();
       await respond(response, 200, 0, "success", {
@@ -1091,7 +1123,7 @@ async function respond(
     "content-type": "application/json; charset=utf-8",
     "content-length": Buffer.byteLength(body),
     "cache-control": "no-store",
-    ...(gzip ? { "content-encoding": "gzip", vary: "accept-encoding" } : {}),
+    ...(gzip ? { "content-encoding": "gzip", vary: [response.getHeader("vary"), "accept-encoding"].filter(Boolean).join(", ") } : {}),
   });
   response.end(body);
 }

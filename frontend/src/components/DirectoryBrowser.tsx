@@ -6,6 +6,7 @@ import { useStore } from "../useStore";
 import type { DirectoryListing, HistorySession } from "../types";
 import { useAnchoredMenu } from "./useAnchoredMenu";
 import { DirectoryTable } from "./DirectoryTable";
+import { backendStorageKey } from "../backend";
 
 const WINDOWS_FALLBACK = "/mnt/c/Users";
 
@@ -117,7 +118,7 @@ export function DirectoryContents({ initialPath, includeFiles, onSelectFile, onS
   const busy = loading || pickerBusy;
   const sessions = useStore(value => value.sessions);
   const [savedCwd] = useState(() => {
-    try { return localStorage.getItem("workbench-last-cwd") ?? ""; } catch { return ""; }
+    try { return localStorage.getItem(backendStorageKey("workbench-last-cwd")) ?? ""; } catch { return ""; }
   });
   useEffect(() => {
     if (addressCrumbs.current) addressCrumbs.current.scrollLeft = addressCrumbs.current.scrollWidth;

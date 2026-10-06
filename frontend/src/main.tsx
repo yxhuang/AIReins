@@ -5,6 +5,7 @@ import { store } from "./store";
 import { applyBodyFontSize, readBodyFontSize } from "./body-font";
 import { initializeHostConnections, workbenchWindowTitle } from "./host-connections";
 import "./styles.css";
+import { backendHref, initializeBackend } from "./backend";
 
 // 重新 build 后旧页面按需加载的 chunk（如 TerminalPanel）已不存在，import 失败会让整页白屏/黑屏：
 // 自动刷新一次换到新版本；10 秒内再失败就不刷新，免得循环。
@@ -19,8 +20,9 @@ window.addEventListener("vite:preloadError", (event) => {
 });
 
 applyBodyFontSize(readBodyFontSize());
+initializeBackend();
 initializeHostConnections();
-document.title = workbenchWindowTitle(window.location.href, 0);
+document.title = workbenchWindowTitle(backendHref(), 0);
 void store.init();
 
 createRoot(document.getElementById("root")!).render(

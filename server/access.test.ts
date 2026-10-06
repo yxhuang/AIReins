@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { checkAccess, loadRemoteConfig, localPolicy, remotePolicy } from "./access.js";
+import { checkAccess, corsOrigin, loadRemoteConfig, localPolicy, remotePolicy, sameTailnetPeerOrigin } from "./access.js";
+import { PeerOriginCache } from "./peer-origins.js";
 
 // ── 本机入口 ──
 const local = localPolicy(8790);
@@ -39,6 +40,49 @@ assert.equal(checkAccess(remote, "GET", { ...me, origin }, true), null, "WS");
 assert.match(checkAccess(remote, "GET", me, true) ?? "", /Origin/, "WS 不带 Origin");
 assert.match(checkAccess(remote, "GET", { ...me, origin: "https://other.tail1234.ts.net" }, true) ?? "", /Origin/, "别的 ts.net 源");
 assert.match(checkAccess(remote, "POST", { ...me, origin: "http://127.0.0.1:8790" }, false) ?? "", /Origin/, "本机页面不能打远程口");
+
+// ── 同 tailnet 本人其他电脑的源（手机主屏 App 留在原源切换主机）──
+const laptop = "https://laptop.tail1234.ts.net";
+const withPeer = remotePolicy({ port: 8792, origin, allowedLogins: ["me@github"] }, { has: value => value === laptop });
+assert.equal(checkAccess(withPeer, "POST", { ...me, origin: laptop }, false), null, "已确认的本人电脑可写");
+assert.equal(checkAccess(withPeer, "GET", { ...me, origin: laptop }, true), null, "已确认的本人电脑可开 WS");
+assert.match(checkAccess(withPeer, "POST", { ...via, origin: laptop }, false) ?? "", /Tailscale 身份/, "仍要身份头");
+assert.match(checkAccess(withPeer, "POST", { ...me, origin: "https://other.tail1234.ts.net" }, false) ?? "", /Origin/, "未确认的同 tailnet 源");
+assert.equal(corsOrigin(withPeer, { ...me, origin: laptop }), laptop, "回显已确认的源");
+assert.equal(corsOrigin(withPeer, { ...me, origin }), null, "同源不加 CORS");
+assert.equal(corsOrigin(remote, { ...me, origin: laptop }), null, "默认不信任任何其他源");
+assert.equal(corsOrigin(local, { ...self, origin: laptop }), null, "本机入口不加 CORS");
+for (const value of ["https://laptop.tail9999.ts.net", "https://a.laptop.tail1234.ts.net", "http://laptop.tail1234.ts.net",
+  "https://laptop.tail1234.ts.net:8443", "https://laptop.tail1234.ts.net.evil.test", origin, undefined]) {
+  assert.equal(sameTailnetPeerOrigin(origin, value), false, `不是同 tailnet 的其他电脑：${value}`);
+}
+assert.equal(sameTailnetPeerOrigin(origin, laptop), true);
+
+{
+  let now = 0, loads = 0;
+  let peers = [{ name: "laptop", origin: laptop, online: true, os: "linux", ips: [], owned: true as const },
+    { name: "shared", origin: "https://shared.tail1234.ts.net", online: true, os: "linux", ips: [] }];
+  let fail = false;
+  const cache = new PeerOriginCache(origin, async () => { loads++; return fail ? { peers: [], reason: "x" } : { peers }; }, () => now);
+  await cache.ensure(laptop);
+  assert.equal(cache.has(laptop), true, "owned 电脑被信任");
+  await cache.ensure("https://shared.tail1234.ts.net");
+  assert.equal(loads, 1, "未知源 15 秒内不重复读 Tailscale");
+  assert.equal(cache.has("https://shared.tail1234.ts.net"), false, "非本人账号的电脑不信任");
+  await cache.ensure("https://evil.example");
+  assert.equal(loads, 1, "非同 tailnet 源不触发读取");
+  now = 11 * 60_000; fail = true;
+  await cache.ensure(laptop);
+  assert.equal(loads, 2, "过期后重读");
+  assert.equal(cache.has(laptop), true, "读取失败保留旧列表");
+  now += 50 * 60_000;
+  await cache.ensure(laptop);
+  assert.equal(cache.has(laptop), false, "持续读取失败超过 1 小时后不再信任旧列表");
+  fail = false; peers = [];
+  now += 16_000;
+  await cache.ensure(laptop);
+  assert.equal(cache.has(laptop), false, "设备从 tailnet 移除后失效");
+}
 
 // ── remote.json 解析 ──
 const dir = await mkdtemp(join(tmpdir(), "workbench-access-test-"));
