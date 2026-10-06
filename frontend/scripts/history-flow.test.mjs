@@ -21,10 +21,15 @@ const {
   filterBySource,
   findImportedSession,
   SOURCE_LABELS,
+  isHistoryDirectoryInput,
+  normalizeHistoryDirectory,
 } = await import("../src/history.ts");
 const { fetchHistory, fetchHistoryMessages } = await import("../src/api.ts");
-const { Store } = await import("../src/store.ts");
+const { Store, store } = await import("../src/store.ts");
 const { HistoryRow, HistoryPreviewPane, HistoryView } = await import("../src/components/HistoryView.tsx");
+const { Sidebar } = await import("../src/components/Sidebar.tsx");
+const { FilePanel } = await import("../src/components/FilePanel.tsx");
+const { DirectoryBrowser, DirectoryContents } = await import("../src/components/DirectoryBrowser.tsx");
 
 let pass = 0;
 const t = async (name, fn) => {
@@ -55,6 +60,9 @@ await t("buildHistoryQuery：空 agent/q 省略，limit/cursor 带上，中文 q
   assert.equal(params.get("q"), "历史", "q 应 trim 后编码");
   assert.equal(params.get("cursor"), "a+b/c=", "cursor 应原样带回（解码后不变）");
   assert.equal(params.get("limit"), "100");
+  const combined = new URLSearchParams(buildHistoryQuery({ cwd: " /a/b/ ", q: "标题" }));
+  assert.equal(combined.get("cwd"), "/a/b/");
+  assert.equal(combined.get("q"), "标题");
 });
 
 // --- 用例 2：来源筛选只作用于给定条目；「全部」原样返回 ---
@@ -113,16 +121,28 @@ await t("fetchHistory：query 正确，data 字段（含 nextCursor/truncated/sk
       durationMs: 9,
     });
   };
-  const data = await fetchHistory({ agent: "claude", q: "opus", limit: 5, cursor: "CUR0" });
+  const data = await fetchHistory({ agent: "claude", cwd: "/a/b", q: "opus", limit: 5, cursor: "CUR0" });
   const url = new URL(calls[0], "http://x");
   assert.equal(url.pathname, "/api/history");
   assert.equal(url.searchParams.get("agent"), "claude");
   assert.equal(url.searchParams.get("q"), "opus");
+  assert.equal(url.searchParams.get("cwd"), "/a/b");
   assert.equal(url.searchParams.get("cursor"), "CUR0");
   assert.equal(data.nextCursor, "CUR1");
   assert.equal(data.skipped, 32, "skipped 要原样透传（前端只做中性说明）");
   assert.equal(data.discovered, 467);
   assert.equal(data.empty, 12);
+});
+
+await t("文件目录跳历史：共享筛选生效，关闭保留，显式清除", () => {
+  const s = new Store();
+  s.navigateHistory("C:\\Users\\project\\");
+  assert.equal(s.historyOpen, true);
+  assert.equal(s.historyCwdFilter, "/mnt/c/Users/project");
+  s.closeSidebarPanel();
+  assert.equal(s.historyCwdFilter, "/mnt/c/Users/project");
+  s.setHistoryCwdFilter("");
+  assert.equal(s.historyCwdFilter, "");
 });
 
 // --- 用例 5：fetchHistoryMessages URL 编码与错误信封抛中文 msg ---
@@ -277,28 +297,51 @@ await t("改名后的列表/预览返回文案", () => {
 
 // 仅打桩 hooks 以装载响应状态与触发真实按钮，组件树仍交给 React 渲染。
 function historyViewFixture(list, phase = "ready") {
-  const values = ["", "all", "", "", list, phase, false, null];
+  return componentFixture(() => HistoryView(), ["", "all", "", "", list, phase, false, null]);
+}
+
+function componentFixture(component, values = []) {
   const refs = [];
+  const memos = [];
+  const effects = [];
+  let pending = [];
+  const same = (a, b) => a && b && a.length === b.length && a.every((value, i) => Object.is(value, b[i]));
   const internals = React.__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE;
-  return () => {
+  const render = () => {
     let stateIndex = 0;
     let refIndex = 0;
+    let memoIndex = 0;
+    let effectIndex = 0;
     const previous = internals.H;
+    const memo = (fn, deps) => {
+      const index = memoIndex++;
+      if (!same(memos[index]?.deps, deps)) memos[index] = { deps, value: fn() };
+      return memos[index].value;
+    };
     internals.H = {
       useState(initial) {
         const index = stateIndex++;
-        if (!(index in values)) values[index] = initial;
+        if (!(index in values)) values[index] = typeof initial === "function" ? initial() : initial;
         return [values[index], (next) => { values[index] = typeof next === "function" ? next(values[index]) : next; }];
       },
       useRef(initial) { return refs[refIndex++] ??= { current: initial }; },
-      useCallback(fn) { return fn; },
-      useMemo(fn) { return fn(); },
-      useEffect() {},
+      useCallback(fn, deps) { return memo(() => fn, deps); },
+      useMemo: memo,
+      useId() { return "fixture-id"; },
+      useEffect(fn, deps) {
+        const index = effectIndex++;
+        if (!same(effects[index]?.deps, deps)) {
+          pending.push(() => { effects[index]?.cleanup?.(); effects[index] = { deps, cleanup: fn() }; });
+        }
+      },
       useSyncExternalStore(_subscribe, getSnapshot) { return getSnapshot(); },
     };
-    try { return HistoryView(); }
+    try { return component(); }
     finally { internals.H = previous; }
   };
+  render.flushEffects = () => { const jobs = pending; pending = []; jobs.forEach(fn => fn()); };
+  render.dispose = () => effects.forEach(effect => effect?.cleanup?.());
+  return render;
 }
 
 function treeButtons(tree) {
@@ -306,6 +349,169 @@ function treeButtons(tree) {
   if (!tree || typeof tree !== "object") return [];
   return [...(tree.type === "button" ? [tree] : []), ...treeButtons(tree.props?.children)];
 }
+
+function treeFind(tree, match) {
+  if (Array.isArray(tree)) return tree.map(child => treeFind(child, match)).find(Boolean);
+  if (!tree || typeof tree !== "object") return undefined;
+  return match(tree) ? tree : treeFind(tree.props?.children, match);
+}
+const searchInput = tree => treeFind(tree, node => node.props?.["aria-label"] === "搜索历史会话");
+const key = (name) => ({ key: name, preventDefault() {}, nativeEvent: { isComposing: false } });
+
+await t("路径判别与转换：Linux、Windows、~、普通关键词和根目录", () => {
+  for (const path of ["/a/b", " ~/project", "~", "C:\\Users\\project", "D:/project"]) assert.equal(isHistoryDirectoryInput(path), true);
+  for (const q of ["关键词", "project/repo", "C:", ""]) assert.equal(isHistoryDirectoryInput(q), false);
+  assert.equal(normalizeHistoryDirectory("C:\\Users\\project\\"), "/mnt/c/Users/project");
+  assert.equal(normalizeHistoryDirectory("~/project/", "/home/me"), "/home/me/project");
+  assert.equal(normalizeHistoryDirectory("~", "/home/me"), "/home/me");
+  assert.equal(normalizeHistoryDirectory("~/project"), "~/project");
+  assert.equal(normalizeHistoryDirectory("///"), "/");
+});
+
+await t("Enter 生成目录胶囊，完整路径 title，× 和空输入 Backspace 清除", () => {
+  store.setHistoryCwdFilter("");
+  const render = componentFixture(() => HistoryView());
+  searchInput(render()).props.onChange({ target: { value: "C:\\Users\\project\\" } });
+  searchInput(render()).props.onKeyDown(key("Enter"));
+  assert.equal(store.historyCwdFilter, "/mnt/c/Users/project");
+  assert.equal(searchInput(render()).props.value, "");
+  const html = renderToStaticMarkup(render());
+  assert.match(html, /title="\/mnt\/c\/Users\/project"/);
+  assert.match(html, />project</);
+  searchInput(render()).props.onChange({ target: { value: "关键词" } });
+  searchInput(render()).props.onKeyDown(key("Backspace"));
+  assert.equal(store.historyCwdFilter, "/mnt/c/Users/project", "非空输入不能清胶囊");
+  treeButtons(render()).find(node => node.props["aria-label"] === "清除目录筛选").props.onClick();
+  assert.equal(store.historyCwdFilter, "");
+  store.setHistoryCwdFilter("/a/b");
+  searchInput(render()).props.onChange({ target: { value: "" } });
+  searchInput(render()).props.onKeyDown(key("Backspace"));
+  assert.equal(store.historyCwdFilter, "");
+});
+
+await t("关键词仍按 250ms 防抖；路径草稿不请求；胶囊与 q/cursor 叠加", async () => {
+  store.setHistoryCwdFilter("/a/b");
+  const calls = [];
+  globalThis.fetch = async url => { calls.push(new URL(String(url), "http://x")); return envelope({ sessions: [], nextCursor: "NEXT", truncated: false, skipped: 0, empty: 0, discovered: 2 }); };
+  const render = componentFixture(() => HistoryView());
+  render(); render.flushEffects();
+  await new Promise(resolve => setImmediate(resolve));
+  searchInput(render()).props.onChange({ target: { value: "关键词" } });
+  render(); render.flushEffects();
+  assert.equal(calls.length, 1);
+  await new Promise(resolve => setTimeout(resolve, 270));
+  render(); render.flushEffects();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(calls.at(-1).searchParams.get("q"), "关键词");
+  assert.equal(calls.at(-1).searchParams.get("cwd"), "/a/b");
+  treeButtons(render()).find(node => node.props["aria-label"] === "加载更多").props.onClick();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(calls.at(-1).searchParams.get("cursor"), "NEXT");
+  assert.equal(calls.at(-1).searchParams.get("cwd"), "/a/b");
+  const before = calls.length;
+  searchInput(render()).props.onChange({ target: { value: "/half/path" } });
+  render(); render.flushEffects();
+  await new Promise(resolve => setTimeout(resolve, 270));
+  render(); render.flushEffects();
+  assert.equal(calls.length, before);
+  searchInput(render()).props.onKeyDown(key("Enter"));
+  render(); render.flushEffects();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(calls.at(-1).searchParams.get("cwd"), "/half/path");
+  assert.equal(calls.at(-1).searchParams.get("q"), null);
+  render.dispose();
+  store.setHistoryCwdFilter("");
+});
+
+await t("目录按钮：手机/无能力用 DirectoryBrowser，桌面有能力用 Windows picker", async () => {
+  const oldMeta = store.meta;
+  const calls = [];
+  globalThis.fetch = async (url, init) => { calls.push({ url, init }); return envelope({ path: "D:\\project" }); };
+  for (const [mobile, capable] of [[true, true], [false, false], [false, true]]) {
+    window.matchMedia = () => ({ matches: mobile });
+    store.meta = { ...oldMeta, capabilities: { windowsDirectoryPicker: capable } };
+    store.setHistoryCwdFilter("/a/b");
+    const render = componentFixture(() => HistoryView());
+    await treeButtons(render()).find(node => node.props["aria-label"] === "选择目录筛选").props.onClick();
+    const browser = treeFind(render(), node => node.type === DirectoryBrowser);
+    if (mobile || !capable) {
+      assert.ok(browser);
+      assert.equal(browser.props.initialPath, "/a/b");
+      assert.ok(!browser.props.allowWindowsPicker && !browser.props.mode);
+      browser.props.onSelect("/picked/path");
+      assert.equal(store.historyCwdFilter, "/picked/path");
+    } else {
+      assert.equal(browser, undefined);
+      assert.equal(calls.at(-1).url, "/api/fs/pick-directory");
+      assert.equal(JSON.parse(calls.at(-1).init.body).path, "/a/b");
+      assert.equal(store.historyCwdFilter, "/mnt/d/project");
+    }
+  }
+  store.meta = oldMeta;
+  store.setHistoryCwdFilter("");
+});
+
+await t("文件面板当前浏览目录按钮触发历史共享筛选", () => {
+  window.innerWidth = 1280;
+  window.matchMedia = () => ({ matches: false });
+  store.filePreview = null;
+  const panel = componentFixture(() => FilePanel({ onClose() {} }))();
+  const contents = treeFind(panel, node => node.type === DirectoryContents);
+  const render = componentFixture(() => DirectoryContents(contents.props), [{ path: "/browsed/child", parent: "/browsed", dirs: [], files: [] }, false, null, "/uncommitted/address"]);
+  treeButtons(render()).find(node => node.props.children === "此目录的对话").props.onClick();
+  assert.equal(store.historyOpen, true);
+  assert.equal(store.historyCwdFilter, "/browsed/child", "取成功浏览目录而非地址草稿");
+});
+
+await t("历史新建：手机切列表可见表单，cwd 预填优先；手动改后不覆盖", () => {
+  const oldMeta = store.meta;
+  const oldHistory = window.history;
+  const oldLoad = store.ensureLoaded;
+  store.ensureLoaded = async () => {};
+  store.meta = { defaultCwd: "/fallback", drivers: {}, capabilities: {} };
+  let newOpen = false;
+  for (const mobile of [false, true]) {
+    window.location.hash = "#/session/previous";
+    const entries = [{ state: null, hash: window.location.hash }];
+    let entryIndex = 0;
+    window.history = {
+      get state() { return entries[entryIndex].state; },
+      replaceState(state, _title, hash) { entries[entryIndex] = { state, hash }; window.location.hash = hash; },
+      pushState(state, _title, hash) { entries.splice(entryIndex + 1); entries.push({ state, hash }); entryIndex++; window.location.hash = hash; },
+      back() { if (entryIndex) { entryIndex--; window.location.hash = entries[entryIndex].hash; store.onPopState(); store.onHashChange(); } },
+    };
+    window.matchMedia = () => ({ matches: mobile });
+    store.currentId = "previous";
+    store.navigateHistory("/a/b");
+    let props = { collapsed: false, newOpen: false, onToggle() {}, onNewOpenChange(value) { newOpen = value; } };
+    const sidebar = componentFixture(() => Sidebar(props));
+    const history = treeFind(sidebar(), node => node.type === HistoryView);
+    const render = componentFixture(() => HistoryView(history.props));
+    treeButtons(render()).find(node => node.props.children === "在此目录新建会话").props.onClick();
+    assert.equal(newOpen, true);
+    assert.equal(store.historyOpen, false);
+    if (mobile) assert.equal(store.currentId, null, "手机清掉主区才能看到表单");
+    props = { ...props, newOpen };
+    const tree = sidebar();
+    const area = treeFind(tree, node => node.props?.className === "sidebar-session-area");
+    assert.equal(area.props.inert, false);
+    const form = treeFind(tree, node => node.type?.name === "NewSessionForm");
+    let formProps = form.props;
+    const renderForm = componentFixture(() => form.type(formProps));
+    const cwdInput = () => treeFind(renderForm(), node => node.props?.id === "new-session-cwd");
+    assert.equal(cwdInput().props.value, "/a/b");
+    cwdInput().props.onChange({ target: { value: "/manual" } });
+    formProps = { ...formProps, initialCwd: "/other" };
+    renderForm(); renderForm.flushEffects();
+    assert.equal(cwdInput().props.value, "/manual");
+    renderForm.dispose();
+  }
+  store.meta = oldMeta;
+  store.ensureLoaded = oldLoad;
+  window.history = oldHistory;
+  window.matchMedia = () => ({ matches: false });
+  store.setHistoryCwdFilter("");
+});
 
 await t("未完成扫描：14px 提示、重试沿 cursor 续扫，加载更多保留且不宣告空结果", async () => {
   const page = { items: [], nextCursor: "START", truncated: true, skipped: 0, empty: 0, discovered: 2 };

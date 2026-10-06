@@ -136,6 +136,7 @@ export function FilePanel({ onClose }: { onClose: () => void }) {
       {preview ? <FilePreview key={preview.target.path} preview={preview} source={source} /> : <DirectoryContents initialPath={directoryInitialPath} includeFiles allowWindowsPicker
         navigationHistory={directoryHistory} registerBrowserBack={registerBrowserBack}
         onPathChange={path => { store.fileDirectory = path; }}
+        onBrowseHistory={path => store.navigateHistory(path)}
         onSelectFile={path => { setNotice(null); void store.openFilePreview({ path, root: store.fileDirectory ?? session?.cwd ?? "/", sessionId: session?.id }); }} />}
     </div>
   </>;

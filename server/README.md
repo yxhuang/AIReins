@@ -152,6 +152,7 @@ Workbench 新建的 Codex 会话在首个 `item/completed.userMessage` 后、没
 - `GET /api/history`：只读列出三家 CLI 自己保存的所有来源会话；没有用户消息的会话隐藏，`empty` 单独计数（分页为本页扫描计数），`skipped` 记录损坏/不可读候选。命中 delegate 元数据的条目附带 `dispatch:{runId,name}`，UUID 和 `session_...` 原样匹配；派单映射只读全部目录的 `run.json`/旧 `meta.json`，缓存 30 秒。
 - `GET /api/history/:agent/:nativeSessionId/messages`：从最新消息向前分页读取完整原生历史
 - `GET /api/meta`：server/CLI 实测版本、按请求入口计算的终端能力位、三 driver 能力位与配置 schema；`hostName` 为执行主机名称，优先用既有 `remote.json` 的 Tailscale 域名机器名，否则用 Node `hostname()`，供主机菜单显示「机器名（本机）」。新增字段需要后端重启，旧前端可忽略。
+- `GET /api/tailscale/peers`：只读发现其他 Windows/Linux/macOS 电脑，沿用现有 Host/Origin 与远程 Tailscale 身份白名单，不增加豁免。`execFile` 不经 shell 调用 `tailscale status --json`（5 秒超时，输出最多 1 MiB），优先 PATH，WSL 未找到时回退 `/mnt/c/Program Files/Tailscale/tailscale.exe`。成功信封 `data:{peers:[{name,origin,online,os,ips}]}`，仅含前端可接受的 HTTPS MagicDNS 地址，排除自身、手机及非法域名，在线优先后按名字排序。未安装、未运行、超时或坏 JSON 都返回 HTTP 200、`code:0`、`data:{peers:[],reason:"可读原因"}`。发现不探测目标 WB 是否可用；后端重启后生效。
 - `POST /api/restart`：无请求体，返回 HTTP 202，信封 `{code:0,msg:"accepted",data:{restarting:true},request_id}`；表示已接受，不表示重启已完成。沿用两个入口的 Host / Origin 校验，远程入口还须 Tailscale 身份白名单；不新增豁免。同一进程内重复请求仍回 202，只启动一次重启。
 - `GET /api/pages`：启动时已注册的扩展页面列表
 - `GET /api/pages/:id/health`：限时探测一个扩展页面的目标服务
@@ -441,8 +442,9 @@ Codex 权限菜单已按当前官方三个常用预设更新（2026-10-01；本�
 
 - `agent` 可省略，或为 `claude / codex / kimi`。
 - `q` 可省略，对归一后的 `title` 和 `cwd` 做大小写不敏感的子串匹配，最长 500 字符。
+- `cwd` 可省略，最长 4096 字符，不允许 NUL；去掉末尾 `/`（根目录 `/` 保留），按大小写敏感的路径段前缀匹配本目录和子目录。例如 `/a/b/` 命中 `/a/b`、`/a/b/c`，不命中 `/a/bc`。与 `q`、`agent` 同时在服务端分页消费循环内筛选。
 - `limit` 默认 50，范围 1–200。
-- `cursor` 是服务端返回的不透明分页位置；翻页时必须原样带回，并继续使用相同的 `agent`、`q`。
+- `cursor` 是服务端返回的不透明分页位置；翻页时必须原样带回，并继续使用相同的 `agent`、`q`、`cwd`。
 
 成功响应的 `data` 形状如下。`messageCount` 只有在原生头部能廉价取得时才会出现；当前三家都不为这个可选字段全文读取 transcript。
 

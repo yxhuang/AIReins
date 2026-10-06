@@ -1,4 +1,5 @@
 import type { AgentKind, HistorySession, HistorySource, SessionRecord } from "./types";
+import { normalizeDirectoryPath } from "./directory-path";
 
 // 历史会话浏览的纯逻辑（无 DOM 依赖，可单测）：查询串构造、来源筛选、已导入对照。
 
@@ -19,10 +20,22 @@ export const SOURCE_FILTER_LABELS: Record<SourceFilter, string> = {
   unknown: "未知",
 };
 
-/** GET /api/history 的查询入参：agent/q/cursor 可省略，limit 有界。 */
+/** 路径输入只在 Enter 时提交，不参与实时关键词搜索。 */
+export function isHistoryDirectoryInput(value: string): boolean {
+  return /^(?:\/|~|[a-z]:[\\/])/i.test(value.trim());
+}
+
+export function normalizeHistoryDirectory(value: string, homeDir?: string): string {
+  let path = normalizeDirectoryPath(value);
+  if (homeDir && (path === "~" || path.startsWith("~/"))) path = homeDir.replace(/\/+$/, "") + path.slice(1);
+  return path.replace(/\/+$/, "") || (path.startsWith("/") ? "/" : "");
+}
+
+/** GET /api/history 的查询入参：agent/q/cwd/cursor 可省略，limit 有界。 */
 export interface HistoryQueryInput {
   agent?: AgentKind;
   q?: string;
+  cwd?: string;
   limit?: number;
   cursor?: string;
 }
@@ -33,6 +46,8 @@ export function buildHistoryQuery(input: HistoryQueryInput): string {
   if (input.agent) params.set("agent", input.agent);
   const q = input.q?.trim();
   if (q) params.set("q", q);
+  const cwd = input.cwd?.trim();
+  if (cwd) params.set("cwd", cwd);
   if (input.limit !== undefined) params.set("limit", String(input.limit));
   if (input.cursor) params.set("cursor", input.cursor);
   return params.toString();

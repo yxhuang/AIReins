@@ -8,15 +8,26 @@
 
 ## 一次性安装
 
-在拥有 `ubuntu` 发行版的 Windows 账户下，以管理员身份打开 **Windows PowerShell 5.1**，执行：
+新电脑先安装并登录 Windows Tailscale，在 WSL 仓库内运行 `bash install.sh` 即可自动配置：
+
+- 仅 WSL 且 Windows Tailscale `status --json` 的 `BackendState` 为 `Running` 时，生成缺失的 `~/.workbench/remote.json`。origin 为本机 `Self.DNSName` 去末尾点后的 HTTPS `*.ts.net` 地址，白名单只含 `User[String(Self.UserID)].LoginName`；默认 `port: 8793`、`terminal: false`，权限 `600`。已有配置只校验、打印 origin，绝不覆盖；无有效 DNSName 或用户映射时提示跳过。
+- `Workbench Remote Gateway` 任务不存在时，从 WSL 弹出一次 UAC，用 `Start-Process -Verb RunAs -Wait` 运行 Windows PowerShell 5.1 安装器，UNC 路径使用 `\\wsl.localhost\<distro>\...`，自动传入 `WSL_DISTRO_NAME`、`USER` 与 `HOME`。请使用拥有该 WSL 发行版的 Windows 账户允许提权；已有任务仅打印状态并跳过。
+- UAC 拒绝或安装失败不阻断其余安装，打印包含实际发行版、Linux 用户、HOME 与仓库路径的手动命令。非 WSL、无 Tailscale 或未登录时跳过，登录后可重跑。
+- 新配置若遇到正在运行的 WB，提示「运行 wb restart 使远程入口生效」；不自动重启。未运行则沿用现有冒烟启动、验证、停止流程，后续由桌面 WB 或远程请求启动。远程终端默认关闭，如需远程终端改为 `true` 后 `wb restart`。
+
+`bash install.sh --check` 只读体检 remote.json、Serve HTTPS `/` 是否指向 `127.0.0.1:8794`、登录任务及状态，不写文件、不提权、不触发 WB 启停。重跑安装不会覆盖 remote.json 或重新安装已有任务；已有任务但 Serve 不匹配时须根据体检提示人工处理。
+
+代理客户端 等系统代理须把 `*.ts.net` 加入绕过，否则浏览器可能报 `ERR_TUNNEL_CONNECTION_FAILED`。
+
+需要手动安装时，在拥有发行版的 Windows 账户下，以管理员身份打开 **Windows PowerShell 5.1**，执行（下面的发行版、用户、HOME 与仓库路径须改成实际值；自动安装失败时优先复制安装脚本打印的命令）：
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File "\\wsl.localhost\ubuntu\home\user\dev\workbench\deploy\windows\install-remote-gateway.ps1"
+& "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "\\wsl.localhost\ubuntu\home\user\dev\workbench\deploy\windows\install-remote-gateway.ps1" -Distro ubuntu -LinuxUser user -LinuxHome /home/user
 ```
 
 安装器执行以下步骤：
 
-- 核对当前账户拥有 Ubuntu、现有 `remote.json`、端口和 Tailscale Serve 目标。
+- 核对当前账户拥有发行版、现有 `remote.json`、端口和 Tailscale Serve 目标。全新电脑无 Serve Web/根路径时可安装，回滚记录 `previousTarget: null`；已有非 Workbench 根路径或已开启 Funnel 时仍拒绝更改。
 - 在 `%LOCALAPPDATA%\workbench\remote-gateway\` 保存运行代码和配置副本，备份旧文件和 Serve 配置。
 - 写 `launcher.vbs`（同托盘，经 wscript 隐藏运行 PowerShell 并等待），创建 `Workbench Remote Gateway` 登录任务：当前账户登录时触发、`Interactive` 登录类型、普通运行权限、不存密码。任务失败时最多重试三次，禁止重复实例。
 - 启动 Windows 入口，仅将原 HTTPS `/` 的后端改成 `http://127.0.0.1:8794`，并读回验证。手机网址不变。
@@ -33,9 +44,12 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "\\wsl.localhost\ubuntu\home
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File "\\wsl.localhost\ubuntu\home\user\dev\workbench\deploy\windows\tests\remote-gateway.ps1"
+powershell -NoProfile -ExecutionPolicy Bypass -File "\\wsl.localhost\ubuntu\home\user\dev\workbench\deploy\windows\tests\install-remote-gateway.ps1"
 ```
 
-测试覆盖启动时无后台探测、身份及 Origin 拒绝、八连接并发冷启动、请求正文、等待页、失败间隔、WebSocket 升级与二进制双向转发。通过模拟测试仍须实际验收：安装后重启电脑并登录 Windows，不点 WB，从已连接 Tailscale 的手机打开原网址，再验证对话与 WebSocket 重连；之后在电脑上点 WB，应直接打开窗口、不重复起服务。不要为了测试而由安装器自动重启或注销电脑。
+第二条命令只模拟安装器 Serve 预检与回滚快照，覆盖空配置、空 Web、无根路径、原 Workbench 目标、拒绝其他代理及 Funnel；临时快照目录打印出来供检查，不改系统设置。WSL 内还可运行 `node deploy/windows/tests/install-remote.test.mjs`，用伪造 JSON、临时 HOME 和命令替身验证自动配置及 install.sh 集成，绝不调用真实 Windows 程序或 WB 服务。
+
+网关测试覆盖启动时无后台探测、身份及 Origin 拒绝、八连接并发冷启动、请求正文、等待页、失败间隔、WebSocket 升级与二进制双向转发。通过模拟测试仍须实际验收：安装后重启电脑并登录 Windows，不点 WB，从已连接 Tailscale 的手机打开原网址，再验证对话与 WebSocket 重连；之后在电脑上点 WB，应直接打开窗口、不重复起服务。不要为了测试而由安装器自动重启或注销电脑。
 
 运行日志：`%LOCALAPPDATA%\workbench\remote-gateway\remote-gateway.log`。电脑需已开机、已登录并联网；此入口不负责唤醒关机或休眠的电脑，也不覆盖 Windows 更新重启后停在登录界面的情况（那时用 RDP/UU 远程进桌面登录一次即可）。
 

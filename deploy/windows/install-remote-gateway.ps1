@@ -55,9 +55,12 @@ $serveBefore = & $tailscale serve status --json
 if ($LASTEXITCODE -ne 0) { throw 'Cannot read Tailscale Serve configuration.' }
 $serveConfig = ($serveBefore -join "`n") | ConvertFrom-Json
 $targetKey = $remoteOrigin.Host + ':443'
-$target = $serveConfig.Web.PSObject.Properties[$targetKey]
+$target = $null
+$rootHandler = $null
+# A fresh machine has no Web map or HTTPS root (serve status returns {}).
+if ($serveConfig.Web) { $target = $serveConfig.Web.PSObject.Properties[$targetKey] }
 if ($target) {
-    $rootHandler = $target.Value.Handlers.PSObject.Properties['/']
+    if ($target.Value.Handlers) { $rootHandler = $target.Value.Handlers.PSObject.Properties['/'] }
     if ($rootHandler -and $rootHandler.Value.Proxy -notin @('http://127.0.0.1:8792', "http://127.0.0.1:$($remote.port)")) {
         throw 'The existing HTTPS root is not the expected Workbench target; nothing was changed.'
     }

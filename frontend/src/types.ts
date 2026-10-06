@@ -228,6 +228,8 @@ export interface MetaInfo {
   hostName?: string;
   /** server 进程 cwd：新建会话表单 cwd 预填的最后一级回退 */
   defaultCwd: string;
+  /** 旧后端可省略；历史目录输入用来展开 ~。 */
+  homeDir?: string;
   cliVersions: Record<AgentKind, string>;
   capabilities: { terminal: boolean; windowsDirectoryPicker?: boolean };
   drivers: Record<AgentKind, DriverMeta>;

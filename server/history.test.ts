@@ -501,3 +501,34 @@ await writeJsonl(emptyCodex, [
 ]);
 const shortHead = await new HistoryIndex({ roots, headBytes: 256 }).list({ agent: "codex", limit: 100 });
 assert.ok(shortHead.sessions.some((session) => session.nativeSessionId === emptyCodexId), "用户消息超出标题读取窗口仍不能当作空会话");
+
+// 不匹配候选穿插在两页之间：必须在消费循环里筛选，再决定页大小与游标。
+const cwdRoot = join(fixture, "cwd-filter");
+await mkdir(cwdRoot);
+const cwdRows = [
+  ["/a/bc", "目标：相似前缀"],
+  ["/a/b", "目标：本目录"],
+  ["/else", "目标：其他目录"],
+  ["/a/b/c", "目标：子目录"],
+  ["/a/b/", "另一个标题"],
+];
+for (const [i, [cwd, title]] of cwdRows.entries()) {
+  const path = join(cwdRoot, `cccccccc-cccc-4ccc-8ccc-${String(i).padStart(12, "0")}.jsonl`);
+  await writeJsonl(path, [{ type: "user", cwd, message: { role: "user", content: title } }]);
+  await utimes(path, now - i, now - i);
+}
+const cwdHistory = new HistoryIndex({ roots: { ...roots, claude: cwdRoot } });
+const cwdMatches = await cwdHistory.list({ agent: "claude", cwd: "/a/b///", limit: 20 });
+assert.deepEqual(cwdMatches.sessions.map(s => s.cwd), ["/a/b", "/a/b/c", "/a/b/"]);
+assert.deepEqual((await cwdHistory.list({ agent: "claude", cwd: "/a/b", q: "目标", limit: 20 })).sessions.map(s => s.cwd), ["/a/b", "/a/b/c"]);
+const cwdFirst = await cwdHistory.list({ agent: "claude", cwd: "/a/b/", q: "目标", limit: 1 });
+assert.deepEqual(cwdFirst.sessions.map(s => s.cwd), ["/a/b"]);
+assert.ok(cwdFirst.nextCursor);
+const cwdSecond = await cwdHistory.list({ agent: "claude", cwd: "/a/b/", q: "目标", limit: 1, cursor: cwdFirst.nextCursor });
+assert.deepEqual(cwdSecond.sessions.map(s => s.cwd), ["/a/b/c"]);
+const cwdLast = await cwdHistory.list({ agent: "claude", cwd: "/a/b/", q: "目标", limit: 1, cursor: cwdSecond.nextCursor });
+assert.equal(cwdLast.sessions.length, 0);
+assert.equal(cwdLast.nextCursor, undefined);
+assert.equal((await cwdHistory.list({ agent: "claude", cwd: "/", limit: 20 })).sessions.length, cwdRows.length);
+assert.equal((await cwdHistory.list({ agent: "codex", cwd: "/a/b", limit: 20 })).sessions.length, 0);
+console.log("history cwd segment filtering / combined query / cursor passed");

@@ -22,6 +22,7 @@ import { fetchWorkFile, saveWorkFile } from "./api";
 import { sessionTitle } from "../../shared/session-title";
 import { extractMentionTokens, stripMentionCandidates } from "./mentions";
 import { partitionPages, type SkippedPage } from "./pages";
+import { normalizeHistoryDirectory } from "./history";
 
 // 全局 WS 收全部会话实时事件；首连和重连按已加载会话的 afterSeq 补发。
 // 未加载会话只维护列表摘要；快照期间缓存事件，落地后追加更大的 seq。
@@ -125,6 +126,8 @@ export class Store {
   currentPageId: string | null = null;
   /** 侧栏面板：historyOpen 与 currentPageId 互斥，保留右侧当前会话。 */
   historyOpen = false;
+  /** 目录筛选跨面板切换保留，直到用户清除；文件面板可直接替换。 */
+  historyCwdFilter = "";
   historySelection: HistorySession | null = null;
   historyRevision = 0;
   dispatchesOpen = false;
@@ -149,6 +152,8 @@ export class Store {
   private desktopPanelOrder: DesktopPanelSide[] = [];
   private desktopPanelEntryId: string | null = null;
   private desktopBackPending = false;
+  /** Chromium 在 location.hash 赋值当中同步派发 popstate；自己写 hash 时别把它当成 Back。 */
+  private writingHash = false;
   private desktopDispatchHash = "#/dispatches";
   private sessionsLoaded = false;
   data = new Map<string, SessionData>();
@@ -401,6 +406,7 @@ export class Store {
   }
 
   private onPopState = (): void => {
+    if (this.writingHash) return;
     if (!this.isMobileNavigation() && !this.readMobileEntry()) {
       if (this.desktopBackPending) {
         this.desktopBackPending = false;
@@ -620,8 +626,13 @@ export class Store {
   navigate(id: string | null): void {
     const hash = id ? `#/session/${encodeURIComponent(id)}` : "#/";
     if (this.isMobileNavigation()) { this.pushMobileRoute(hash); return; }
-    window.location.hash = hash;
+    this.writeHash(hash);
     this.onHashChange();
+  }
+
+  private writeHash(hash: string): void {
+    this.writingHash = true;
+    try { window.location.hash = hash; } finally { this.writingHash = false; }
   }
 
   navigatePage(id: string): void {
@@ -634,7 +645,15 @@ export class Store {
     this.notify();
   }
 
-  navigateHistory(): void {
+  setHistoryCwdFilter(cwd: string): void {
+    const next = normalizeHistoryDirectory(cwd, this.meta?.homeDir);
+    if (next === this.historyCwdFilter) return;
+    this.historyCwdFilter = next;
+    this.notify();
+  }
+
+  navigateHistory(cwd?: string): void {
+    if (cwd !== undefined) this.setHistoryCwdFilter(cwd);
     if (this.isMobileNavigation()) { this.pushMobileRoute("#/history"); return; }
     this.historyOpen = true;
     this.currentPageId = null;
@@ -696,7 +715,7 @@ export class Store {
     }
     const previous = this.beforeDispatches;
     this.currentId = previous?.currentId ?? null;
-    window.location.hash = previous?.hash ?? "#/";
+    this.writeHash(previous?.hash ?? "#/");
     this.onHashChange();
     if (this.historyOpen) this.historySelection = previous?.selection ?? null;
     this.notify();

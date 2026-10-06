@@ -1,11 +1,12 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { AgentKind, HistorySession } from "../types";
-import { fetchHistory } from "../api";
+import { fetchHistory, pickWindowsDirectory } from "../api";
 import {
   findImportedSession,
   filterBySource,
   SOURCE_FILTER_LABELS,
   SOURCE_LABELS,
+  isHistoryDirectoryInput,
   type SourceFilter,
 } from "../history";
 import { relativeTime, relativeTimeShort } from "../format";
@@ -14,6 +15,7 @@ import { PagedHistory } from "./ResumedHistory";
 import { store, type Store } from "../store";
 import { shallowEqual, useStore } from "../useStore";
 import { PanelActions } from "./PanelActions";
+import { DirectoryBrowser } from "./DirectoryBrowser";
 
 const AGENTS: AgentKind[] = ["claude", "codex", "kimi"];
 
@@ -53,8 +55,10 @@ type ListPhase = "loading" | "ready" | "error";
  * 预览确认后「导入并续接」（就地续接，不是分叉——代价写在按钮上方）。
  * 分页用 nextCursor +「加载更多」；扫描未完成时提示并沿游标重试，不当错误。
  */
-export function HistoryView() {
+export function HistoryView({ onNewSession }: { onNewSession?: (cwd: string) => void } = {}) {
   const historyRevision = useStore(value => value.historyRevision);
+  const cwdFilter = useStore(value => value.historyCwdFilter);
+  const windowsPicker = useStore(value => value.meta?.capabilities?.windowsDirectoryPicker === true);
   const importedSessionKeys = useStore(selectImportedSessionKeys, shallowEqual);
   const now = useStore(selectHistoryNow);
   const [agentFilter, setAgentFilter] = useState<AgentKind | "">("");
@@ -71,13 +75,45 @@ export function HistoryView() {
   const [phase, setPhase] = useState<ListPhase>("loading");
   const [loadingMore, setLoadingMore] = useState(false);
   const [listError, setListError] = useState<string | null>(null);
+  const [directoryOpen, setDirectoryOpen] = useState(false);
+  const [pickerBusy, setPickerBusy] = useState(false);
+  const [directoryError, setDirectoryError] = useState<string | null>(null);
   const selectedKey = useStore((value) => value.historySelection
     ? `${value.historySelection.agent}:${value.historySelection.nativeSessionId}` : null);
-  /** 请求代次：agent/q 变化时自增，过期响应（含旧查询的「加载更多」）直接丢弃 */
+  /** 请求代次：agent/q/cwd 变化时自增，过期响应（含旧查询的「加载更多」）直接丢弃 */
   const reqGen = useRef(0);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const pickerGen = useRef(0);
+  useEffect(() => () => { pickerGen.current += 1; }, []);
+
+  const selectDirectory = (path: string) => {
+    store.setHistoryCwdFilter(path);
+    if (isHistoryDirectoryInput(qInput)) { setQInput(""); setQ(""); }
+    setDirectoryOpen(false);
+    setDirectoryError(null);
+    inputRef.current?.focus();
+  };
+  const browseDirectory = async () => {
+    setDirectoryError(null);
+    if (!windowsPicker || window.matchMedia("(max-width: 720px)").matches) {
+      setDirectoryOpen(true);
+      return;
+    }
+    const gen = ++pickerGen.current;
+    setPickerBusy(true);
+    try {
+      const result = await pickWindowsDirectory(cwdFilter);
+      if (gen === pickerGen.current && result.path) selectDirectory(result.path);
+    } catch (error) {
+      if (gen === pickerGen.current) setDirectoryError(error instanceof Error ? error.message : String(error));
+    } finally {
+      if (gen === pickerGen.current) { setPickerBusy(false); inputRef.current?.focus(); }
+    }
+  };
 
   // 搜索防抖：输入停 250ms 后才真正打到 q 触发重新拉取
   useEffect(() => {
+    if (isHistoryDirectoryInput(qInput)) return;
     const timer = setTimeout(() => setQ(qInput.trim()), SEARCH_DEBOUNCE_MS);
     return () => clearTimeout(timer);
   }, [qInput]);
@@ -95,6 +131,7 @@ export function HistoryView() {
         const data = await fetchHistory({
           ...(agentFilter ? { agent: agentFilter } : {}),
           ...(q ? { q } : {}),
+          ...(cwdFilter ? { cwd: cwdFilter } : {}),
           limit: PAGE_SIZE,
           ...(cursor ? { cursor } : {}),
         });
@@ -121,10 +158,10 @@ export function HistoryView() {
         if (gen === reqGen.current && cursor) setLoadingMore(false);
       }
     },
-    [agentFilter, q],
+    [agentFilter, q, cwdFilter],
   );
 
-  // agent/q 变化 → 从头重拉（cursor 作废）；来源筛选是前端侧过滤，不重拉
+  // agent/q/cwd 变化 → 从头重拉（cursor 作废）；来源筛选是前端侧过滤，不重拉
   useEffect(() => {
     void load();
   }, [load, historyRevision]);
@@ -194,15 +231,37 @@ export function HistoryView() {
               {loadingMore ? <>加载<br />中…</> : <>加载<br />更多</>}
             </button>
           )}
-          <input
-            type="search"
-            className="history-search"
-            value={qInput}
-            onChange={(e) => setQInput(e.target.value)}
-            placeholder="搜索标题或目录…"
-            aria-label="搜索历史会话"
-          />
+          <div className="history-search">
+            <button type="button" className="dir-windows-picker history-directory-picker" aria-label="选择目录筛选"
+              title={pickerBusy ? "等待 Windows 选择目录" : "选择工作目录筛选"}
+              disabled={pickerBusy} aria-busy={pickerBusy} onClick={browseDirectory}>
+              {/* 与文件面板地址栏的 Windows 浏览按钮同一图标 */}
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M3 8V5.5A1.5 1.5 0 0 1 4.5 4H9l2 2h8.5A1.5 1.5 0 0 1 21 7.5V9" fill="currentColor" fillOpacity=".25" />
+                <path d="M3.5 8h17a1.5 1.5 0 0 1 1.5 1.7l-1.2 9A1.5 1.5 0 0 1 19.3 20H4.7a1.5 1.5 0 0 1-1.5-1.3L2 9.7A1.5 1.5 0 0 1 3.5 8Z" fill="currentColor" fillOpacity=".5" />
+              </svg>
+            </button>
+            {cwdFilter && <span className="history-chip history-cwd-chip" title={cwdFilter}>
+              <span className="history-cwd-name">{cwdFilter.split("/").filter(Boolean).at(-1) || "/"}</span>
+              <button type="button" className="icon-btn" aria-label="清除目录筛选" onClick={() => store.setHistoryCwdFilter("")}>×</button>
+            </span>}
+            <input ref={inputRef} type="search" value={qInput}
+              onChange={(e) => setQInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.nativeEvent.isComposing) return;
+                if (e.key === "Enter" && isHistoryDirectoryInput(qInput)) {
+                  e.preventDefault();
+                  selectDirectory(qInput);
+                } else if (e.key === "Backspace" && !qInput && cwdFilter) {
+                  e.preventDefault();
+                  store.setHistoryCwdFilter("");
+                }
+              }}
+              placeholder="搜索关键词，或输入/选择目录…" aria-label="搜索历史会话" />
+          </div>
         </div>
+        {directoryError && <p className="history-meta history-error" role="alert">{directoryError}</p>}
+        {cwdFilter && <button type="button" className="btn history-new-session" onClick={() => onNewSession?.(cwdFilter)}>在此目录新建会话</button>}
         {phase === "ready" && list.truncated && (
           <p className="history-meta" style={{ fontSize: "var(--detail-font-size)" }}>
             扫描未完成，可<button
@@ -254,6 +313,8 @@ export function HistoryView() {
           </>
         )}
       </section>
+      {directoryOpen && <DirectoryBrowser initialPath={cwdFilter} onSelect={selectDirectory}
+        onClose={() => { setDirectoryOpen(false); inputRef.current?.focus(); }} />}
     </div>
   );
 }

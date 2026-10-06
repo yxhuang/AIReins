@@ -1,3 +1,5 @@
+import type { TailscalePeersResult } from "../../server/tailscale-peers.js";
+
 export interface HostConnections {
   /** 发起切换的浏览器本机入口；手机直接打开远程页时为空。 */
   localOrigin: string | null;
@@ -23,6 +25,39 @@ export function normalizeRemoteOrigin(value: unknown): string | null {
   return url?.protocol === "https:" && !url.port && MAGIC_DNS.test(url.hostname) ? url.origin : null;
 }
 
+function lookupKey(value: string): string {
+  const key = value.trim().toLowerCase();
+  // 浏览器 URL 解析统一 IPv6 的大小写、零压缩及可选方括号。
+  if (key.includes(":")) {
+    try { return new URL(`http://${key.startsWith("[") ? key : `[${key}]`}`).hostname; }
+    catch { /* 非 IPv6 时仍作为机器名匹配。 */ }
+  }
+  return key;
+}
+
+/** null 表示需要发现结果；提供结果后无匹配或有歧义则抛出可读错误。 */
+export function resolveRemoteHostInput(input: string, discovery?: TailscalePeersResult): string | null {
+  const value = input.trim();
+  if (!value || value.length > 512) throw new Error("请输入 Tailscale IP、机器名或完整地址（最多 512 个字符）。");
+  const complete = normalizeRemoteOrigin(value);
+  if (complete) return complete;
+  const dns = value.toLowerCase().replace(/[/.]$/, "");
+  if (MAGIC_DNS.test(dns)) return `https://${dns}`;
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(value)) throw new Error("请输入完整的 HTTPS Tailscale 地址，不带路径、账号密码或自定义端口。");
+  if (!discovery) return null;
+  const key = lookupKey(value);
+  const origins = new Set<string>();
+  for (const peer of discovery.peers) {
+    const origin = normalizeRemoteOrigin(peer.origin);
+    if (origin && (lookupKey(peer.name) === key || connectionLabel(origin).toLowerCase() === key || peer.ips.some(ip => lookupKey(ip) === key))) {
+      origins.add(origin);
+    }
+  }
+  if (origins.size > 1) throw new Error(`在 Tailscale 中找到多个匹配 ${value} 的电脑，请使用 Tailscale IP 或完整地址。`);
+  if (origins.size === 0) throw new Error(`在 Tailscale 中找不到 ${value} 对应的电脑。${discovery.reason ? ` ${discovery.reason}` : ""}`);
+  return [...origins][0]!;
+}
+
 export function normalizeLocalOrigin(value: unknown): string | null {
   const url = address(value);
   return url?.protocol === "http:" && (url.hostname === "127.0.0.1" || url.hostname === "localhost") ? url.origin : null;
@@ -38,6 +73,14 @@ export function normalizeConnections(value: unknown): HostConnections {
     record.localName.length <= 253 && !/[\u0000-\u001f\u007f]/.test(record.localName) ? record.localName.trim() : undefined;
   return { localOrigin: normalizeLocalOrigin(record.localOrigin), remotes: [...new Set(remotes)].slice(0, MAX_REMOTE_HOSTS),
     ...(localName ? { localName } : {}) };
+}
+
+export function connectionsWithRemote(connections: HostConnections, address: string): HostConnections {
+  const origin = normalizeRemoteOrigin(address);
+  if (!origin) throw new Error("请输入完整的 https://机器名.tail…ts.net Tailscale 地址，不带路径或账号密码。");
+  if (connections.remotes.includes(origin)) return connections;
+  if (connections.remotes.length >= MAX_REMOTE_HOSTS) throw new Error(`最多保存 ${MAX_REMOTE_HOSTS} 台远程主机。`);
+  return { ...connections, remotes: [...connections.remotes, origin] };
 }
 
 export function connectionsForPage(href: string, saved: unknown, transfer?: unknown): HostConnections {

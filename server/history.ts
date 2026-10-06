@@ -27,6 +27,7 @@ export interface HistorySession {
 interface HistoryListInput {
   agent?: AgentKind;
   q?: string;
+  cwd?: string;
   limit: number;
   cursor?: string;
 }
@@ -201,6 +202,7 @@ export class HistoryIndex {
     // 发现与消费各有预算；目录发现耗尽预算后，已发现的候选仍能处理。
     const deadline = Date.now() + this.timeoutMs;
     const q = (input.q ?? "").trim().toLocaleLowerCase();
+    const cwd = (input.cwd ?? "").trim().replace(/\/+$/, "") || (input.cwd?.trim().startsWith("/") ? "/" : "");
     const sessions: HistorySession[] = [];
     let skipped = discovery.skipped;
     let empty = 0;
@@ -241,6 +243,7 @@ export class HistoryIndex {
       const dispatch = dispatches.get(session.nativeSessionId);
       if (dispatch) decorated.dispatch = dispatch;
       if (q && !`${decorated.title}\n${decorated.cwd}`.toLocaleLowerCase().includes(q)) continue;
+      if (cwd && decorated.cwd !== cwd && !decorated.cwd.startsWith(cwd === "/" ? "/" : `${cwd}/`)) continue;
       sessions.push(decorated);
       if (sessions.length >= input.limit) break;
     }

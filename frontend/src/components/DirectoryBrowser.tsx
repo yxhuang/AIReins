@@ -80,13 +80,14 @@ export function DirectoryBrowser({ initialPath, onSelect, onClose, mode = "dir",
 }
 
 /** 弹窗与右侧面板共用导航、请求和列表；宿主决定点击文件后的行为。 */
-export function DirectoryContents({ initialPath, includeFiles, onSelectFile, onSelectDirectory, allowWindowsPicker = false, onPathChange, navigationHistory, registerBrowserBack }: {
+export function DirectoryContents({ initialPath, includeFiles, onSelectFile, onSelectDirectory, allowWindowsPicker = false, onPathChange, onBrowseHistory, navigationHistory, registerBrowserBack }: {
   initialPath: string;
   includeFiles: boolean;
   onSelectFile: (path: string, name: string) => void;
   onSelectDirectory?: (path: string) => void;
   allowWindowsPicker?: boolean;
   onPathChange?: (path: string) => void;
+  onBrowseHistory?: (path: string) => void;
   navigationHistory?: RefObject<string[]>;
   registerBrowserBack?: (back: () => boolean) => () => void;
 }) {
@@ -291,6 +292,9 @@ export function DirectoryContents({ initialPath, includeFiles, onSelectFile, onS
           </div>
           <button className="btn" type="button" title="可粘贴 Windows 或 Linux 文件夹地址，按 Enter 或点击前往" disabled={busy || !address.trim()}
             onClick={() => void load(normalizeDirectoryPath(address))}>前往</button>
+          {onBrowseHistory && <button className="btn dir-history-button" type="button" disabled={busy || !listing}
+            title={listing ? `查看 ${listing.path} 及子目录的对话` : "先浏览目录"}
+            onClick={() => { if (listing) onBrowseHistory(listing.path); }}>此目录的对话</button>}
         </div>
         <div className="dir-nav">
           <button className="btn" type="button" title="返回当前目录的上一级" disabled={!listing?.parent || busy} onClick={() => { if (listing?.parent) void load(listing.parent); }}>上一级</button>

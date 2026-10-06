@@ -7,6 +7,7 @@ successes=()
 warnings=()
 errors=()
 windows=false
+remote_created=false
 
 ok() { successes+=("$*"); printf '✅ %s\n' "$*"; }
 warn() { warnings+=("$*"); printf '⚠ %s\n' "$*"; }
@@ -94,6 +95,12 @@ else
 fi
 
 if [[ "${1:-}" == --check ]] || (( ${#errors[@]} > 0 )); then
+  if [[ "$node_major" =~ ^[0-9]+$ ]] && (( 10#$node_major >= 22 )); then
+    printf '\n远程入口体检（只读）\n'
+    node "$REPO/deploy/windows/install-remote.mjs" --check || warn '远程入口体检未完成，请检查上面的提示。'
+  else
+    warn 'remote.json / Serve / Workbench Remote Gateway：需要 Node ≥ 22 才能体检。'
+  fi
   summary
   (( ${#errors[@]} == 0 ))
   exit $?
@@ -147,6 +154,15 @@ if "$windows"; then
   fi
 fi
 
+printf '\n配置 Tailscale 远程入口\n'
+node "$REPO/deploy/windows/install-remote.mjs"
+remote_rc=$?
+case "$remote_rc" in
+  0) ;;
+  10) remote_created=true ;;
+  *) warn '远程入口自动配置未完成，继续其余安装。' ;;
+esac
+
 printf '\n冒烟测试\n'
 # status 的退出码可能受可选 python3/curl 影响；以“运行中”输出识别现有服务。
 status_output="$("$REPO/bin/workbench" status 2>&1 || true)"
@@ -154,6 +170,9 @@ started_pid=''
 smoke_ready=true
 if [[ "$status_output" == 运行中（PID\ * ]]; then
   printf '服务已运行，只验证 /api/meta，保留现有服务。\n'
+  if "$remote_created"; then
+    warn '运行 wb restart 使远程入口生效（本次不自动重启）。'
+  fi
 else
   start_output="$(WORKBENCH_NO_OPEN=1 "$REPO/bin/workbench" start 2>&1)"
   start_rc=$?

@@ -16,6 +16,7 @@ import { getWorkFile, getWorkContent, saveWorkFile, WorkFileError, TEXT_LIMIT } 
 import { HistoryIndex, HistoryQueryError } from "./history.js";
 import { NativeDeleteError } from "./native-session-delete.js";
 import { getMeta, getServerHostName, SERVER_VERSION } from "./meta.js";
+import { getTailscalePeers } from "./tailscale-peers.js";
 import { feishuSender, GateNotifier, larkCliSender, loadNotifyConfig, type NotifyConfig } from "./notify.js";
 import { checkPageHealth, proxyPage, readLinks, scanPages } from "./pages.js";
 import { pruneStorage, workbenchHome } from "./persistence.js";
@@ -388,6 +389,8 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
         hostName: getServerHostName(REMOTE_CONFIG?.origin),
         capabilities: { terminal: terminalEnabled(policy, REMOTE_CONFIG), windowsDirectoryPicker: windowsPickerEnabled(policy.kind === "local") },
       }, requestId);
+    } else if (method === "GET" && url.pathname === "/api/tailscale/peers") {
+      await respond(response, 200, 0, "success", await getTailscalePeers(), requestId);
     } else if (method === "GET" && url.pathname === "/api/storage") {
       await respond(response, 200, 0, "success", getStorageStats(manager), requestId);
     } else if (method === "POST" && url.pathname === "/api/storage/clean") {
@@ -1001,13 +1004,16 @@ function validateFileLimit(value: string | null): number {
 function validateHistoryQuery(searchParams: URLSearchParams): {
   agent?: CreateSessionInput["agent"];
   q?: string;
+  cwd?: string;
   limit: number;
   cursor?: string;
 } {
   const agentValue = searchParams.get("agent");
   const q = searchParams.get("q") ?? "";
+  const cwd = searchParams.get("cwd") ?? "";
   const cursor = searchParams.get("cursor") ?? "";
   if (q.length > 500) throw new ApiError(400, 40030, "q 最多 500 个字符");
+  if (cwd.length > 4_096 || cwd.includes("\0")) throw new ApiError(400, 40030, "cwd 过长或含无效字符");
   if (cursor.length > 4_096) throw new ApiError(400, 40031, "cursor 过长");
   const limitValue = searchParams.get("limit");
   const limit = limitValue === null || limitValue === "" ? 50 : Number(limitValue);
@@ -1017,6 +1023,7 @@ function validateHistoryQuery(searchParams: URLSearchParams): {
   return {
     ...(agentValue ? { agent: validateHistoryAgent(agentValue) } : {}),
     ...(q ? { q } : {}),
+    ...(cwd ? { cwd } : {}),
     limit,
     ...(cursor ? { cursor } : {}),
   };

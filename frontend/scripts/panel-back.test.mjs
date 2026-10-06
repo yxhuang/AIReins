@@ -2,10 +2,12 @@ import assert from 'node:assert/strict';
 globalThis.WebSocket={CONNECTING:0,OPEN:1,CLOSING:2,CLOSED:3};
 const {Store}=await import('../src/store.ts');
 
-function fixture(){
+function fixture({chromiumHash=false}={}){
   const entries=[{hash:'#/session/fixture',state:null}],pending=[];let index=0;
   const store=new Store();store.currentId='fixture';store.ensureLoaded=async()=>{};
-  const location={get hash(){return entries[index].hash},set hash(hash){entries.splice(index+1);entries.push({hash,state:null});index++}};
+  const location={get hash(){return entries[index].hash},set hash(hash){entries.splice(index+1);entries.push({hash,state:null});index++;
+    // Chromium fires popstate synchronously inside the hash write, hashchange later.
+    if(chromiumHash){store.onPopState();pending.push(()=>store.onHashChange())}}};
   const history={get state(){return entries[index].state},get length(){return entries.length},
     replaceState(state,_title,hash){entries[index]={state:structuredClone(state),hash}},
     pushState(state,_title,hash){entries.splice(index+1);entries.push({state:structuredClone(state),hash});index++},
@@ -74,3 +76,13 @@ console.log('PASS: desktop panel Back ordering, switches, manual close, draft an
   f.back();assert.equal(calls,0,'file previews keep the previous draft-preserving panel Back');assert.equal(s.filePreview.draft,'unsaved');
 }
 console.log('PASS: directory Back priority and manual/preview bypass');
+{
+  // 历史面板「打开会话」：Chromium 同步 popstate 曾被当成 Back 关面板，把 URL 改回旧会话。
+  const f=fixture({chromiumHash:true}),s=f.store;
+  s.sessions=[{id:'fixture'},{id:'other'}];
+  s.navigateHistory();s.navigate('other');f.settle();
+  assert.equal(s.currentId,'other','open-session from history lands on the target session');
+  assert.equal(s.historyOpen,false);
+  assert.equal(window.location.hash,'#/session/other');
+}
+console.log('PASS: navigate under synchronous popstate');

@@ -3,12 +3,38 @@ import {
   normalizeRemoteOrigin, normalizeLocalOrigin, connectionLabel, workbenchWindowTitle,
   connectionsForPage, hostNavigationUrl, parseHostTransfer, normalizeConnections,
   initializeHostConnections, getHostConnections, saveHostConnections, subscribeHostConnections, HOST_CONNECTIONS_KEY,
+  connectionsWithRemote, resolveRemoteHostInput,
 } from '../src/host-connections.ts';
 
 const local = 'http://127.0.0.1:8790';
 const home = 'https://my-desktop.tailxxxx.ts.net';
 const other = 'https://other-pc.tailxxxx.ts.net';
 assert.equal(normalizeRemoteOrigin(`${home}/`), home);
+const laptop = 'https://my-laptop.tailxxxx.ts.net';
+const discoveredLaptop = { name: 'my-laptop', origin: laptop, online: true, os: 'windows',
+  ips: ['100.64.0.49', 'fd7a:115c:a1e0::0000:0031'] };
+const discovery = { peers: [discoveredLaptop] };
+assert.equal(resolveRemoteHostInput(laptop), laptop, '完整 origin 无需接口');
+for (const bare of ['my-laptop.tailxxxx.ts.net', 'my-laptop.tailxxxx.ts.net/', 'my-laptop.tailxxxx.ts.net.']) {
+  assert.equal(resolveRemoteHostInput(bare), laptop, '裸 MagicDNS 无需接口');
+}
+assert.equal(resolveRemoteHostInput('100.64.0.49'), null, 'IP 需要发现结果');
+for (const input of ['100.64.0.49', 'fd7a:115c:a1e0::0000:0031', 'FD7A:115C:A1E0::0000:0031',
+  'fd7a:115c:a1e0:0000:0000:0000:0000:0031', 'my-laptop', 'my-laptop', ' my-laptop ']) {
+  assert.equal(resolveRemoteHostInput(input, discovery), laptop, input);
+}
+assert.equal(resolveRemoteHostInput('my-laptop', { peers: [{ ...discoveredLaptop, name: 'Windows laptop' }] }), laptop, '匹配 MagicDNS 首段');
+assert.equal(resolveRemoteHostInput('Windows Laptop', { peers: [{ ...discoveredLaptop, name: 'Windows laptop' }] }), laptop, '匹配 name，大小写不敏感');
+assert.throws(() => resolveRemoteHostInput('100.64.1.99', discovery), /找不到 100\.64\.1\.99 对应的电脑/);
+assert.throws(() => resolveRemoteHostInput('unknown', { peers: [], reason: 'Tailscale 未运行' }), /找不到 unknown.*Tailscale 未运行/);
+assert.throws(() => resolveRemoteHostInput('my-laptop', { peers: [discoveredLaptop,
+  { ...discoveredLaptop, origin: other, online: false }] }), /多个.*请使用 Tailscale IP 或完整地址/, '同名时拒绝歧义，在线不覆盖离线');
+assert.equal(resolveRemoteHostInput('my-laptop', { peers: [discoveredLaptop, discoveredLaptop] }), laptop, '重复 origin 只算一台');
+assert.throws(() => resolveRemoteHostInput('my-laptop', { peers: [{ ...discoveredLaptop, origin: 'https://evil.test' }] }), /找不到/, '发现地址仍必须通过原校验');
+for (const bad of [`${laptop}/path`, `${laptop}?secret=x`, 'http://my-laptop.tailxxxx.ts.net', 'https://evil.test']) {
+  assert.throws(() => resolveRemoteHostInput(bad), /完整的 HTTPS Tailscale 地址/, bad);
+}
+assert.throws(() => resolveRemoteHostInput('   '), /请输入/);
 for (const bad of ['javascript:alert(1)', 'http://my-desktop.tailxxxx.ts.net', `${home}.evil.test`, `${home}/path`, `${home}?token=secret`, `${home}#fragment`, 'https://name:password@my-desktop.tailxxxx.ts.net', 'https://evil.test']) {
   assert.equal(normalizeRemoteOrigin(bad), null, bad);
 }
@@ -39,6 +65,13 @@ assert.deepEqual(connectionsForPage(`${home}/`, null), { localOrigin: null, remo
 assert.equal(connectionsForPage('http://localhost:8790/', initial).localOrigin, 'http://localhost:8790', '实际本机入口覆盖旧返回地址');
 assert.deepEqual(connectionsForPage(`${home}/`, { localOrigin: null, remotes: [other] }, initial).remotes, [other, home], '保留目标源已保存的其他主机');
 const fullHosts = Array.from({ length: 16 }, (_, i) => `https://pc-${i}.tailxxxx.ts.net`);
+assert.deepEqual(connectionsWithRemote(initial, other).remotes, [home, other], '一键添加保留已保存主机');
+assert.deepEqual(connectionsWithRemote(initial, home), initial, '重复发现项不会重复添加');
+assert.throws(() => connectionsWithRemote(initial, 'https://evil.test'), /Tailscale/);
+assert.throws(() => connectionsWithRemote({ ...initial, remotes: fullHosts }, other), /最多保存 16/);
+assert.equal(connectionsWithRemote({ ...initial, remotes: fullHosts }, fullHosts[0]).remotes.length, 16, '满额时已有主机仍可切换');
+const discoveredHop = hostNavigationUrl(other, connectionsWithRemote(initial, other));
+assert.deepEqual(parseHostTransfer(discoveredHop).remotes, [home, other], '发现项保存后的上下文传到目标');
 assert.deepEqual(connectionsForPage(`${home}/`, { localOrigin: local, remotes: fullHosts }).remotes, fullHosts,
   '列表满额时访问新主机不能静默删除已保存地址');
 assert.equal(parseHostTransfer(`${home}/#wb-connect=broken%`), null);
@@ -78,6 +111,22 @@ assert.equal(handlers.size, 0, '最后一个订阅退出后移除真正注册的
 globalThis.localStorage.setItem = () => { throw Error('storage unavailable'); };
 assert.equal(saveHostConnections({ localOrigin: local, remotes: [home] }), false);
 assert.ok(getHostConnections().remotes.includes(home), '存储不可用时保留本页状态');
+const { fetchTailscalePeers } = await import('../src/api.ts');
+const originalFetch = globalThis.fetch;
+try {
+  let requests = 0;
+  const peers = [{ name: 'other-pc', origin: other, online: false, os: 'windows', ips: ['100.64.1.2'] }];
+  globalThis.fetch = async (path, init) => {
+    requests++;
+    assert.equal(path, '/api/tailscale/peers');
+    assert.ok(init.signal, '发现接口沿用 API 超时保护');
+    return { json: async () => ({ code: 0, msg: 'success', data: { peers }, request_id: 'fixture' }) };
+  };
+  assert.deepEqual(await fetchTailscalePeers(), { peers });
+  assert.equal(requests, 1, 'API 调用不自动重试');
+  globalThis.fetch = async () => ({ json: async () => ({ code: 0, data: { peers: [], reason: '未检测到 Tailscale' } }) });
+  assert.deepEqual(await fetchTailscalePeers(), { peers: [], reason: '未检测到 Tailscale' });
+} finally { globalThis.fetch = originalFetch; }
 globalThis.React = (await import('react')).default;
 globalThis.WebSocket = { CONNECTING: 0, OPEN: 1, CLOSING: 2, CLOSED: 3 };
 const { renderToStaticMarkup } = await import('react-dom/server');
@@ -107,5 +156,8 @@ assert.ok(brand.includes('选择主机，当前：my-desktop'));
 globalThis.window.location.href = `${local}/`;
 initializeHostConnections();
 assert.match(renderToStaticMarkup(React.createElement(HostSwitcher)), /class="brand-name"[^>]*>本机<\/span>/);
-assert.ok(renderToStaticMarkup(React.createElement(HostConnectionSettings)).includes('Tailscale 地址'));
-console.log('PASS: 主机地址校验、Tailscale 名称与窗口标题、本机/远程往返、手机直连、跨源合并与不可信 fragment');
+const hostSettings = renderToStaticMarkup(React.createElement(HostConnectionSettings));
+assert.ok(hostSettings.includes('Tailscale 地址'));
+assert.match(hostSettings, /type="text"/, 'IP 和机器名不被浏览器 URL 表单校验拦截');
+assert.ok(hostSettings.includes('Tailscale IP'), '两个共用入口提示支持 IP 与机器名');
+console.log('PASS: 主机地址与 IP/IPv6/机器名补全、裸 MagicDNS、无匹配及歧义、连接往返与存储保护');

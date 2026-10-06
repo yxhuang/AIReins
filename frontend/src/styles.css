@@ -590,6 +590,9 @@ body.resizing {
 }
 .host-switch-current { margin: 4px 6px 8px; font-size: 14px; color: var(--text-muted); overflow-wrap: anywhere; }
 .host-menu-row { display: flex; align-items: stretch; gap: 4px; }
+.host-menu-section { margin: 8px 4px 4px; padding-top: 8px; border-top: 1px solid var(--border); font-size: 14px; color: var(--text-muted); }
+.host-menu-offline :is(.host-menu-target, .host-menu-new-window) { color: var(--text-muted); }
+.host-menu-status { margin-left: 8px; font-size: 13px; }
 .host-menu-target, .host-menu-new-window, .host-menu-manage, .host-remove {
   border: 0; background: transparent; color: var(--text); font: inherit; cursor: pointer; border-radius: 6px;
 }
@@ -772,6 +775,12 @@ body.resizing {
 .dir-heading h2 { margin: 0; font-size: 16px; }
 .dir-actions { justify-content: flex-end; }
 .dir-location { display: flex; align-items: center; gap: 8px; }
+.dir-history-button { flex-shrink: 0; font-size: 14px; padding-inline: 6px; }
+@container directory-browser (max-width: 380px) {
+  .dir-location { flex-wrap: wrap; }
+  .dir-location .dir-address { flex-basis: calc(100% - 64px); }
+  .dir-history-button { margin-left: auto; }
+}
 .dir-address { position: relative; z-index: 3; display: flex; flex: 1; align-items: stretch; min-width: 0; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
 .dir-address:focus-within { border-color: var(--busy); }
 .dir-address-path { display: flex; flex: 1; min-width: 0; min-height: 40px; }
@@ -3247,6 +3256,9 @@ body.resizing {
 .history-chip.agent-kimi.selected   { border-color: var(--agent-kimi);   color: var(--agent-kimi-ink);   box-shadow: inset 0 0 0 1px var(--agent-kimi); }
 
 .history-search {
+  display: flex;
+  align-items: center;
+  gap: 4px;
   flex: 1 1 180px;
   min-width: 140px;
   max-width: 320px;
@@ -3255,8 +3267,19 @@ body.resizing {
   background: var(--surface);
   color: var(--text);
   font-size: 16px;
-  padding: 4px 8px;
+  padding: 0 8px 0 0;
   font-family: var(--font-ui);
+}
+.history-search:focus-within { border-color: var(--busy); }
+/* 外观沿用 .dir-windows-picker（无框、右侧分隔线），贴齐搜索框左缘 */
+.history-directory-picker { flex: 0 0 38px; align-self: stretch; border-radius: 5px 0 0 5px; }
+.history-search input { flex: 1; width: 0; min-width: 0; border: 0; background: transparent; color: inherit; font: inherit; padding: 8px 0; }
+.history-cwd-chip { display: inline-flex; align-items: center; min-width: 0; max-width: 45%; gap: 2px; background: var(--surface-sunk); }
+.history-cwd-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.history-cwd-chip .icon-btn { flex-shrink: 0; width: 24px; height: 24px; padding: 0; border: 0; background: transparent; }
+.history-new-session { align-self: flex-start; margin: 0 4px 4px; }
+@media (pointer: coarse) {
+  .history-directory-picker, .history-cwd-chip .icon-btn { min-width: 44px; min-height: 44px; }
 }
 
 /* 列表元信息（discovered/skipped/truncated）：中性小字，skipped/truncated 不是错误 */

@@ -121,6 +121,7 @@ export function Sidebar({ collapsed, onToggle, newOpen, onNewOpenChange, returnT
   // pendingGates 是可变 Map；用可比较的原始字符串捕获“总数相同但分布换了会话”的变化。
   useStore(selectPendingSignature);
   const [swipedId, setSwipedId] = useState<string | null>(null);
+  const [newCwd, setNewCwd] = useState<string | undefined>();
   useEffect(() => {
     if (!swipedId) return;
     const close = (event: Event) => {
@@ -207,6 +208,7 @@ export function Sidebar({ collapsed, onToggle, newOpen, onNewOpenChange, returnT
               aria-label={newOpen ? "取消新建" : "新建会话"}
               onClick={() => {
                 if (panelOpen) store.closeSidebarPanel(window.matchMedia("(max-width: 720px)").matches);
+                setNewCwd(undefined);
                 onNewOpenChange(!newOpen);
               }}
             >
@@ -227,7 +229,7 @@ export function Sidebar({ collapsed, onToggle, newOpen, onNewOpenChange, returnT
       <div className="sidebar-body">
         {!collapsed && (
           <div className="sidebar-session-area" inert={panelOpen} aria-hidden={panelOpen || undefined}>
-            {newOpen && <NewSessionForm onDone={() => onNewOpenChange(false)} />}
+            {newOpen && <NewSessionForm initialCwd={newCwd} onDone={() => onNewOpenChange(false)} />}
             <ul className="session-list">
               {waiting.length > 0 && (
                 // 分区标题复用 .page-nav-title 的中性小字语言；暖色仍只出现在行内闸门徽标上
@@ -261,7 +263,12 @@ export function Sidebar({ collapsed, onToggle, newOpen, onNewOpenChange, returnT
         )}
         {panelOpen && !collapsed && (
           <section className="sidebar-panel-expanded" aria-label={historyOpen ? "历史会话内容" : currentPage?.name || "页面不存在"}>
-            {historyOpen ? <div id="sidebar-history-panel" className="sidebar-panel-content"><HistoryView /></div>
+            {historyOpen ? <div id="sidebar-history-panel" className="sidebar-panel-content"><HistoryView onNewSession={cwd => {
+              setNewCwd(cwd);
+              if (window.matchMedia("(max-width: 720px)").matches) store.navigate(null);
+              else store.closeSidebarPanel();
+              onNewOpenChange(true);
+            }} /></div>
               : currentPage ? <div id={`sidebar-page-${currentPage.id}`} className="sidebar-panel-content"><PageView page={currentPage} sidebar onCollapse={closePanel} /></div>
               : <div className="sidebar-panel-content sidebar-panel-missing">该页面可能已从 pages/ 移除或 manifest 失效。页面列表在启动时扫描，改动需重启后生效。</div>}
           </section>
@@ -1018,12 +1025,12 @@ function openChatGPT() {
   chatgptWin = window.open("https://chatgpt.com/", "wb-chatgpt", `popup,width=${w},height=${h},left=${screen.availWidth - w},top=0`);
 }
 
-function NewSessionForm({ onDone }: { onDone: () => void }) {
+function NewSessionForm({ onDone, initialCwd }: { onDone: () => void; initialCwd?: string }) {
   const meta = useStore(selectMeta);
   // 会话列表可能在表单挂载后才到；保留该订阅以触发 cwd 三级回退的补填 effect。
   useStore(selectSessions);
   const [agent, setAgent] = useState<AgentKind>("claude");
-  const [cwd, setCwdState] = useState(pickInitialCwd);
+  const [cwd, setCwdState] = useState(() => initialCwd ?? pickInitialCwd());
   // 用户动过 cwd 输入框后不再自动预填（含故意清空）
   const cwdTouched = useRef(false);
   const setCwd = (value: string) => {
@@ -1039,6 +1046,10 @@ function NewSessionForm({ onDone }: { onDone: () => void }) {
   // 三个配置下拉的已选值；"" = 跟随配置（不传该字段）。切 agent 时整体重置。
   const [configSel, setConfigSel] = useState<Partial<Record<ConfigOptionId, string>>>(() => newSessionConfig("claude"));
   const options = meta?.drivers[agent]?.options ?? [];
+
+  useEffect(() => {
+    if (initialCwd && !cwdTouched.current) setCwdState(initialCwd);
+  }, [initialCwd]);
 
   // meta/会话列表可能晚于表单挂载到达：用户未动手且仍为空时补一次预填
   useEffect(() => {

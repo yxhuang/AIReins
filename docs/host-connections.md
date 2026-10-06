@@ -4,12 +4,14 @@
 
 ## 另一台电脑安装
 
-在它自己的 WSL/Linux 中 clone 本仓库，进入仓库运行 `bash install.sh`；依赖要求见 [新电脑安装](../README.md#新电脑安装)。脚本安装 `wb` 命令，WSL 下也安装 Windows 托盘与快捷方式；完成后手动固定到任务栏。`git pull` 后重跑同一命令即可更新。CLI 安装、登录和本地工作目录属于那台电脑，clone 仓库不会复制这些状态；Tailscale 远程入口仍须单独配置。
+在它自己的 WSL/Linux 中 clone 本仓库，进入仓库运行 `bash install.sh`；依赖要求见 [新电脑安装](../README.md#新电脑安装)。脚本安装 `wb` 命令，WSL 下也安装 Windows 托盘与快捷方式；完成后手动固定到任务栏。Windows Tailscale 已安装、登录并运行时，脚本自动生成缺失的 `~/.workbench/remote.json`（本机 MagicDNS origin、本机用户白名单、8793 端口、权限 600、远程终端默认关闭），已有配置只校验并打印 origin、不覆盖。登录任务缺失时弹出一次 UAC，允许后安装 Windows 远程网关及 Serve；已有任务打印状态并跳过，拒绝或失败时打印手动命令且继续本机安装。新配置遇到已运行 WB 时提示「运行 wb restart 使远程入口生效」，不会自动重启；未运行则按现有冒烟流程处理。
+
+`git pull` 后重跑同一命令即可更新；`bash install.sh --check` 只读报告 remote.json、Serve 与计划任务状态，不写文件或弹 UAC。非 WSL、无 Tailscale 或未登录时跳过远程配置，登录后可重跑。CLI 安装、登录和本地工作目录属于那台电脑，clone 仓库不会复制这些状态。远程终端默认关闭，如需远程终端改为 `true` 后 `wb restart`。代理客户端 等系统代理须把 `*.ts.net` 加入绕过，否则浏览器可能报 `ERR_TUNNEL_CONNECTION_FAILED`。
 
 ## 双向连接
 
-1. 两台电脑各自准备可访问的 Tailscale WB HTTPS 地址。沿用 [后端远程入口配置](../server/README.md#远程入口配置-workbenchremotejson) 的 Serve、身份白名单与 Host/Origin 校验；新增电脑须配置它自己的入口。Windows 登录后按需启动参考 [REMOTE.md](../deploy/windows/REMOTE.md)。
-2. 在每台电脑的本机 WB 中，打开「设置 → 主机与连接」，或品牌菜单的「管理主机…」，添加对方的地址，例如 `https://other-pc.tailxxxx.ts.net`。只接受完整 HTTPS MagicDNS origin，不带路径、查询、fragment、账号密码或自定义端口。名字直接读取域名中的 Tailscale 机器名，最多保存 16 台。
+1. 两台电脑各自准备可访问的 Tailscale WB HTTPS 地址。WSL 新电脑可由 `bash install.sh` 自动配置；其他环境参考 [后端远程入口配置](../server/README.md#远程入口配置-workbenchremotejson)。Serve、身份白名单与 Host/Origin 校验继续生效，每台电脑使用自己的入口。Windows 登录后按需启动参考 [REMOTE.md](../deploy/windows/REMOTE.md)。
+2. 在每台电脑的本机 WB 中，点击左上角 wb 品牌按钮，从「Tailscale 上的其他电脑」选择对方，即可保存地址并切换；↗ 则保存并在新标签页打开。每次打开菜单只发现一次，列出同一 tailnet 中尚未保存的 Windows/Linux/macOS 电脑，在线优先；离线电脑置灰并标「离线」，仍可点击。「设置 → 主机与连接」和「管理主机…」也可手动添加：支持完整地址（例如 `https://other-pc.tailxxxx.ts.net`）、裸 MagicDNS 名（可带末尾 `/` 或 `.`）、Tailscale IPv4/IPv6 和机器名。裸 MagicDNS 直接补全 HTTPS；IP 或机器名在点击添加时查询 Tailscale 设备，机器名不区分大小写，可匹配设备名称或 MagicDNS 首段。补全成功会显示「已补全为 …」；找不到时提示原因且不保存，多台同名时提示改用 IP 或完整地址，避免添加错电脑。最终保存的地址仍只接受完整 HTTPS MagicDNS origin，不带路径、查询、fragment、账号密码或自定义端口，最多保存 16 台。
 3. 点击品牌按钮选择目标，当前页面整页跳到目标 WB；每行的 ↗ 可另开标签页，同时查看两台电脑。
 4. 从本机 WB 进入远程时，带上发起浏览器的本机返回入口，远程菜单可选「本机」返回。直接在手机或独立浏览器打开远程地址时，没有本机返回入口。
 
@@ -19,7 +21,7 @@
 
 切换后，会话、历史、文件、工作目录、权限和终端都属于目标机器。切换不迁移任务，也不发送中断、释放或重启命令；正常运行的后台任务继续在原主机上执行。文件正在保存时阻止当前页面切换；未发送输入（包括新建会话的首条消息）/附件确认后才能切走，未保存文件沿用浏览器离页确认。新标签打开保留原页面；主机菜单的上下方向键同时覆盖当前页切换和新标签操作。
 
-目标电脑需要开机、联网、允许访问且 WB 可用；Tailscale 本身不唤醒停止的 WSL。连接失败停留在目标地址的错误页面，浏览器后退可以返回来源，不自动改为本机执行。远程终端和原生 Windows 文件选择沿用目标已有能力配置。
+发现仅表示设备在 Tailscale 上登记，不代表安装或运行了 WB；不做跨源探测。后端只读运行 `tailscale status --json`，优先 PATH 中的 `tailscale`，WSL 未找到时使用 Windows 安装路径；命令超时约 5 秒且输出有上限，未安装、未运行或读取失败时不显示发现列表。目标电脑需要开机、联网、允许访问且 WB 可用；Tailscale 本身不唤醒停止的 WSL。连接失败停留在目标地址的错误页面，浏览器后退可以返回来源，不自动改为本机执行。远程终端和原生 Windows 文件选择沿用目标已有能力配置。
 
 ## 验收边界
 
