@@ -133,6 +133,12 @@ export function HostSwitcher() {
     if (!next) event.preventDefault();
     else event.currentTarget.href = hostNavigationUrl(origin, next);
   };
+  // 左键开独立窗口：Chrome --app 窗口里的 popup 继承同一 app 名，任务栏与 WB 归为一组；中键仍按浏览器默认开标签页。
+  const openNewWindow = (event: MouseEvent<HTMLAnchorElement>) => {
+    if (event.defaultPrevented || event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey) return;
+    event.preventDefault();
+    window.open(event.currentTarget.href, "_blank", `popup,noopener,noreferrer,width=${window.outerWidth},height=${window.outerHeight}`);
+  };
   const choose = (origin: string, discovered = false) => {
     if (origin === currentOrigin) { close(true); return; }
     if (store.filePreview?.saving) { setError("文件正在保存，完成后再切换主机。"); return; }
@@ -146,6 +152,10 @@ export function HostSwitcher() {
     ...(currentUnsaved ? [currentRemote, ...connections.remotes] : connections.remotes)
       .map(origin => ({ origin, name: connectionLabel(origin) })),
   ];
+  // Chrome/Edge 的 --app 与安装的 PWA 都报 standalone；普通标签页里不需要这个入口。
+  const standalone = typeof window !== "undefined" && window.matchMedia?.("(display-mode: standalone)").matches;
+  const brands = (navigator as Navigator & { userAgentData?: { brands: { brand: string }[] } }).userAgentData?.brands ?? [];
+  const browserLabel = brands.some(b => b.brand === "Google Chrome") ? "在 Chrome 中打开" : "在浏览器中打开";
   const knownOrigins = new Set([currentOrigin, ...connections.remotes]);
   const discovered = peers.filter(peer => {
     if (knownOrigins.has(peer.origin)) return false;
@@ -161,7 +171,7 @@ export function HostSwitcher() {
       <span className="brand-line" aria-hidden="true" />
       <span className="brand-name" aria-hidden="true">{label}</span>
     </button>
-    {open && createPortal(<div className="host-switch-panel" ref={panelRef} id={panelId}
+    {open && createPortal(<div className={`host-switch-panel${managing ? " managing" : ""}`} ref={panelRef} id={panelId}
       role={managing ? "dialog" : "menu"} aria-label={managing ? "主机与连接" : "选择主机"}
       style={{ ...position, maxHeight: `calc(100dvh - ${position.top + 8}px)` }}
       onKeyDown={event => {
@@ -186,7 +196,7 @@ export function HostSwitcher() {
             <span className="host-menu-name">{name}</span>
           </button>
           <a role="menuitem" href={hostNavigationUrl(origin, connections)} target="_blank" rel="noopener noreferrer"
-            className="host-menu-new-window" aria-label={`在新标签页打开 ${name}`} title="在新标签页打开">↗</a>
+            className="host-menu-new-window" aria-label={`在新窗口打开 ${name}`} title="在新窗口打开" onClick={openNewWindow}>↗</a>
         </div>)}
         {discovered.length > 0 && <>
           <p className="host-menu-section">Tailscale 上的其他电脑</p>
@@ -197,14 +207,16 @@ export function HostSwitcher() {
             </button>
             <a role="menuitem" href={hostNavigationUrl(peer.origin, { ...connections, remotes: [...connections.remotes, peer.origin] })}
               target="_blank" rel="noopener noreferrer" className="host-menu-new-window"
-              aria-label={`在新标签页打开 ${peer.name}`} title="在新标签页打开"
-              onClick={event => openNewTab(event, peer.origin)}
+              aria-label={`在新窗口打开 ${peer.name}`} title="在新窗口打开"
+              onClick={event => { openNewTab(event, peer.origin); openNewWindow(event); }}
               onAuxClick={event => { if (event.button === 1) openNewTab(event, peer.origin); }}>↗</a>
           </div>)}
         </>}
         {connections.remotes.length === 0 && <p className="settings-hint">添加另一台电脑的 Tailscale 地址后即可切换。</p>}
         {!connections.localOrigin && <p className="settings-hint">从电脑的本机 Workbench 进入远程后，可在这里返回本机。</p>}
         {currentUnsaved && <p className="settings-hint" role="status">列表已满，当前主机暂未保存。原有地址已保留，可在主机与连接中管理。</p>}
+        {standalone && <a role="menuitem" className="host-menu-manage host-menu-browser" href={window.location.href}
+          target="_blank" rel="noopener noreferrer" onClick={() => close(false)}>{browserLabel}</a>}
         <button type="button" role="menuitem" className="host-menu-manage" onClick={() => setManaging(true)}>管理主机…</button>
       </>}
       {error && <p className="host-connection-notice" role="alert">{error}</p>}

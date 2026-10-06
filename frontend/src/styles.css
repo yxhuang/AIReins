@@ -583,11 +583,12 @@ body.resizing {
 .host-switch-button .brand-mark, .host-switch-button .brand-line { flex-shrink: 0; }
 .app.sidebar-collapsed .host-switch-button { padding-inline: 5px; }
 .host-switch-panel {
-  position: fixed; z-index: 75; width: min(300px, calc(100vw - 16px)); box-sizing: border-box;
+  position: fixed; z-index: 75; width: max-content; min-width: 200px; max-width: min(280px, calc(100vw - 16px)); box-sizing: border-box;
   padding: 8px; border: 1px solid var(--border-strong); border-radius: 10px;
   background: var(--surface); color: var(--text); box-shadow: var(--shadow-pop);
   overflow-y: auto; overscroll-behavior: contain; font: 15px var(--font-ui);
 }
+.host-switch-panel.managing { width: min(300px, calc(100vw - 16px)); max-width: none; } /* 添加表单需要输入框宽度 */
 .host-switch-current { margin: 4px 6px 8px; font-size: 14px; color: var(--text-muted); overflow-wrap: anywhere; }
 .host-menu-row { display: flex; align-items: stretch; gap: 4px; }
 .host-menu-section { margin: 8px 4px 4px; padding-top: 8px; border-top: 1px solid var(--border); font-size: 14px; color: var(--text-muted); }
@@ -602,6 +603,11 @@ body.resizing {
 .host-menu-check { width: 16px; flex: 0 0 16px; color: var(--busy); }
 .host-menu-new-window { width: 44px; min-height: 44px; display: grid; place-items: center; text-decoration: none; flex-shrink: 0; }
 .host-menu-manage { display: block; width: 100%; min-height: 44px; margin-top: 6px; padding: 8px; border-top: 1px solid var(--border); text-align: left; }
+.host-menu-browser { box-sizing: border-box; text-decoration: none; }
+/* 提示文字不撑宽菜单：宽度由主机名决定，提示随之换行 */
+.host-switch-panel:not(.managing) :is(.settings-hint, .host-connection-notice) { width: 0; min-width: 100%; }
+.host-menu-browser + .host-menu-manage { margin-top: 0; border-top: 0; }
+@media (pointer: fine) { .host-menu-new-window { width: 34px; } }
 .host-menu-target:hover, .host-menu-new-window:hover, .host-menu-manage:hover, .host-remove:hover { background: var(--chrome); }
 .host-switch-panel :is(button, a, input):focus-visible { outline: 2px solid var(--busy); outline-offset: -2px; }
 .host-connections-settings { min-width: 0; }
