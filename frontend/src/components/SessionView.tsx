@@ -1,8 +1,8 @@
 import { Fragment, type ReactNode, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import type { CommandInfo, DriverConfigOption, Mention, SessionRecord } from "../types";
 import { sessionTitle, truncateDisplayWidth } from "../format";
-import { compactCwd, awayFromLatest, showComposerInterrupt, appendRefineCommand } from "../session-ui";
-import { buildRenderItems, focusVisible, groupReadOnlyTools } from "../render-items";
+import { compactCwd, awayFromLatest, syncStreamViewport, showComposerInterrupt, appendRefineCommand } from "../session-ui";
+import { createRenderItemsBuilder } from "../render-items";
 import { filterCommands, noteCommandUsed, readRecentCommands, recentInTable } from "../commands";
 import { extractMentionTokens, mentionQueryAt, mentionTokenEnd } from "../mentions";
 import { configOptionsForModel, modelConfigPatch, needsRestartNote, effectiveFor, modelShortName, pillText, EFFECTIVE_SOURCE_LABELS, ALIAS_NOTE, RESTART_NOTE } from "../config-view";
@@ -24,6 +24,7 @@ import { SessionDispatchBadge, SessionDispatchLink, useSessionDispatches } from 
 import { PanelActions, PanelMenuItems } from "./PanelActions";
 import { PageIcon } from "./Sidebar";
 import { shortSessionTitle } from "./SessionTitle";
+import { MarkdownCommitContext } from "./MarkdownMessage";
 import { ContextUsage } from "./ContextUsage";
 
 const selectMeta = (value: Store) => value.meta;
@@ -41,22 +42,23 @@ export function SessionView({ session, mobileTail, usage }: { session: SessionRe
   const dead = session.status === "dead";
   const selectData = useCallback((value: Store) => value.data.get(session.id), [session.id]);
   const data = useStore(selectData);
-  const title = shortSessionTitle(sessionTitle(session, data?.events));
   const wsState = useStore(selectWsState);
   // 三家均按原生会话身份查询派单；后台任务计数仍由 Claude 原生事件提供。
   const backgroundCount = session.agent === "claude" ? session.backgroundTasks?.length ?? 0 : 0;
   const dispatchRuns = useSessionDispatches(session.nativeSessionId ?? session.id, backgroundCount, session.agent);
+  const renderBuilder = useMemo(() => createRenderItemsBuilder(session.agent), [session.id, session.agent]);
   const items = useMemo(
-    () => (data ? buildRenderItems(data.events, session.agent) : []),
+    () => renderBuilder.update(data?.events ?? [], data?.dropped),
     // resync 可以用相同 seq 原子替换事件窗口，所以 events 引用也是必要失效键。
-    [data?.seq, data?.dropped, data?.events, session.agent],
+    [data?.seq, data?.dropped, data?.events, renderBuilder],
   );
 
+  const title = shortSessionTitle(sessionTitle(session, renderBuilder.firstUser ? [renderBuilder.firstUser] : []));
+
   const focusView = useStore(selectFocusView);
-  const shown = useMemo(() => {
-    const grouped = groupReadOnlyTools(items, session.agent, session.cwd);
-    return focusView ? grouped.filter(focusVisible) : grouped;
-  }, [items, focusView, session.agent, session.cwd]);
+  const prefixVersion = renderBuilder.prefixVersion;
+  const shown = useMemo(() => renderBuilder.display(focusView, session.cwd),
+    [renderBuilder, data, focusView, session.cwd]);
 
   const streamRef = useRef<HTMLDivElement>(null);
   const earlierRef = useRef<HTMLDivElement>(null);
@@ -102,6 +104,15 @@ export function SessionView({ session, mobileTail, usage }: { session: SessionRe
   // 贴底跟随：是否贴底按用户最后一次滚动时的位置记，初始为贴底。
   // 不能在更新后再量——进会话、刷新、重连补齐时整批事件一次撑高，更新后量永远不在底部。
   const stickToBottom = useRef(true);
+  const hiddenPendingUpdater = useRef(updateHiddenPending);
+  hiddenPendingUpdater.current = updateHiddenPending;
+  // Stable context value: streaming deltas must not invalidate every old message.
+  const onMarkdownCommit = useCallback(() => {
+    const container = streamRef.current;
+    if (!container || readingAnchor.current) return;
+    setShowLatest(syncStreamViewport(container, stickToBottom.current));
+    hiddenPendingUpdater.current();
+  }, []);
   const loadEarlier = useCallback(() => {
     void store.loadOlder(session.id, () => {
       const container = streamRef.current;
@@ -132,7 +143,7 @@ export function SessionView({ session, mobileTail, usage }: { session: SessionRe
       readingAnchor.current = null;
     } else if (container && stickToBottom.current) container.scrollTop = container.scrollHeight;
     if (container) setShowLatest(awayFromLatest(container.scrollHeight, container.scrollTop, container.clientHeight));
-  }, [items, data?.prependVersion]);
+  }, [items, data?.seq, data?.dropped, data?.events, data?.prependVersion]);
 
   useEffect(() => {
     const container = streamRef.current;
@@ -156,6 +167,66 @@ export function SessionView({ session, mobileTail, usage }: { session: SessionRe
     void store.recoverMissingPendingGate(session.id);
   };
 
+  const renderItem = (item: (typeof shown)[number], index: number) => {
+    const isLast = index === shown.length - 1;
+    const next = shown[index + 1];
+    if (item.kind === "tool-group") {
+      const continues = (next?.kind === "text" || next?.kind === "thought" || next?.kind === "tool" || next?.kind === "tool-group") && next.turn === item.turn;
+      return <ReadOnlyToolGroup key={item.key} item={item} agent={session.agent} cwd={session.cwd} continues={continues} />;
+    }
+    if (item.kind === "text" || item.kind === "thought" || item.kind === "tool") {
+      const continues = (next?.kind === "text" || next?.kind === "thought" || next?.kind === "tool" || next?.kind === "tool-group") && next.turn === item.turn;
+      const dot = item.kind === "tool" ? ` timeline-${item.status}` : "";
+      const view = item.kind === "text"
+        ? <TextBlockView item={item} streaming={isLast && running} cwd={session.cwd} sessionId={session.id} />
+        : item.kind === "thought" ? <ThoughtBlockView item={item} /> : <ToolCard item={item} agent={session.agent} cwd={session.cwd} />;
+      return <div key={item.key} className={`timeline-item${continues ? " timeline-continues" : ""}${dot}`}>{view}</div>;
+    }
+    switch (item.kind) {
+      case "user":
+        return <UserBlockView key={item.key} item={item} />;
+      case "external-history":
+        return <ExternalHistoryView key={item.key} item={item} agent={session.agent} cwd={session.cwd} sessionId={session.id} />;
+      case "gate": {
+        // AskUserQuestion 渲染为提问选择卡片；与普通闸门共用 pendingGates/贴条机制
+        const Block = item.questions?.length ? QuestionBlock : GateBlock;
+        return (
+          <Block
+            key={item.key}
+            item={item}
+            sessionId={session.id}
+            dead={dead}
+            ref={(el) => {
+              if (el) gateRefs.current.set(item.requestId, el);
+              else gateRefs.current.delete(item.requestId);
+            }}
+          />
+        );
+      }
+      case "system":
+        return <SystemLine key={item.key} item={item} />;
+      case "raw":
+        return <RawLine key={item.key} item={item} />;
+      default:
+        return null;
+    }
+  };
+  // Keep one keyed children array: moving rows between prefix/tail arrays would
+  // remount tools and gates when new blocks arrive, losing their local state.
+  const rowCache = useRef<{ deps: unknown[]; rows: ReactNode[]; length: number } | null>(null);
+  const rows = useMemo(() => {
+    const deps = [items, prefixVersion, focusView, session.id, session.agent, session.cwd, dead, running];
+    const cached = rowCache.current;
+    if (cached && deps.every((value, i) => value === cached.deps[i])) {
+      for (let i = Math.max(0, cached.length - 1); i < shown.length; i++) cached.rows[i] = renderItem(shown[i]!, i);
+      cached.length = shown.length;
+      return cached.rows;
+    }
+    const rows = shown.map(renderItem);
+    rowCache.current = { deps, rows, length: shown.length };
+    return rows;
+  }, [items, data, prefixVersion, focusView, session.id, session.agent, session.cwd, dead, running]);
+
   return (
     <div className={`session agent-${session.agent}`}>
       <header className="session-head">
@@ -174,7 +245,7 @@ export function SessionView({ session, mobileTail, usage }: { session: SessionRe
         <div className="session-head-actions">
           <SessionDispatchLink runs={dispatchRuns} backgroundCount={backgroundCount} desktop />
           <div className="session-panel-controls">
-            <PanelActions />
+            <PanelActions dispatchRuns={dispatchRuns} />
             {mobileTail && <div className="mobile-tail">{mobileTail}</div>}
             <SessionDispatchBadge runs={dispatchRuns} backgroundCount={backgroundCount} />
             <SessionMoreMenu session={session} usage={usage} />
@@ -206,50 +277,7 @@ export function SessionView({ session, mobileTail, usage }: { session: SessionRe
         {data && data.dropped > 0 && (
           <p className="system-line">有 {data.dropped} 条较早事件已省略（内存上限）；快照仍保留全量。</p>
         )}
-        {shown.map((item, index) => {
-          const isLast = index === shown.length - 1;
-          const next = shown[index + 1];
-          if (item.kind === "tool-group") {
-            const continues = (next?.kind === "text" || next?.kind === "thought" || next?.kind === "tool" || next?.kind === "tool-group") && next.turn === item.turn;
-            return <ReadOnlyToolGroup key={item.key} item={item} agent={session.agent} cwd={session.cwd} continues={continues} />;
-          }
-          if (item.kind === "text" || item.kind === "thought" || item.kind === "tool") {
-            const continues = (next?.kind === "text" || next?.kind === "thought" || next?.kind === "tool" || next?.kind === "tool-group") && next.turn === item.turn;
-            const dot = item.kind === "tool" ? ` timeline-${item.status}` : "";
-            const view = item.kind === "text"
-              ? <TextBlockView item={item} streaming={isLast && running} cwd={session.cwd} sessionId={session.id} />
-              : item.kind === "thought" ? <ThoughtBlockView item={item} /> : <ToolCard item={item} agent={session.agent} cwd={session.cwd} />;
-            return <div key={item.key} className={`timeline-item${continues ? " timeline-continues" : ""}${dot}`}>{view}</div>;
-          }
-          switch (item.kind) {
-            case "user":
-              return <UserBlockView key={item.key} item={item} />;
-            case "external-history":
-              return <ExternalHistoryView key={item.key} item={item} agent={session.agent} cwd={session.cwd} sessionId={session.id} />;
-            case "gate": {
-              // AskUserQuestion 渲染为提问选择卡片；与普通闸门共用 pendingGates/贴条机制
-              const Block = item.questions?.length ? QuestionBlock : GateBlock;
-              return (
-                <Block
-                  key={item.key}
-                  item={item}
-                  sessionId={session.id}
-                  dead={dead}
-                  ref={(el) => {
-                    if (el) gateRefs.current.set(item.requestId, el);
-                    else gateRefs.current.delete(item.requestId);
-                  }}
-                />
-              );
-            }
-            case "system":
-              return <SystemLine key={item.key} item={item} />;
-            case "raw":
-              return <RawLine key={item.key} item={item} />;
-            default:
-              return null;
-          }
-        })}
+        <MarkdownCommitContext value={onMarkdownCommit}>{rows}</MarkdownCommitContext>
       </div>
 
       {showLatest && <button type="button" className="back-to-latest" onClick={() => {
@@ -905,7 +933,7 @@ function Composer({ session, dead, errored }: { session: SessionRecord; dead: bo
       fitTextarea();
     });
     observer.observe(el);
-    return () => observer.disconnect();
+      return () => observer.disconnect();
   }, [fitTextarea]);
 
   // 补全插入后把光标落到插入路径之后

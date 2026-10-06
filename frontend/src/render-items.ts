@@ -359,7 +359,7 @@ function abnormalTurnReason(payload: Record<string, unknown>, agent: AgentKind):
 
 const externalHistoryMessages = new WeakMap<object, HistoryMessage[]>();
 
-export function buildRenderItems(events: UnifiedEvent[], agent: AgentKind): RenderItem[] {
+function renderItemsReducer(events: UnifiedEvent[], agent: AgentKind) {
   const items: RenderItem[] = [];
   const tools = new Map<string, ToolView>();
   const gates = new Map<string, GateView>();
@@ -382,12 +382,21 @@ export function buildRenderItems(events: UnifiedEvent[], agent: AgentKind): Rend
     lastThought = undefined;
   };
 
-  for (const event of [...events].sort((a, b) => a.seq - b.seq)) {
+  const positions = new WeakMap<RenderItem, number>();
+  const replace = <T extends RenderItem>(item: T): T => {
+    const index = positions.get(item) ?? items.indexOf(item);
+    const next = { ...item };
+    items[index] = next;
+    positions.set(next, index);
+    return next;
+  };
+  const append = (event: UnifiedEvent) => {
     const p = event.payload;
     switch (event.type) {
       case "agent_text_delta": {
         const text = String(p.text ?? "");
         if (lastText) {
+          lastText = replace(lastText);
           lastText.text += text;
         } else {
           lastText = { kind: "text", key: `text:${event.seq}`, seq: event.seq, text, turn };
@@ -399,6 +408,7 @@ export function buildRenderItems(events: UnifiedEvent[], agent: AgentKind): Rend
       case "thought_delta": {
         const text = String(p.text ?? "");
         if (lastThought) {
+          lastThought = replace(lastThought);
           lastThought.text += text;
         } else {
           lastThought = { kind: "thought", key: `thought:${event.seq}`, seq: event.seq, text, turn };
@@ -471,8 +481,10 @@ export function buildRenderItems(events: UnifiedEvent[], agent: AgentKind): Rend
         break;
       }
       case "tool_call_updated": {
-        const view = tools.get(String(p.toolCallId ?? ""));
+        let view = tools.get(String(p.toolCallId ?? ""));
         if (view) {
+          view = replace(view);
+          tools.set(view.toolCallId, view);
           // kimi 跑命令时的 content 是终端引用（{type:"terminal"}），不是入参，不能覆盖真实入参
           const updated = toolInputText(p);
           if (updated && !isTerminalRefContent(p.content)) view.input = updated;
@@ -482,8 +494,10 @@ export function buildRenderItems(events: UnifiedEvent[], agent: AgentKind): Rend
         break;
       }
       case "tool_call_completed": {
-        const view = tools.get(String(p.toolCallId ?? ""));
+        let view = tools.get(String(p.toolCallId ?? ""));
         if (view) {
+          view = replace(view);
+          tools.set(view.toolCallId, view);
           view.status = p.isError ? "error" : "ok";
           // claude 给 result，kimi 给 content，宽容取其一。
           view.result = toolResultText(p.result ?? p.content);
@@ -512,8 +526,10 @@ export function buildRenderItems(events: UnifiedEvent[], agent: AgentKind): Rend
         break;
       }
       case "permission_resolved": {
-        const view = gates.get(String(p.requestId ?? ""));
+        let view = gates.get(String(p.requestId ?? ""));
         if (view) {
+          view = replace(view);
+          gates.set(view.requestId, view);
           view.decision = p.decision as PermissionDecision;
           // 提问卡片的回答回执：广播原样带回 questionAnswers，供「已选择：…」降级态展示
           if (p.questionAnswers && typeof p.questionAnswers === "object" && !Array.isArray(p.questionAnswers)) {
@@ -613,11 +629,85 @@ export function buildRenderItems(events: UnifiedEvent[], agent: AgentKind): Rend
         // usage_updated 等不在流内渲染（会话头单独展示）。
         break;
     }
-  }
-  return items;
+    if (items.length) positions.set(items[items.length - 1]!, items.length - 1);
+  };
+  return { items, append };
 }
 
 // 工具入参的展示文本：claude 流式给 partialInput 字符串，kimi 给 content/rawInput，宽容处理。
+
+export function buildRenderItems(events: UnifiedEvent[], agent: AgentKind): RenderItem[] {
+  const reducer = renderItemsReducer(events, agent);
+  for (const event of [...events].sort((a, b) => a.seq - b.seq)) reducer.append(event);
+  return reducer.items;
+}
+
+/** A replacement window is always atomic, even when its last seq is unchanged. */
+export function createRenderItemsBuilder(agent: AgentKind) {
+  let source: UnifiedEvent[] | undefined;
+  let length = 0;
+  let dropped: number | undefined;
+  let last: UnifiedEvent | undefined;
+  let maxSeq = -Infinity;
+  let reducer = renderItemsReducer([], agent);
+  let displayCache: { items: RenderItem[]; version: number; focus: boolean; cwd: string; length: number; shown: StreamRenderItem[] } | undefined;
+  return {
+    // Older item changes invalidate the cached display prefix; text deltas only change the tail.
+    prefixVersion: 0,
+    firstUser: undefined as UnifiedEvent | undefined,
+    display(focus: boolean, cwd: string): StreamRenderItem[] {
+      const items = reducer.items;
+      const cached = displayCache;
+      if (cached && cached.items === items && cached.version === this.prefixVersion && cached.focus === focus && cached.cwd === cwd) {
+        for (let i = Math.max(0, cached.length - 1); i < items.length; i++) {
+          const item = items[i]!;
+          if (focus && !focusVisible(item)) continue;
+          if (cached.shown.at(-1)?.key === item.key) cached.shown[cached.shown.length - 1] = item;
+          else if (i >= cached.length) cached.shown.push(item);
+        }
+        cached.length = items.length;
+        return cached.shown;
+      }
+      const grouped = groupReadOnlyTools(items, agent, cwd);
+      const shown = focus ? grouped.filter(focusVisible) : grouped;
+      displayCache = { items, version: this.prefixVersion, focus, cwd, length: items.length, shown };
+      return shown;
+    },
+    update(events: UnifiedEvent[], nextDropped = 0): RenderItem[] {
+      let safe = source === events && dropped === nextDropped && events.length >= length
+        && (length === 0 || events[length - 1] === last);
+      let seq = maxSeq;
+      for (let i = length; safe && i < events.length; i++) {
+        const event = events[i]!;
+        // Codex command output suppression looks ahead across the complete window.
+        safe = event.seq > seq && !(agent === "codex" && (event.type === "tool_call_started"
+          || event.type === "tool_call_completed" && typeof asRecord(event.payload.result).aggregatedOutput === "string"));
+        seq = event.seq;
+      }
+      if (!safe) {
+        reducer = renderItemsReducer(events, agent);
+        for (const event of [...events].sort((a, b) => a.seq - b.seq)) reducer.append(event);
+        this.firstUser = events.find(event => event.type === "user_message");
+        maxSeq = events.reduce((max, event) => Math.max(max, event.seq), -Infinity);
+        this.prefixVersion++;
+      } else {
+        for (let i = length; i < events.length; i++) {
+          const event = events[i]!;
+          if (!this.firstUser && event.type === "user_message") this.firstUser = event;
+          if (event.type !== "agent_text_delta" && event.type !== "thought_delta") this.prefixVersion++;
+          reducer.append(event);
+        }
+        maxSeq = seq;
+      }
+      source = events;
+      length = events.length;
+      last = events.at(-1);
+      dropped = nextDropped;
+      return reducer.items;
+    },
+  };
+}
+
 function toolInputText(p: Record<string, unknown>): string {
   if (typeof p.partialInput === "string") return p.partialInput;
   if (p.input !== undefined) return stringifyBlock(p.input);

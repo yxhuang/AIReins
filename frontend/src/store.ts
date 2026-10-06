@@ -667,6 +667,24 @@ export class Store {
     this.notify();
   }
 
+  /** 派单详情的「返回」回流程图（高亮该派单）；手机从会话直达详情时原地换成流程图，流程图再返回即回会话。 */
+  backFromDispatchDetail(runId: string): void {
+    if (!this.isMobileNavigation()) { this.navigateDispatches(); return; }
+    if (this.mobileBackPending) return;
+    const entry = this.readMobileEntry();
+    const source = entry?.source;
+    const verified = Boolean(entry && source && this.mobilePredecessors.get(entry.id) === source.id);
+    // 来源本身是流程图：可证实相邻就 back，刷新后无法证实则原地还原为该流程图（returnMobileRoute 兜底）。
+    if (source?.route.dispatchesOpen && !/^#\/dispatches\//.test(source.route.hash)) {
+      this.returnMobileRoute("#/dispatches");
+      return;
+    }
+    const route = this.mobileRouteFromHash(`#/dispatches?runs=${encodeURIComponent(runId)}`);
+    const replaced = this.replaceMobileEntry(route, source);
+    if (verified) this.mobilePredecessors.set(replaced.id, source!.id);
+    this.applyMobileRoute(route);
+  }
+
   closeDispatches(): void {
     if (this.isMobileNavigation()) { this.returnMobileRoute(this.currentId ? `#/session/${encodeURIComponent(this.currentId)}` : "#/"); return; }
     if (this.desktopPanelOrder.includes("right")) {

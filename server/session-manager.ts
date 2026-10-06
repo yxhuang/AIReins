@@ -18,6 +18,12 @@ import {
 } from "./session-config.js";
 import {
   appendTranscript,
+  assertTranscriptWritable,
+  flushTranscripts,
+  readTranscriptPage,
+  readTranscriptTail,
+  setTranscriptCacheIdle,
+  releaseTranscriptCache,
   deleteSessionFiles,
   loadRegistry,
   loadSessionGroups,
@@ -51,7 +57,7 @@ import type {
 import { ulid } from "./ulid.js";
 import { menuSettingsFiles, withMenuFileUris, type McpAction, type SideQuestionInput } from "./session-menu.js";
 import { parseCodexCommand } from "./codex-commands.js";
-import { selectEventPage, snapshotState, type EventPage } from "./event-pages.js";
+import type { EventPage } from "./event-pages.js";
 import { captureWorkerIdentity, oldWorkerGone, readSystemBootTime } from "./worker-process.js";
 import { hasTerminalWorkerEvidence, rebootProvesWorkerGone } from "./session-recovery.js";
 import { parseGroupName, parseOrganizationPatch, SessionOrganizationError, type SessionOrganizationFrame } from "./session-organization.js";
@@ -130,6 +136,7 @@ export class SessionManager {
     log("info", "legacy Claude transcript updates compacted", compactClaudeTranscripts(loaded));
     for (const stored of loaded) {
       let recovered: ReturnType<typeof readTranscriptState>;
+      setTranscriptCacheIdle(stored.transcriptPath, stored.released === true || stored.status === "idle");
       try { recovered = readTranscriptState(stored.transcriptPath); } catch (error) {
         log("error", "transcript recovery failed", { sessionId: stored.id, file: stored.transcriptPath, message: String(error) });
         recovered = { events: [], damaged: true, incompleteTail: false };
@@ -273,18 +280,19 @@ export class SessionManager {
   getSnapshot(id: string, tail = false): { session: SessionRecord; seq: number; events: UnifiedEvent[]; hasMore?: boolean; firstSeq?: number } | undefined {
     const session = this.sessions.get(id);
     if (!session) return undefined;
-    const events = readTranscript(session.transcriptPath);
-    if (!tail) return { session: this.get(id)!, seq: session.seq, events };
+    if (!tail) return { session: this.get(id)!, seq: session.seq, events: readTranscript(session.transcriptPath) };
+    setTranscriptCacheIdle(session.transcriptPath, session.released === true || session.status === "idle");
+    const { state, title, ...page } = readTranscriptTail(session.transcriptPath);
     return {
-      session: { ...cloneSession(session), title: sessionTitle({ ...session, title: this.titles.get(id) ?? sessionTitle({}, events) }, undefined), snapshotState: snapshotState(events) },
+      session: { ...cloneSession(session), title: sessionTitle({ ...session, title: this.titles.get(id) ?? title }, undefined), snapshotState: state },
       seq: session.seq,
-      ...selectEventPage(events),
+      ...page,
     };
   }
 
   getEventsBefore(id: string, beforeSeq: number): EventPage | undefined {
     const session = this.sessions.get(id);
-    return session ? selectEventPage(readTranscript(session.transcriptPath), beforeSeq) : undefined;
+    return session ? readTranscriptPage(session.transcriptPath, beforeSeq) : undefined;
   }
 
   getEventsAfter(id: string, afterSeq: number): { events: UnifiedEvent[]; requiresSnapshot: boolean; currentSeq: number } | undefined {
@@ -733,6 +741,7 @@ export class SessionManager {
     }
     const record = this.sessions.get(id);
     if (!record) return undefined;
+    flushTranscripts(record.transcriptPath);
     if (permanently) {
       validateNativeDelete(record);
       if (this.stopping || this.startups.has(id) || !["idle", "dead", "error"].includes(record.status)) {
@@ -810,6 +819,7 @@ export class SessionManager {
     if (record.released) throw new Error("会话 worker 已释放；下次发送时会自动从磁盘续接");
     const blocker = this.releaseBlocker(id, record);
     if (blocker) throw new Error(blocker);
+    flushTranscripts(record.transcriptPath);
     const worker = this.workers.get(id)!;
     // 先从 workers 删除再 stop：stop 触发的 exited 回调因 current() 为假直接返回，不会把会话标成 dead
     // 标记先于 stop；续接入口等待完整释放操作，旧进程退出前不启动新代。
@@ -840,6 +850,9 @@ export class SessionManager {
           ...(reason === "idle" && context.idleMinutes !== undefined ? { idleMinutes: context.idleMinutes } : {}),
         });
       }
+      flushTranscripts(record.transcriptPath);
+      releaseTranscriptCache(record.transcriptPath);
+      setTranscriptCacheIdle(record.transcriptPath, true);
       return { session: cloneSession(record), resumeCommand, vscodeUri: buildVSCodeUri(record) };
     })();
     this.releases.set(id, releasing);
@@ -897,6 +910,8 @@ export class SessionManager {
    */
   async shutdown(): Promise<void> {
     this.stopping = true;
+    let flushError: unknown;
+    try { flushTranscripts(); } catch (error) { flushError = error; }
     for (const id of this.partialUpdates.keys()) this.flushPartialUpdates(id);
     await Promise.allSettled(this.pendingMarkReads.values());
     await Promise.allSettled(this.releases.values());
@@ -925,7 +940,9 @@ export class SessionManager {
     for (const record of this.sessions.values()) {
       if (record.released && !this.damagedTranscripts.has(record.id)) record.releasedMark = this.nativeMarks.get(record.id);
     }
+    try { flushTranscripts(); } catch (error) { flushError ??= error; }
     this.persistRegistry();
+    if (flushError) throw flushError;
   }
 
   private emit(id: string, type: EventType, payload: Record<string, unknown> = {}, ephemeral = false): UnifiedEvent | undefined {
@@ -951,7 +968,14 @@ export class SessionManager {
     if (type === "user_message" && !this.titles.has(id)) this.titles.set(id, sessionTitle({}, [event]));
     if (type === "user_message") event.title = sessionTitle({ ...session, title: this.titles.get(id) });
     session.lastActivityAt = timestamp;
-    appendTranscript(session.transcriptPath, event);
+    appendTranscript(session.transcriptPath, event, () => {
+      this.damagedTranscripts.add(id);
+      session.status = "error";
+      const updates = this.partialUpdates.get(id);
+      if (updates) for (const update of updates.values()) if (update.timer) clearTimeout(update.timer);
+      this.partialUpdates.delete(id);
+      this.persistRegistry();
+    });
     const ring = this.rings.get(id) ?? [];
     ring.push(event);
     if (ring.length > RING_SIZE) ring.splice(0, ring.length - RING_SIZE);
@@ -985,6 +1009,7 @@ export class SessionManager {
     if (!session) return;
     if (status === "starting" || status === "dead") this.setBackgroundTasks(id, []);
     session.status = status;
+    setTranscriptCacheIdle(session.transcriptPath, status === "idle" || session.released === true);
     session.lastActivityAt = new Date().toISOString();
     this.trackWorkerProcess(session, status === "dead" ? undefined : this.workers.get(id));
     this.persistRegistry();
@@ -1381,6 +1406,8 @@ export class SessionManager {
   private assertWritableTranscript(id: string): void {
     if (this.deletingSessions.has(id)) throw new SessionBusyError("会话正在彻底删除，请稍候。");
     if (this.damagedTranscripts.has(id)) throw new Error(`transcript 损坏，禁止继续写入：${this.sessions.get(id)?.transcriptPath}`);
+    const session = this.sessions.get(id);
+    if (session) assertTranscriptWritable(session.transcriptPath);
   }
 
   private validateCwd(cwd: string): void {

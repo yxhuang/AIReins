@@ -9,6 +9,12 @@ export function awayFromLatest(height: number, top: number, viewport: number): b
   return height - top - viewport > 120;
 }
 
+/** 正文提交后按既有贴底意图更新；阅读历史时不移动视口。 */
+export function syncStreamViewport(container: { scrollHeight: number; scrollTop: number; clientHeight: number }, sticky: boolean): boolean {
+  if (sticky) container.scrollTop = container.scrollHeight;
+  return awayFromLatest(container.scrollHeight, container.scrollTop, container.clientHeight);
+}
+
 export function showComposerInterrupt(status: string, supported: boolean | undefined, processId: number | undefined, text: string): boolean {
   return status === "running" && Boolean(supported && processId && text.trim());
 }

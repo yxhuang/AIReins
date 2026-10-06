@@ -110,6 +110,7 @@ node frontend/scripts/smoke-ws.mjs  # 需后端；会创建测试会话、批准
 
 ## 消息与原生历史
 
+- 顺序追加事件由持久 reducer 增量折叠，更新条目使用新对象；分组和已完成行缓存，仅更新末尾。事件窗口引用替换、`dropped`、乱序/重复 seq 和 Codex 回溯输出依赖会全量重建。流式 Markdown 每 100ms 最多解析一次，停止流式后立即使用完整原文，代码着色仍等整轮结束。正文实际提交后同步贴底与“回到最新”状态，阅读历史时保持滚动位置。回归见 [long-session-scroll.test.mjs](scripts/long-session-scroll.test.mjs)、 [long-session-render.test.mjs](scripts/long-session-render.test.mjs)。
 - 助手用 `react-markdown` + GFM，禁原始 HTML、过滤 URL，外链加 noopener/noreferrer；单换行保留，代码/表格块内横滚，复制使用原文并提示失败。见 [MarkdownMessage.tsx](src/components/MarkdownMessage.tsx)。
 - 代码按需加载轻量词法着色，源码先转义；无/未知语言或 >2000 行纯文本，流式整轮结束后着色并丢弃过期结果；不是完整语法解析器，支持语言见 [code-highlight.ts](src/code-highlight.ts)、[highlight-languages.ts](src/highlight-languages.ts)。
 - 同回合 text/thought/tool 共用时间线，闸门/提问独立；正常结束不额外显示系统行，异常如实显示。连续 ≥3 个成功只读工具合并摘要，读取路径去重，未知工具回落原名/原始内容；命令先展示 20 行，可展开全部。见 [tool-summary.ts](src/tool-summary.ts)、[render-items.ts](src/render-items.ts)。

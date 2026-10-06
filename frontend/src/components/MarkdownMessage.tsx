@@ -1,9 +1,10 @@
-import React, { createContext, memo, isValidElement, useContext, useEffect, useState, type ReactNode } from "react";
+import React, { createContext, memo, isValidElement, useContext, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import Markdown, { defaultUrlTransform } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { mentionSegments } from "../mentions";
 import { highlightCode, highlightLanguage } from "../code-highlight";
 import { resolveLocalFileLink } from "../file-preview";
+import { createStreamingTextThrottle } from "../streaming-text";
 import { store } from "../store";
 
 function codeText(node: ReactNode): string {
@@ -24,6 +25,7 @@ function copyCode(button: HTMLButtonElement, text: string) {
     .then(() => flash("已复制"), () => flash("复制失败"));
 }
 
+export const MarkdownCommitContext = createContext<(() => void) | undefined>(undefined);
 const StreamingContext = createContext(false);
 const FileLinkContext = createContext<{ cwd: string; sessionId?: string } | undefined>(undefined);
 
@@ -70,7 +72,7 @@ const markdownComponents: React.ComponentProps<typeof Markdown>["components"] = 
   pre: MarkdownCodeBlock,
 };
 
-export const MarkdownMessage = memo(function MarkdownMessage({ text, streaming = false, cwd, sessionId }: { text: string; streaming?: boolean; cwd?: string; sessionId?: string }) {
+const ParsedMarkdownMessage = memo(function ParsedMarkdownMessage({ text, streaming = false, cwd, sessionId }: { text: string; streaming?: boolean; cwd?: string; sessionId?: string }) {
   return (
     <div className="markdown-message">
       <StreamingContext value={streaming}>
@@ -85,6 +87,18 @@ export const MarkdownMessage = memo(function MarkdownMessage({ text, streaming =
       </StreamingContext>
     </div>
   );
+});
+
+export const MarkdownMessage = memo(function MarkdownMessage(props: { text: string; streaming?: boolean; cwd?: string; sessionId?: string }) {
+  const onCommit = useContext(MarkdownCommitContext);
+  const [text, setText] = useState(props.text);
+  const throttle = useRef<ReturnType<typeof createStreamingTextThrottle> | null>(null);
+  if (!throttle.current) throttle.current = createStreamingTextThrottle(setText);
+  useEffect(() => { throttle.current!.update(props.text, props.streaming === true); }, [props.text, props.streaming]);
+  useEffect(() => () => throttle.current!.cancel(), []);
+  const displayedText = props.streaming ? text : props.text;
+  useLayoutEffect(() => { onCommit?.(); }, [displayedText, onCommit]);
+  return <ParsedMarkdownMessage {...props} text={displayedText} />;
 });
 
 export function UserMessageText({ text }: { text: string }) {

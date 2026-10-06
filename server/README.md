@@ -425,6 +425,8 @@ Codex 权限菜单已按当前官方三个常用预设更新（2026-10-01；本�
 
 分页阈值在 `server/event-pages.ts`：`EVENT_PAGE_MAX_TURNS = 30`，`EVENT_PAGE_MAX_JSON_BYTES = 1.5 * 1024 * 1024`（事件数组未压缩 JSON 的 UTF-8 字节数）。从末尾向前尽量累计完整回合，至少保留最后一个不可拆分段；只有 `user_message` 且 `steer !== true` 可作回合起点，首条用户消息之前的事件归第一段。切点不得穿过工具 started→最后 updated/completed 或审批 request→resolved 的区间，尚未完成的工具/闸门区间延伸至末尾；完成后再次更新工具也追溯原起点，`process_exited` 不截断工具区间。没有安全切点、单回合过大或跨回合配对形成超阈值不可拆段时，整段返回。分段 prepend 后统一重建渲染项，以保持工具配对和分组结果与全量一致。
 
+长会话分页按需缓存 seq→字节偏移、安全切点、字节/回合前缀和派生状态，正文仅按分页偏移读取。启动全量恢复不预建分页缓存；索引按保守估算设 16MiB 总预算并执行 LRU，闲置项优先淘汰，释放 worker 时移除索引，超预算单项不常驻。追加增量更新；文件 stat 指纹变化时先重判健康和残尾边界，读取前后指纹一致才缓存；全量健康重判同步失效旧版本索引，写后确认 inode、预期大小、新增字节与读取期间版本一致才增量推进缓存。tail 快照的分页与派生状态共用一次索引读取，超预算单项也只扫描一次。返回数据隔离于缓存，工具迟到更新仍会撤销穿过工具生命周期的旧切点。同 tick 的首次 transcript 追加同步执行，其余合批写入；所有读取、释放、移除和正常退出前刷出待写批次。延迟批次写失败记录日志，并将对应会话标为 error、transcript 在当前进程内锁为只读；后续 driver 回调不再写入，读取不会解除保护，重启后按实际字节执行原有恢复校验。回归见 `server/long-session.test.ts`、`server/long-session-review.test.ts`，基准见 `frontend/scripts/long-session-bench.mjs`。
+
 单会话客户端可在快照后连接 `/ws?sessionId=<id>&afterSeq=<seq>`；当前前端使用全局 `/ws`，以 `replay` 消息传各已加载会话的 `afterSeq`（详见性能接口契约）。连接期间产生的缺口由每会话 1,000 条 ring buffer 补发；超出 ring 时服务端发送 `resync_required`，客户端重新取 `tail=1` 快照。历史分页不会改变重连的 `seq`。
 
 ## 三家 CLI 原生历史

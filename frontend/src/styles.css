@@ -4085,10 +4085,10 @@ body.resizing {
 .dispatch-history-more { display: block; margin: 18px auto; }
 .session-dispatch-link { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; padding: 8px 18px; color: var(--text-muted); font-size: 16px; border-bottom: 1px solid var(--border); }
 @media (max-width: 720px) {
-  /* 窄屏详情和历史收窄间距；面板标题条负责关闭回到原视图。 */
+  /* 窄屏详情和历史收窄间距；面板标题条的「返回」负责回流程图，详情自带的返回行不再显示。 */
   .dispatch-detail-head { padding: 16px; margin: 14px 10px; }
   .dispatch-detail-section { padding: 16px; margin: 14px 10px; }
-  .dispatch-detail-nav { padding: 10px; }
+  .dispatch-detail-nav { display: none; }
   .dispatch-history-row { grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
   .dispatch-history-row > .mono { grid-column: 1; }
   .dispatch-history-row > time { grid-column: 2; }
@@ -4114,6 +4114,8 @@ body.resizing {
   .sidebar-head .brand-mark, .sidebar-head .brand-line { flex-shrink: 0; }
   .sidebar-head .brand-name { overflow: hidden; text-overflow: ellipsis; }
   .chrome-icon-btn:hover:not(:disabled) { background: var(--raised-bg-hover); }
+  /* 有派单时填执行端身份色（同手机 SessionDispatchBadge），图标反色保证对比。 */
+  .btn.chrome-icon-btn.has-dispatch-runs { color: light-dark(#fff, var(--bg)); }
   .session > .session-dispatch-link { display: none; }
   .session-head-actions > .session-dispatch-link {
     display: inline-flex; align-items: center; gap: 4px; padding: 6px 10px;

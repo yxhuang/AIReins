@@ -391,6 +391,22 @@ t("手机派单详情的返回按钮 back，前进仍可回详情", () => {
   s.navigateDispatches(); h.flush(); assert.equal(window.location.hash, "#/dispatches");
   assert.equal(h.history.length, 4); h.forward(); assert.equal(window.location.hash, "#/dispatches/one");
 });
+t("手机派单详情顶栏返回 → 流程图 → 会话；会话直达详情时原地换成流程图", () => {
+  const h = navigationHarness(); const { s } = h;
+  s.navigate("session-a"); s.navigateDispatches(); s.navigateDispatches(["one"]);
+  s.backFromDispatchDetail("one"); h.flush(); assert.equal(window.location.hash, "#/dispatches");
+  s.closeDispatches(); h.flush(); assert.equal(window.location.hash, "#/session/session-a"); noRightPanel(s);
+  const d = navigationHarness();
+  d.s.navigate("session-a"); d.s.navigateDispatches(["one"]); const depth = d.history.length;
+  d.s.backFromDispatchDetail("one"); d.flush();
+  assert.equal(window.location.hash, "#/dispatches?runs=one"); assert.equal(d.history.length, depth); assert.ok(d.s.dispatchesOpen);
+  d.s.closeDispatches(); d.flush(); assert.equal(window.location.hash, "#/session/session-a"); noRightPanel(d.s);
+  const r = navigationHarness();
+  r.s.navigate("session-a"); r.s.navigateDispatches(); r.s.navigateDispatches(["one"]);
+  const reloaded = r.reload(); reloaded.backFromDispatchDetail("one"); r.flush();
+  assert.equal(window.location.hash, "#/dispatches");
+  reloaded.closeDispatches(); r.flush(); assert.equal(window.location.hash, "#/session/session-a"); noRightPanel(reloaded);
+});
 t("刷新恢复面板和来源；未知相邻关系的关闭 replace，不误 back", () => {
   const h = navigationHarness();
   h.s.navigate("session-a"); h.s.navigatePage("ai-usage"); h.s.setFilesOpen(true);

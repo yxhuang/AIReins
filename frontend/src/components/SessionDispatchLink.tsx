@@ -3,7 +3,7 @@ import { fetchParentDispatches } from "../api";
 import { store } from "../store";
 import { startSessionDispatchPolling } from "../dispatch-polling";
 import type { DispatchRun } from "../dispatch-flow";
-import { dispatchIcon } from "./PanelActions";
+import { dispatchBadge, dispatchIcon } from "./PanelActions";
 
 /** 本会话派出的任务：会话里只轮询一份，顶栏图标和标题下的行共用。 */
 export function useSessionDispatches(nativeId: string | undefined, backgroundCount: number, agent?: string): DispatchRun[] {
@@ -27,12 +27,8 @@ export function useSessionDispatches(nativeId: string | undefined, backgroundCou
 /** 手机顶栏「⋯」左侧的派单图标：填执行端身份色，多家按扇区分色；点开派单流程图。 */
 export function SessionDispatchBadge({ runs, backgroundCount }: { runs: DispatchRun[]; backgroundCount: number }) {
   if (!runs.length) return null;
-  const tools = [...new Set(runs.map((run) => run.tool))];
-  const color = (tool: string) => `var(--agent-${tool}, var(--busy))`;
-  const fill = tools.length === 1 ? color(tools[0]!)
-    : `conic-gradient(${tools.map((tool, i) => `${color(tool)} ${i / tools.length * 360}deg ${(i + 1) / tools.length * 360}deg`).join(", ")})`;
   // 手机上标题下那行有派单时隐藏，后台任务数并进这里。
-  const label = `派单：${tools.join("、")}，共 ${runs.length} 个${backgroundCount ? `；后台 ${backgroundCount} 个任务` : ""}`;
+  const { fill, label } = dispatchBadge(runs, backgroundCount);
   return <button type="button" className="btn mobile-round session-dispatch-badge" style={{ background: fill }} aria-label={label} title={label}
     onClick={() => store.navigateDispatches(runs.map((run) => run.runId))}>{dispatchIcon}</button>;
 }
