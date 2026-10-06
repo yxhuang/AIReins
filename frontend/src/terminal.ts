@@ -204,6 +204,11 @@ export function isTerminalPasteKey(event: Pick<KeyboardEvent, "ctrlKey" | "code"
   return event.code === "KeyV" && !event.altKey && event.ctrlKey !== event.metaKey;
 }
 
+/** Windows Terminal 式复制：有选区时 Ctrl+C / Cmd+C 复制，Ctrl+Shift+C 总是复制；无选区的 Ctrl+C 仍发中断。 */
+export function isTerminalCopyKey(event: Pick<KeyboardEvent, "ctrlKey" | "code" | "altKey" | "metaKey" | "shiftKey">, hasSelection: boolean): boolean {
+  return event.code === "KeyC" && !event.altKey && event.ctrlKey !== event.metaKey && (event.shiftKey || hasSelection);
+}
+
 type TermTouch = Pick<Touch, "identifier" | "clientX" | "clientY">;
 const TERM_TITLEBAR_SWIPE_DISTANCE = 48;
 

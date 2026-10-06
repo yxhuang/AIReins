@@ -9,6 +9,7 @@ import { createTerminal, fetchTerminals, killTerminal } from "../api";
 import {
   isTerminalToggleKey,
   isTerminalPasteKey,
+  isTerminalCopyKey,
   createTermTitlebarGesture,
   TERM_ACTIVE_STORAGE_KEY,
   TERM_SHORTCUT_KEYS,
@@ -88,6 +89,8 @@ interface TermRuntime {
   isAtTop: () => boolean;
   sendInput: (data: string) => void;
   paste: (text: string) => void;
+  /** 复制选区到剪贴板并清除选区；没有选区返回 false。 */
+  copySelection: () => boolean;
   createNew: (kind: ShellKind) => Promise<void>;
   switchTo: (id: string) => void;
   switchShell: (kind: ShellKind) => Promise<void>;
@@ -142,7 +145,7 @@ export function TerminalPanel({ open, onClose }: { open: boolean; onClose: () =>
     setTerminals(list);
   };
 
-  // 右键 / 粘贴按钮读剪贴板；拒绝授权、不支持或非安全上下文时退回手动粘贴。
+  // 右键（无选区时）/ 粘贴按钮读剪贴板；拒绝授权、不支持或非安全上下文时退回手动粘贴。
   const pasteClipboard = async () => {
     let text: string | null = null;
     try {
@@ -172,7 +175,20 @@ export function TerminalPanel({ open, onClose }: { open: boolean; onClose: () =>
     term.open(host);
     // 返回 false 只跳过 xterm；保留浏览器默认粘贴，再由 xterm 的 paste 监听处理。
     // 键盘粘贴无需 readText 授权，也不会重复发送或破坏 bracketed paste。
-    term.attachCustomKeyEventHandler((event) => !isTerminalToggleKey(event) && !isTerminalPasteKey(event));
+    const copySelection = () => {
+      const text = term.getSelection();
+      if (!text) return false;
+      void navigator.clipboard.writeText(text).catch(() => window.prompt("手动复制：", text));
+      term.clearSelection();
+      return true;
+    };
+    term.attachCustomKeyEventHandler((event) => {
+      if (isTerminalCopyKey(event, term.hasSelection())) {
+        if (event.type === "keydown") copySelection();
+        return false;
+      }
+      return !isTerminalToggleKey(event) && !isTerminalPasteKey(event);
+    });
 
     let disposed = false;
     let socket: WebSocket | null = null;
@@ -440,6 +456,7 @@ export function TerminalPanel({ open, onClose }: { open: boolean; onClose: () =>
       },
       // 走 term.paste：bracketed paste 与换行归一由 xterm 处理，再经 onData 上行
       paste: (text) => term.paste(text),
+      copySelection,
       createNew: (kind) => runGuarded(() => createNew(kind)),
       switchTo,
       switchShell: (kind) => runGuarded(() => showShell(kind)),
@@ -678,7 +695,8 @@ export function TerminalPanel({ open, onClose }: { open: boolean; onClose: () =>
           onContextMenuCapture={(event) => {
             event.preventDefault();
             event.stopPropagation();
-            void pasteClipboard();
+            // 右键：有选区复制，否则粘贴（同 Windows Terminal）
+            if (!runtimeRef.current?.copySelection()) void pasteClipboard();
           }} />
         <div className="term-keys" role="toolbar" aria-label="终端快捷键">
           {TERM_SHORTCUT_KEYS.map((key, index) => (

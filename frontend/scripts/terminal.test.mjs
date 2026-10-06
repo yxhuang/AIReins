@@ -5,6 +5,7 @@ import { strict as assert } from "node:assert";
 const {
   isTerminalToggleKey,
   isTerminalPasteKey,
+  isTerminalCopyKey,
   createTermTitlebarGesture,
   TERM_ACTIVE_STORAGE_KEY,
   TERM_MIN_WIDTH,
@@ -33,6 +34,16 @@ t("Ctrl+Backquote requires exactly Ctrl and physical Backquote", () => {
   }
   assert.equal(isTerminalToggleKey({ ...key, ctrlKey: false }), false);
   assert.equal(isTerminalToggleKey({ ...key, code: "KeyQ" }), false);
+});
+
+t("复制键：有选区 Ctrl/Cmd+C 复制，Ctrl+Shift+C 总复制；无选区 Ctrl+C 仍是中断", () => {
+  const key = { code: "KeyC", ctrlKey: true, metaKey: false, altKey: false, shiftKey: false };
+  assert.equal(isTerminalCopyKey(key, false), false);
+  assert.equal(isTerminalCopyKey(key, true), true);
+  assert.equal(isTerminalCopyKey({ ...key, shiftKey: true }, false), true);
+  assert.equal(isTerminalCopyKey({ ...key, ctrlKey: false, metaKey: true }, true), true);
+  assert.equal(isTerminalCopyKey({ ...key, altKey: true }, true), false);
+  assert.equal(isTerminalCopyKey({ ...key, ctrlKey: false }, true), false);
 });
 
 t("粘贴按键交给浏览器：Ctrl+V、Ctrl+Shift+V、Cmd+V；普通 V 与其他控制键仍交给终端", () => {
