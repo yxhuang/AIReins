@@ -146,7 +146,11 @@ export function SettingsMenu() {
   const [powerConfirm, setPowerConfirm] = useState<number | null>(null);
   const powerButton = useRef<HTMLButtonElement>(null);
   const powerDialog = useRef<HTMLDivElement>(null);
-  const dialogOpen = storageDialogOpen || powerConfirm !== null;
+  /** 重启确认弹层打开时存当时的忙会话数，关闭为 null。 */
+  const [restartConfirm, setRestartConfirm] = useState<number | null>(null);
+  const restartButton = useRef<HTMLButtonElement>(null);
+  const restartConfirmDialog = useRef<HTMLDivElement>(null);
+  const dialogOpen = storageDialogOpen || powerConfirm !== null || restartConfirm !== null;
   const powerActive = power !== null && power.state !== "idle";
 
   useEffect(() => () => restartAbort.current?.abort(), []);
@@ -154,7 +158,8 @@ export function SettingsMenu() {
     if (restartState === "restarting" || restartState === "failed") restartDialog.current?.focus();
   }, [restartState]);
 
-  const restart = async () => {
+  /** confirmed = 已在弹层里确认中断忙会话，不再重查。 */
+  const restart = async (confirmed = false) => {
     if (restartPending.current) return;
     restartPending.current = true;
     setRestartState("checking");
@@ -162,11 +167,14 @@ export function SettingsMenu() {
     const controller = new AbortController();
     restartAbort.current = controller;
     try {
-      const count = restartBusyCount(await fetchSessions());
-      if (controller.signal.aborted) return;
-      if (count > 0 && !window.confirm(`有 ${count} 个会话正在运行或带有后台任务，重启会中断它们。仍要重启 Workbench？`)) {
-        setRestartState("idle");
-        return;
+      if (!confirmed) {
+        const count = restartBusyCount(await fetchSessions());
+        if (controller.signal.aborted) return;
+        if (count > 0) {
+          setRestartState("idle");
+          setRestartConfirm(count);
+          return;
+        }
       }
       close(false);
       setRestartState("restarting");
@@ -241,6 +249,14 @@ export function SettingsMenu() {
   useEffect(() => {
     if (powerConfirm !== null) powerDialog.current?.querySelector<HTMLButtonElement>("button")?.focus();
   }, [powerConfirm !== null]);
+  useEffect(() => {
+    if (restartConfirm !== null) restartConfirmDialog.current?.querySelector<HTMLButtonElement>("button")?.focus();
+  }, [restartConfirm !== null]);
+
+  const closeRestartConfirm = () => {
+    setRestartConfirm(null);
+    requestAnimationFrame(() => restartButton.current?.focus());
+  };
 
   const closePowerConfirm = () => {
     setPowerConfirm(null);
@@ -400,7 +416,7 @@ export function SettingsMenu() {
             <input id="settings-term-font" className="settings-range" type="range"
               min={TERM_FONT_MIN} max={TERM_FONT_MAX} step={1} value={termSize}
               onChange={(e) => choose(item.id, e.target.value)} />
-            <span className="settings-hint">只对这台设备生效，电脑和手机分开记。</span>
+            <span className="settings-hint">只对这台设备生效。</span>
           </div>
         ) : (
           <div className="settings-item" key={item.id}>
@@ -424,24 +440,30 @@ export function SettingsMenu() {
     <div className="settings" ref={rootRef}>
       {open && (
         <div className="settings-panel" ref={panelRef} role="dialog" aria-label="设置" inert={dialogOpen}>
-          {renderGroup(SESSIONS_GROUP, <WorkbenchStorage dialogOpen={storageDialogOpen} onDialogOpenChange={setStorageDialogOpen} />)}
-          <section className="settings-group">
-            <h3 className="settings-group-title">Workbench</h3>
-            <button type="button" className="settings-action settings-hosts" onClick={openHostMenu} aria-haspopup="menu">
-              主机与连接（Tailscale）
-            </button>
-            <button type="button" className="settings-action" disabled={restartState !== "idle"}
-              onClick={() => void restart()}>
-              <span aria-hidden="true">↻</span>{restartState === "checking" ? "检查会话中…" : "重启 Workbench"}
-            </button>
-            <button type="button" className="settings-action settings-power" ref={powerButton} aria-haspopup={powerActive ? undefined : "dialog"}
-              onClick={() => void togglePowerOff()}>
-              <span aria-hidden="true">⏻</span>{power?.state === "waiting" ? `等待 ${power.busy} 个会话完成后关机 · 取消`
-                : power?.state === "scheduled" ? "已发出关机（约 60 秒）· 取消" : "关机"}
-            </button>
-            {(power?.error || powerError) && <span className="new-error" role="alert">{power?.error || powerError}</span>}
-          </section>
-          {renderGroup(APPEARANCE_GROUP)}
+          <div className="settings-col">
+            {renderGroup(SESSIONS_GROUP, <WorkbenchStorage dialogOpen={storageDialogOpen} onDialogOpenChange={setStorageDialogOpen} />)}
+            <section className="settings-group">
+              <button type="button" className="settings-action" ref={restartButton} disabled={restartState !== "idle"}
+                aria-haspopup="dialog" onClick={() => void restart()}>
+                <span aria-hidden="true">↻</span>{restartState === "checking" ? "检查会话中…" : "重启 Workbench"}
+              </button>
+            </section>
+          </div>
+          <div className="settings-col">
+            {renderGroup(APPEARANCE_GROUP)}
+            <section className="settings-group">
+              <h3 className="settings-group-title">主机</h3>
+              <button type="button" className="settings-action settings-hosts" onClick={openHostMenu} aria-haspopup="menu">
+                主机与连接（Tailscale）
+              </button>
+              <button type="button" className="settings-action settings-power" ref={powerButton} aria-haspopup={powerActive ? undefined : "dialog"}
+                onClick={() => void togglePowerOff()}>
+                <span aria-hidden="true">⏻</span>{power?.state === "waiting" ? `等待 ${power.busy} 个会话完成后关机 · 取消`
+                  : power?.state === "scheduled" ? "已发出关机（约 60 秒）· 取消" : "关机"}
+              </button>
+              {(power?.error || powerError) && <span className="new-error" role="alert">{power?.error || powerError}</span>}
+            </section>
+          </div>
         </div>
       )}
       <button
@@ -476,6 +498,22 @@ export function SettingsMenu() {
           </div>
         </div>, document.body,
       )}
+      {restartConfirm !== null && createPortal(
+        <div className="dir-overlay storage-overlay" onKeyDown={(event) => modalKeyDown(event, restartConfirmDialog.current, closeRestartConfirm)}>
+          <div className="dir-dialog storage-dialog" ref={restartConfirmDialog} tabIndex={-1} role="dialog"
+            aria-modal="true" aria-labelledby="restart-confirm-title" aria-describedby="restart-confirm-description">
+            <div className="dir-heading">
+              <h2 id="restart-confirm-title">重启 Workbench</h2>
+            </div>
+            <p id="restart-confirm-description">有 {restartConfirm} 个会话正在运行或带有后台任务，重启会中断它们。</p>
+            <p className="settings-hint">确认后关闭设置并重启，页面会自动重连。</p>
+            <div className="dir-actions">
+              <button type="button" className="btn" onClick={closeRestartConfirm}>取消</button>
+              <button type="button" className="btn btn-danger" onClick={() => { setRestartConfirm(null); void restart(true); }}>仍要重启</button>
+            </div>
+          </div>
+        </div>, document.body,
+      )}
       {(restartState === "restarting" || restartState === "failed") && createPortal(
         <div className="dir-overlay restart-overlay" onKeyDown={(event) => {
           event.stopPropagation();
@@ -484,16 +522,18 @@ export function SettingsMenu() {
             if (restartState === "failed") restartDialog.current?.querySelector<HTMLButtonElement>("button")?.focus();
           }
         }}>
-          <div className="dir-dialog" ref={restartDialog} tabIndex={-1} role="dialog" aria-modal="true"
+          <div className="dir-dialog storage-dialog" ref={restartDialog} tabIndex={-1} role="dialog" aria-modal="true"
             aria-labelledby="restart-title" aria-describedby="restart-description">
-            <h3 id="restart-title">{restartState === "restarting" ? "重启中…" : "重启未确认成功"}</h3>
+            <div className="dir-heading">
+              <h2 id="restart-title">{restartState === "restarting" ? "重启中…" : "重启未确认成功"}</h2>
+            </div>
             <p id="restart-description" role={restartState === "failed" ? "alert" : "status"}>
               {restartState === "restarting" ? "正在等待 Workbench 恢复连接，请稍候。" : `${restartError}。请在电脑终端按当前实例的端口和 WORKBENCH_HOME 执行 wb restart，再刷新页面；手机用户请到电脑操作。`}
             </p>
-            {restartState === "failed" && <button type="button" className="btn" onClick={() => {
+            {restartState === "failed" && <div className="dir-actions"><button type="button" className="btn" onClick={() => {
               setRestartState("idle");
               gearRef.current?.focus();
-            }}>关闭提示</button>}
+            }}>关闭提示</button></div>}
           </div>
         </div>, document.body,
       )}

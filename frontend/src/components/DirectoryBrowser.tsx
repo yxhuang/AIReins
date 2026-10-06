@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef, useState, type RefObject } from "react";
+import { createPortal } from "react-dom";
 import { fetchDirectories, fetchHistory, pickWindowsDirectory, pickWindowsFile } from "../api";
 import { store } from "../store";
 import { directoryBreadcrumbs, normalizeDirectoryPath, recentDirectoryPaths, sortedDirectoryEntries } from "../directory-path";
@@ -80,7 +81,7 @@ export function DirectoryBrowser({ initialPath, onSelect, onClose, mode = "dir",
 }
 
 /** 弹窗与右侧面板共用导航、请求和列表；宿主决定点击文件后的行为。 */
-export function DirectoryContents({ initialPath, includeFiles, onSelectFile, onSelectDirectory, allowWindowsPicker = false, onPathChange, onBrowseHistory, navigationHistory, registerBrowserBack }: {
+export function DirectoryContents({ initialPath, includeFiles, onSelectFile, onSelectDirectory, allowWindowsPicker = false, onPathChange, onBrowseHistory, navigationHistory, registerBrowserBack, navTarget }: {
   initialPath: string;
   includeFiles: boolean;
   onSelectFile: (path: string, name: string) => void;
@@ -90,6 +91,8 @@ export function DirectoryContents({ initialPath, includeFiles, onSelectFile, onS
   onBrowseHistory?: (path: string) => void;
   navigationHistory?: RefObject<string[]>;
   registerBrowserBack?: (back: () => boolean) => () => void;
+  /** 给定时导航（刷新/上一级/WSL/Windows）渲染进宿主标题栏；null = 槽位尚未挂载，先不渲染，避免闪一下内联按钮。 */
+  navTarget?: HTMLElement | null;
 }) {
   const [listing, setListing] = useState<DirectoryListing | null>(null);
   const [loading, setLoading] = useState(true);
@@ -199,6 +202,12 @@ export function DirectoryContents({ initialPath, includeFiles, onSelectFile, onS
     setAddressEditing(true);
   }
 
+  function goUp() { if (listing?.parent) void load(listing.parent); }
+  function openWindows() {
+    const target = lastWindowsCwd(store.sessions, windowsHistory);
+    void load(target, target === WINDOWS_FALLBACK ? undefined : WINDOWS_FALLBACK);
+  }
+
   async function browseWindows() {
     if (busy) return;
     const id = requestId.current;
@@ -294,16 +303,18 @@ export function DirectoryContents({ initialPath, includeFiles, onSelectFile, onS
             onClick={() => void load(normalizeDirectoryPath(address))}>前往</button>
           {onBrowseHistory && <button className="btn dir-history-button" type="button" disabled={busy || !listing}
             title={listing ? `查看 ${listing.path} 及子目录的对话` : "先浏览目录"}
-            onClick={() => { if (listing) onBrowseHistory(listing.path); }}>此目录的对话</button>}
+            onClick={() => { if (listing) onBrowseHistory(listing.path); }}>目录内会话</button>}
         </div>
-        <div className="dir-nav">
-          <button className="btn" type="button" title="返回当前目录的上一级" disabled={!listing?.parent || busy} onClick={() => { if (listing?.parent) void load(listing.parent); }}>上一级</button>
+        {navTarget === undefined ? <div className="dir-nav">
+          <button className="btn" type="button" title="返回当前目录的上一级" disabled={!listing?.parent || busy} onClick={goUp}>上一级</button>
           <button className="btn" type="button" title="打开 WSL 主目录" disabled={busy} onClick={() => void load()}>WSL</button>
-          <button className="btn" type="button" title="打开最近使用的 Windows 目录" disabled={busy} onClick={() => {
-            const target = lastWindowsCwd(store.sessions, windowsHistory);
-            void load(target, target === WINDOWS_FALLBACK ? undefined : WINDOWS_FALLBACK);
-          }}>Windows</button>
-        </div>
+          <button className="btn" type="button" title="打开最近使用的 Windows 目录" disabled={busy} onClick={openWindows}>Windows</button>
+        </div> : navTarget && createPortal(<>
+          <button className="file-nav-btn file-nav-icon" type="button" aria-label="刷新" title="重新读取当前目录（含 Git 状态）" disabled={busy} onClick={() => void load(listing?.path ?? (normalizeDirectoryPath(address) || undefined))}><NavIcon d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8 M21 3v5h-5" /></button>
+          <button className="file-nav-btn file-nav-icon" type="button" aria-label="上一级" title="返回当前目录的上一级" disabled={!listing?.parent || busy} onClick={goUp}><NavIcon d="M12 19V5 M5 12l7-7 7 7" /></button>
+          <button className="file-nav-btn" type="button" title="打开 WSL 主目录" disabled={busy} onClick={() => void load()}>WSL</button>
+          <button className="file-nav-btn" type="button" title="打开最近使用的 Windows 目录" disabled={busy} onClick={openWindows}>Windows</button>
+        </>, navTarget)}
         {error && <p className="new-error" role="alert">{error}</p>}
         {listing?.truncated && <p className="new-hint">{includeFiles ? "条目较多，文件夹和文件各最多显示 1000 个。" : "此目录下子目录超过 1000 个，仅显示前 1000 个。"}</p>}
         <div className={`dir-list${includeFiles ? " dir-list-table" : ""}`} aria-label={includeFiles ? "目录与文件列表" : "子目录列表"}>
@@ -329,6 +340,10 @@ export function DirectoryContents({ initialPath, includeFiles, onSelectFile, onS
         )}
     </div>
   );
+}
+
+function NavIcon({ d }: { d: string }) {
+  return <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.25" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={d} /></svg>;
 }
 
 function DirectoryEntryIcon({ folder }: { folder: boolean }) {

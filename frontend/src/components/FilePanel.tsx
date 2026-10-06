@@ -71,6 +71,7 @@ export function FilePanel({ onClose }: { onClose: () => void }) {
   }, []);
   const [sourcePath, setSourcePath] = useState<string | null>(null);
   const [width, setWidth] = useSidePanelWidth(FILE_WIDTH_OPTIONS);
+  const [navSlot, setNavSlot] = useState<HTMLDivElement | null>(null);
   const [notice, setNotice] = useState<{ path: string; copied: boolean | null; reason: string | null } | null>(null);
   const copyId = useRef(0);
   useEffect(() => () => { copyId.current += 1; }, []);
@@ -111,6 +112,7 @@ export function FilePanel({ onClose }: { onClose: () => void }) {
       <div className="term-titlebar file-titlebar">
         {!preview && <PanelBackButton onClick={onClose} />}
         <strong className="file-side-title">文件</strong>
+        {!preview && <div ref={setNavSlot} className="file-nav" role="toolbar" aria-label="目录导航" />}
         {preview && <div className="file-actions" role="toolbar" aria-label="文件操作">
           <button className="file-action" type="button" aria-label="返回" title="返回目录" disabled={preview.saving} onClick={() => {
             if (store.clearFilePreview()) { setNotice(null); setSourcePath(null); }
@@ -134,7 +136,7 @@ export function FilePanel({ onClose }: { onClose: () => void }) {
         {notice.copied !== null && <p className="dir-copy-status">{notice.copied ? "路径已复制。" : <>无法自动复制，请手动复制：<span className="mono">{notice.path}</span></>}</p>}
       </div>}
       {preview ? <FilePreview key={preview.target.path} preview={preview} source={source} /> : <DirectoryContents initialPath={directoryInitialPath} includeFiles allowWindowsPicker
-        navigationHistory={directoryHistory} registerBrowserBack={registerBrowserBack}
+        navigationHistory={directoryHistory} registerBrowserBack={registerBrowserBack} navTarget={navSlot}
         onPathChange={path => { store.fileDirectory = path; }}
         onBrowseHistory={path => store.navigateHistory(path)}
         onSelectFile={path => { setNotice(null); void store.openFilePreview({ path, root: store.fileDirectory ?? session?.cwd ?? "/", sessionId: session?.id }); }} />}

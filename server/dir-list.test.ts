@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { mkdir, mkdtemp, stat, symlink, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { DirListError, listDirectories } from "./dir-list.js";
+import { execFileSync } from "node:child_process";
+import { DirListError, gitStatus, listDirectories } from "./dir-list.js";
 
 const fixture = await mkdtemp(join(tmpdir(), "workbench-dir-list-test-"));
 await mkdir(join(fixture, "zeta"));
@@ -75,4 +76,31 @@ assert.equal((await listDirectories(fileLimited, { files: true })).truncated, fa
 await writeFile(join(fileLimited, "overflow.txt"), "");
 assert.equal((await listDirectories(fileLimited, { files: true })).truncated, true);
 
-console.log("dir-list: 过滤、排序、符号链接、parent、缺省及错误路径通过");
+const repo = await mkdtemp(join(tmpdir(), "workbench-dir-list-git-"));
+const gitIn = (...args: string[]) => execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", ...args], { cwd: repo });
+gitIn("init", "-q");
+await mkdir(join(repo, "子 目录", "deep"), { recursive: true });
+await writeFile(join(repo, "clean.txt"), "c");
+await writeFile(join(repo, "edit.txt"), "e");
+await writeFile(join(repo, "子 目录", "a.txt"), "a");
+await writeFile(join(repo, "子 目录", "deep", "old.txt"), "o");
+gitIn("add", ".");
+gitIn("commit", "-qm", "init");
+await writeFile(join(repo, "edit.txt"), "changed");
+await writeFile(join(repo, "子 目录", "new.txt"), "n");
+await mkdir(join(repo, "子 目录", "fresh"));
+await writeFile(join(repo, "子 目录", "fresh", "f.txt"), "f");
+gitIn("mv", "子 目录/deep/old.txt", "子 目录/deep/renamed.txt");
+assert.deepEqual(await gitStatus(repo), { "edit.txt": "M", "子 目录": "R" }, "根目录：文件取自身状态，文件夹取子项最高状态");
+assert.deepEqual(await gitStatus(join(repo, "子 目录")), { "new.txt": "U", fresh: "U", deep: "R" }, "子目录按仓库前缀截成直接子项");
+assert.deepEqual((await listDirectories(repo, { files: true })).git, { "edit.txt": "M", "子 目录": "R" });
+assert.equal((await listDirectories(repo)).git, undefined, "目录选择模式不跑 git");
+assert.equal(await gitStatus(fixture), undefined, "非 Git 目录不返回状态");
+const parent = await mkdtemp(join(tmpdir(), "workbench-dir-list-repos-"));
+await mkdir(join(parent, "plain"));
+execFileSync("git", ["init", "-q", join(parent, "clean-repo")]);
+execFileSync("cp", ["-r", repo, join(parent, "dirty-repo")]);
+assert.deepEqual((await listDirectories(parent, { files: true })).git, { "dirty-repo": "M" }, "非仓库目录里，子仓库按整仓最高状态亮点，干净仓库与普通文件夹不标");
+assert.equal((await listDirectories(fixture, { files: true })).git, undefined, "没有子仓库时不返回 git");
+
+console.log("dir-list: 过滤、排序、符号链接、parent、缺省、错误路径及 Git 状态通过");

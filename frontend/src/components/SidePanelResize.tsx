@@ -8,7 +8,7 @@ const DEFAULT_WIDTH_OPTIONS = {
 };
 export const FILE_WIDTH_OPTIONS = {
   storageKey: "workbench-file-width", event: "workbench-file-panel-width",
-  minWidth: 240, defaultWidth: 280,
+  minWidth: 320, defaultWidth: 340,
 };
 type WidthOptions = typeof DEFAULT_WIDTH_OPTIONS;
 const viewportWidth = () => window.innerWidth;

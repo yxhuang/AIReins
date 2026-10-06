@@ -2,6 +2,8 @@ import { useLayoutEffect, useRef, useState } from "react";
 import { directoryEntryDate, directoryEntrySize, sortedDirectoryEntries, type DirectorySort } from "../directory-path";
 import type { DirectoryListing } from "../types";
 
+const GIT_LABELS: Record<string, string> = { M: "已修改", A: "已新增", R: "已改名", D: "已删除", U: "未跟踪", "!": "有冲突" };
+
 /** 表体直接生成文本 DOM；只在目录变化时建行，排序移动已有行，避免大目录逐行挂载 React 状态。 */
 export function DirectoryTable({ listing, busy, onActivate }: {
   listing: DirectoryListing;
@@ -22,6 +24,15 @@ export function DirectoryTable({ listing, busy, onActivate }: {
         name.type = "button";
         name.className = `dir-table-name${folder ? " dir-table-folder" : ""}`;
         name.textContent = entry.name;
+        const mark = listing.git?.[entry.name];
+        if (mark) {
+          const badge = document.createElement("span");
+          badge.className = "dir-git";
+          badge.textContent = folder ? "●" : mark;
+          name.dataset.git = mark;
+          name.append(badge);
+          row.title += `\nGit：${folder ? "其下有改动（" : ""}${GIT_LABELS[mark] ?? mark}${folder ? "）" : ""}`;
+        }
         row.insertCell().append(name);
         const size = row.insertCell();
         size.className = "dir-table-size";
@@ -53,7 +64,7 @@ export function DirectoryTable({ listing, busy, onActivate }: {
     for (const row of rows.current.values()) row.querySelector("button")!.disabled = busy;
   }, [listing, busy]);
 
-  return <table className="dir-table" aria-label="目录与文件详情" aria-disabled={busy}>
+  return <table className={`dir-table${listing.git ? " dir-table-git" : ""}`} aria-label="目录与文件详情" aria-disabled={busy}>
     <thead><tr>
       {([["name", "名称"], ["size", "大小"], ["modifiedAt", "修改日期"]] as const).map(([key, label]) =>
         <th key={key} scope="col" aria-sort={sort.key === key ? sort.direction === "asc" ? "ascending" : "descending" : "none"}>

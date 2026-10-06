@@ -319,6 +319,8 @@ export interface DirectoryListing {
   truncated: boolean;
   /** 仅 files=1 时返回：同层普通文件（隐藏文件不列） */
   files?: DirectoryEntry[];
+  /** 仅 files=1 且在 Git 工作区时返回：子项名 → M/A/R/D/U/!（文件夹为其下最高状态） */
+  git?: Record<string, string>;
 }
 
 export interface WorkFileTarget { path: string; root: string; sessionId?: string }

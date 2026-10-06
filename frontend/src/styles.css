@@ -850,6 +850,14 @@ body.resizing {
 .dir-table-name { display: block; width: 100%; min-height: 21px; padding: 0 0 0 22px; border: 0; background: linear-gradient(var(--text-muted), var(--text-muted)) 2px 3px / 11px 15px no-repeat; color: var(--busy); font: inherit; text-align: left; overflow-wrap: anywhere; cursor: pointer; }
 .dir-table-folder { background: linear-gradient(var(--folder-fill), var(--folder-fill)) 1px 4px / 15px 11px no-repeat, linear-gradient(var(--folder-edge), var(--folder-edge)) 1px 1px / 7px 4px no-repeat; }
 .dir-table-name:focus-visible, .dir-table-sort:focus-visible { outline-offset: -2px; }
+/* Git 仓库内名称左侧留 14px 槽放状态：文件字母、文件夹圆点；图标随之右移，名称仍对齐。 */
+.dir-table-git .dir-table-name { position: relative; padding-left: 36px; background-position: 16px 3px; }
+.dir-table-git .dir-table-folder { background-position: 15px 4px, 15px 1px; }
+.dir-git { position: absolute; left: 0; top: 0; width: 12px; text-align: center; font-size: 13px; font-weight: 700; line-height: 21px; }
+.dir-table-folder .dir-git { font-size: 10px; }
+.dir-table-name[data-git="M"] .dir-git { color: var(--folder-edge); }
+.dir-table-name:is([data-git="U"], [data-git="A"], [data-git="R"]) .dir-git { color: var(--ok); }
+.dir-table-name:is([data-git="D"], [data-git="!"]) .dir-git { color: var(--danger); }
 .dir-table[aria-disabled="true"] { pointer-events: none; }
 @container directory-browser (max-width: 420px) {
   .dir-table thead tr { display: grid; grid-template-columns: minmax(0, 1fr) 56px 82px; }
@@ -858,6 +866,7 @@ body.resizing {
   .dir-table td:first-child { grid-column: 1 / -1; }
   .dir-table-size, .dir-table-date { padding-top: 0 !important; color: var(--text-muted); }
   .dir-table-size { padding-left: 28px !important; text-align: left; }
+  .dir-table-git .dir-table-size { padding-left: 42px !important; }
 }
 @media (pointer: coarse) {
   .dir-table tbody tr { min-height: 44px; }
@@ -2807,7 +2816,7 @@ body.resizing {
   animation: settings-pop 0.12s ease-out;
 }
 
-/* 桌面设置面板两栏：左「会话（含存储）+ Workbench」，右「外观」。
+/* 桌面设置面板两栏（各自一个 .settings-col，免得两栏行高互相撑出空隙）：左「会话（含存储）│ 重启」，右「外观 │ 主机」。
    .sidebar 有 overflow:hidden，540px 会被裁，所以改 fixed 贴左下（10 侧栏内边距 + 2 底栏内边距 + 按钮 + 8 间距） */
 @media (min-width: 721px) {
   .app:not(.sidebar-collapsed) .sidebar-foot .settings > .settings-panel {
@@ -2815,8 +2824,7 @@ body.resizing {
     width: 540px; max-height: calc(100vh - 80px);
     display: grid; grid-template-columns: 1fr 1fr; column-gap: 14px; align-items: start;
   }
-  .settings > .settings-panel > .settings-group { grid-column: 1; }
-  .settings > .settings-panel > .settings-group-appearance { grid-column: 2; grid-row: 1 / span 2; border-top: none; border-left: 1px solid var(--border); padding-left: 14px; }
+  .settings > .settings-panel > .settings-col + .settings-col { border-top: none; border-left: 1px solid var(--border); padding-left: 14px; }
   /* 异步存储明细最多按三行预留，避免底部锚定的菜单加载后向上跳。 */
   .settings > .settings-panel .settings-storage-breakdown { min-height: 3lh; }
 }
@@ -2827,7 +2835,7 @@ body.resizing {
 }
 
 .settings-group { padding: 12px 0 14px; }
-.settings-group + .settings-group { border-top: 1px solid var(--border); }
+.settings-group + .settings-group, .settings-col + .settings-col { border-top: 1px solid var(--border); }
 
 .settings-group-title {
   margin: 0 0 10px;
@@ -2902,7 +2910,6 @@ body.resizing {
 
 .settings-storage { margin-bottom: 12px; }
 .settings-hosts { margin-bottom: 8px; }
-.settings-power { margin-top: 8px; }
 .settings-storage-breakdown { overflow-wrap: anywhere; }
 .storage-overlay { z-index: 100; }
 .storage-dialog { overflow-y: auto; }
@@ -3949,6 +3956,20 @@ body.resizing {
 .file-titlebar:has(.file-actions) > .panel-collapse { display: none; }
 .file-actions { display: flex; flex: 1; align-items: center; gap: 2px; min-width: 0; height: 100%; overflow-x: auto; scrollbar-width: none; }
 .file-actions::-webkit-scrollbar { display: none; }
+.file-nav { display: flex; flex: 1; align-items: center; gap: 8px; min-width: 0; height: 100%; margin-left: 6px; overflow-x: auto; scrollbar-width: none; }
+.file-nav::-webkit-scrollbar { display: none; }
+/* 标题栏导航沿用全站浅底凸起质感：刷新/上一级为大圆钮，WSL/Windows 为胶囊。 */
+.file-nav-btn {
+  display: inline-flex; flex: 0 0 auto; align-items: center; justify-content: center;
+  height: 32px; padding: 0 10px; border: 0; border-radius: 999px;
+  background: var(--raised-bg); box-shadow: var(--raised-shadow); color: var(--text);
+  font: inherit; font-size: 14px; font-weight: 500; white-space: nowrap; cursor: pointer; touch-action: manipulation;
+}
+.file-nav-icon { width: 36px; height: 36px; padding: 0; border-radius: 50%; }
+.file-nav-btn:hover:not(:disabled) { background: var(--raised-bg-hover); }
+.file-nav-btn:active:not(:disabled) { background: var(--sunk-bg); box-shadow: var(--sunk-shadow); transform: scale(0.96); }
+.file-nav-btn:focus-visible { outline: 2px solid var(--busy); outline-offset: 2px; }
+.file-nav-btn:disabled { opacity: .45; cursor: default; }
 .file-action { display: inline-flex; flex: 0 0 auto; align-items: center; justify-content: center; gap: 4px; min-height: 30px; padding: 4px; box-sizing: border-box; border: 1px solid transparent; border-radius: 6px; background: transparent; color: var(--text-muted); font: inherit; font-size: 14px; line-height: 1.25; text-decoration: none; white-space: nowrap; cursor: pointer; }
 .file-action:hover { color: var(--text); background: var(--surface-sunk); border-color: var(--border); }
 .file-action:focus-visible { outline: 2px solid var(--busy); outline-offset: 1px; }
@@ -3961,12 +3982,13 @@ body.resizing {
 }
 @media (pointer: coarse) {
   .file-titlebar { height: 52px; }
+  .file-nav-icon { width: 40px; height: 40px; }
+  .file-nav-btn:not(.file-nav-icon) { height: 36px; }
   .file-action { min-height: 44px; min-width: 36px; }
   .file-view-toggle { padding: 0; }
   .file-view-option { min-height: 42px; }
 }
 .file-side-panel .dir-contents { padding: 10px 8px; overflow: hidden; }
-.file-side-panel .dir-nav { flex-wrap: wrap; }
 .file-notice { flex: 0 1 auto; min-height: 0; overflow-y: auto; padding: 8px; font-size: 14px; }
 .file-notice p { margin: 0; }
 .file-notice .dir-copy-status { margin-top: 4px; }

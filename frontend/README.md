@@ -59,7 +59,7 @@ node frontend/scripts/smoke-ws.mjs  # 需后端；会创建测试会话、批准
 
 ## 侧栏内面板
 
-- 左上角 **wb｜当前主机** 整体为主机选择按钮（沿用 Workbench 字体、描边/高光/轻投影，无小箭头）：本机入口显示「本机」，远程用 Tailscale MagicDNS 机器名；窗口标题同步连接身份且保留未决闸门计数。300px 菜单的本机项显示「机器名（本机）」；本机名来自 meta.hostName，并随来源返回上下文携带；旧后端缺字段时回退「本机」，需要后端重启后生效。菜单支持整页切换、新标签和管理主机，设置 Workbench 组的「主机与连接（Tailscale）」直接打开此菜单。地址只存浏览器，通过经过校验的 fragment 带到目标源并在 `store.init()` 前消费；目标列表合并保留，手机直接远程不产生 localhost 返回入口。文件保存/未保存与未发送输入有保护，切换不操作后台任务。连接与两机安装见 [主机连接说明](../docs/host-connections.md)，逻辑在 `host-connections.ts`，控件在 `HostSwitcher.tsx`。
+- 左上角 **wb｜当前主机** 整体为主机选择按钮（沿用 Workbench 字体、描边/高光/轻投影，无小箭头）：本机入口显示「本机」，远程用 Tailscale MagicDNS 机器名；窗口标题同步连接身份且保留未决闸门计数。300px 菜单的本机项显示「机器名（本机）」；本机名来自 meta.hostName，并随来源返回上下文携带；旧后端缺字段时回退「本机」，需要后端重启后生效。菜单支持整页切换、新标签和管理主机，设置「主机」组的「主机与连接（Tailscale）」直接打开此菜单。地址只存浏览器，通过经过校验的 fragment 带到目标源并在 `store.init()` 前消费；目标列表合并保留，手机直接远程不产生 localhost 返回入口。文件保存/未保存与未发送输入有保护，切换不操作后台任务。连接与两机安装见 [主机连接说明](../docs/host-connections.md)，逻辑在 `host-connections.ts`，控件在 `HostSwitcher.tsx`。
 
 - 底栏第一行「历史会话 │ AI 用量等扩展页」（可换行），第二行「设置、直达」；直达为200px浮层，锚定直达按钮上方8px、右边缘对齐按钮，向左展开；链接去掉默认及行末箭头，保留配置的图标，打开时刷新 `/api/links`，按 `pages/links.json` 的 group 分组，以普通新标签链接打开。输入框有文字时，Claude/Codex 的 R 在末尾追加 `/refine-prompt` / `$refine-prompt` 并保留焦点；手机替换缓存时间槽位，Kimi 暂无确切 skill 语法而隐藏。
 
@@ -125,7 +125,7 @@ node frontend/scripts/smoke-ws.mjs  # 需后端；会创建测试会话、批准
 - 专用 `/ws/terminal` 每次 open 重新 attach，收到 attached 先 reset 再回放；省略输出给提示，resize 只在尺寸变化时发送。退避与回前台重连沿全局规则；kill 就地二次确认，exit 显示退出码、允许新建；见 [terminal.ts](src/terminal.ts)。
 - 终端/派单宽默认 480px，clamp 至 `[320, 视口−480]`，窄屏全屏；手机 Esc/Tab/Ctrl-C/Ctrl-D/方向键与粘贴，Clipboard 失败退回手动 prompt，经 xterm.paste 处理。终端主题读 CSS 令牌，随主题/系统变化；契约见 [terminal-panel-design.md](../docs/terminal-panel-design.md)。
 - 等宽字体优先本地 Maple Mono NF CN/Nerd Font，不下载字体；字体就绪或 1.5 秒超时重新度量 fit，不阻塞连接。终端字号默认按「宽屏 16 / 手机 13px × 整体比例」自动；设置里「终端字号」滑块（10–24px，localStorage `workbench-term-font`，按设备分开）设过就用设定值，见 `readTermFontSize`（[body-font.ts](src/body-font.ts)）。关闭尝试把焦点还给输入框。
-- 文件面板宽单独记忆（默认 280、最小 240），目录浏览与新建 cwd 选择共用 [DirectoryBrowser.tsx](src/components/DirectoryBrowser.tsx)。点文件打开当前预览，顶栏“返回”恢复目录；引用与复制路径是显式操作。引用仍要求当前非 dead、支持 mentions、cwd 内且相对路径无空白；打开文件不改变 cwd，见 [FilePanel.tsx](src/components/FilePanel.tsx)。
+- 文件面板宽单独记忆（默认 340、最小 320，容纳标题栏导航按钮），目录浏览与新建 cwd 选择共用 [DirectoryBrowser.tsx](src/components/DirectoryBrowser.tsx)。点文件打开当前预览，顶栏“返回”恢复目录；引用与复制路径是显式操作。引用仍要求当前非 dead、支持 mentions、cwd 内且相对路径无空白；打开文件不改变 cwd，见 [FilePanel.tsx](src/components/FilePanel.tsx)。
 - [FilePreview.tsx](src/components/FilePreview.tsx) 按点击读取，仅在 store 中保留当前文件：UTF-8（可含 BOM）文本最多 1 MiB，直接在轻量文本框编辑并显式“保存”（源码中 Ctrl/Cmd+S 同效）；Markdown 源码/预览使用现有库，CSV/TSV 原文可编辑、表格最多200行100列且正确处理引号与字段换行。文本源码、Markdown代码块随面板宽度自动换行，仅改变显示，不向文件内容插入换行符。文本框编辑时浏览器将换行归一为 LF；未编辑的原文不重写。其他编码/二进制/Office及超限文件可见地拒绝编辑。图片原生显示；PDF只查看，以 iframe 导航至原生查看器，文件操作集中到单行顶栏，按“返回、引用、复制路径、外部打开”排列；普通文本（TXT、Markdown、CSV/TSV）第四个入口为“下载”，避免与原本也触发下载的外部打开重复。HTML保留外部打开与下载。下载前显示浏览器确认框，取消留在当前预览且保留草稿；确认下载已保存的文件，不自动保存未提交编辑。窄面板按钮显示图标，保留可访问名称和提示；极窄时顶栏可横向滚动。预览/源码（CSV/TSV为表格/源码）复用终端的分段滑块，编辑文件的保存也在顶栏。移除重新读取与底部操作区，正常预览不显示路径、字节数、只读标签或浏览器查看器说明，保留实际错误与未保存提醒。`navigator.pdfViewerEnabled=false` 时直接提示未启用内嵌查看，不创建空白查看区；旧浏览器没有该字段时仍尝试内嵌。用户已确认本机 PDF 可以正常打开；其他设备仍取决于浏览器原生能力与设置。
 - HTML 源码可编辑，预览用无权限 `sandbox` iframe + CSP，移除脚本/跳转等主动内容，仅支持内联 CSS 与 data 图片；相对及外部图片/CSS 不加载。Markdown 文件预览保留文本与表格，不自动加载图片或导航文档链接。媒体最多32MiB，服务端路径和版本约束见[文件接口契约](../server/README.md)。
 - 未保存草稿在收起面板、切会话和手机后退时保留，重开面板可继续；换文件/返回目录前确认是否放弃，刷新关闭页面触发 beforeunload 提醒（由设备浏览器决定是否显示）。保存冲突或失败保留草稿，不能直接覆盖 Agent 的新版本；返回目录后重新打开可重新读取文件，仍需确认放弃草稿。保存中不能修改或切到其他文件。迟到读取不会覆盖当前文件，返回目录后重新打开可以重试媒体显示。
@@ -134,17 +134,19 @@ node frontend/scripts/smoke-ws.mjs  # 需后端；会创建测试会话、批准
 - 新建工作目录和目录浏览地址栏支持粘贴 Windows 盘符绝对路径（如 `C:\Users\user\项目`，支持“复制为路径”的双引号），统一转换为 `/mnt/c/Users/user/项目`；Linux 路径保持原样。地址栏按 Enter 或点“前往”读取目标，成功后才能选定目录；失败保留输入并提示，不选用上次目录。目录弹窗嵌在新建表单中，地址栏 Enter 只导航，不提交创建会话。
 - 文件浏览地址栏默认显示可点击的目录层级，Linux从 `/` 开始、Windows挂载路径从 `C:` 等盘符开始；每层的title为完整路径，点击任意层直接导航。长路径横向滚动，进入目录默认露出末尾；点击空白处或分隔符切换完整路径输入，自动选中原地址，支持输入/粘贴、Enter或“前往”；Esc放弃编辑并恢复当前目录层级，不关闭面板。层级按钮获得焦点时粘贴也可进入输入模式；成功导航返回层级显示，失败保留输入。输入与最近目录同栏，右侧箭头打开与地址栏动态等宽的主题菜单；菜单路径字号13px、行高1.35，长路径换行。复用浮层的外点/焦点关闭，支持方向键、Home/End、Enter选择与Esc返回下拉按钮；触屏条目至少44px。文件侧栏、文件选择弹窗和工作目录选择弹窗共用这一地址栏，不另显示路径层级行。第二行“WSL”打开主目录。
 - 文件列表由 `DirectoryTable.tsx` 直接显示名称、大小、修改日期的紧凑表格，无目录列表iframe、大路径标题或额外上级目录行；沿用 WB 地址栏与导航。表体只在目录变化时创建文本DOM，排序复用 `directory-path.ts` 并只移动位置改变的行；类型图标用CSS背景绘制，不增加逐行框架状态或图标节点；文件夹使用独立的Windows黄色令牌，地址栏原生选择按钮和目录选择列表同步用黄。表头、名称、大小、日期均为15px，行高1.4、单元格上下2px留白；大小/日期保持单行，日期列155px，宽面板目录项约25px高，窄面板分行约50px，触屏行命中区域不少于44px。点击任一列打开该目录/文件，名称按钮也支持键盘；数据一律通过 `textContent` 写入，不解释文件名HTML。事件在表体集中处理，不需要模板脚本、消息转发或主题观察器。深浅主题、字体、Esc直接继承宿主；文件夹始终在前，未知元数据显示“—”并在同类末尾，零字节显示“0 B”、文件夹大小留空。窄面板把元数据放在名称下方，宽面板并排成列；排序不重新请求接口。旧服务端未带元数据时仍可浏览/打开；目录选择模式保留原列表。原Chromium组件/vendor源保留供历史对比，已不进入生产引用图。PDF/HTML预览自身的iframe用途保持不变。
+- 文件面板把刷新、上一级（↑）、WSL、Windows 渲染进标题栏“文件”右侧（`DirectoryContents` 的 `navTarget` 门户；槽位未挂载时不渲染，弹窗仍用第二行内联按钮）。刷新重读当前目录及 Git 状态，不轮询、不监听。
+- `/api/fs/dirs?files=1` 在 Git 工作区内并行跑 `git --no-optional-locks rev-parse --show-prefix` 与 `status -z -- .`（各 1.5s 超时），返回 `git`：直接子项名 → M/A/R/D/U/!，文件夹取其下最高状态。当前目录不在仓库时（如 `~/dev`），含 `.git` 的子文件夹各跑一次 `status`（并发 4、总预算 2s），取整仓最高状态，干净仓库不标。返回 `git` 时表格名称左侧留 14px 槽：文件显示字母、文件夹显示圆点，悬停提示含状态。非仓库且无子仓库、git 不可用或超时不返回该字段、不显示标记；见 [dir-list.ts](../server/dir-list.ts)。
 - 新建表单只有一个“浏览…”，先打开 Workbench 目录弹窗；地址栏与文件子页面同一形态（可点的路径层级、点空白处编辑路径、右侧最近目录下拉），不再另设层级按钮行。本机入口 `meta.capabilities.windowsDirectoryPicker=true` 时地址栏左侧显示文件夹按钮，调用现代 Windows 文件夹窗口（PowerShell 7 WinForms），选定后直接填入工作目录并关闭弹窗；取消保留当前目录，失败在弹窗内报错。远程入口不提供原生窗口。最近目录取（本设备上次创建目录＋当前表单初始目录＋工作台会话，去重最多8个，原生 Windows 历史最多补1个）；手机可横滑路径层级或用“最近目录”选择电脑目录，点选后仍需确认“选定此目录”。
 - 目录浏览打开时后台预取三家原生历史 `q=/mnt/&limit=1`，Windows 按钮比较历史与工作台最近活动的 `/mnt/` 目录，无记录用 `/mnt/c/Users`。按钮不等待历史；慢请求/失败期间用本地结果，返回后仅供后续点击，不自动改变当前目录。关键词也匹配标题，仅遇到非 `/mnt/` 目录时继续最小页，1.5 秒后不再追加请求；接口自身超时仍由 `api.ts` 管理。历史列表会遍历目录和 stat，并按需读取文件头/检查用户消息，不预取完整历史消息。
 
-- 文件面板地址栏左侧的蓝色文件夹图标打开 Windows 浏览窗口，按钮比右侧最近目录下拉宽 4px，提供悬停提示；本机能力未确认或远程入口不显示。取消保持当前目录，选文件沿用原预览接口。第二行 WSL 打开 Linux 主目录，Windows 仍跳到最近使用的 Windows 目录。
+- 文件面板地址栏左侧的蓝色文件夹图标打开 Windows 浏览窗口，按钮比右侧最近目录下拉宽 4px，提供悬停提示；本机能力未确认或远程入口不显示。取消保持当前目录，选文件沿用原预览接口。WSL（弹窗第二行，文件面板在标题栏）打开 Linux 主目录，Windows 仍跳到最近使用的 Windows 目录。
 
 ## RC、释放与重启
 
 - RC 胶囊仅 Claude，状态与 URL 由 session / `remote_control_updated` 驱动，失败原因可见于 title；快照/重连恢复，链接只打开 claude.ai。默认开启选项读写 Claude 启动设置；见 [SessionView.tsx](src/components/SessionView.tsx)、[SettingsMenu.tsx](src/components/SettingsMenu.tsx)。
 - 远程 user 只在 connecting/connected/reconnecting 识别，排除子代理/合成消息，本机回显 FIFO 最多 20 条且不随 result 清空；worker 替换按设置/此前状态恢复 RC，见 [server/drivers/claude.ts](../server/drivers/claude.ts)。
 - 「更多 → VSCode 继续」仅 idle 且有原生 id 可释放；成功复制 resumeCommand，失败退回 prompt，桌面尝试协议导航，手机只复制。释放不标 dead，输入框可再发，由后端磁盘续接；见 [SessionView.tsx](src/components/SessionView.tsx)、[server/README.md](../server/README.md)。
-- 空闲释放档位 0/15/30/60/120 分钟，经 `/api/prefs` 保存，写失败回滚；running、待审批、RC 已连接等跳过，释放事件更新列表。设置重启先重读忙会话数并确认，POST 202 后须观察 WS 断开再恢复，60 秒超时提示失败；见 [restart.ts](src/restart.ts)。「关机」先弹与清理存储同款的确认弹层（默认聚焦取消），确认后交给后端 `/api/power-off`：无忙会话直接关机，否则后端等全部完成再关；等待/已排定时按钮显示状态并可点击取消，此时菜单打开期间每 3 秒刷新状态。设置面板桌面两栏：左「会话（底部存储占用与清理）+ Workbench」，右「外观」；手机按同序单栏。Workbench 组的「主机与连接（Tailscale）」关闭设置并派发 `OPEN_HOST_MENU_EVENT`，直接打开左上角 wb 主机菜单。
+- 空闲释放档位 0/15/30/60/120 分钟，经 `/api/prefs` 保存，写失败回滚；running、待审批、RC 已连接等跳过，释放事件更新列表。设置重启先重读忙会话数，有忙会话时弹与清理存储同款的确认弹层（默认聚焦取消，「仍要重启」才继续），重启中/失败提示也用同款弹层，POST 202 后须观察 WS 断开再恢复，60 秒超时提示失败；见 [restart.ts](src/restart.ts)。「关机」先弹与清理存储同款的确认弹层（默认聚焦取消），确认后交给后端 `/api/power-off`：无忙会话直接关机，否则后端等全部完成再关；等待/已排定时按钮显示状态并可点击取消，此时菜单打开期间每 3 秒刷新状态。设置面板桌面两栏，各为一个 `.settings-col`：左「会话（底部存储占用与清理）│ 重启 Workbench」，右「外观 │ 主机（主机与连接、关机）」；手机按同序单栏。「主机与连接（Tailscale）」关闭设置并派发 `OPEN_HOST_MENU_EVENT`，直接打开左上角 wb 主机菜单。
 
 ## 外观与通用边界
 
