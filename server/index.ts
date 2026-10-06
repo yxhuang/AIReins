@@ -104,7 +104,14 @@ const manager = new SessionManager();
 // 关机走用户的 win-shutdown（默认 60 秒后 /sg /f，abort 取消）；不在 PATH 假设上，直接用固定位置。
 const powerOff = createPowerOff({
   busy: () => busySessionCount(manager.list()),
-  run: (args) => promisify(execFile)(join(homedir(), ".local/bin/win-shutdown"), args, { timeout: 30_000 }),
+  run: async (args) => {
+    try {
+      await promisify(execFile)(join(homedir(), ".local/bin/win-shutdown"), args, { timeout: 30_000 });
+    } catch (error) {
+      // abort 时 Windows 报 1116「没有正在进行的关机」：目标状态已达成，按取消成功处理。
+      if (!(args[0] === "abort" && String((error as { stderr?: unknown }).stderr ?? "").includes("(1116)"))) throw error;
+    }
+  },
 });
 const terminals = new TerminalRegistry(process.cwd());
 const history = new HistoryIndex();

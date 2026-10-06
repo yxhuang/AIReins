@@ -2910,6 +2910,9 @@ body.resizing {
 
 .settings-storage { margin-bottom: 12px; }
 .settings-hosts { margin-bottom: 8px; }
+/* 关机已排定/等待中：按钮变成取消，用 --danger 提示有一项待处理的不可逆动作 */
+.settings-power.is-pending { border-color: var(--danger); color: var(--danger); }
+.settings-power.is-pending:hover:not(:disabled) { border-color: var(--danger); }
 .settings-storage-breakdown { overflow-wrap: anywhere; }
 .storage-overlay { z-index: 100; }
 .storage-dialog { overflow-y: auto; }

@@ -166,6 +166,7 @@ export function restartWorkbench(signal?: AbortSignal): Promise<{ restarting: bo
 export interface PowerOffStatus {
   state: "idle" | "waiting" | "scheduled";
   busy: number;
+  remainingMs?: number;
   error?: string;
 }
 

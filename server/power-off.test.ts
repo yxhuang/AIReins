@@ -13,8 +13,8 @@ assert.equal(busySessionCount([
 // 空闲：直接关机
 {
   const calls: string[][] = [];
-  const power = createPowerOff({ busy: () => 0, run: async (args) => { calls.push(args); } });
-  assert.deepEqual(await power.request(), { state: "scheduled", busy: 0 });
+  const power = createPowerOff({ busy: () => 0, run: async (args) => { calls.push(args); }, now: () => 1000 });
+  assert.deepEqual(await power.request(), { state: "scheduled", busy: 0, remainingMs: 60_000 });
   assert.deepEqual(calls, [[]]);
   await power.request();
   assert.equal(calls.length, 1, "已排定时重复请求不再执行");
@@ -46,6 +46,23 @@ assert.equal(busySessionCount([
   busy = 0;
   await sleep(20);
   assert.deepEqual(calls, []);
+}
+
+// 倒计时：剩余时间随时钟递减；过了关机时刻加宽限仍活着，回到 idle 并带错误
+{
+  let clock = 0;
+  const power = createPowerOff({ busy: () => 0, run: async () => undefined, delayMs: 60_000, graceMs: 30_000, now: () => clock });
+  await power.request();
+  clock = 45_000;
+  assert.equal(power.status().remainingMs, 15_000);
+  clock = 80_000;
+  assert.deepEqual(power.status(), { state: "scheduled", busy: 0, remainingMs: 0 });
+  clock = 90_001;
+  const timedOut = power.status();
+  assert.equal(timedOut.state, "idle");
+  assert.equal(timedOut.remainingMs, undefined);
+  assert.match(timedOut.error ?? "", /仍未关机/);
+  assert.equal((await power.request()).state, "scheduled", "超时复位后可重新关机");
 }
 
 // 命令失败：回到 idle 并带错误

@@ -152,6 +152,13 @@ export function SettingsMenu() {
   const restartConfirmDialog = useRef<HTMLDivElement>(null);
   const dialogOpen = storageDialogOpen || powerConfirm !== null || restartConfirm !== null;
   const powerActive = power !== null && power.state !== "idle";
+  /** 已排定关机的本地时刻：按服务端给的剩余毫秒折算，避开手机与电脑时钟差。 */
+  const [powerDeadline, setPowerDeadline] = useState<number | null>(null);
+  const [powerNow, setPowerNow] = useState(() => Date.now());
+  const applyPower = (status: PowerOffStatus) => {
+    setPower(status);
+    setPowerDeadline(status.remainingMs === undefined ? null : Date.now() + status.remainingMs);
+  };
 
   useEffect(() => () => restartAbort.current?.abort(), []);
   useEffect(() => {
@@ -220,7 +227,7 @@ export function SettingsMenu() {
   useEffect(() => {
     if (!open) return;
     let cancelled = false;
-    const load = () => powerOff().then((status) => { if (!cancelled) setPower(status); }).catch(() => { /* 保持当前显示 */ });
+    const load = () => powerOff().then((status) => { if (!cancelled) applyPower(status); }).catch(() => { /* 保持当前显示 */ });
     void load();
     const timer = powerActive ? setInterval(load, 3000) : undefined;
     return () => {
@@ -229,13 +236,22 @@ export function SettingsMenu() {
     };
   }, [open, powerActive]);
 
+  // 倒计时每秒走一格；到点后的复位由上面的 3 秒刷新从服务端拿
+  useEffect(() => {
+    if (!open || powerDeadline === null) return;
+    setPowerNow(Date.now());
+    const timer = setInterval(() => setPowerNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [open, powerDeadline]);
+  const powerSeconds = powerDeadline === null ? null : Math.max(0, Math.ceil((powerDeadline - powerNow) / 1000));
+
   const togglePowerOff = async () => {
     if (powerPending.current) return;
     powerPending.current = true;
     setPowerError("");
     try {
       if (powerActive) {
-        setPower(await powerOff("DELETE"));
+        applyPower(await powerOff("DELETE"));
         return;
       }
       setPowerConfirm((await powerOff()).busy);
@@ -268,7 +284,7 @@ export function SettingsMenu() {
     if (powerPending.current) return;
     powerPending.current = true;
     try {
-      setPower(await powerOff("POST"));
+      applyPower(await powerOff("POST"));
     } catch (error) {
       setPowerError(error instanceof Error ? error.message : String(error));
     } finally {
@@ -456,10 +472,11 @@ export function SettingsMenu() {
               <button type="button" className="settings-action settings-hosts" onClick={openHostMenu} aria-haspopup="menu">
                 主机与连接（Tailscale）
               </button>
-              <button type="button" className="settings-action settings-power" ref={powerButton} aria-haspopup={powerActive ? undefined : "dialog"}
-                onClick={() => void togglePowerOff()}>
-                <span aria-hidden="true">⏻</span>{power?.state === "waiting" ? `等待 ${power.busy} 个会话完成后关机 · 取消`
-                  : power?.state === "scheduled" ? "已发出关机（约 60 秒）· 取消" : "关机"}
+              <button type="button" className={`settings-action settings-power${powerActive ? " is-pending" : ""}`} ref={powerButton}
+                aria-haspopup={powerActive ? undefined : "dialog"} onClick={() => void togglePowerOff()}>
+                {powerActive ? <span aria-hidden="true">✕</span> : <span aria-hidden="true">⏻</span>}
+                {power?.state === "waiting" ? `取消关机（等 ${power.busy} 个会话完成）`
+                  : power?.state === "scheduled" ? (powerSeconds === null ? "取消关机" : `取消关机（${powerSeconds} 秒后关机）`) : "关机"}
               </button>
               {(power?.error || powerError) && <span className="new-error" role="alert">{power?.error || powerError}</span>}
             </section>
