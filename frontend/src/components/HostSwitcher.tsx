@@ -142,8 +142,19 @@ export function HostSwitcher() {
     if (!next) event.preventDefault();
     else event.currentTarget.href = hostNavigationUrl(origin, next);
   };
+  // Chrome/Edge 的 --app 与安装的 PWA 都报 standalone。
+  const standalone = typeof window !== "undefined" && window.matchMedia?.("(display-mode: standalone)").matches;
+  const mobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent) ||
+    (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+  // 手机主屏 App 只在添加时的源内全屏，跳到别的电脑会被系统套上浏览器栏：改为提示用那台电脑自己的主屏图标。
+  const homeScreenHint = (origin: string) => {
+    if (!standalone || !mobile || origin === currentOrigin) return false;
+    setError(`主屏 App 内切换会出现浏览器栏。请从 ${connectionLabel(origin)} 的主屏图标进入；还没有的话，在 Safari 打开 ${origin}，分享 → 添加到主屏幕。`);
+    return true;
+  };
   const choose = (origin: string, discovered = false) => {
     if (origin === currentOrigin) { close(true); return; }
+    if (homeScreenHint(origin)) return;
     if (store.filePreview?.saving) { setError("文件正在保存，完成后再切换主机。"); return; }
     if (hostSwitchHasUnsentInput() && !window.confirm("当前有未发送的输入或附件，仍要切换主机？")) return;
     // 未保存文件继续由 store 的 beforeunload 保护；这里不清空文件、草稿，也不停止 worker。
@@ -155,12 +166,8 @@ export function HostSwitcher() {
     ...(currentUnsaved ? [currentRemote, ...connections.remotes] : connections.remotes)
       .map(origin => ({ origin, name: connectionLabel(origin) })),
   ];
-  // Chrome/Edge 的 --app 与安装的 PWA 都报 standalone。
-  const standalone = typeof window !== "undefined" && window.matchMedia?.("(display-mode: standalone)").matches;
   const brands = (navigator as Navigator & { userAgentData?: { brands: { brand: string }[] } }).userAgentData?.brands ?? [];
   const browserLabel = brands.some(b => b.brand === "Google Chrome") ? "在 Chrome 中打开" : "在浏览器中打开";
-  const mobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent) ||
-    (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
   const canOpenApp = !standalone && !mobile && isLocal && appWindow === true;
   const openInApp = async () => {
     if (openingApp) return;
@@ -217,7 +224,7 @@ export function HostSwitcher() {
           </button>
           <a role="menuitem" href={hostNavigationUrl(origin, connections)} target="_blank" rel="noopener noreferrer"
             className="host-menu-new-window" aria-label={`在新${standalone ? "窗口" : "标签页"}打开 ${name}`}
-            title={standalone ? "在新窗口打开" : "在新标签页打开"} onClick={event => openNewWindow(event, !!standalone)}>↗</a>
+            title={standalone ? "在新窗口打开" : "在新标签页打开"} onClick={event => { if (homeScreenHint(origin)) event.preventDefault(); else openNewWindow(event, !!standalone); }}>↗</a>
         </div>)}
         {discovered.length > 0 && <>
           <p className="host-menu-section">Tailscale 上的其他电脑</p>
@@ -229,7 +236,7 @@ export function HostSwitcher() {
             <a role="menuitem" href={hostNavigationUrl(peer.origin, { ...connections, remotes: [...connections.remotes, peer.origin] })}
               target="_blank" rel="noopener noreferrer" className="host-menu-new-window"
               aria-label={`在新${standalone ? "窗口" : "标签页"}打开 ${peer.name}`} title={standalone ? "在新窗口打开" : "在新标签页打开"}
-              onClick={event => { openNewTab(event, peer.origin); openNewWindow(event, !!standalone); }}
+              onClick={event => { if (homeScreenHint(peer.origin)) { event.preventDefault(); return; } openNewTab(event, peer.origin); openNewWindow(event, !!standalone); }}
               onAuxClick={event => { if (event.button === 1) openNewTab(event, peer.origin); }}>↗</a>
           </div>)}
         </>}
