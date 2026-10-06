@@ -25,7 +25,7 @@ git clone https://github.com/yxhuang/workbench.git && cd workbench && bash insta
 
 脚本检查依赖、安装 npm 依赖和 `wb` / `workbench` 命令、安装 Windows 托盘与快捷方式，并做冒烟测试；已有服务保持运行。WSL 下检测到已登录运行的 Windows Tailscale 时，还会自动配置远程入口：
 
-1. `~/.workbench/remote.json` 不存在时，以本机 MagicDNS HTTPS 地址和本机 Tailscale 用户生成配置（`port: 8793`、`terminal: false`、权限 `600`），打印 origin；已有文件只校验、打印 origin，绝不覆盖。
+1. `~/.workbench/remote.json` 不存在时，以本机 MagicDNS HTTPS 地址和本机 Tailscale 用户生成配置（`port: 8793`、`terminal: true`、权限 `600`），打印 origin；已有文件只校验、打印 origin，绝不覆盖。
 2. `Workbench Remote Gateway` 登录任务不存在时，弹出一次 UAC，在拥有该 WSL 发行版的 Windows 账户下允许安装；Windows PowerShell 5.1 安装网关及 Tailscale Serve。已有任务打印状态并跳过。拒绝 UAC 或失败会继续本机安装并打印可复制的管理员 PowerShell 手动命令。
 3. 新配置生成时，若 WB 已运行，提示「运行 wb restart 使远程入口生效」，由你选择时机执行；未运行则沿用冒烟测试的临时启动、验证、停止流程，之后由桌面 WB 或远程请求启动服务。
 

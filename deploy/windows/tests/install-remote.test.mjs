@@ -9,7 +9,7 @@ import { configFromStatus, validateConfig, setupRemote } from '../install-remote
 
 const origin = 'https://new-pc.tail123.ts.net';
 const status = () => ({ BackendState: 'Running', Self: { DNSName: 'new-pc.tail123.ts.net.', UserID: 42 }, User: { '42': { LoginName: 'owner@example.com' } } });
-const expected = { port: 8793, origin, allowedLogins: ['owner@example.com'], terminal: false };
+const expected = { port: 8793, origin, allowedLogins: ['owner@example.com'], terminal: true };
 
 test('generate the logged-in machine config without changing status input', () => {
   const input = status();
@@ -66,7 +66,7 @@ test('fresh install writes mode 600 and invokes one waited UAC with UNC and Linu
   assert.match(uac[0], /-Verb RunAs -Wait -PassThru/);
   assert.ok(uac[0].includes('\\\\wsl.localhost\\Ubuntu\\home\\test user\\workbench\\deploy\\windows\\install-remote-gateway.ps1'));
   assert.ok(uac[0].includes('-Distro "Ubuntu" -LinuxUser "test" -LinuxHome "' + f.home + '"'));
-  assert.ok(f.messages.some(s => s.includes('如需远程终端改为 true 后 wb restart')));
+  assert.ok(f.messages.some(s => s.includes('远程终端已开启')));
 });
 test('existing config is byte-for-byte preserved and existing task skips UAC', () => {
   const f = fixture({ task: { State: 'Running' } });
