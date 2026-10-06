@@ -390,6 +390,18 @@ function SessionMoreMenu({ session, usage }: { session: SessionRecord; usage?: U
     }
   };
 
+  const copyId = async () => {
+    const id = session.nativeSessionId;
+    if (!id) return;
+    closeMenu();
+    try {
+      await navigator.clipboard.writeText(id);
+      showNotice("会话 ID 已复制", false);
+    } catch {
+      window.prompt("手动复制会话 ID：", id);
+    }
+  };
+
   const feedback = busy ? { text: "释放中…", error: false } : notice;
 
   return (
@@ -418,6 +430,10 @@ function SessionMoreMenu({ session, usage }: { session: SessionRecord; usage?: U
             <PageIcon icon={usage.icon} /> AI 用量
           </button>}
           <hr className="session-more-mobile session-more-sep" />
+          <button type="button" className="btn session-more-item" role="menuitem" disabled={!session.nativeSessionId} aria-disabled={!session.nativeSessionId}
+            title={session.nativeSessionId ? `复制原生会话 id：${session.nativeSessionId}` : "首轮完成前没有原生会话 id"} onClick={() => void copyId()}>
+            <CopyIcon /> 复制会话 ID
+          </button>
           <button type="button" className="btn session-more-item" role="menuitem" aria-label="VSCode 继续" disabled={!canRelease} aria-disabled={!canRelease}
             aria-describedby={disabledReason ? `${menuId}-reason` : undefined} title={title} onClick={() => void onClick()}>
             <VSCodeIcon /> VSCode 继续
@@ -1609,3 +1625,11 @@ function Composer({ session, dead, errored }: { session: SessionRecord; dead: bo
 }
 
 // 命令筛选与「最近使用」已抽到 ../commands（纯逻辑，单测见 scripts/render-items.test.mjs）。
+
+function CopyIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect x="9" y="9" width="11" height="11" rx="2" /><path d="M5 15V6a2 2 0 0 1 2-2h9" />
+    </svg>
+  );
+}

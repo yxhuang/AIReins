@@ -38,8 +38,18 @@ export class ClaudePlugins {
       this.latest.delete(cwd);
       throw new Error("claude plugin list 输出不是插件列表");
     }
-    this.latest.set(cwd, result);
-    return result;
+    // CLI 会列出所有项目的安装记录；每个插件只留当前目录下最具体的一条（local > project > user）。
+    // enabled 已是 CLI 按 cwd 算出的实际生效状态，开关作用于这一条的 scope。
+    const rank = (p: ClaudePlugin) => ({ local: 3, project: 2, user: 1 } as Record<string, number>)[p.scope ?? ""] ?? 0;
+    const byId = new Map<string, ClaudePlugin>();
+    for (const p of result as ClaudePlugin[]) {
+      if (typeof p.projectPath === "string" && p.projectPath !== cwd) continue;
+      const prev = byId.get(p.id);
+      if (!prev || rank(p) > rank(prev)) byId.set(p.id, p);
+    }
+    const plugins = [...byId.values()];
+    this.latest.set(cwd, plugins);
+    return plugins;
   }
 
   async setEnabled(cwd: string, id: string, enabled: boolean, scope?: unknown): Promise<void> {

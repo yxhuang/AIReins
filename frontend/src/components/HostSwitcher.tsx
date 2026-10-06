@@ -1,7 +1,7 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState, useSyncExternalStore, type MouseEvent } from "react";
 import { createPortal } from "react-dom";
 import {
-  connectionLabel, connectionsWithRemote, getHostConnections, hostNavigationUrl,
+  connectionLabel, hostShortName, connectionsWithRemote, getHostConnections, hostNavigationUrl,
   normalizeLocalOrigin, normalizeRemoteOrigin, resolveRemoteHostInput, saveHostConnections, subscribeHostConnections,
 } from "../host-connections";
 import { fetchTailscalePeers, openAppWindow } from "../api";
@@ -164,7 +164,9 @@ export function HostSwitcher() {
   const destinations = [
     ...(connections.localOrigin ? [{ origin: connections.localOrigin, name: localName ? `${localName}（本机）` : "本机" }] : []),
     ...(currentUnsaved ? [currentRemote, ...connections.remotes] : connections.remotes)
-      .map(origin => ({ origin, name: connectionLabel(origin) })),
+      .map(origin => ({ origin, name: connectionLabel(origin) }))
+      // 本机自己的 Tailscale 地址与「本机」是同一台，不重复列出
+      .filter(({ origin, name }) => !(connections.localOrigin && name === localName && origin !== currentOrigin)),
   ];
   const brands = (navigator as Navigator & { userAgentData?: { brands: { brand: string }[] } }).userAgentData?.brands ?? [];
   const browserLabel = brands.some(b => b.brand === "Google Chrome") ? "在 Chrome 中打开" : "在浏览器中打开";
@@ -197,6 +199,7 @@ export function HostSwitcher() {
       <span className="brand-mark" aria-hidden="true">wb</span>
       <span className="brand-line" aria-hidden="true" />
       <span className="brand-name" aria-hidden="true">{label}</span>
+      <span className="brand-short" aria-hidden="true">{hostShortName(isLocal ? localName ?? "" : label)}</span>
     </button>
     {open && createPortal(<div className={`host-switch-panel${managing ? " managing" : ""}`} ref={panelRef} id={panelId}
       role={managing ? "dialog" : "menu"} aria-label={managing ? "主机与连接" : "选择主机"}

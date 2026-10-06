@@ -114,17 +114,21 @@
   --shadow-pop: 0 6px 24px rgb(0 0 0 / 0.14);
   /* 按钮质感（10-03 用户定，全站统一）：浅底按钮 = 上亮下暗微渐变 + 1px 细描边 + 顶部内高光 + 轻投影；
      选中/按下 = 实底凹陷；实色按钮（主色/闸门/新建/发送）只叠高光与投影。颜色全由令牌混出，深浅主题自动跟随。 */
+  /* 深色下「高光」若取 --surface 只比底色亮一点、「投影」若取 --text 反成浅色光晕，按钮发平；
+     所以高光/投影单独按主题取：浅色沿用原值，深色用白色微光 + 黑色投影，按下态在深色里变暗而非变亮。 */
+  --raised-hl: light-dark(color-mix(in srgb, var(--surface) 55%, transparent), rgb(255 255 255 / 0.09));
+  --raised-drop: light-dark(color-mix(in srgb, var(--text) 10%, transparent), rgb(0 0 0 / 0.45));
   --raised-bg: linear-gradient(180deg, color-mix(in srgb, var(--text) 11%, var(--chrome)), color-mix(in srgb, var(--text) 6%, var(--chrome)));
   --raised-shadow: inset 0 0 0 1px color-mix(in srgb, var(--text) 9%, transparent),
-    inset 0 1px 0 color-mix(in srgb, var(--surface) 55%, transparent),
-    0 1px 2px color-mix(in srgb, var(--text) 10%, transparent);
-  --raised-sheen: linear-gradient(180deg, color-mix(in srgb, var(--surface) 45%, transparent), color-mix(in srgb, var(--text) 4%, transparent));
-  --raised-shadow-soft: inset 0 1px 0 color-mix(in srgb, var(--surface) 55%, transparent), 0 1px 2px color-mix(in srgb, var(--text) 8%, transparent);
+    inset 0 1px 0 var(--raised-hl),
+    0 1px 2px var(--raised-drop);
+  --raised-sheen: linear-gradient(180deg, light-dark(color-mix(in srgb, var(--surface) 45%, transparent), rgb(255 255 255 / 0.05)), color-mix(in srgb, var(--text) 4%, transparent));
+  --raised-shadow-soft: inset 0 1px 0 var(--raised-hl), 0 1px 2px var(--raised-drop);
   --raised-bg-hover: linear-gradient(180deg, color-mix(in srgb, var(--text) 16%, var(--chrome)), color-mix(in srgb, var(--text) 10%, var(--chrome)));
-  --sunk-bg: color-mix(in srgb, var(--text) 18%, var(--chrome));
-  --sunk-shadow: inset 0 1px 2px color-mix(in srgb, var(--text) 12%, transparent);
+  --sunk-bg: light-dark(color-mix(in srgb, var(--text) 18%, var(--chrome)), color-mix(in srgb, black 22%, var(--chrome)));
+  --sunk-shadow: inset 0 1px 2px light-dark(color-mix(in srgb, var(--text) 12%, transparent), rgb(0 0 0 / 0.5));
   --accent-sheen: linear-gradient(180deg, color-mix(in srgb, white 16%, transparent), transparent 60%);
-  --accent-shadow: inset 0 1px 0 color-mix(in srgb, white 22%, transparent), 0 1px 2px color-mix(in srgb, var(--text) 16%, transparent);
+  --accent-shadow: inset 0 1px 0 color-mix(in srgb, white 22%, transparent), 0 1px 2px light-dark(color-mix(in srgb, var(--text) 16%, transparent), rgb(0 0 0 / 0.5));
 }
 
 :root[data-theme="light"] { color-scheme: light; }
@@ -565,6 +569,7 @@ body.resizing {
   font: 700 24px var(--font-mono);
   letter-spacing: -0.08em;
 }
+.brand-short { display: none; }
 .brand-line { width: 1px; height: 28px; background: var(--border-strong); margin: 0 2px; }
 .app.sidebar-collapsed .brand-line,
 .app.sidebar-collapsed .brand-name { display: none; }
@@ -3756,6 +3761,8 @@ body.resizing {
   /* 手机列表页顶栏一行（参照 iOS 工具栏）：wb 标志 │ 刷新 · 蓝色实心「+」新建 …… 右端文件 · 终端 · 派单（浅底圆钮）。
      「workbench」字样与 ChatGPT 入口在手机上不显示（ChatGPT 用 App） */
   .app:not(.sidebar-collapsed) .brand-name, .app:not(.sidebar-collapsed) .sidebar-chatgpt { display: none; }
+  /* 机器全名会挤占顶栏按钮，只显示两字简称（X1 / De） */
+  .app:not(.sidebar-collapsed) .brand-short:not(:empty) { display: inline; font-size: 15px; font-weight: 600; }
   .app:not(.sidebar-collapsed) .sidebar { grid-template-columns: auto auto minmax(0, 1fr); column-gap: 6px; }
   .app:not(.sidebar-collapsed) .sidebar > .mobile-panel-launcher { grid-area: 1 / 3; justify-self: stretch; justify-content: flex-end; align-self: center; }
   .app:not(.sidebar-collapsed) .sidebar-head { justify-content: flex-start; gap: 6px; min-width: 0; }

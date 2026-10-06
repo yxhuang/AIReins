@@ -31,4 +31,12 @@ const failing = new ClaudePlugins(async (_cwd, args) => {
 });
 await failing.list("/session");
 await assert.rejects(failing.setEnabled("/session", "known@market", true), /模拟 CLI 失败/);
-console.log("✅ Claude 插件列表校验、scope、数组参数、刷新与失败处理");
+const scoped = new ClaudePlugins(async () => [
+  { id: "sp@m", scope: "user", enabled: true },
+  { id: "sp@m", scope: "local", projectPath: "/other", enabled: true },
+  { id: "sp@m", scope: "local", projectPath: "/session", enabled: true },
+  { id: "only-other@m", scope: "local", projectPath: "/other", enabled: false },
+]);
+assert.deepEqual((await scoped.list("/session")).map((p) => [p.id, p.scope, p.projectPath]), [["sp@m", "local", "/session"]]);
+assert.deepEqual((await scoped.list("/elsewhere")).map((p) => [p.id, p.scope]), [["sp@m", "user"]]);
+console.log("✅ Claude 插件列表校验、scope、数组参数、刷新与失败处理、按 cwd 去重");

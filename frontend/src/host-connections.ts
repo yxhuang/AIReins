@@ -104,6 +104,13 @@ export function connectionLabel(href: string): string {
   return normalizeRemoteOrigin(url.origin) ? (url.hostname.split(".")[0] ?? url.hostname) : url.hostname;
 }
 
+/** 手机顶栏的两字主机简称：去掉首段用户前缀（my-laptop → X1，my-desktop → De）。 */
+export function hostShortName(name: string): string {
+  const rest = name.includes("-") ? name.slice(name.indexOf("-") + 1) : name;
+  const chars = rest.replace(/[^a-z0-9]/gi, "").slice(0, 2).toLowerCase();
+  return chars.charAt(0).toUpperCase() + chars.slice(1);
+}
+
 export function workbenchWindowTitle(href: string, pending: number): string {
   const prefix = pending > 0 ? `(${pending}) 个闸门待处理 · ` : "";
   const label = connectionLabel(href);
