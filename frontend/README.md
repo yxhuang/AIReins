@@ -69,7 +69,7 @@ node frontend/scripts/smoke-ws.mjs  # 需后端；会创建测试会话、批准
 - 已结束及超时会话从「历史会话」查找，工作台记录带「工作台」来源标签；已移除「N 个工作台会话」折叠。预览底部「打开会话」仍能进入主列表外会话：已释放的原会话可发送并原地续接，dead 显示「新建会话并续接」，不因当前打开而进入主列表；手机后退/前进仍恢复历史预览/列表。
 - 「历史会话」及扩展页内容覆盖侧栏会话区，底部入口不重排，同刻只开一个；标题/收起/Esc 关闭。会话列表保持挂载但不可聚焦，关闭恢复滚动；见 [Sidebar.tsx](src/components/Sidebar.tsx)。
 - 桌面保留当前会话并恢复路由；手机历史列表与全屏预览共用 `#/history`，由版本 1 的 `history.state.workbenchNavigation.route.historySelection` 区分。列表点行 push 预览，预览换选 replace 当前 state；系统后退回列表、前进恢复预览，列表再后退回进入列表前的来源。列表持续挂载，保留筛选/分页/滚动位置。刷新后仍恢复预览；主动返回只有确认本次运行的前条是列表才 back，否则 replace 回列表（无列表来源的旧 state 也只清预览）。桌面选择/返回仍不新增 history。关闭历史或换页后再打开重新加载；旧 history/page hash 仍可进入。
-- 历史列表每页 150 条，关键词 250ms 防抖，agent 由后端筛选；来源只过滤已加载条目并明示范围。空会话隐藏，`truncated/skipped` 为中性说明，导入对照 `agent + nativeSessionId`；见 [HistoryView.tsx](src/components/HistoryView.tsx)、[history.ts](src/history.ts)。
+- 历史列表每页 150 条，关键词 250ms 防抖，agent 由后端筛选；来源只过滤已加载条目并明示范围。空会话隐藏，`truncated/skipped` 为中性说明，导入对照 `agent + nativeSessionId`。历史面板选定目录时，左上角「新建会话」直接以该目录为默认工作目录（原「在此目录新建会话」按钮已并入）；见 [HistoryView.tsx](src/components/HistoryView.tsx)、[history.ts](src/history.ts)。
 - 扩展页只在启动取列表，未知类型跳过；只在打开/重试时查 health。不可达或 `embeddable:false` 不挂 iframe；true 正常嵌入，null/缺省保留空白提示与新标签出口；见 [PageView.tsx](src/components/PageView.tsx)、[pages.ts](src/pages.ts)。
 - iframe 使用 manifest URL，`proxy:true` 则走同源 `/pages/<id>/`；侧栏忽略主区 maxWidth，收起卸载。跨源 iframe 内 Esc 不可捕获；非代理 loopback 页面在远程入口显示电脑端提示，不能把手机的 localhost 当成服务端。
 
@@ -102,7 +102,7 @@ node frontend/scripts/smoke-ws.mjs  # 需后端；会创建测试会话、批准
 ### 命令菜单
 
 - Claude「/」按扩展分成「上下文 / 模型 / 自定义 / 设置 / 支持」；「管理插件」「MCP 服务器」放在自定义，副标题直接说明可启停/重载/重连。MCP 和插件均为 `role="switch"`；MCP 回复中可操作，启动或审批时在控件旁说明原因，操作后读回。Thinking 放在模型组，默认开启、会话保存，点后保持菜单展开；失败就地提示。Fast 通过能力接口读取原生 `supportsFastMode`，只在支持时显示，点击发用户命令 `/fast`。见 [SlashMenu.tsx](src/components/SlashMenu.tsx)。
-- `/tasks` 面板消费实时 `session.backgroundTasks`；停止前确认，控制成功不提前移除任务，等 CLI 元数据更新。`/btw` 弹窗问答不进入 store 主事件流，只在组件内保存历史（最多传 20 轮），支持取消，关闭会取消请求并清空问答；synthetic/null 不加入历史。见 [ClaudeMenuPanels.tsx](src/components/ClaudeMenuPanels.tsx)。
+- `/tasks` 面板消费实时 `session.backgroundTasks`；停止前确认，控制成功不提前移除任务，等 CLI 元数据更新。侧问面板（Claude `/btw`、Codex `/side` 及别名 `/btw`）不进入 store 主事件流，只在组件内保存历史（最多传 20 轮），支持取消，关闭会取消请求并清空问答；synthetic/null 不加入历史。输入框打 `/` 即可补全这几个命令（`withSideCommands` 补进命令表，同名 CLI 项去重），整行「/btw 问题」发送时被 `parseSideCommand` 拦下、不发主对话，带问题打开面板并立即提问（延后一拍，StrictMode 不重复）；补全面板里对侧问命令按 Enter 直接打开空面板，Tab 只填充。Claude 的「/」菜单 `/btw` 入口打开同一面板（Codex 菜单无此入口）。Codex 请求上限 320 秒（服务端回合 300 秒），Claude 80 秒。见 [ClaudeMenuPanels.tsx](src/components/ClaudeMenuPanels.tsx)、[commands.ts](src/commands.ts)。
 - 配置文件链接只提供 VSCode 路径，不启动编辑器或写文件，部分设置需续接生效。Thinking 的 0/31999 控制覆盖由后端在 worker 初始化时重发，不写 `~/.claude/settings.json`。新增样式字号只用 14/15/16，复用现有冷色 switch。
 - 导出使用原生 `export_conversation` 文本，可复制/下载，不把前端事件窗口当完整存档；Rewind 尚未接入。面板渲染见 [ClaudeMenuPanels.tsx](src/components/ClaudeMenuPanels.tsx)。
 - Codex 提供 status/model/mcp/skills/compact/review/new/interrupt 客户端命令；未知命令明确报错。compact/review/new 限空闲无审批，interrupt 限运行中，错误就地展示；见 [CodexCommandPanel.tsx](src/components/CodexCommandPanel.tsx)、[SessionView.tsx](src/components/SessionView.tsx)。
@@ -115,6 +115,7 @@ node frontend/scripts/smoke-ws.mjs  # 需后端；会创建测试会话、批准
 - 代码按需加载轻量词法着色，源码先转义；无/未知语言或 >2000 行纯文本，流式整轮结束后着色并丢弃过期结果；不是完整语法解析器，支持语言见 [code-highlight.ts](src/code-highlight.ts)、[highlight-languages.ts](src/highlight-languages.ts)。
 - 同回合 text/thought/tool 共用时间线，闸门/提问独立；正常结束不额外显示系统行，异常如实显示。连续 ≥3 个成功只读工具合并摘要，读取路径去重，未知工具回落原名/原始内容；命令先展示 20 行，可展开全部。见 [tool-summary.ts](src/tool-summary.ts)、[render-items.ts](src/render-items.ts)。
 - 调试行仅在渲染层由 `RAW_EVENT_NOISE` 降噪：隐藏 Codex diff 更新、hook 开始/明确成功完成、账户更新和 Claude 工具进度/命令生命周期；hook 失败或未知状态、未知事件保留。命令 `outputDelta` 仅在对应已完成工具卡片包含该输出时隐藏，实时或独有输出保留；Claude `user` 仅过滤已展示的文本回显，后台完成通知、跨会话消息等独有内容保留。服务端事件和 transcript 不变。
+- 按停止后回合结束显示中性行「已打断，可直接发消息继续」，不进出错态：Claude 认 driver 的 `interrupted:true`，Codex 认 `status:"interrupted"`，Kimi 认 `stopReason:"cancelled"`；见 [render-items.ts](src/render-items.ts)。
 - Focus view 在「/」菜单切换并按浏览器保存：实时及历史隐藏工具、思考、调试和中性系统行，保留用户/助手、闸门/提问与错误；见 `focusVisible`、[HistoryTimeline.tsx](src/components/HistoryTimeline.tsx)。
 - 历史预览、导入区共用 PagedHistory，首次最新 50 条并滚到底，nextCursor 向前 prepend，无原 500 条上限；旧页失败可重试，空窗口仍能翻页。导入首页使用 historyCursor 截止导入时刻，失效才回退最新页；见 [ResumedHistory.tsx](src/components/ResumedHistory.tsx)、[resumed-history.ts](src/resumed-history.ts)。
 - 外部续聊通过 `external_messages_added` 入流，文本/工具/可用思考复用历史渲染；原生历史只读，不伪造缺失状态。超长正文仍可能截断，跨页工具结果不另补读；跳转已导入会话优先非 dead、再按活动时间，见 [history.ts](src/history.ts)。

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { SessionRecord } from "../types";
 import { fetchClaudeCapabilities, fetchSessionInfo, manageSessionMcp, setSessionPlugin, setSessionThinking, type SessionInfoKind } from "../api";
-import { ClaudeMenuPanel, SettingsFileLinks, ClaudeTasksDialog, ClaudeSideQuestionDialog } from "./ClaudeMenuPanels";
+import { ClaudeMenuPanel, SettingsFileLinks, ClaudeTasksDialog } from "./ClaudeMenuPanels";
 import { compactTokens } from "../format";
 import { store, type Store } from "../store";
 import { useStore } from "../useStore";
@@ -28,16 +28,17 @@ const INFO_LABELS: Record<SessionInfoKind, string> = {
 
 const selectFocusView = (value: Store) => value.focusView;
 
-export function SlashMenu({ session, commandsSupported, onBrowseCommands, onCodexCommand, canInsertCommand = true }: {
+export function SlashMenu({ session, commandsSupported, onBrowseCommands, onSideQuestion, onCodexCommand, canInsertCommand = true }: {
   session: SessionRecord;
   commandsSupported: boolean;
   onBrowseCommands: () => void;
+  onSideQuestion: () => void;
   onCodexCommand?: (name: string) => void;
   canInsertCommand?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [info, setInfo] = useState<SessionInfoKind | null>(null);
-  const [panel, setPanel] = useState<"tasks" | "btw" | null>(null);
+  const [panel, setPanel] = useState<"tasks" | null>(null);
   const [supportsFast, setSupportsFast] = useState(false);
   const [thinkingPending, setThinkingPending] = useState(false);
   const [thinkingError, setThinkingError] = useState("");
@@ -113,7 +114,7 @@ export function SlashMenu({ session, commandsSupported, onBrowseCommands, onCode
               <button type="button" className="attach-item" role="menuitem"
                 onClick={() => { setOpen(false); setPanel("tasks"); }}>/tasks · 后台任务<span className="slash-subtitle">查看运行任务并停止</span></button>
               <button type="button" className="attach-item" role="menuitem" disabled={!workerReady}
-                onClick={() => { setOpen(false); setPanel("btw"); }}>/btw · 侧问<span className="slash-subtitle">单独问答，不加入主对话</span></button>
+                onClick={() => { setOpen(false); onSideQuestion(); }}>/btw · 侧问<span className="slash-subtitle">单独问答，不加入主对话</span></button>
               <div className="slash-group">模型</div>
               <button type="button" className="attach-item slash-toggle" role="switch" aria-label="Thinking" aria-checked={thinking}
                 disabled={!workerReady || thinkingPending || session.status === "starting"}
@@ -167,7 +168,6 @@ export function SlashMenu({ session, commandsSupported, onBrowseCommands, onCode
         </div>
       )}
       {panel === "tasks" && <ClaudeTasksDialog key={session.id} session={session} onClose={() => setPanel(null)} />}
-      {panel === "btw" && <ClaudeSideQuestionDialog key={session.id} sessionId={session.id} onClose={() => setPanel(null)} />}
       {info && <InfoDialog key={`${session.id}:${info}`} session={session} kind={info} onClose={() => setInfo(null)} />}
     </span>
   );

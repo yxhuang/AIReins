@@ -51,6 +51,7 @@ const selectSessions = (value: Store) => value.sessions;
 const selectNow = (value: Store) => value.now;
 const selectMeta = (value: Store) => value.meta;
 const selectHistoryOpen = (value: Store) => value.historyOpen;
+const selectHistoryNewCwd = (value: Store) => value.historyOpen ? value.historyCwdFilter : "";
 const selectCurrentId = (value: Store) => value.currentId;
 const selectPendingSignature = (value: Store) =>
   value.sessions.map((session) => `${session.id}:${value.pendingCount(session.id)}`).join("|");
@@ -122,6 +123,14 @@ export function Sidebar({ collapsed, onToggle, newOpen, onNewOpenChange, returnT
   useStore(selectPendingSignature);
   const [swipedId, setSwipedId] = useState<string | null>(null);
   const [newCwd, setNewCwd] = useState<string | undefined>();
+  // 历史面板已选定目录时，「新建会话」直接以该目录为默认工作目录
+  const historyCwd = useStore(selectHistoryNewCwd);
+  const newSessionIn = (cwd: string) => {
+    setNewCwd(cwd);
+    if (window.matchMedia("(max-width: 720px)").matches) store.navigate(null);
+    else store.closeSidebarPanel();
+    onNewOpenChange(true);
+  };
   useEffect(() => {
     if (!swipedId) return;
     const close = (event: Event) => {
@@ -207,6 +216,7 @@ export function Sidebar({ collapsed, onToggle, newOpen, onNewOpenChange, returnT
               aria-expanded={newOpen}
               aria-label={newOpen ? "取消新建" : "新建会话"}
               onClick={() => {
+                if (!newOpen && historyCwd) { newSessionIn(historyCwd); return; }
                 if (panelOpen) store.closeSidebarPanel(window.matchMedia("(max-width: 720px)").matches);
                 setNewCwd(undefined);
                 onNewOpenChange(!newOpen);
@@ -263,12 +273,7 @@ export function Sidebar({ collapsed, onToggle, newOpen, onNewOpenChange, returnT
         )}
         {panelOpen && !collapsed && (
           <section className="sidebar-panel-expanded" aria-label={historyOpen ? "历史会话内容" : currentPage?.name || "页面不存在"}>
-            {historyOpen ? <div id="sidebar-history-panel" className="sidebar-panel-content"><HistoryView onNewSession={cwd => {
-              setNewCwd(cwd);
-              if (window.matchMedia("(max-width: 720px)").matches) store.navigate(null);
-              else store.closeSidebarPanel();
-              onNewOpenChange(true);
-            }} /></div>
+            {historyOpen ? <div id="sidebar-history-panel" className="sidebar-panel-content"><HistoryView /></div>
               : currentPage ? <div id={`sidebar-page-${currentPage.id}`} className="sidebar-panel-content"><PageView page={currentPage} sidebar onCollapse={closePanel} /></div>
               : <div className="sidebar-panel-content sidebar-panel-missing">该页面可能已从 pages/ 移除或 manifest 失效。页面列表在启动时扫描，改动需重启后生效。</div>}
           </section>

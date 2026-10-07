@@ -3,7 +3,7 @@ import type { CommandInfo, DriverConfigOption, Mention, SessionRecord } from "..
 import { sessionTitle, truncateDisplayWidth } from "../format";
 import { compactCwd, awayFromLatest, syncStreamViewport, showComposerInterrupt, appendRefineCommand } from "../session-ui";
 import { createRenderItemsBuilder } from "../render-items";
-import { filterCommands, noteCommandUsed, readRecentCommands, recentInTable } from "../commands";
+import { filterCommands, noteCommandUsed, parseSideCommand, readRecentCommands, recentInTable, withSideCommands } from "../commands";
 import { extractMentionTokens, mentionQueryAt, mentionTokenEnd } from "../mentions";
 import { configOptionsForModel, modelConfigPatch, needsRestartNote, effectiveFor, modelShortName, pillText, EFFECTIVE_SOURCE_LABELS, ALIAS_NOTE, RESTART_NOTE } from "../config-view";
 import { fetchFiles, uploadAttachment, fetchCodexSkills, runCodexCommand, type CodexSkillInfo } from "../api";
@@ -19,6 +19,7 @@ import { ClockIcon, ConfigPills, PlusIcon, SendIcon, StopIcon, type MenuGroup, t
 import { DirectoryBrowser } from "./DirectoryBrowser";
 import { insertFileMention, planFileMention } from "./FilePanel";
 import { SlashMenu } from "./SlashMenu";
+import { SideQuestionDialog } from "./ClaudeMenuPanels";
 import { AgentIcon, VSCodeIcon } from "./AgentIcon";
 import { SessionDispatchBadge, SessionDispatchLink, useSessionDispatches } from "./SessionDispatchLink";
 import { PanelActions, PanelMenuItems } from "./PanelActions";
@@ -747,6 +748,8 @@ function Composer({ session, dead, errored }: { session: SessionRecord; dead: bo
   const [skillError, setSkillError] = useState<string | null>(null);
   const [skillsLoading, setSkillsLoading] = useState(false);
   const [codexResult, setCodexResult] = useState<CodexCommandResult | null>(null);
+  // /btw、/side 侧问面板（question 为输入框带入的首问，可为空）
+  const [sideQuestion, setSideQuestion] = useState<{ question: string } | null>(null);
   const codexBusy = useRef(false);
   const closeCodexResult = useCallback(() => setCodexResult(null), []);
   const listRef = useRef<HTMLDivElement>(null);
@@ -781,7 +784,7 @@ function Composer({ session, dead, errored }: { session: SessionRecord; dead: bo
     const mention = attachmentMention(att);
     return mention ? [mention] : [];
   });
-  const table = commands ?? [];
+  const table = useMemo(() => withSideCommands(session.agent, commands ?? []), [session.agent, commands]);
   const refineCommand = session.agent === "claude" ? "/refine-prompt" : session.agent === "codex" ? "$refine-prompt" : null;
   const showRefine = !dead && Boolean(text.trim() && refineCommand);
   const appendRefine = () => {
@@ -1115,6 +1118,14 @@ function Composer({ session, dead, errored }: { session: SessionRecord; dead: bo
   };
 
   const confirm = (cmd: CommandInfo, fillOnly: boolean) => {
+    if (!fillOnly && parseSideCommand(session.agent, `/${cmd.name}`) !== null) {
+      // 侧问命令：补全面板里回车直接打开空面板（Tab 仍只填充，便于接着写问题）
+      noteCommandUsed(session.agent, cmd.name);
+      setText("");
+      setDismissed(false);
+      setSideQuestion({ question: "" });
+      return;
+    }
     if (!fillOnly && !cmd.argHint) {
       // 无参数命令：确认即直接发（结构化 command，不拼 text）；失败保留文本，错误条提示
       noteCommandUsed(session.agent, cmd.name);
@@ -1146,6 +1157,15 @@ function Composer({ session, dead, errored }: { session: SessionRecord; dead: bo
     const trimmed = text.trim();
     if (dead) return;
     if (!trimmed && readyMentions.length === 0) return;
+    const side = parseSideCommand(session.agent, trimmed);
+    if (side !== null) {
+      // 侧问不进主对话：打开面板直接提问，附件条留在输入框
+      noteCommandUsed(session.agent, /^\/(\S+)/.exec(trimmed)![1]!);
+      setText("");
+      setDismissed(false);
+      setSideQuestion({ question: side });
+      return;
+    }
     if (session.agent === "codex" && trimmed.startsWith("/")) {
       if (!willBeCommand || !cmdMatch || readyMentions.length) {
         setCodexResult({ name: "status", error: "未知 Codex 命令或命令带有附件。请从 / 面板选择可用项。" });
@@ -1424,6 +1444,8 @@ function Composer({ session, dead, errored }: { session: SessionRecord; dead: bo
         </div>
       )}
       {codexResult && <CodexCommandPanel result={codexResult} onClose={closeCodexResult} />}
+      {sideQuestion && <SideQuestionDialog sessionId={session.id} agent={session.agent} initialQuestion={sideQuestion.question}
+        onClose={() => { setSideQuestion(null); textareaRef.current?.focus(); }} />}
       {session.agent === "kimi" && session.status === "running" && (
         <div className="composer-hint" role="status">Kimi 不支持运行中插话；发送将排队到当前回合结束，停止执行会取消队列。</div>
       )}
@@ -1556,6 +1578,7 @@ function Composer({ session, dead, errored }: { session: SessionRecord; dead: bo
           </span>
           <SlashMenu session={session} commandsSupported={commandsSupported && !dead}
             canInsertCommand={!text}
+            onSideQuestion={() => setSideQuestion({ question: "" })}
             onCodexCommand={name => {
               if (name === "review") { setText("/review "); textareaRef.current?.focus(); }
               else void executeCodex(name);

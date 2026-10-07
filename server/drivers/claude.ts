@@ -44,7 +44,8 @@ function isHumanRemoteUser(message: Record<string, any>, text: string): boolean 
     if (["isSynthetic", "isMeta", "isCompactSummary", "isVisibleInTranscriptOnly", "isSidechain"]
       .some((key) => record[key] === true)) return false;
   }
-  return !/^(?:Base directory for this skill:|<(?:command-(?:name|message|args)|local-command-(?:stdout|caveat)|system-reminder|skill(?:s_instructions|-instructions)?|task-notification|ide_(?:selection|opened_file))\b)/i
+  // 「[Request interrupted by user…]」是 CLI 打断后自己写回的标记，不是远程消息。
+  return !/^(?:Base directory for this skill:|\[Request interrupted by user|<(?:command-(?:name|message|args)|local-command-(?:stdout|caveat)|system-reminder|skill(?:s_instructions|-instructions)?|task-notification|ide_(?:selection|opened_file))\b)/i
     .test(text.trimStart());
 }
 
@@ -225,6 +226,8 @@ export class ClaudeDriver extends BaseDriver {
   private steerEchoedSinceResult = false;
   private steerCarried = false;
   private turnActive = false;
+  /** 本轮已发过 interrupt：随后的 error_during_execution 是用户打断，不是会话出错。 */
+  private interruptRequested = false;
   private menuModels: unknown;
   private menuReportedModel?: string;
   private readonly sideRequestIds = new Set<string>();
@@ -462,6 +465,7 @@ export class ClaudeDriver extends BaseDriver {
     if (text) content.push({ type: "text", text });
     content.push(...attachments);
     if (this.turnActive && text) this.steersAwaitingEcho.push(text);
+    if (!this.turnActive) this.interruptRequested = false;
     this.turnActive = true;
     this.callbacks.status("running");
     if (text) {
@@ -523,6 +527,7 @@ export class ClaudeDriver extends BaseDriver {
   async interrupt(): Promise<void> {
     this.steersAwaitingEcho.length = 0;
     this.steerCarried = false;
+    this.interruptRequested = true;
     this.send({
       type: "control_request",
       request_id: randomUUID(),
@@ -751,11 +756,14 @@ export class ClaudeDriver extends BaseDriver {
           costUsd: message.total_cost_usd,
         });
       }
+      const interrupted = this.interruptRequested && message.subtype !== "success";
+      this.interruptRequested = false;
       this.callbacks.emit("turn_completed", {
         subtype: message.subtype,
         result: message.result,
         isError: Boolean(message.is_error),
         stopReason: message.stop_reason,
+        ...(interrupted ? { interrupted: true } : {}),
       });
       // 未回显的插话会由 CLI 紧接着另起一轮跑，保持 running：误判 idle 时下一次发送会走
       // refreshBeforeSend，把 CLI 自己排队写入的消息当成别处续聊而重启 worker。
@@ -770,7 +778,7 @@ export class ClaudeDriver extends BaseDriver {
       this.steerCarried = false;
       this.steerEchoedSinceResult = false;
       this.turnActive = false;
-      this.callbacks.status(message.is_error ? "error" : "idle");
+      this.callbacks.status(message.is_error && !interrupted ? "error" : "idle");
       return;
     }
 
@@ -881,7 +889,7 @@ export class ClaudeDriver extends BaseDriver {
   }
 
   async askSideQuestion(input: SideQuestionInput, signal: AbortSignal): Promise<unknown> {
-    return this.requestControl({ subtype: "side_question", ...input }, signal);
+    return this.requestControl({ subtype: "side_question", question: input.question, ...(input.history ? { history: input.history } : {}) }, signal);
   }
 
   async manageMcp(action: McpAction): Promise<unknown> {

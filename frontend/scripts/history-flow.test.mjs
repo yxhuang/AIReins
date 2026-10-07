@@ -463,7 +463,7 @@ await t("文件面板当前浏览目录按钮触发历史共享筛选", () => {
   assert.equal(store.historyCwdFilter, "/browsed/child", "取成功浏览目录而非地址草稿");
 });
 
-await t("历史新建：手机切列表可见表单，cwd 预填优先；手动改后不覆盖", () => {
+await t("历史选定目录后点左上角新建：手机切列表可见表单，cwd 预填优先；手动改后不覆盖", () => {
   const oldMeta = store.meta;
   const oldHistory = window.history;
   const oldLoad = store.ensureLoaded;
@@ -485,9 +485,8 @@ await t("历史新建：手机切列表可见表单，cwd 预填优先；手动�
     store.navigateHistory("/a/b");
     let props = { collapsed: false, newOpen: false, onToggle() {}, onNewOpenChange(value) { newOpen = value; } };
     const sidebar = componentFixture(() => Sidebar(props));
-    const history = treeFind(sidebar(), node => node.type === HistoryView);
-    const render = componentFixture(() => HistoryView(history.props));
-    treeButtons(render()).find(node => node.props.children === "在此目录新建会话").props.onClick();
+    assert.ok(!treeButtons(componentFixture(() => HistoryView())()).some(node => node.props.children === "在此目录新建会话"), "已并入左上角新建");
+    treeButtons(sidebar()).find(node => node.props["aria-label"] === "新建会话").props.onClick();
     assert.equal(newOpen, true);
     assert.equal(store.historyOpen, false);
     if (mobile) assert.equal(store.currentId, null, "手机清掉主区才能看到表单");

@@ -15,6 +15,8 @@ const {
   noteCommandUsed,
   recentInTable,
   MAX_RECENT_COMMANDS,
+  withSideCommands,
+  parseSideCommand,
 } = await import("../src/commands.ts");
 
 let pass = 0;
@@ -180,6 +182,19 @@ t("unknown 状态单独显示并断开，不能当作已成功", () => {
   const grouped = fold([...reads(1, 3), unknown, ...reads(5, 3)]);
   assert.deepEqual(kinds(grouped), ["tool-group", "tool", "tool-group"]);
   assert.equal(grouped[1], unknown);
+});
+
+t("三家按停止结束的回合显示中性打断行而非出错", () => {
+  for (const [agent, payload] of [
+    ["claude", { subtype: "error_during_execution", isError: true, interrupted: true }],
+    ["codex", { status: "interrupted" }],
+    ["kimi", { stopReason: "cancelled" }],
+  ]) {
+    const [item] = buildRenderItems([ev(1, "turn_completed", payload)], agent);
+    assert.equal(item.text, "已打断，可直接发消息继续", agent);
+    assert.equal(item.tone, "muted", agent);
+  }
+  assert.equal(buildRenderItems([ev(1, "turn_completed", { subtype: "error_during_execution", isError: true })], "claude")[0].tone, "error");
 });
 
 t("跨 turn 的工具不能合并（包括没有可见系统行的正常 turn_completed）", () => {
@@ -521,6 +536,21 @@ t("组内保持命令表原顺序", () => {
   assert.deepEqual(names(filterCommands(TABLE, "com", [])).slice(0, 2), ["compact", "commit"]);
 });
 
+t("侧问命令：Claude /btw，Codex /side 与 /btw；同名 CLI 项去重，Kimi 不加", () => {
+  assert.deepEqual(names(withSideCommands("claude", [cmd("btw", "CLI"), cmd("compact", "x")])), ["btw", "compact"]);
+  assert.equal(withSideCommands("claude", [cmd("btw", "CLI")])[0].argHint, "问题");
+  assert.deepEqual(names(withSideCommands("codex", TABLE)).slice(0, 2), ["side", "btw"]);
+  assert.deepEqual(names(withSideCommands("kimi", TABLE)), names(TABLE));
+  assert.equal(parseSideCommand("claude", "/btw  这是什么？\n第二行 "), "这是什么？\n第二行");
+  assert.equal(parseSideCommand("claude", "/btw"), "");
+  assert.equal(parseSideCommand("claude", "/side 问题"), null);
+  assert.equal(parseSideCommand("codex", "/side 问题"), "问题");
+  assert.equal(parseSideCommand("codex", "/btw"), "");
+  assert.equal(parseSideCommand("codex", "/btwx 问题"), null);
+  assert.equal(parseSideCommand("kimi", "/btw 问题"), null);
+  assert.equal(parseSideCommand("claude", "说 /btw 问题"), null);
+});
+
 // ══ commands：最近使用 ══
 t("空 query 有 recent：最近使用置顶，其余保持表序；不在表内的名字跳过", () => {
   const out = filterCommands(TABLE, "", ["review", "已删除命令", "compact"]);
@@ -602,7 +632,7 @@ t("正常与旧版无字段的 turn_completed 不显示，三家异常均带原�
     ["codex", { status: "completed" }, null],
     ["codex", { status: "failed", error: { message: "执行失败" } }, "执行失败", "failed"],
     ["kimi", { stopReason: "end_turn" }, null],
-    ["kimi", { stopReason: "cancelled" }, "执行已取消", "cancelled"],
+    ["kimi", { stopReason: "max_tokens" }, "已达到输出长度上限", "max_tokens"],
     ["claude", { subtype: "constructor", isError: true }, "执行未正常完成", "constructor"],
     ["kimi", { stopReason: "unknown_reason" }, "执行未正常完成", "unknown_reason"],
     ["claude", {}, null], ["codex", {}, null], ["kimi", {}, null],

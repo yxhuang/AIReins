@@ -28,7 +28,9 @@ Claude 会话另有 `backgroundTasks:[{id,type,description}]`：来自 CLI 的 `
 
 WS 上行 `{"type":"set_remote_control","sessionId":"...","enabled":true|false}`，成功收到常规 `ack`，失败收到带 `action:"set_remote_control"` 的常规 `error`；仅 Claude 活 worker 可用。driver 发送 `remote_control` 控制请求，15 秒未回复进入错误态。用户 `~/.claude/settings.json` 明确设 `remoteControlAtStartup:true` 时，新 worker 自动开启；project/local 设置明确 `false` 时禁止自动开启，读不到按关闭。已开启的会话因外部续聊或配置切换替换 worker 时自动恢复 RC，`session_url` 可变化。此功能不修改用户的 Claude 设置。
 
-Claude stdout 的 `bridge_state`、控制应答驱动胶囊状态；未知 state 安全显示中间态。`--replay-user-messages` 的 user 文本只在 RC 为 `connecting / connected / reconnecting`、且不是本机回显、子代理、合成记录或 CLI 注入包装时，才由 driver 发 `user_message`；RC 关闭时沿用原有行为，只处理其中的工具结果。本机回显以最多 20 条的先进先出列表匹配，`result` 不清空它。这样远端消息进入统一 transcript 和现有用户气泡，回合结束更新原生会话指纹，避免下次发送被误判为别处续聊。**手机发送消息的 stdout 形状及上述去重仍待真机验证**；本次无对话消息冒烟未覆盖它。`remote_control_work_secret` 重挂接不支持，收到会回复控制错误。
+Claude stdout 的 `bridge_state`、控制应答驱动胶囊状态；未知 state 安全显示中间态。`--replay-user-messages` 的 user 文本只在 RC 为 `connecting / connected / reconnecting`、且不是本机回显、子代理、合成记录、CLI 注入包装或打断标记 `[Request interrupted by user…]` 时，才由 driver 发 `user_message`；RC 关闭时沿用原有行为，只处理其中的工具结果。本机回显以最多 20 条的先进先出列表匹配，`result` 不清空它。这样远端消息进入统一 transcript 和现有用户气泡，回合结束更新原生会话指纹，避免下次发送被误判为别处续聊。**手机发送消息的 stdout 形状及上述去重仍待真机验证**；本次无对话消息冒烟未覆盖它。`remote_control_work_secret` 重挂接不支持，收到会回复控制错误。
+
+Claude 停止走 `control_request {subtype:"interrupt"}`（与 CLI/扩展按 Esc 相同，只打断当前回合，进程与会话保留）。CLI 随后以 `result {subtype:"error_during_execution", is_error:true}` 收尾；driver 记住本轮发过 interrupt，把这个非 success 的 result 标成 `turn_completed.interrupted:true` 并转 idle，不进 error，下一条消息照常续聊。
 
 ## 访问控制
 
@@ -169,7 +171,8 @@ Claude 菜单按扩展分成「上下文 / 模型 / 自定义 / 设置 / 支持�
 - `PUT /api/sessions/:id/thinking`：`{enabled:boolean}` → `{session}`。Claude 会话配置保存 `thinkingLevel:"off"|"default_on"`，默认 `default_on`；driver 发送 `set_max_thinking_tokens`，关闭为 0，开启为 31999 + `thinking_display:null`（与扩展默认预算一致，使用 wb 现有思考呈现）。请求成功才保存并广播 `config_updated`。已释放会话只保存，下一次续接生效；每次 worker 初始化（含重启、续接）重新下发。单次控制 15 秒，前端总上限 40 秒。不写用户 settings，不修改模型/effort。菜单开关点后保持展开，失败就地显示。
 - `GET /api/sessions/:id/info/capabilities`：只返回 `{supportsFastMode:boolean}`，匹配 `initialize.models[]` 的 `value / resolvedModel`（兼容 `[1m]`）；配置跟随时使用 CLI init 或有效设置模型，未知模型/缺失能力字段为 false。Fast 只在字段为 true 时显示，通过现有用户消息链路发 `/fast`，不绕过 CLI 的账户额度检查。
 - `POST /api/sessions/:id/tasks/stop`：`{taskId}` → `{stopped:true}`，只接受当前会话 `backgroundTasks` 中的任务，已有 live worker 发送 `stop_task {task_id}`。回复中可停止，前端先 `window.confirm`；成功只表示停止请求已接受，列表以 `background_tasks_changed` 的全量元数据为准，不提前删除任务。控制 15 秒，前端 20 秒；不拉起已释放 worker。
-- `POST /api/sessions/:id/side-question`：`{question,history?:[{question,response}]}` → `{response:string|null,synthetic?,error?,refusal_fallback?}`。问题及每个历史字段为 1–20000 字符，历史最多 20 轮；只转发 `side_question`，不调用主消息发送接口，不写主线事件。面板在内存保存独立历史，synthetic/null 不加入历史。每会话最多一个在途侧问，关闭/取消/HTTP 断开经 `control_cancel_request` 取消，迟到回复忽略；控制上限 60 秒，前端 80 秒。侧问/Thinking 在途时阻止配置切换与 worker 释放。以上三个写接口非法输入、非 Claude 或 CLI 错误为 400 / 40069；不存在为 404 / 40401，均沿用已有访问控制。
+- `POST /api/sessions/:id/side-question`（Claude `/btw`、Codex `/side`）：`{question,history?:[{question,response}],sideId?}` → `{response:string|null,sideId?,synthetic?,error?,refusal_fallback?}`（`sideId` 仅 Codex 使用，Claude 不转发）。问题及每个历史字段为 1–20000 字符，历史最多 20 轮；Claude 只转发 `side_question`，不调用主消息发送接口，不写主线事件。面板在内存保存独立历史，synthetic/null 不加入历史。每会话最多一个在途侧问，关闭/取消/HTTP 断开取消（Claude 经 `control_cancel_request`，Codex 见下），迟到回复忽略；Claude 控制上限 60 秒、前端 80 秒。侧问/Thinking 在途时阻止配置切换与 worker 释放。以上三个写接口非法输入、非 Claude（侧问另允许 Codex）或 CLI 错误为 400 / 40069；不存在为 404 / 40401，均沿用已有访问控制。
+  - Codex 侧聊：照 TUI `/side`（rust-v0.160.1 `tui/src/app/side.rs`）：无 history 时 `thread/fork {ephemeral:true, excludeTurns:true, approvalPolicy:"never"}`，开发者指令追加原生侧聊指令，`thread/inject_items` 注入边界提示，再在侧聊线程 `turn/start` 并取最后一条 agentMessage；回复带 `sideId`（侧聊线程 ID），面板续问带回；有 history 且 `sideId` 正是当前侧聊线程时复用该线程；否则（侧聊线程已因取消/出错丢弃，或另一窗口开了新侧聊）重新 fork 并把历史问答作为文字背景，不串线。取消与 `turn/start` 响应赛跑，已从 `turn/started` 得知回合 ID 即可立即 interrupt；fork / inject 等待期间取消立即返回，取消或超时后迟到的成功 fork 也会 unsubscribe。侧聊线程的通知不进主线、任何服务端请求（审批/提问）一律拒绝；取消/出错 interrupt + unsubscribe，正常结束的侧聊线程留到下次新开面板或 worker 停止才 unsubscribe（ephemeral 不落盘）。主线尚无首条消息时 fork 失败，提示先发一条消息。回合上限 300 秒。前端 320 秒。
 
 2026-10-02 判定表（上一轮已接项目继续保留）：
 
@@ -181,6 +184,7 @@ Claude 菜单按扩展分成「上下文 / 模型 / 自定义 / 设置 / 支持�
 | Fast | 本轮已接，按能力显示 | `models[].supportsFastMode === true`；发用户命令 `/fast` |
 | 后台任务 /tasks | 本轮已接 | 实时清单、确认停止、task ID 白名单；真实任务停止待临时实例补验 |
 | 侧问 /btw | 本轮已接 | stream-json 实测返回 `response:"4",synthetic:false`；独立历史、取消，不进主线 |
+| Codex 侧聊 /side | 已接 | codex-cli 0.160.1 实测：侧聊读到主线上下文、续问复用同一 fork、主线零事件泄漏 |
 | 状态、账户/用量、Memory、Instructions、Skills、Sandbox、输出样式、Hooks、设置文件、导出、帮助 | 保留已接 | 配置编辑仍走文件协议链接，导出以 CLI 文本为准 |
 | Rewind、Bookmarks | 不接 | 本单排除；Rewind 缺文件检查点与消息 UUID |
 | 插件安装/卸载/marketplace、MCP 添加/删除/OAuth | 不接 | 本单排除，避免扩大配置写入范围 |

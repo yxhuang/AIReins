@@ -44,35 +44,47 @@ export function ClaudeTasksDialog({ session, onClose }: { session: SessionRecord
   </MenuDialog>;
 }
 
-export function ClaudeSideQuestionDialog({ sessionId, onClose }: { sessionId: string; onClose: () => void }) {
-  const [question, setQuestion] = useState("");
+export function SideQuestionDialog({ sessionId, agent, initialQuestion = "", onClose }: {
+  sessionId: string; agent: string; initialQuestion?: string; onClose: () => void;
+}) {
+  const codex = agent === "codex";
+  const [question, setQuestion] = useState(initialQuestion);
   const [thread, setThread] = useState<{ question: string; answer: string; synthetic?: boolean }[]>([]);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
   const controller = useRef<AbortController | null>(null);
   const history = useRef<SideQuestionTurn[]>([]);
-  useEffect(() => () => { controller.current?.abort(); controller.current = null; }, []);
-  const ask = async () => {
-    const text = question.trim();
+  const sideId = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    // 输入框「/btw 问题」直接带问题打开：挂载即提问。延后一拍，StrictMode 的模拟卸载会先清掉定时器，不重复提问。
+    const timer = initialQuestion.trim() ? setTimeout(() => void ask(initialQuestion)) : undefined;
+    return () => { clearTimeout(timer); controller.current?.abort(); controller.current = null; };
+  }, []);
+  const ask = async (value = question) => {
+    const text = value.trim();
     if (!text || controller.current) return;
     const request = new AbortController(); controller.current = request; setPending(true); setError("");
     try {
-      const result = await askSessionSideQuestion(sessionId, text, history.current, request.signal);
+      // Codex 侧聊可能读文件、跑检查：服务端回合上限 300 秒
+      const result = await askSessionSideQuestion(sessionId, text, history.current, request.signal, codex ? 320_000 : 80_000, sideId.current);
       if (request.signal.aborted) return;
+      sideId.current = result.sideId;
       if (result.error) throw new Error(result.error);
       const answer = typeof result.response === "string" && result.response.trim() ? result.response : "没有返回答案。";
       setThread(value => [...value, { question: text, answer, synthetic: result.synthetic }]);
       // 服务端每个历史字段限 20000 字符；超长回答只显示不进历史，否则之后每次提问都会被拒
       if (result.response && !result.synthetic && result.response.length <= 20000) history.current = [...history.current, { question: text, response: result.response }].slice(-20);
-      setQuestion("");
+      setQuestion(current => current.trim() === text ? "" : current);
     } catch (cause) { if (!request.signal.aborted) setError(cause instanceof Error ? cause.message : String(cause)); }
     finally { if (controller.current === request) { controller.current = null; setPending(false); } }
   };
   const cancel = () => {
-    controller.current?.abort(); controller.current = null; setPending(false); setError("侧问已取消。");
+    controller.current?.abort(); controller.current = null; setPending(false); setError(codex ? "侧聊已取消。" : "侧问已取消。");
   };
-  return <MenuDialog title="侧问 · /btw" onClose={onClose}>
-    <p className="new-hint">单独问答，不加入主对话。关闭面板会取消在途侧问并清空这里的问答。</p>
+  return <MenuDialog title={codex ? "侧聊 · /side" : "侧问 · /btw"} onClose={onClose}>
+    <p className="new-hint">{codex
+      ? "在当前线程的临时分支里问答，不加入主对话；可读文件和做只读检查，不弹审批。关闭面板会取消在途问答并清空这里的记录。"
+      : "单独问答，不加入主对话。关闭面板会取消在途侧问并清空这里的问答。"}</p>
     {thread.map((turn, index) => <div className="info-row" key={index}>
       <div className="info-name">{turn.question}</div><div className="info-code side-answer">{turn.answer}</div>
       {turn.synthetic && <div className="info-meta">CLI 提示</div>}

@@ -553,7 +553,10 @@ function renderItemsReducer(events: UnifiedEvent[], agent: AgentKind) {
         userTexts.clear();
         turn++;
         const reason = abnormalTurnReason(p, agent);
-        if (reason) {
+        // 用户按停止：三家分别报 interrupted 标记 / interrupted / cancelled，按中性提示而非出错
+        if (p.interrupted === true || reason === "interrupted" || reason === "cancelled") {
+          items.push({ kind: "system", key: `sys:${event.seq}`, seq: event.seq, text: "已打断，可直接发消息继续", tone: "muted" });
+        } else if (reason) {
           const label = Object.hasOwn(TURN_ERROR_LABELS, reason) ? TURN_ERROR_LABELS[reason]
             : /^[a-z][a-z_]+$/.test(reason) ? "执行未正常完成" : reason;
           const raw = agent === "claude" ? p.subtype : agent === "codex" ? p.status : p.stopReason;

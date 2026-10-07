@@ -89,6 +89,27 @@ export function filterCommands(
   return [...weighted(prefix), ...weighted(fuzzy), ...weighted(desc)];
 }
 
+/** WB 接管的侧问命令：Claude /btw；Codex /side 及其原生别名 /btw。 */
+const SIDE_COMMANDS: Record<string, CommandInfo[]> = {
+  claude: [{ name: "btw", description: "侧问：单独问答，不加入主对话", argHint: "问题", source: "claude" }],
+  codex: [
+    { name: "side", description: "侧聊：在当前线程的临时分支里问答，不加入主对话", argHint: "问题", source: "codex" },
+    { name: "btw", description: "侧聊（/side 的别名）", argHint: "问题", source: "codex" },
+  ],
+};
+
+/** 命令表补上侧问命令（CLI 已列出同名项时以 WB 版本为准）。 */
+export function withSideCommands(agent: string, commands: CommandInfo[]): CommandInfo[] {
+  const side = SIDE_COMMANDS[agent] ?? [];
+  return side.length ? [...side, ...commands.filter((cmd) => !side.some((s) => s.name === cmd.name))] : commands;
+}
+
+/** 「/btw 问题」「/side」等整行输入 → 问题文本（可为空串）；不是侧问命令返回 null。 */
+export function parseSideCommand(agent: string, text: string): string | null {
+  const match = /^\/(\S+)(?:\s+([\s\S]*))?$/.exec(text.trim());
+  return match && (SIDE_COMMANDS[agent] ?? []).some((cmd) => cmd.name === match[1]) ? (match[2] ?? "").trim() : null;
+}
+
 export function isSubsequence(needle: string, haystack: string): boolean {
   let i = 0;
   for (const ch of haystack) {

@@ -55,7 +55,7 @@ type ListPhase = "loading" | "ready" | "error";
  * 预览确认后「导入并续接」（就地续接，不是分叉——代价写在按钮上方）。
  * 分页用 nextCursor +「加载更多」；扫描未完成时提示并沿游标重试，不当错误。
  */
-export function HistoryView({ onNewSession }: { onNewSession?: (cwd: string) => void } = {}) {
+export function HistoryView() {
   const historyRevision = useStore(value => value.historyRevision);
   const cwdFilter = useStore(value => value.historyCwdFilter);
   const windowsPicker = useStore(value => value.meta?.capabilities?.windowsDirectoryPicker === true);
@@ -261,7 +261,6 @@ export function HistoryView({ onNewSession }: { onNewSession?: (cwd: string) => 
           </div>
         </div>
         {directoryError && <p className="history-meta history-error" role="alert">{directoryError}</p>}
-        {cwdFilter && <button type="button" className="btn history-new-session" onClick={() => onNewSession?.(cwdFilter)}>在此目录新建会话</button>}
         {phase === "ready" && list.truncated && (
           <p className="history-meta" style={{ fontSize: "var(--detail-font-size)" }}>
             扫描未完成，可<button

@@ -3300,7 +3300,6 @@ body.resizing {
 .history-cwd-chip { display: inline-flex; align-items: center; min-width: 0; max-width: 45%; gap: 2px; background: var(--surface-sunk); }
 .history-cwd-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .history-cwd-chip .icon-btn { flex-shrink: 0; width: 24px; height: 24px; padding: 0; border: 0; background: transparent; }
-.history-new-session { align-self: flex-start; margin: 0 4px 4px; }
 @media (pointer: coarse) {
   .history-directory-picker, .history-cwd-chip .icon-btn { min-width: 44px; min-height: 44px; }
 }

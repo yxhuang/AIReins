@@ -612,7 +612,8 @@ export class SessionManager {
 
   async askSideQuestion(id: string, input: SideQuestionInput, signal: AbortSignal): Promise<unknown> {
     this.assertWritableTranscript(id);
-    if (this.sessions.get(id)?.agent !== "claude") throw new Error("仅 Claude 会话支持侧问");
+    const agent = this.sessions.get(id)?.agent;
+    if (agent !== "claude" && agent !== "codex") throw new Error("仅 Claude / Codex 会话支持侧问");
     if (this.sideQuestions.has(id)) throw new Error("当前侧问尚未结束");
     if (this.restartingSessions.has(id) || this.checkingSessions.has(id)) throw new Error("会话正在续接或重启");
     this.sideQuestions.add(id);
@@ -620,7 +621,7 @@ export class SessionManager {
       await this.startups.get(id);
       const worker = await this.ensureWorker(id);
       if (signal.aborted) throw new Error("请求已取消");
-      if (!worker.askSideQuestion) throw new Error("Claude driver 不支持侧问");
+      if (!worker.askSideQuestion) throw new Error("当前 driver 不支持侧问");
       return await worker.askSideQuestion(input, signal);
     } finally { this.sideQuestions.delete(id); }
   }
