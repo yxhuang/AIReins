@@ -198,3 +198,14 @@ try {
   else delete globalThis.navigator;
 }
 console.log("✅ 文件顶栏操作顺序、简洁 PDF 界面、原生查看器入口及能力回退");
+
+const previousState = { sessions: store.sessions, currentId: store.currentId, fileDirectory: store.fileDirectory };
+try {
+  store.sessions = [{ id: "a", cwd: "/proj/a", status: "idle", agent: "claude" }, { id: "b", cwd: "/proj/b", status: "idle", agent: "claude" }];
+  store.fileDirectory = { sessionId: "a", path: "/proj/a/sub" };
+  const shown = id => { store.currentId = id; return renderToStaticMarkup(React.createElement(FilePanel, { onClose() {} })); };
+  assert.ok(shown("a").includes("/proj/a/sub"), "同一会话保留浏览位置");
+  const other = shown("b");
+  assert.ok(other.includes("/proj/b") && !other.includes("/proj/a"), "切到其他会话回到该会话 cwd");
+} finally { Object.assign(store, previousState); }
+console.log("✅ 文件面板浏览目录按会话归属");

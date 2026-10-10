@@ -135,7 +135,8 @@ export class Store {
   filesOpen = false;
   /** 只保留当前文件；收起、切会话、手机后退都保留草稿，重新打开可继续。 */
   filePreview: FilePreviewState | null = null;
-  fileDirectory: string | null = null;
+  /** 文件面板浏览位置按会话归属；切到别的会话时回到该会话 cwd。 */
+  fileDirectory: { sessionId: string | null; path: string } | null = null;
   /** 当前目录浏览器注册；侧键先沿成功访问的目录返回，再退出侧栏。 */
   fileBrowserBack: (() => boolean) | null = null;
   private fileLoad: AbortController | null = null;
@@ -774,7 +775,7 @@ export class Store {
     const abort = new AbortController(); this.fileLoad = abort;
     const preview: FilePreviewState = { target, file: null, draft: "", loading: true, saving: false, error: null, loadId: ++this.fileLoadSequence };
     this.filePreview = preview;
-    this.fileDirectory = target.root;
+    this.fileDirectory = { sessionId: target.sessionId ?? this.currentId, path: target.root };
     this.setFilesOpen(true);
     this.notify();
     try {

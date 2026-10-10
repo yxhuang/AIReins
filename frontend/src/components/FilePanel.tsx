@@ -63,7 +63,8 @@ export function FilePanel({ onClose }: { onClose: () => void }) {
   const session = useStore((value) => value.currentId ? value.session(value.currentId) : undefined);
   const preview = useStore(value => value.filePreview);
   // 浏览中的路径由 DirectoryContents 自己维护；宿主通知不应再次初始化并读取同一目录。
-  const directoryInitialPath = useMemo(() => store.fileDirectory ?? session?.cwd ?? "", [preview, session?.cwd]);
+  const sessionDirectory = () => store.fileDirectory && store.fileDirectory.sessionId === (session?.id ?? null) ? store.fileDirectory.path : null;
+  const directoryInitialPath = useMemo(() => sessionDirectory() ?? session?.cwd ?? "", [preview, session?.id, session?.cwd]);
   const directoryHistory = useRef<string[]>([]);
   const registerBrowserBack = useCallback((back: () => boolean) => {
     store.fileBrowserBack = back;
@@ -137,9 +138,9 @@ export function FilePanel({ onClose }: { onClose: () => void }) {
       </div>}
       {preview ? <FilePreview key={preview.target.path} preview={preview} source={source} /> : <DirectoryContents initialPath={directoryInitialPath} includeFiles allowWindowsPicker
         navigationHistory={directoryHistory} registerBrowserBack={registerBrowserBack} navTarget={navSlot}
-        onPathChange={path => { store.fileDirectory = path; }}
+        onPathChange={path => { store.fileDirectory = { sessionId: session?.id ?? null, path }; }}
         onBrowseHistory={path => store.navigateHistory(path)}
-        onSelectFile={path => { setNotice(null); void store.openFilePreview({ path, root: store.fileDirectory ?? session?.cwd ?? "/", sessionId: session?.id }); }} />}
+        onSelectFile={path => { setNotice(null); void store.openFilePreview({ path, root: sessionDirectory() ?? session?.cwd ?? "/", sessionId: session?.id }); }} />}
     </div>
   </>;
 }
