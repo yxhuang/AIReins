@@ -6,10 +6,11 @@
 
 ```bash
 npm install
+npm run build
 npm run server
 ```
 
-默认静态目录是仓库内的 `frontend/dist/`；M2 构建完成后会自动从 `/` 托管 SPA。开发时也可用 `WORKBENCH_STATIC_DIR` 指向另一份静态产物。`WORKBENCH_PORT` 可在并行开发或隔离验收时改端口，但不能改变回环绑定地址；生产默认仍为 `8790`。
+默认静态目录是仓库内的 `frontend/dist/`，构建后从 `/` 托管 SPA；该目录不入库。`install.sh` 安装/更新时构建并预压缩，`wb` 启动前缺少 `frontend/dist/index.html` 时自动构建，构建失败退出。`npm run build` 保留旧 hash 资源，避免已打开页面加载失败；直接 `npm run server` 前须自行构建。开发时也可用 `WORKBENCH_STATIC_DIR` 指向另一份静态产物。`WORKBENCH_PORT` 可在并行开发或隔离验收时改端口，但不能改变回环绑定地址；生产默认仍为 `8790`。
 
 持久化位置：
 

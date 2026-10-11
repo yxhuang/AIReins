@@ -11,7 +11,8 @@ export default defineConfig({
   build: {
     // 后端静态目录就是 frontend/dist（server/index.ts 的 STATIC_ROOT 默认值）。
     outDir: "dist",
-    emptyOutDir: true,
+    // 已打开的页面可能仍引用旧 hash，构建时保留旧资源。
+    emptyOutDir: false,
   },
   server: {
     port: 5173,

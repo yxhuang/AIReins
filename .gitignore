@@ -1,4 +1,5 @@
 node_modules/
+frontend/dist/
 scratch/
 __pycache__/
 .work-orders/

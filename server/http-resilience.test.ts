@@ -1,17 +1,25 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
-import { mkdtemp, mkdir, readFile, readdir, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
 import { createServer, connect } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { WebSocket } from "ws";
+import { gzipSync } from "node:zlib";
 
 // Real HTTP/upgrade handlers, isolated state and fake metadata CLIs; no live worker/model.
 const root = fileURLToPath(new URL("..", import.meta.url));
 const home = await mkdtemp(join(tmpdir(), "workbench-http-resilience-"));
 const bin = join(home, "bin");
+const staticRoot = join(home, "static");
+const asset = "fixture.css";
+const css = "body { color: red; }\n";
+await mkdir(join(staticRoot, "assets"), { recursive: true });
+await writeFile(join(staticRoot, "index.html"), '<link rel="stylesheet" href="/assets/fixture.css">');
+await writeFile(join(staticRoot, "assets", asset), css);
+await writeFile(join(staticRoot, "assets", `${asset}.gz`), gzipSync(css));
 await mkdir(bin);
 await mkdir(join(home, "transcripts"));
 for (const name of ["claude", "codex", "kimi"]) {
@@ -49,7 +57,7 @@ const port = (listener.address() as { port: number }).port;
 await new Promise<void>(resolve => listener.close(() => resolve()));
 const child = spawn(process.execPath, ["--import", "tsx", join(root, "server/index.ts")], {
   cwd: root, env: { ...process.env, WORKBENCH_HOME: home, WORKBENCH_PORT: String(port), PATH: `${bin}:${process.env.PATH}`,
-    CODEX_HOME: codexHome, WORKBENCH_CODEX_HISTORY_DIR: join(codexHome, "sessions") },
+    CODEX_HOME: codexHome, WORKBENCH_CODEX_HISTORY_DIR: join(codexHome, "sessions"), WORKBENCH_STATIC_DIR: staticRoot },
   stdio: ["ignore", "pipe", "pipe"],
 });
 const closed = new Promise<void>(resolve => child.once("close", () => resolve()));
@@ -77,13 +85,12 @@ try {
     const body = await response.json();
     assert.equal(body.data.sessions.length, 100);
   }
-  const asset = (await readdir(join(root, "frontend/dist/assets"))).find(name => name.endsWith(".css.gz"));
-  assert.ok(asset, "Existing compressed CSS asset required");
+  assert.equal((await fetch(`${base}/`)).status, 200);
   for (const [encoding, expected] of [["gzip;q=0", null], ["gzip", "gzip"]] as const) {
-    const response: Response = await fetch(`${base}/assets/${asset.slice(0, -3)}`, { headers: { "accept-encoding": encoding } });
+    const response: Response = await fetch(`${base}/assets/${asset}`, { headers: { "accept-encoding": encoding } });
     assert.equal(response.headers.get("content-encoding"), expected, `static ${encoding}`);
     assert.equal(response.status, 200);
-    await response.arrayBuffer();
+    assert.equal(await response.text(), css);
   }
   const socket = connect(port, "127.0.0.1");
   let rejection = "";

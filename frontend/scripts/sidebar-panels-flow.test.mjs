@@ -221,7 +221,7 @@ t("会话、欢迎页与历史预览均有同组入口；手机列表有顶部�
   assert.ok(emptyPreview.includes('class="panel-actions"'));
 });
 
-t("更多菜单仅保留 VSCode 继续，不能释放时直接显示原因并禁用菜单项", () => {
+t("更多菜单保留复制会话 ID 与 VSCode 继续，按各自条件禁用", () => {
   store.ensureLoaded = async () => {};
   const base = { id: "more", agent: "claude", cwd: "/repo", status: "idle", nativeSessionId: "native", config: {}, createdAt: "2026-10-01T00:00:00Z", lastActivityAt: "2026-10-01T00:00:00Z" };
   for (const [overrides, reason] of [
@@ -239,7 +239,10 @@ t("更多菜单仅保留 VSCode 继续，不能释放时直接显示原因并禁
     assert.ok(menu.includes('role="menu"'));
     assert.ok(menu.includes('hidden=""'), "默认收起");
     // 文件/终端/派单/AI 用量是手机专用项（session-more-mobile，桌面 CSS 隐藏），不计入
-    assert.equal((menu.match(/<button[^>]*role="menuitem"[^>]*>/g) ?? []).filter((tag) => !tag.includes("session-more-mobile")).length, 1);
+    assert.equal((menu.match(/<button[^>]*role="menuitem"[^>]*>/g) ?? []).filter((tag) => !tag.includes("session-more-mobile")).length, 2);
+    const copy = (menu.match(/<button\b[^>]*>[\s\S]*?<\/button>/g) ?? []).find(button => button.includes('复制会话 ID'));
+    assert.ok(copy);
+    assert.equal(copy.includes('disabled=""'), !store.sessions[0].nativeSessionId);
     assert.ok(menu.includes('aria-label="VSCode 继续"'));
     assert.ok(menu.includes('role="img" aria-label="VSCode"'));
     if (reason) {

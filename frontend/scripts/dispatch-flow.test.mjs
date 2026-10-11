@@ -10,7 +10,7 @@ import { fetchDispatches } from '../src/api.ts';
 
 globalThis.React = React;
 globalThis.WebSocket = { CONNECTING: 0, OPEN: 1, CLOSING: 2, CLOSED: 3 };
-globalThis.window = { location: { hash: '#/' }, innerWidth: 1280, addEventListener() {} };
+globalThis.window = { location: { hash: '#/', href: 'http://127.0.0.1:8790/' }, innerWidth: 1280, addEventListener() {} };
 const { Store, store } = await import('../src/store.ts');
 const { App } = await import('../src/App.tsx');
 const { DispatchView, DispatchTree } = await import('../src/components/DispatchView.tsx');
@@ -416,7 +416,9 @@ await t('面板路由保留会话/历史预览/页面；关闭恢复，主页和
     assert.equal(s.currentId, 'session-a'); assert.ok(s.dispatchesOpen);
     s.closeDispatches(); assert.equal(window.location.hash, '#/session/session-a');
   }
-  s.toggleDispatches(); s.navigatePage('ai-usage'); assert.equal(s.dispatchesOpen, false);
+  s.toggleDispatches(); s.navigatePage('ai-usage');
+  assert.equal(s.dispatchesOpen, true); assert.equal(s.currentPageId, 'ai-usage');
+  assert.equal(s.currentId, 'session-a');
   const fresh = new Store(); window.location.hash = '#/dispatches/run-one'; fresh.onHashChange();
   assert.ok(fresh.dispatchesOpen); assert.equal(fresh.currentId, null);
   fresh.closeDispatches(); assert.equal(window.location.hash, '#/');

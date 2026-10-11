@@ -5,6 +5,15 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { normalizeFileQuery, searchFiles } from "./file-search.js";
 
+let rg: string;
+try {
+  rg = execFileSync("/bin/sh", ["-c", "command -v rg"], { encoding: "utf8" }).trim();
+} catch (error) {
+  if (![1, 127].includes((error as { status: number }).status)) throw error;
+  console.log("SKIP file-search: rg (ripgrep) 未安装；请安装 ripgrep 后重跑。");
+  process.exit(0);
+}
+
 const root = await mkdtemp(join(tmpdir(), "workbench-file-search-"));
 const project = join(root, "project");
 const bin = join(root, "bin");
@@ -18,7 +27,6 @@ await mkdir(join(project, "node_modules"));
 await writeFile(join(project, "node_modules", "skip.txt"), "skip");
 await symlink("/etc/passwd", join(project, "outside.txt"));
 // Simulate Workbench's PATH: Git/Codex available, rg only bundled with Codex.
-const rg = execFileSync("/bin/sh", ["-c", "command -v rg"], { encoding: "utf8" }).trim();
 await symlink("/usr/bin/git", join(bin, "git"));
 await writeFile(join(release, "bin", "codex"), "", { mode: 0o755 });
 await symlink(join(release, "bin", "codex"), join(bin, "codex"));

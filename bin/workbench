@@ -41,6 +41,17 @@ start() {
     echo "   换端口：WORKBENCH_PORT=8791 workbench" >&2
     return 1
   fi
+  if [[ ! -f "$REPO/frontend/dist/index.html" ]]; then
+    echo "前端尚未构建，执行 npm run build…"
+    if ! (cd "$REPO" && npm run build); then
+      echo "❌ 前端构建失败，工作台未启动；请修复构建错误后重试。" >&2
+      return 1
+    fi
+    if [[ ! -f "$REPO/frontend/dist/index.html" ]]; then
+      echo "❌ 构建后仍缺少 frontend/dist/index.html，工作台未启动。" >&2
+      return 1
+    fi
+  fi
   mkdir -p "$(dirname "$LOG")"
   # 日志超过 5MB 就轮转成 .1，只留一份旧的（对标 kimi 的按大小轮转）
   (( $(stat -c %s "$LOG" 2>/dev/null || echo 0) > 5242880 )) && mv -f "$LOG" "$LOG.1"

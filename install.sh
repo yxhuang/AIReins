@@ -44,11 +44,13 @@ else
     '  curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -' \
     '  sudo apt-get install -y nodejs'
 fi
-for dep in npm ss; do
+for dep in npm ss rg; do
   if command -v "$dep" >/dev/null 2>&1; then
     ok "$dep 已安装"
   elif [[ "$dep" == ss ]]; then
     fail '缺少 ss；修复：sudo apt-get install -y iproute2'
+  elif [[ "$dep" == rg ]]; then
+    fail '缺少 rg（ripgrep，文件检索需要）；修复：sudo apt-get install -y ripgrep'
   else
     fail '缺少 npm；修复：用 NodeSource 22 安装 nodejs（含 npm）。'
     # Node 已达标但 npm 缺失时，也给出完整修复入口。
@@ -115,6 +117,15 @@ else
   exit 1
 fi
 
+printf '\n构建前端与预压缩静态资源\n'
+if (cd "$REPO" && npm run build); then
+  ok '前端已构建 / 更新（保留旧静态资源）'
+else
+  fail 'npm run build 失败，安装未完成；请修复构建错误后重跑 bash install.sh。'
+  summary
+  exit 1
+fi
+
 if ! mkdir -p "$HOME/.local/bin"; then
   fail '无法创建 ~/.local/bin，请检查目录权限。'
   summary
@@ -169,7 +180,7 @@ status_output="$("$REPO/bin/workbench" status 2>&1 || true)"
 started_pid=''
 smoke_ready=true
 if [[ "$status_output" == 运行中（PID\ * ]]; then
-  printf '服务已运行，只验证 /api/meta，保留现有服务。\n'
+  printf '服务已运行，验证 /api/meta、首页与静态资源，保留现有服务。\n'
   if "$remote_created"; then
     warn '运行 wb restart 使远程入口生效（本次不自动重启）。'
   fi
@@ -183,19 +194,42 @@ else
   fi
   if (( start_rc != 0 )); then smoke_ready=false; fi
 fi
-url="http://127.0.0.1:${WORKBENCH_PORT:-8790}/api/meta"
-if "$smoke_ready"; then
+smoke_get() {
+  local response
   if command -v curl >/dev/null 2>&1; then
-    response="$(curl --noproxy '*' -s --max-time 3 "$url")" || smoke_ready=false
+    response="$(curl --noproxy '*' -sS --max-time 3 -w '\n%{http_code}' "$1")" || return 1
+    [[ "${response##*$'\n'}" == 200 ]] || return 1
+    printf '%s' "${response%$'\n'*}"
   else
-    response="$(node -e 'fetch(process.argv[1], {signal: AbortSignal.timeout(3000)}).then(r => r.text()).then(t => process.stdout.write(t)).catch(e => {console.error(e.message); process.exitCode = 1})' "$url")" || smoke_ready=false
+    node -e 'fetch(process.argv[1], {signal: AbortSignal.timeout(3000)}).then(r => {
+      if (r.status !== 200) throw new Error(`HTTP ${r.status}: ${process.argv[1]}`);
+      return r.text();
+    }).then(t => process.stdout.write(t)).catch(e => {console.error(e.message); process.exitCode = 1})' "$1"
   fi
+}
+url="http://127.0.0.1:${WORKBENCH_PORT:-8790}"
+if "$smoke_ready"; then
+  response="$(smoke_get "$url/api/meta")" || smoke_ready=false
   if "$smoke_ready" && printf '%s' "$response" | node -e '
     let body = ""; process.stdin.setEncoding("utf8"); process.stdin.on("data", s => body += s);
     process.stdin.on("end", () => {try {process.exitCode = JSON.parse(body).code === 0 ? 0 : 1} catch {process.exitCode = 1}});
   '; then
     ok '冒烟测试：/api/meta 返回 code: 0'
   else
+    smoke_ready=false
+  fi
+fi
+if "$smoke_ready"; then
+  if homepage="$(smoke_get "$url/")" && asset="$(printf '%s' "$homepage" | node -e '
+    let body = ""; process.stdin.setEncoding("utf8"); process.stdin.on("data", s => body += s);
+    process.stdin.on("end", () => {
+      const asset = body.match(/(?:src|href)=[\x22\x27](\/assets\/[^\x22\x27]+)[\x22\x27]/);
+      if (asset) process.stdout.write(asset[1]); else process.exitCode = 1;
+    });
+  ')" && smoke_get "$url$asset" >/dev/null; then
+    ok "冒烟测试：首页 / 与静态资源 $asset 返回 200"
+  else
+    fail '冒烟测试：首页或引用的静态资源未返回 200，或首页未引用 assets 资源。'
     smoke_ready=false
   fi
 fi

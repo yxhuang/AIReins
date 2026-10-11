@@ -133,7 +133,7 @@ test('Serve health verifies configured HTTPS root and refuses Funnel', () => {
 });
 
 // Run the real install.sh with shell/Windows/service commands replaced in a temp repo.
-function installerFixture(running = true) {
+function installerFixture(running = true, extraEnv = {}) {
   const home = mkdtempSync(join(tmpdir(), 'wb-install-shell-'));
   const repo = join(home, 'repo'); const mocks = join(home, 'mock-bin');
   mkdirSync(join(repo, 'deploy/windows'), { recursive: true });
@@ -149,9 +149,17 @@ case "$1" in
   *) exit 1 ;;
 esac`);
   if (running) writeFileSync(join(home, 'running'), '');
-  executable(join(mocks, 'npm'), 'echo "npm $*" >> "$TEST_TRACE"');
-  executable(join(mocks, 'curl'), 'echo \'{"code":0}\'');
-  for (const name of ['ss', 'codex', 'powershell.exe']) executable(join(mocks, name), 'echo "mock $0 $*" >> "$TEST_TRACE"');
+  executable(join(mocks, 'npm'), `echo "npm $*" >> "$TEST_TRACE"
+if [[ "$*" == 'run build' && "\${TEST_BUILD_FAIL:-0}" == 1 ]]; then exit 1; fi`);
+  executable(join(mocks, 'curl'), `url="\${@: -1}"
+echo "curl $url" >> "$TEST_TRACE"
+case "$url" in
+  */api/meta) printf '{"code":0}\\n200' ;;
+  */assets/fixture.js) printf 'fixture\\n%s' "\${TEST_ASSET_STATUS:-200}" ;;
+  */) printf '<script src="/assets/fixture.js"></script>\\n%s' "\${TEST_HOME_STATUS:-200}" ;;
+  *) exit 1 ;;
+esac`);
+  for (const name of ['ss', 'rg', 'codex', 'powershell.exe']) executable(join(mocks, name), 'echo "mock $0 $*" >> "$TEST_TRACE"');
   executable(join(mocks, 'wslpath'), 'echo "$2"');
   const runner = join(home, 'remote-runner.mjs');
   writeFileSync(runner, `import { appendFileSync, writeFileSync } from 'node:fs';
@@ -173,7 +181,7 @@ fi
 exec "$TEST_NODE" "$@"`);
   const run = check => spawnSync('bash', [join(repo, 'install.sh'), ...(check ? ['--check'] : [])], {
     encoding: 'utf8', timeout: 10000,
-    env: { ...process.env, HOME: home, USER: 'test', WSL_DISTRO_NAME: 'Ubuntu', WORKBENCH_PORT: '8790', PATH: `${mocks}:${home}/.local/bin:/usr/bin:/bin`, TEST_NODE: process.execPath, TEST_RUNNER: runner, TEST_TRACE: trace, TEST_HOME: home, TEST_REPO: repo, TEST_REMOTE_LOG: join(home, 'remote-output') },
+    env: { ...process.env, HOME: home, USER: 'test', WSL_DISTRO_NAME: 'Ubuntu', WORKBENCH_PORT: '8790', PATH: `${mocks}:${home}/.local/bin:/usr/bin:/bin`, TEST_NODE: process.execPath, TEST_RUNNER: runner, TEST_TRACE: trace, TEST_HOME: home, TEST_REPO: repo, TEST_REMOTE_LOG: join(home, 'remote-output'), ...extraEnv },
   });
   return { home, trace, run };
 }
@@ -192,6 +200,11 @@ test('install.sh keeps running WB, requests restart, continues after refused UAC
   assert.ok(output.stdout.includes('运行 wb restart 使远程入口生效'));
   assert.ok(output.stdout.includes('UAC 被拒绝或安装失败'), output.stdout + output.stderr);
   assert.ok(output.stdout.includes('冒烟测试：/api/meta 返回 code: 0'));
+  assert.ok(output.stdout.includes('首页 / 与静态资源 /assets/fixture.js 返回 200'));
+  assert.match(readFileSync(f.trace, 'utf8'), /npm run build/);
+  for (const path of ['/api/meta', '/', '/assets/fixture.js']) {
+    assert.ok(readFileSync(f.trace, 'utf8').includes(`curl http://127.0.0.1:8790${path}`));
+  }
   assert.doesNotMatch(readFileSync(f.trace, 'utf8'), /wb (start|stop|restart)/);
   const path = join(f.home, '.workbench/remote.json'); const before = readFileSync(path, 'utf8');
   const again = f.run(false);
@@ -207,3 +220,20 @@ test('install.sh uses existing smoke start/stop logic when WB is not running', (
   assert.doesNotMatch(trace, /wb restart/);
   assert.ok(output.stdout.includes('已停止本次冒烟启动的服务'));
 });
+
+test('install.sh fails a build before installing links or touching services', () => {
+  const f = installerFixture(true, { TEST_BUILD_FAIL: '1' }); const output = f.run(false);
+  assert.equal(output.status, 1, output.stdout + output.stderr);
+  assert.ok(output.stdout.includes('npm run build 失败，安装未完成'));
+  assert.match(readFileSync(f.trace, 'utf8'), /npm run build/);
+  assert.doesNotMatch(readFileSync(f.trace, 'utf8'), /wb |powershell/);
+  assert.equal(existsSync(join(f.home, '.local/bin')), false);
+});
+for (const name of ['TEST_HOME_STATUS', 'TEST_ASSET_STATUS']) {
+  test(`install.sh rejects non-200 ${name} and preserves running WB`, () => {
+    const f = installerFixture(true, { [name]: '404' }); const output = f.run(false);
+    assert.equal(output.status, 1, output.stdout + output.stderr);
+    assert.ok(output.stdout.includes('首页或引用的静态资源未返回 200'));
+    assert.doesNotMatch(readFileSync(f.trace, 'utf8'), /wb (start|stop|restart)/);
+  });
+}
