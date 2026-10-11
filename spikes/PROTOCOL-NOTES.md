@@ -2,7 +2,7 @@
 
 ## 运行中插话探针（2026-10-01，steering）
 
-版本：Claude Code 2.1.285、Codex 0.159.3、Kimi 2.1.1。cwd 为 `/tmp/wb-steer-gxjL0R/{claude,codex,kimi}`，不触碰运行中的 wb；证据在 `captures/2026-10-01-steer/`。NDJSON 的 `captureLine` 指向原始捕获行；思考内容、签名和凭证字段省略，Kimi 未完成的工具参数流省略。
+版本：Claude Code 2.1.285、Codex 0.159.3、Kimi 2.1.1。cwd 为 `/tmp/wb-steer-gxjL0R/{claude,codex,kimi}`，不触碰运行中的 wb；原始抓包未随仓库公开。NDJSON 的 `captureLine` 指向原始捕获行；思考内容、签名和凭证字段省略，Kimi 未完成的工具参数流省略。
 
 | 家族 | 实测与证据（归档文件行号） | Workbench 行为 |
 | --- | --- | --- |
@@ -42,7 +42,7 @@ ACP initialize 的客户端能力字段为 `clientCapabilities: { elicitation: {
 
 与 0.38.0 旧记录相比：老版结论中 form 客户端可拿到多题/多选依然成立；本次确认了 2.1.1 的精确 capability 字段、schema 映射和三种 action，Workbench 已声明 form 能力并接入。普通审批与最终执行闸门不变。
 
-实测日期：2026-08-21；工作目录：`/home/user/dev/workbench`。
+实测日期：2026-08-21；工作目录：`/home/user/projects/workbench`。
 
 版本：Node `v22.23.1`、Claude Code `2.1.238`、Codex CLI `0.148.0`、Kimi Code CLI `0.38.0`。三份 capture 都采用同一 NDJSON 信封：
 
@@ -56,9 +56,9 @@ ACP initialize 的客户端能力字段为 `clientCapabilities: { elicitation: {
 
 | CLI | 会话/线程 ID | 原生会话落盘路径 |
 | --- | --- | --- |
-| Claude | `00000000-0000-4000-8000-000000000065` | `/home/user/.claude/projects/-home-user-dev-workbench/00000000-0000-4000-8000-000000000065.jsonl` |
+| Claude | `00000000-0000-4000-8000-000000000065` | `/home/user/.claude/projects/-home-user-projects-workbench/00000000-0000-4000-8000-000000000065.jsonl` |
 | Codex | `00000000-0000-4000-8000-000000000066` | `/home/user/.codex/sessions/2026/08/21/rollout-2026-08-21T16-32-27-00000000-0000-4000-8000-000000000066.jsonl` |
-| Kimi | `session_00000000-0000-4000-8000-000000000070` | `/home/user/.kimi-code/sessions/wd_workbench_0123456789ab/session_00000000-0000-4000-8000-000000000070/` |
+| Kimi | `session_00000000-0000-4000-8000-000000000001` | `/home/user/.kimi-code/sessions/wd_workbench_0123456789ab/session_00000000-0000-4000-8000-000000000001/` |
 
 ## 1. Claude stream-json
 
@@ -108,7 +108,7 @@ client → CLI：`user`、`control_response`。
     "tool_name": "Write",
     "display_name": "Write",
     "input": {
-      "file_path": "/home/user/dev/workbench/spikes/sandbox/claude-approved.txt",
+      "file_path": "/home/user/projects/workbench/spikes/sandbox/claude-approved.txt",
       "content": "CLAUDE_APPROVED"
     },
     "description": "spikes/sandbox/claude-approved.txt",
@@ -131,7 +131,7 @@ client → CLI：`user`、`control_response`。
     "response": {
       "behavior": "allow",
       "updatedInput": {
-        "file_path": "/home/user/dev/workbench/spikes/sandbox/claude-approved.txt",
+        "file_path": "/home/user/projects/workbench/spikes/sandbox/claude-approved.txt",
         "content": "CLAUDE_APPROVED"
       }
     }
@@ -148,7 +148,7 @@ client → CLI：`user`、`control_response`。
 任务书预期删除 `CLAUDE_CODE_ENTRYPOINT` 可让会话按普通 CLI 身份落盘；实测否定了这个假设。最终 session jsonl 的早期记录为：
 
 ```json
-{"type":"attachment","userType":"external","entrypoint":"sdk-cli","cwd":"/home/user/dev/workbench","sessionId":"00000000-0000-4000-8000-000000000065","version":"2.1.238"}
+{"type":"attachment","userType":"external","entrypoint":"sdk-cli","cwd":"/home/user/projects/workbench","sessionId":"00000000-0000-4000-8000-000000000065","version":"2.1.238"}
 {"type":"user","permissionMode":"default","promptSource":"sdk","userType":"external","entrypoint":"sdk-cli","sessionId":"00000000-0000-4000-8000-000000000065"}
 ```
 
@@ -215,7 +215,7 @@ codex app-server --stdio
 ```json
 {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"clientInfo":{"name":"workbench-spike","title":"Workbench M0","version":"0.0.0"},"capabilities":null}}
 {"jsonrpc":"2.0","method":"initialized","params":{}}
-{"jsonrpc":"2.0","id":2,"method":"thread/start","params":{"cwd":"/home/user/dev/workbench","approvalPolicy":"untrusted","sandbox":"workspace-write","ephemeral":false}}
+{"jsonrpc":"2.0","id":2,"method":"thread/start","params":{"cwd":"/home/user/projects/workbench","approvalPolicy":"untrusted","sandbox":"workspace-write","ephemeral":false}}
 {"jsonrpc":"2.0","id":3,"method":"turn/start","params":{"threadId":"00000000-0000-4000-8000-000000000066","input":[{"type":"text","text":"…","text_elements":[]}],"approvalPolicy":"untrusted","sandboxPolicy":{"type":"workspaceWrite","writableRoots":[],"networkAccess":false,"excludeTmpdirEnvVar":false,"excludeSlashTmp":false}}}
 ```
 
@@ -261,7 +261,7 @@ app-server → client 请求/通知：
     "startedAtMs":1787301156726,
     "environmentId":"local",
     "command":"/bin/bash -lc \"printf 'CODEX_APPROVED\\\\n' > spikes/sandbox/codex-approved.txt\"",
-    "cwd":"/home/user/dev/workbench",
+    "cwd":"/home/user/projects/workbench",
     "commandActions":[{"type":"unknown","command":"printf 'CODEX_APPROVED\\n' > spikes/sandbox/codex-approved.txt"}],
     "proposedExecpolicyAmendment":["/bin/bash","-lc","printf 'CODEX_APPROVED\\n' > spikes/sandbox/codex-approved.txt"],
     "availableDecisions":[
@@ -293,7 +293,7 @@ app-server → client 请求/通知：
 续接现有会话的真实请求：
 
 ```json
-{"jsonrpc":"2.0","id":4,"method":"thread/resume","params":{"threadId":"00000000-0000-4000-8000-000000000066","cwd":"/home/user/dev/workbench"}}
+{"jsonrpc":"2.0","id":4,"method":"thread/resume","params":{"threadId":"00000000-0000-4000-8000-000000000066","cwd":"/home/user/projects/workbench"}}
 ```
 
 完成后用：
@@ -305,7 +305,7 @@ app-server → client 请求/通知：
 `thread/start` 返回的 `thread.path` 即 rollout 路径，并返回 `source:"vscode"`。rollout 首行实值：
 
 ```json
-{"type":"session_meta","payload":{"id":"00000000-0000-4000-8000-000000000066","cwd":"/home/user/dev/workbench","originator":"workbench-spike","cli_version":"0.148.0","source":"vscode"}}
+{"type":"session_meta","payload":{"id":"00000000-0000-4000-8000-000000000066","cwd":"/home/user/projects/workbench","originator":"workbench-spike","cli_version":"0.148.0","source":"vscode"}}
 ```
 
 调查结论：`source:"vscode"` **不是从当前 VSCODE 环境变量继承，也不由 `initialize.clientInfo` 决定**。当前 `codex app-server` 这个 umbrella 子命令把 session source 固定成 `VSCode`；`codex app-server --help` 没有 `--session-source`，也没有可用的环境变量或 initialize 字段覆盖它。单独构建/安装的 `codex-app-server` 二进制入口有 `--session-source`，但本机 PATH 没有该独立命令，且不属于本项目要求的原生 `codex app-server` 调用面。
@@ -367,10 +367,10 @@ app-server → client 请求/通知：
 }
 ```
 
-`session/new` 实发参数只有 `{"cwd":"/home/user/dev/workbench","mcpServers":[]}`，没有 permission/approval 字段。返回把模式放在 `configOptions[id=mode]` 和 `modes` 中：`default`（Manual approvals）、`plan`（Read-only）、`auto`（Auto-approve safe operations）、`yolo`（Auto-approve everything）。切换使用：
+`session/new` 实发参数只有 `{"cwd":"/home/user/projects/workbench","mcpServers":[]}`，没有 permission/approval 字段。返回把模式放在 `configOptions[id=mode]` 和 `modes` 中：`default`（Manual approvals）、`plan`（Read-only）、`auto`（Auto-approve safe operations）、`yolo`（Auto-approve everything）。切换使用：
 
 ```json
-{"jsonrpc":"2.0","id":30,"method":"session/set_mode","params":{"sessionId":"session_00000000-0000-4000-8000-000000000070","modeId":"default"}}
+{"jsonrpc":"2.0","id":30,"method":"session/set_mode","params":{"sessionId":"session_00000000-0000-4000-8000-000000000001","modeId":"default"}}
 ```
 
 ### 实测方法/更新全量清单（收发双向）
@@ -417,7 +417,7 @@ initialize 宣告及 Kimi 0.38.0 内置 ACP v1 schema 给出的生命周期方�
   "id":0,
   "method":"session/request_permission",
   "params":{
-    "sessionId":"session_00000000-0000-4000-8000-000000000070",
+    "sessionId":"session_00000000-0000-4000-8000-000000000001",
     "options":[
       {"optionId":"approve_once","name":"Approve once","kind":"allow_once"},
       {"optionId":"approve_always","name":"Approve for this session","kind":"allow_always"},
@@ -446,16 +446,16 @@ initialize 宣告及 Kimi 0.38.0 内置 ACP v1 schema 给出的生命周期方�
   "id":1,
   "method":"terminal/create",
   "params":{
-    "sessionId":"session_00000000-0000-4000-8000-000000000070",
+    "sessionId":"session_00000000-0000-4000-8000-000000000001",
     "command":"/bin/bash",
-    "args":["-c","cd '/home/user/dev/workbench' && printf 'KIMI_APPROVED\\n' > spikes/sandbox/kimi-approved.txt"],
+    "args":["-c","cd '/home/user/projects/workbench' && printf 'KIMI_APPROVED\\n' > spikes/sandbox/kimi-approved.txt"],
     "env":[
       {"name":"NO_COLOR","value":"1"},
       {"name":"TERM","value":"dumb"},
       {"name":"GIT_TERMINAL_PROMPT","value":"0"},
       {"name":"SHELL","value":"/bin/bash"}
     ],
-    "cwd":"/home/user/dev/workbench",
+    "cwd":"/home/user/projects/workbench",
     "outputByteLimit":4194304
   }
 }
@@ -499,7 +499,7 @@ ACP 会话继承该默认值，因此不显式 `session/set_mode` 就没有标�
 ### usage/token 样本
 
 ```json
-{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"session_00000000-0000-4000-8000-000000000070","update":{"sessionUpdate":"usage_update","used":25417,"size":1048576}}}
+{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"session_00000000-0000-4000-8000-000000000001","update":{"sessionUpdate":"usage_update","used":25417,"size":1048576}}}
 ```
 
 Kimi 这里不是 input/output 分项，而是上下文已用量 `used` 与总容量 `size`。
@@ -526,9 +526,9 @@ Kimi 这里不是 input/output 分项，而是上下文已用量 `used` 与总�
 - [x] 1. `npm run spike:claude`（探针脚本已删除，见 git 历史）：最终退出码 0；两轮 prompt、83 个 partial、1 次审批、靶文件内容校验成功。
 - [x] 1. `npm run spike:codex`（探针脚本已删除，见 git 历史）：最终退出码 0；initialize → thread/start → turn/start → command approval → completed → thread/resume → unsubscribe 全闭环。
 - [x] 1. `npm run spike:kimi`（探针脚本已删除，见 git 历史）：最终退出码 0；initialize → list/new/set_mode/prompt → request_permission → terminal 全生命周期 → close 全闭环。
-- [x] 2. `spikes/captures/claude.ndjson` 非空，含真实 `control_request` 与 `control_response`。
-- [x] 2. `spikes/captures/codex.ndjson` 非空，含真实 `item/commandExecution/requestApproval` 与同 id `{decision:"accept"}`。
-- [x] 2. `spikes/captures/kimi.ndjson` 非空，含真实 `session/request_permission` 与同 id selected outcome；另含 `terminal/create` 执行闸门及应答。
+- [x] 2. 原始抓包 `claude.ndjson`（未随仓库公开）非空，含真实 `control_request` 与 `control_response`。
+- [x] 2. 原始抓包 `codex.ndjson`（未随仓库公开）非空，含真实 `item/commandExecution/requestApproval` 与同 id `{decision:"accept"}`。
+- [x] 2. 原始抓包 `kimi.ndjson`（未随仓库公开）非空，含真实 `session/request_permission` 与同 id selected outcome；另含 `terminal/create` 执行闸门及应答。
 - [x] 3. 本文记录三家确切命令、握手、全量实测事件/方法、真实审批样本、会话 id/路径、续接、usage 和踩坑。
 - [x] 4. Claude 的关键字段形状已在“control_request / control_response 的确切形状”中用完整真实样本钉死。
 - [x] 5. 三家 usage/token 字段均贴出真实 capture 样本。
@@ -537,7 +537,7 @@ Kimi 这里不是 input/output 分项，而是上下文已用量 `used` 与总�
 
 ## 7. kimi 2.1.1 工具调用字段（2026-09-28 抓包）
 
-来源：`spikes/kimi-tools-capture.ts`（探针脚本已删除，见 git 历史）→ `spikes/captures/kimi-tools.ndjson`。七步工具任务（读/搜/列/改/写/跑命令/抓取），沙箱 cwd，权限一律自动批准。结论：**`kind` / `locations` / `rawInput` 确实存在**，但出现时机分阶段。
+来源：`spikes/kimi-tools-capture.ts`（探针脚本已删除，见 git 历史）→ 原始抓包 `kimi-tools.ndjson`（未随仓库公开）。七步工具任务（读/搜/列/改/写/跑命令/抓取），沙箱 cwd，权限一律自动批准。结论：**`kind` / `locations` / `rawInput` 确实存在**，但出现时机分阶段。
 
 **初始 `tool_call`**：只有短名 title + kind + 空 content，**无 locations、无 rawInput**：
 
@@ -574,7 +574,7 @@ Kimi 这里不是 input/output 分项，而是上下文已用量 `used` 与总�
 - Write：`"Wrote 5 bytes to b.txt"`。
 - FetchURL：页面正文文本（开头带「引用此页」提示句）。
 
-**terminal 类 content（Bash）**：完成态 content 只有终端引用，**没有输出文本、没有 rawOutput**；输出只能经 `terminal/output` 另取（印证 HANDOFF「阶段 2 的两个坑」第一条）。`status` 反映退出码：`ls -la && false` 完成态为 `"failed"`。
+**terminal 类 content（Bash）**：完成态 content 只有终端引用，**没有输出文本、没有 rawOutput**；输出只能经 `terminal/output` 另取（早期联调已在此踩坑：误以为完成态会带回输出）。`status` 反映退出码：`ls -la && false` 完成态为 `"failed"`。
 
 ```json
 {"sessionUpdate":"tool_call_update","toolCallId":"0:tool_9VNP…","status":"failed","content":[{"type":"terminal","terminalId":"tools-1790607026567-0"}]}
@@ -584,7 +584,7 @@ Kimi 这里不是 input/output 分项，而是上下文已用量 `used` 与总�
 
 ## 8. Claude 跨宿主续接：缓存、模型与分叉（CLI 2.1.284，2026-09-30）
 
-对照工单已归档（`~/dev/_notes/backups/workbench-local-docs-20261002.tgz`）。审计工具：`node server/scripts/cache-audit.mjs <jsonl|id 前缀> [--ttl 3600] [--json]`，`--since 14d` 扫全部。
+对照工单为本地归档，未随仓库公开。审计工具：`node server/scripts/cache-audit.mjs <jsonl|id 前缀> [--ttl 3600] [--json]`，`--since 14d` 扫全部。
 
 **系统提示快照让跨宿主续接不破缓存**。续接时 CLI 按 jsonl 里的 `prompt_snapshot` / `deferred_tools_record` 附件重放上次的系统提示和工具表，之后的变化只以 `deferred_tools_delta` / `agent_listing_delta` / `mcp_instructions_delta` 追加在对话尾部，所以 VSCode 与 wb 追加提示不同也不动前缀。VSCode 扩展在 initialize 里显式传 `systemPromptSnapshot: true` 并把「VSCode Extension Context」作为 `appendSystemPrompt`；wb 的 initialize 不带这两个字段，快照开关走默认值（开），同样生效。VSCode 独有工具（`FetchInboxMessage` / `ReadNotifications` / `SendUserFile`）也是 delta，不破缓存。
 - 真实会话 00000205（VSCode ↔ wb 来回切）：4 轮 0 次意外失效，切换轮 read 57169 / write 737、read 57906 / write 649。
@@ -662,7 +662,7 @@ CLI `/config` 的 `Te(e)`（binary 字节 215603696）在选 `"false"` 时执行
 
 ## 11. 扩展菜单补齐：MCP 管理与只读面板（2026-10-01）
 
-> 本节提到的 `scratch/…`、`.work-orders/…` 是本地文件，2026-10-02 已清出工作区，归档在 `~/dev/_notes/backups/workbench-local-docs-20261002.tgz`。
+> 本节提到的 `scratch/…`、`.work-orders/…` 是本地文件，2026-10-02 已清出工作区，归档在本地备份中，未随仓库公开。
 
 调查源为 `~/.vscode-server/extensions/anthropic.claude-code-2.1.286-linux-x64/{webview/index.js,extension.js}`；本机 CLI `2.1.285`。`scratch/slash-ext/extension-actions.txt` 保存菜单注册片段，`extension-protocol.txt` / `extension-related.txt` 保存 SDK/宿主实现片段。完整条目判定表在 `.work-orders/2026-10-01-slash-ext-report.md`。以下均走本地无头 stream-json，无新增 npm 依赖。
 
@@ -690,11 +690,11 @@ Hooks 编辑在扩展实际通过 `claude edit-hook`（JSON stdin）后刷新 `g
 
 ## 12. Codex 客户端命令与 skills（2026-10-01，0.159.3）
 
-> 本节提到的 `scratch/…`、`.work-orders/…` 是本地文件，2026-10-02 已清出工作区，归档在 `~/dev/_notes/backups/workbench-local-docs-20261002.tgz`。
+> 本节提到的 `scratch/…`、`.work-orders/…` 是本地文件，2026-10-02 已清出工作区，归档在本地备份中，未随仓库公开。
 
 本机 `codex --version` = codex-cli 0.159.3。生成 JSON schema 于 `scratch/codex-commands/schema/`，关键依据为 v2/SkillsListParams、SkillsListResponse、TurnStartParams.definitions.UserInput、ThreadCompactStartParams、ReviewStartParams、ThreadReadParams、ListMcpServerStatusParams。官方 [app-server](https://learn.chatgpt.com/docs/app-server) 亦明确建议显式 skill input；只有 `$name` 文本也可触发模型查找，但可能增加延迟。本机 schema 不提供文档较新版本的 perCwdExtraUserRoots，本实现不发送该字段。
 
-探针：`skills/list {cwds:["/home/user/dev/workbench"],forceReload:true}` → `{data:[{cwd,skills:[{name,description,path,enabled,scope,interface?,dependencies?,shortDescription?,pluginId?}],errors:[{path,message}]}]}`。本机隔离 CODEX_HOME（仅状态目录迁移，读取原配置/skills）发现 62 项、25 项 enabled、0 errors，路径落在 ~/.codex/skills、~/.agents/skills 和 agent-env 的共享源。结果留存 `scratch/codex-commands/skills-list.json`；不将禁用项暴露给 picker。
+探针：`skills/list {cwds:["/home/user/projects/workbench"],forceReload:true}` → `{data:[{cwd,skills:[{name,description,path,enabled,scope,interface?,dependencies?,shortDescription?,pluginId?}],errors:[{path,message}]}]}`。本机隔离 CODEX_HOME（仅状态目录迁移，读取原配置/skills）发现 62 项、25 项 enabled、0 errors，路径落在 ~/.codex/skills、~/.agents/skills 和 agent-env 的共享源。结果留存 `scratch/codex-commands/skills-list.json`；不将禁用项暴露给 picker。
 
 ```json
 {"id":30,"method":"skills/list","params":{"cwds":["/project"],"forceReload":true}}

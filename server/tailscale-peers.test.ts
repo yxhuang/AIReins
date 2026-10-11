@@ -24,11 +24,11 @@ assert.deepEqual(parseTailscalePeers('{"Peer":{}}'), { peers: [] });
 assert.equal(parseTailscalePeers(JSON.stringify({ Peer: { pc: { ...peer("pc"), HostName: "", TailscaleIPs: [42, "bad", "100.64.1.3"] } } })).peers[0]?.name, "pc");
 console.log("PASS: Tailscale 电脑发现、自身/手机排除、DNS 与前端兼容、排序、坏 JSON 和停止状态");
 
-const targets = parseTaildropTargets("100.64.0.9\tmy-laptop\toffline; last seen 18h ago\r\n100.64.0.7\tzeta\n100.64.0.8\tiphone-14-pro\n\nnot-an-ip\tbad\n100.64.0.10\t\n", "100.64.0.8");
+const targets = parseTaildropTargets("100.64.0.9\talice-laptop\toffline; last seen 18h ago\r\n100.64.0.7\tzeta\n100.64.0.8\tiphone-14-pro\n\nnot-an-ip\tbad\n100.64.0.10\t\n", "100.64.0.8");
 assert.deepEqual(targets, [
   { name: "iphone-14-pro", ip: "100.64.0.8", online: true, self: true },
   { name: "zeta", ip: "100.64.0.7", online: true, self: false },
-  { name: "my-laptop", ip: "100.64.0.9", online: false, self: false },
+  { name: "alice-laptop", ip: "100.64.0.9", online: false, self: false },
 ]);
 assert.deepEqual(parseTaildropTargets(""), []);
 console.log("PASS: Taildrop 目标解析、本机置顶、离线识别与坏行过滤");

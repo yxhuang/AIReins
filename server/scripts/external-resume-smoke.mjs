@@ -1,4 +1,4 @@
-// 外部续聊真机冒烟（2026-09-27）。只对临时实例跑（18790 + 临时 WORKBENCH_HOME，见 HANDOFF「临时实例测后端」），会消耗少量真实额度。
+// 外部续聊真机冒烟（2026-09-27）。只对临时实例跑（18790 + 临时 WORKBENCH_HOME，见本地 .work-orders/HANDOFF.md（若有）「临时实例测后端」），会消耗少量真实额度。
 // 用法：NO_PROXY='*' node server/scripts/external-resume-smoke.mjs http://127.0.0.1:18790 <claude|codex|kimi> <空目录>
 // 流程：工作台记 APPLE → 外部 CLI 续聊记 CHERRY → 工作台问全部单词（应含 CHERRY、出现 external_messages_added）→ 再问（不应再续接）。
 // Codex 外部续接会被单写者锁拒绝（EXT_FAILED … active writer），属预期。

@@ -1,6 +1,6 @@
 # Workbench 前端
 
-Vite + React + TypeScript 调度台，将 Claude Code、Codex、Kimi 会话放在同一列表，跨会话显示审批与提问。本文记录现行开发约定；后续待办见 [HANDOFF.md](../HANDOFF.md)，接口契约见 [server/README.md](../server/README.md)。
+Vite + React + TypeScript 调度台，将 Claude Code、Codex、Kimi 会话放在同一列表，跨会话显示审批与提问。本文记录现行开发约定；接手规则与后续待办见根目录 [AGENTS.md](../AGENTS.md)，接口契约见 [server/README.md](../server/README.md)。
 
 ## 构建与开发
 
@@ -139,7 +139,7 @@ node frontend/scripts/smoke-ws.mjs  # 需后端；会创建测试会话、批准
 - 文件列表由 `DirectoryTable.tsx` 直接显示名称、大小、修改日期的紧凑表格，无目录列表iframe、大路径标题或额外上级目录行；沿用 WB 地址栏与导航。表体只在目录变化时创建文本DOM，排序复用 `directory-path.ts` 并只移动位置改变的行；类型图标用CSS背景绘制，不增加逐行框架状态或图标节点；文件夹使用独立的Windows黄色令牌，地址栏原生选择按钮和目录选择列表同步用黄。表头、名称、大小、日期均为15px，行高1.4、单元格上下2px留白；大小/日期保持单行，日期列155px，宽面板目录项约25px高，窄面板分行约50px，触屏行命中区域不少于44px。点击任一列打开该目录/文件，名称按钮也支持键盘；数据一律通过 `textContent` 写入，不解释文件名HTML。事件在表体集中处理，不需要模板脚本、消息转发或主题观察器。深浅主题、字体、Esc直接继承宿主；文件夹始终在前，未知元数据显示“—”并在同类末尾，零字节显示“0 B”、文件夹大小留空。窄面板把元数据放在名称下方，宽面板并排成列；排序不重新请求接口。旧服务端未带元数据时仍可浏览/打开；目录选择模式保留原列表。原Chromium组件/vendor源保留供历史对比，已不进入生产引用图。PDF/HTML预览自身的iframe用途保持不变。
 - 文件面板「发送到设备」（Taildrop）：目录表格行右键/菜单键/Android 长按走 `contextmenu`，iOS 触屏自己计时 500ms（移动超 10px 取消，长按后吞掉随之而来的点击）；预览顶栏「发送」按钮弹同一菜单。[TaildropMenu.tsx](src/components/TaildropMenu.tsx) 复用 `SidebarActionMenu`，打开时读 `/api/tailscale/file-targets`，当前访问设备排第一标「（本机）」，离线设备禁用。选中后菜单关闭，面板提示「正在发送…」，请求结束显示结果或错误；文件夹由服务端打包为 zip 后发送。
 - 文件面板把刷新、上一级（↑）、WSL、Windows 渲染进标题栏“文件”右侧（`DirectoryContents` 的 `navTarget` 门户；槽位未挂载时不渲染，弹窗仍用第二行内联按钮）。刷新重读当前目录及 Git 状态，不轮询、不监听。
-- `/api/fs/dirs?files=1` 在 Git 工作区内并行跑 `git --no-optional-locks rev-parse --show-prefix` 与 `status -z -- .`（各 1.5s 超时），返回 `git`：直接子项名 → M/A/R/D/U/!，文件夹取其下最高状态。当前目录不在仓库时（如 `~/dev`），含 `.git` 的子文件夹各跑一次 `status`（并发 4、总预算 2s），取整仓最高状态，干净仓库不标。返回 `git` 时表格名称左侧留 14px 槽：文件显示字母、文件夹显示圆点，悬停提示含状态。非仓库且无子仓库、git 不可用或超时不返回该字段、不显示标记；见 [dir-list.ts](../server/dir-list.ts)。
+- `/api/fs/dirs?files=1` 在 Git 工作区内并行跑 `git --no-optional-locks rev-parse --show-prefix` 与 `status -z -- .`（各 1.5s 超时），返回 `git`：直接子项名 → M/A/R/D/U/!，文件夹取其下最高状态。当前目录不在仓库时（如 `~/projects`），含 `.git` 的子文件夹各跑一次 `status`（并发 4、总预算 2s），取整仓最高状态，干净仓库不标。返回 `git` 时表格名称左侧留 14px 槽：文件显示字母、文件夹显示圆点，悬停提示含状态。非仓库且无子仓库、git 不可用或超时不返回该字段、不显示标记；见 [dir-list.ts](../server/dir-list.ts)。
 - 新建表单只有一个“浏览…”，先打开 Workbench 目录弹窗；地址栏与文件子页面同一形态（可点的路径层级、点空白处编辑路径、右侧最近目录下拉），不再另设层级按钮行。本机入口 `meta.capabilities.windowsDirectoryPicker=true` 时地址栏左侧显示文件夹按钮，调用现代 Windows 文件夹窗口（PowerShell 7 WinForms），选定后直接填入工作目录并关闭弹窗；取消保留当前目录，失败在弹窗内报错。远程入口不提供原生窗口。最近目录取（本设备上次创建目录＋当前表单初始目录＋工作台会话，去重最多8个，原生 Windows 历史最多补1个）；手机可横滑路径层级或用“最近目录”选择电脑目录，点选后仍需确认“选定此目录”。
 - 目录浏览打开时后台预取三家原生历史 `q=/mnt/&limit=1`，Windows 按钮比较历史与工作台最近活动的 `/mnt/` 目录，无记录用 `/mnt/c/Users`。按钮不等待历史；慢请求/失败期间用本地结果，返回后仅供后续点击，不自动改变当前目录。关键词也匹配标题，仅遇到非 `/mnt/` 目录时继续最小页，1.5 秒后不再追加请求；接口自身超时仍由 `api.ts` 管理。历史列表会遍历目录和 stat，并按需读取文件头/检查用户消息，不预取完整历史消息。
 
@@ -164,7 +164,7 @@ node frontend/scripts/smoke-ws.mjs  # 需后端；会创建测试会话、批准
 
 ## 只做过代码或打桩复核的前端路径
 
-需要用户真机看的事项统一记在 `HANDOFF.md`「等用户真机看 / 确认的」；这里只列日常使用碰不到、仍只有代码或打桩证据的路径：
+需要用户真机看的事项统一记在本地的 `.work-orders/HANDOFF.md`（若有）「等用户真机看 / 确认的」；这里只列日常使用碰不到、仍只有代码或打桩证据的路径：
 
 - Codex 图片附件 `localImage` 只核对过协议与单测，未真实投递；iOS 文件三选项、拖放、HEIC→JPEG canvas 压缩未真机。
 - 中文 IME 组字状态下 `/`、`@`、`$skill` 面板的筛选与键盘交互。

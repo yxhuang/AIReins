@@ -6,7 +6,7 @@
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File "\\wsl.localhost\ubuntu\home\<用户名>\workbench\deploy\windows\install-tray.ps1" -Distro ubuntu -WbPath '/home/<用户名>/workbench/bin/workbench'
 ```
 
-路径包含 `dev`，直接在 PowerShell 中用引号包住完整路径即可；不要经 `cmd /c start` 转发。如果 UNC 路径无法访问，可把 `deploy/windows/` 中的两个 `.ps1` 和 `deploy/workbench.ico` 复制到同一个 Windows 本地目录，再运行：
+路径包含 `=` 等特殊字符时，直接在 PowerShell 中用引号包住完整路径即可；不要经 `cmd /c start` 转发。如果 UNC 路径无法访问，可把 `deploy/windows/` 中的两个 `.ps1` 和 `deploy/workbench.ico` 复制到同一个 Windows 本地目录，再运行：
 
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File "C:\wb-tray\install-tray.ps1" -SourceDir "C:\wb-tray" -Distro ubuntu -WbPath '~/.local/bin/workbench'

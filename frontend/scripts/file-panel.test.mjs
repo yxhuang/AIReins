@@ -40,7 +40,7 @@ assert.deepEqual(recentDirectoryPaths([
   { cwd: "/new", lastActivityAt: "2026-10-03" }, { cwd: "bad-relative", lastActivityAt: "bad" },
 ], ["", "/last", String.raw`C:\Projects`]), ["/last", "/mnt/c/Projects", "/new", "/old"]);
 for (const [input, expected] of [
-  [String.raw`C:\Users\user\Documents\Work\资料\示例项目`, "/mnt/c/Users/user/Documents/Work/资料/示例项目"],
+  [String.raw`C:\Users\user\Documents\项目\2025级`, "/mnt/c/Users/user/Documents/项目/2025级"],
   [String.raw`  "D:\My Projects\中文目录"  `, "/mnt/d/My Projects/中文目录"],
   ["c:/Users/user/", "/mnt/c/Users/user/"],
   ["E:\\", "/mnt/e/"],

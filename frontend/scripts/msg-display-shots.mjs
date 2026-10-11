@@ -42,13 +42,13 @@ let seq = 0;
 const ev = (sid, type, payload) => ({ type, sessionId: sid, agentId: "main", seq: ++seq, timestamp: new Date(Date.UTC(2026, 8, 28, 13, 0, seq)).toISOString(), payload });
 function events(sid, agent) {
   seq = 0;
-  const e = [ev(sid, "session_created", { agent, cwd: "/home/user/dev/workbench", config: {} })];
+  const e = [ev(sid, "session_created", { agent, cwd: "/home/user/projects/workbench", config: {} })];
   e.push(ev(sid, "external_messages_added", { nativeSessionId: "x", truncated: false, messages: [
     { role: "user", text: "在别处问的：**加粗** 和 `code`", timestamp: null },
     { role: "assistant", text: "别处的回答：\n\n- 列表一\n- 列表二", timestamp: null }] }));
   e.push(ev(sid, "user_message", { text: "帮我看一下 @frontend/src/styles.css 和 @server/index.ts 然后跑测试" }));
   e.push(ev(sid, "thought_delta", { text: "" }));
-  e.push(ev(sid, "tool_call_started", { toolCallId: "t1", toolName: "Read", input: { file_path: "/home/user/dev/workbench/frontend/src/styles.css" } }));
+  e.push(ev(sid, "tool_call_started", { toolCallId: "t1", toolName: "Read", input: { file_path: "/home/user/projects/workbench/frontend/src/styles.css" } }));
   e.push(ev(sid, "tool_call_completed", { toolCallId: "t1", result: "/* 设计令牌 */\n:root { --bg: #FAF9F5; }" }));
   e.push(ev(sid, "thought_delta", { text: "先读样式文件，再跑 npm test 看看哪些断言会受「本轮结束」降噪影响。" }));
   e.push(ev(sid, "tool_call_started", { toolCallId: "t2", toolName: "Bash", input: { command: "npm test" } }));
@@ -57,7 +57,7 @@ function events(sid, agent) {
   e.push(ev(sid, "turn_completed", { subtype: "success", isError: false, stopReason: "end_turn", status: "completed" }));
   e.push(ev(sid, "user_message", { text: "继续，改一下" }));
   e.push(ev(sid, "tool_call_started", { toolCallId: "t3", toolName: "Grep", input: { pattern: "本轮结束" } }));
-  e.push(ev(sid, "permission_request", { requestId: "g1", toolName: "Edit", input: { file_path: "/home/user/dev/workbench/frontend/src/render-items.ts", old_string: 'text: "本轮结束",', new_string: 'text: "本轮异常结束",' } }));
+  e.push(ev(sid, "permission_request", { requestId: "g1", toolName: "Edit", input: { file_path: "/home/user/projects/workbench/frontend/src/render-items.ts", old_string: 'text: "本轮结束",', new_string: 'text: "本轮异常结束",' } }));
   e.push(ev(sid, "agent_text_delta", { text: "正在等你批准这次编辑……" }));
   const bad = { claude: { subtype: "error_during_execution", isError: true }, codex: { status: "failed", error: { message: "boom" } }, kimi: { stopReason: "cancelled" } }[agent];
   e.push(ev(sid, "turn_completed", bad));
@@ -65,7 +65,7 @@ function events(sid, agent) {
 }
 const ids = { claude: "FAKECLAUDE000000000000000A", codex: "FAKECODEX0000000000000000B", kimi: "FAKEKIMI00000000000000000C" };
 const real = (await (await fetch(`${base}/api/sessions`)).json()).data.sessions[0];
-const record = (agent) => ({ ...real, id: ids[agent], agent, status: "idle", seq: 99, cwd: process.env.FIXTURES ? "/work/proj" : "/home/user/dev/workbench", transcriptPath: "/dev/null" });
+const record = (agent) => ({ ...real, id: ids[agent], agent, status: "idle", seq: 99, cwd: process.env.FIXTURES ? "/work/proj" : "/home/user/projects/workbench", transcriptPath: "/dev/null" });
 const browser = await chromium.launch();
 const report = [];
 // 三组视口：长图两组（整页高度，查横滚用）+ 真实桌面 1280×820 + 真实手机 390×844
@@ -111,7 +111,7 @@ if (process.env.UI_SCENARIOS === "1") {
   const scenes = ["empty", "gate-long-path", "running-input", "back-to-latest", "model-cwd", "title-dispatch"];
   const sizes = [{ width: 1280, height: 820 }, { width: 390, height: 844, touch: true },
     ...[320, 390, 430].map((width) => ({ width, height: 844, touch: true, large: true }))];
-  const longCwd = "/home/user/dev/workbench/一个很长的项目目录/用于核对模型菜单路径";
+  const longCwd = "/home/user/projects/workbench/一个很长的项目目录/用于核对模型菜单路径";
   const longPath = `${longCwd}/${"路径需要换行的子目录/".repeat(7)}文件名必须可见.ts`;
   const sceneMeta = {
     serverVersion: "ui-fixture", defaultCwd: longCwd,

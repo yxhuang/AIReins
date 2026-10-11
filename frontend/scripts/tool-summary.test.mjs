@@ -454,7 +454,7 @@ t("lineDiff：未变行保留、改动行成对", () => {
 const execFixture = JSON.parse(readFileSync(new URL("./fixtures/tool-events/codex-exec.json", import.meta.url), "utf8"));
 const execSummary = (input, extra = {}) => summarizeTool("codex", {
   toolName: "exec", input, result: "完整结果", status: "ok", ...extra,
-}, "/home/user/dev/workbench");
+}, "/home/user/projects/workbench");
 
 t("exec 真实单命令：静态提取，展开保留原始 JS 与结果", () => {
   const input = execFixture.single.input;
@@ -555,8 +555,8 @@ t("exec 真实长字符串 patch 经历史接口到预览/派单仍可摘要", (
   ]);
   const [view] = buildHistoryRenderItems(messages);
   assert.equal(view.input, input);
-  const s = summarizeTool("codex", view, "/home/user/dev/workbench");
-  assert.deepEqual([s.verb, s.target], ["编辑", "/home/user/dev/demo-tool/bin/runner"]);
+  const s = summarizeTool("codex", view, "/home/user/projects/workbench");
+  assert.deepEqual([s.verb, s.target], ["编辑", "/home/user/projects/demo-tool/bin/runner"]);
   assert.match(s.body.calls[0].input, /\*\*\* End Patch$/);
   assert.equal(s.body.result, "done");
 });

@@ -2,7 +2,7 @@
 
 实现路径：手机 → Windows Tailscale Serve → Windows `127.0.0.1:8794` 入口 → WSL 中的 Workbench `127.0.0.1:8793`。Windows 入口在**登录 Windows 后**由计划任务隐藏运行，只有授权 HTTP 请求到达后才启动 WSL 和 wb 服务（不开桌面窗口）。开机登录后不用点 WB，手机直接打开原网址即可。
 
-只做登录后的场景：代理客户端 靠 `HKCU\...\Run` 在登录后才自启（`launch_at_startup`，配置 `autoLaunch: true`），未登录时 WSL 没有代理，CLI 连不上模型。所以不存 Windows 密码、不开 Tailscale 无人值守。
+只做登录后的场景：系统代理客户端靠 `HKCU\...\Run` 在登录后才自启，未登录时 WSL 没有代理，CLI 连不上模型。所以不存 Windows 密码、不开 Tailscale 无人值守。
 
 **当前状态（2026-10-03）：已安装并实测通过（重启登录后不点 WB，手机请求 10 秒内拉起 WSL+wb）。首次安装曾因 5.1 下 param 默认值里 `$PSScriptRoot` 为空失败，已修。待验：开机自动登录后停在锁屏、不解锁时手机能否直接用。**
 
@@ -17,12 +17,12 @@
 
 `bash install.sh --check` 只读体检 remote.json、Serve HTTPS `/` 是否指向 `127.0.0.1:8794`、登录任务及状态，不写文件、不提权、不触发 WB 启停。重跑安装不会覆盖 remote.json 或重新安装已有任务；已有任务但 Serve 不匹配时须根据体检提示人工处理。
 
-代理客户端 等系统代理须把 `*.ts.net` 加入绕过，否则浏览器可能报 `ERR_TUNNEL_CONNECTION_FAILED`。
+系统代理须把 `*.ts.net` 加入绕过，否则浏览器可能报 `ERR_TUNNEL_CONNECTION_FAILED`。
 
 需要手动安装时，在拥有发行版的 Windows 账户下，以管理员身份打开 **Windows PowerShell 5.1**，执行（下面的发行版、用户、HOME 与仓库路径须改成实际值；自动安装失败时优先复制安装脚本打印的命令）：
 
 ```powershell
-& "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "\\wsl.localhost\ubuntu\home\user\dev\workbench\deploy\windows\install-remote-gateway.ps1" -Distro ubuntu -LinuxUser user -LinuxHome /home/user
+& "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "\\wsl.localhost\ubuntu\home\user\projects\workbench\deploy\windows\install-remote-gateway.ps1" -Distro ubuntu -LinuxUser user -LinuxHome /home/user
 ```
 
 安装器执行以下步骤：
@@ -43,8 +43,8 @@
 先执行模拟测试（不启动 WSL、Chrome 或 Tailscale，不改系统设置）：
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File "\\wsl.localhost\ubuntu\home\user\dev\workbench\deploy\windows\tests\remote-gateway.ps1"
-powershell -NoProfile -ExecutionPolicy Bypass -File "\\wsl.localhost\ubuntu\home\user\dev\workbench\deploy\windows\tests\install-remote-gateway.ps1"
+powershell -NoProfile -ExecutionPolicy Bypass -File "\\wsl.localhost\ubuntu\home\user\projects\workbench\deploy\windows\tests\remote-gateway.ps1"
+powershell -NoProfile -ExecutionPolicy Bypass -File "\\wsl.localhost\ubuntu\home\user\projects\workbench\deploy\windows\tests\install-remote-gateway.ps1"
 ```
 
 第二条命令只模拟安装器 Serve 预检与回滚快照，覆盖空配置、空 Web、无根路径、原 Workbench 目标、拒绝其他代理及 Funnel；临时快照目录打印出来供检查，不改系统设置。WSL 内还可运行 `node deploy/windows/tests/install-remote.test.mjs`，用伪造 JSON、临时 HOME 和命令替身验证自动配置及 install.sh 集成，绝不调用真实 Windows 程序或 WB 服务。

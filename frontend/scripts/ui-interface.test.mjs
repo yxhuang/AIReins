@@ -21,7 +21,7 @@ test("R：末尾追加 refine 命令，去末尾空白且不重复，空输入�
 
 test("D1：单行标题优先占宽，cwd 末两段且不使用 bidi", async () => {
   const { compactCwd } = await import("../src/session-ui.ts");
-  for (const [path, expected] of [["/home/user/dev/workbench", "…/dev/workbench"], ["/a/b", "/a/b"], ["/", "/"], ["C:\\Users\\user\\repo", "…/user/repo"]]) assert.equal(compactCwd(path), expected);
+  for (const [path, expected] of [["/home/user/projects/workbench", "…/projects/workbench"], ["/a/b", "/a/b"], ["/", "/"], ["C:\\Users\\user\\repo", "…/user/repo"]]) assert.equal(compactCwd(path), expected);
   assert.match(view, /className="session-title"/);
   assert.match(rule(".session-title"), /flex:\s*1/);
   assert.match(rule(".session-model"), /max-width:\s*35%/);

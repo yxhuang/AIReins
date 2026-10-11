@@ -6,7 +6,7 @@
 
 在它自己的 WSL/Linux 中 clone 本仓库，进入仓库运行 `bash install.sh`；依赖要求见 [新电脑安装](../README.md#新电脑安装)。脚本安装 `wb` 命令，WSL 下也安装 Windows 托盘与快捷方式；完成后手动固定到任务栏。Windows Tailscale 已安装、登录并运行时，脚本自动生成缺失的 `~/.workbench/remote.json`（本机 MagicDNS origin、本机用户白名单、8793 端口、权限 600、远程终端默认开启 `terminal: true`），已有配置只校验并打印 origin、不覆盖。登录任务缺失时弹出一次 UAC，允许后安装 Windows 远程网关及 Serve；已有任务打印状态并跳过，拒绝或失败时打印手动命令且继续本机安装。新配置遇到已运行 WB 时提示「运行 wb restart 使远程入口生效」，不会自动重启；未运行则按现有冒烟流程处理。
 
-`git pull` 后重跑同一命令即可更新；`bash install.sh --check` 只读报告 remote.json、Serve 与计划任务状态，不写文件或弹 UAC。非 WSL、无 Tailscale 或未登录时跳过远程配置，登录后可重跑。CLI 安装、登录和本地工作目录属于那台电脑，clone 仓库不会复制这些状态。远程终端默认开启；如需关闭把 `terminal` 改为 `false` 后 `wb restart`（旧配置缺 `terminal` 字段时终端关闭，补上 `"terminal": true` 即开）。代理客户端 等系统代理须把 `*.ts.net` 加入绕过，否则浏览器可能报 `ERR_TUNNEL_CONNECTION_FAILED`。
+`git pull` 后重跑同一命令即可更新；`bash install.sh --check` 只读报告 remote.json、Serve 与计划任务状态，不写文件或弹 UAC。非 WSL、无 Tailscale 或未登录时跳过远程配置，登录后可重跑。CLI 安装、登录和本地工作目录属于那台电脑，clone 仓库不会复制这些状态。远程终端默认开启；如需关闭把 `terminal` 改为 `false` 后 `wb restart`（旧配置缺 `terminal` 字段时终端关闭，补上 `"terminal": true` 即开）。系统代理须把 `*.ts.net` 加入绕过，否则浏览器可能报 `ERR_TUNNEL_CONNECTION_FAILED`。
 
 ## 双向连接
 

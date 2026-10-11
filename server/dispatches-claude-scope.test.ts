@@ -9,7 +9,7 @@ const projects = join(root, "projects");
 const delegate = join(root, "delegate");
 const now = Date.now();
 const timestamp = new Date(now - 1000).toISOString();
-const outsideCwd = "/home/user/dev";
+const outsideCwd = "/home/user/projects";
 const encode = (cwd: string) => cwd.replace(/[^A-Za-z0-9]/gu, "-");
 async function fixture(cwd: string, parent: string, agent: string) {
   const project = join(projects, encode(cwd));

@@ -73,7 +73,7 @@ Claude 停止走 `control_request {subtype:"interrupt"}`（与 CLI/扩展按 Esc
 ```json
 {
   "port": 8792,
-  "origin": "https://my-desktop.tailxxxx.ts.net",
+  "origin": "https://alice-desktop.example.ts.net",
   "allowedLogins": ["你的登录名@github"],
   "terminal": false
 }
@@ -90,7 +90,7 @@ Serve 会剥掉客户端自带的同名身份头，再注入真实身份。远�
 
 | 现象 | 常见原因 | 处理 |
 |---|---|---|
-| 手机打不开，一直超时 | 手机 Tailscale 没连上；代理客户端 TUN 抢了路由；电脑睡眠或关机了 | 看手机 Tailscale 的连接状态；TUN 模式要把 `100.64.0.0/10` 与 `*.ts.net` 设为直连；电脑那边远程开机 |
+| 手机打不开，一直超时 | 手机 Tailscale 没连上；系统代理 TUN 抢了路由；电脑睡眠或关机了 | 看手机 Tailscale 的连接状态；TUN 模式要把 `100.64.0.0/10` 与 `*.ts.net` 设为直连；电脑那边远程开机 |
 | 502 Bad Gateway | workbench 没在跑；或 `remote.json` 没配、配错了，8792 没有监听 | 用 `wb status` 看「远程」那一行；`wb logs` 里搜 `remote` |
 | 403「没有 Tailscale 身份」 | 没走 Serve，比如直连了 8792；或请求来自 Funnel、打了 tag 的设备 | 改用 `https://<机器域名>/` 访问 |
 | 403「Tailscale 账号 X 未授权」 | X 不在 `allowedLogins` 里 | 把 X 加进 `remote.json`，然后 `wb restart` |
@@ -153,7 +153,7 @@ Workbench 新建的 Codex 会话在首个 `item/completed.userMessage` 后、没
 - `output` 先 `initialize` 获取 `available_output_styles`，再 `get_settings` 刷新磁盘设置，返回 `{outputStyle,availableStyles,settingsFiles}`，两次请求各 15 秒、前端总上限 40 秒。仅返回样式字段，不暴露整个 settings（可能含环境变量）。
 - `settings` 直接返回 `{settingsFiles:[{source,label,path,uri}]}`，无需 worker，dead 会话也可打开；三个范围为用户、项目、项目本地。用户路径尊重 `CLAUDE_CONFIG_DIR`，默认 `~/.claude/settings.json`。hooks/permissions/skills/sandbox/memory/output 查看也附带 `settingsFiles`；memory/instructions 的文件及目录行附带 `uri`。
 - `uri` 仅为协议链接：WSL 返回 `vscode://vscode-remote/wsl+<distro>/<encoded-path>`，其他 Linux 返回 `vscode://file/<encoded-path>`；路径分段编码，非绝对路径或控制字符返回 null。后端不启动 VSCode，不写 settings；文件可以尚未创建。Hooks 等在编辑器保存后重新打开面板查看，某些配置需下次续接。插件/策略提供的 Hooks 仍按原来源展示，不伪装成用户 settings 中的条目。
-- 新菜单只用于 Claude；Rewind 没有接入：虽然协议有 `rewind_files {user_message_id,dry_run}`，当前 worker 未启用 SDK 文件检查点且 wb 事件没有原生用户 UUID，实测 `canRewind:false,error:"File rewinding is not enabled."`，无法提供可信的文件/消息预览。扩展的会话回退另走宿主 fork + resume 截点，不能直接移植。调查表与冒烟证据已归档到 `~/dev/_notes/backups/workbench-local-docs-20261002.tgz`（`.work-orders/2026-10-01-slash-ext-report.md`、`scratch/slash-ext/`）。
+- 新菜单只用于 Claude；Rewind 没有接入：虽然协议有 `rewind_files {user_message_id,dry_run}`，当前 worker 未启用 SDK 文件检查点且 wb 事件没有原生用户 UUID，实测 `canRewind:false,error:"File rewinding is not enabled."`，无法提供可信的文件/消息预览。扩展的会话回退另走宿主 fork + resume 截点，不能直接移植。调查表与冒烟证据为本地归档（`.work-orders/2026-10-01-slash-ext-report.md`、`scratch/slash-ext/`），未随仓库公开。
 - `GET /api/sessions/:id/files?q=<关键词>&limit=<默认50>`：在会话 `cwd` 内检索可引用的普通文件
 - `DELETE /api/sessions/:id`：停止 worker；删注册表条目，并删 wb 自己的副本（transcript、未被引用的附件）；三家原生记录不动。响应的 `transcriptsDeleted:true` 仅指 wb 副本，`workbenchTranscriptPreserved:false`、`nativeTranscriptPreserved:true` 如实报告；续接/检查中的移除返回 400 / 40063，IO 错误仍返回 500。
 - `GET /api/history`：只读列出三家 CLI 自己保存的所有来源会话；没有用户消息的会话隐藏，`empty` 单独计数（分页为本页扫描计数），`skipped` 记录损坏/不可读候选。命中 delegate 元数据的条目附带 `dispatch:{runId,name}`，UUID 和 `session_...` 原样匹配；派单映射只读全部目录的 `run.json`/旧 `meta.json`，缓存 30 秒。
@@ -163,7 +163,7 @@ Workbench 新建的 Codex 会话在首个 `item/completed.userMessage` 后、没
 - `GET /api/tailscale/file-targets`：文件面板「发送到设备」的 Taildrop 目标。调用 `tailscale file cp --targets`（查找顺序与超时同上），成功信封 `data:{targets:[{name,ip,online,self}],reason?}`；`self` 仅远程入口按 Tailscale Serve 覆盖写入的 `X-Forwarded-For` 标出来访设备，本机入口恒为 false。排序为本机、在线、名称。CLI 不存在、未运行、超时都返回 `code:0`、空列表加 `reason`。
 - `POST /api/tailscale/send`：JSON `{path,root,sessionId?,target}`，`target` 为上一接口返回的 IP。`path/root/sessionId` 沿用工作文件的授权根与 realpath 检查；普通文件以 fd 流式读取，文件夹先在临时目录 `zip -r -y` 打包为 `<名称>.zip`（符号链接存为链接，10 分钟超时，发送后删除临时目录）。发送前重新取 `--targets`，只接受列表内在线 IP，再不经 shell 执行 `tailscale file cp --name=<名称> - <ip>:` 由 stdin 喂内容，30 分钟超时；请求持续到发送结束。成功 `data:{sent:true,name}`。路径错误同文件接口（`status*100+90`，空文件夹 400/`40090`，打包失败 500/`50090`）；目标不在列表或取 `--targets` 失败 400/`40091`（消息为原因），离线 409/`40991`，CLI 启动失败或非零退出 502/`50291`（附 stderr 末行），读取待发送内容出错 500/`50091`。文件夹以 `O_DIRECTORY|O_NOFOLLOW` fd 锚定并复核 realpath，zip 在 `/proc/<pid>/fd/<fd>` 内打包 `.`，条目不带顶层目录。前端请求超时 45 分钟；客户端断开不会取消服务端已开始的发送。Taildrop CLI 本身不收目录（`directories not supported`），因此由服务端打包。
 - `POST /api/restart`：无请求体，返回 HTTP 202，信封 `{code:0,msg:"accepted",data:{restarting:true},request_id}`；表示已接受，不表示重启已完成。沿用两个入口的 Host / Origin 校验，远程入口还须 Tailscale 身份白名单；不新增豁免。同一进程内重复请求仍回 202，只启动一次重启。
-- `GET|POST|DELETE /api/power-off`：关机。信封 `data:{state:"idle"|"waiting"|"scheduled",busy,remainingMs?,error?}`，`busy` 为 running、starting 或带后台任务的会话数（比重启多算 starting）。POST 时无忙会话立即执行 `prefs.json` 中的 `shutdownCommand`（无参数排定 60 秒后关机），否则进入 `waiting`，每 5 秒检查一次，全部空闲后自动执行、不再确认；重复 POST 不重复执行。`scheduled` 且命令已落地时带 `remainingMs`（距关机的剩余毫秒，前端据此倒计时）；过了关机时刻 60 秒仍在运行，回到 `idle` 并带 `error`。DELETE 取消等待；已排定时执行 `win-shutdown abort`，Windows 报 1116（没有正在进行的关机）按取消成功处理。失败回到 `idle` 并带 `error`。等待状态只在内存，WB 重启即丢失。远程入口可用，沿用同样的 Host/Origin 与 Tailscale 身份白名单。
+- `GET|POST|DELETE /api/power-off`：关机。信封 `data:{state:"idle"|"waiting"|"scheduled",busy,remainingMs?,error?}`，`busy` 为 running、starting 或带后台任务的会话数（比重启多算 starting）。POST 时无忙会话立即执行 `prefs.json` 中的 `shutdownCommand`（无参数排定 60 秒后关机），否则进入 `waiting`，每 5 秒检查一次，全部空闲后自动执行、不再确认；重复 POST 不重复执行。`scheduled` 且命令已落地时带 `remainingMs`（距关机的剩余毫秒，前端据此倒计时）；过了关机时刻 60 秒仍在运行，回到 `idle` 并带 `error`。DELETE 取消等待；已排定时以 `abort` 参数执行同一命令，Windows 报 1116（没有正在进行的关机）按取消成功处理。失败回到 `idle` 并带 `error`。等待状态只在内存，WB 重启即丢失。远程入口可用，沿用同样的 Host/Origin 与 Tailscale 身份白名单。
 - `GET /api/pages`：启动时已注册的扩展页面列表
 - `GET /api/pages/:id/health`：限时探测一个扩展页面的目标服务
 
@@ -225,7 +225,7 @@ Kimi 配置探测仍通过 `session/new` 读取 configOptions。探测进程关�
 ```json
 {
   "agent": "claude",
-  "cwd": "/home/user/dev/workbench",
+  "cwd": "/home/user/projects/workbench",
   "snapshot": "auto",
   "config": {
     "model": "haiku",
@@ -519,7 +519,7 @@ Claude 跳过 meta/sidechain，按 assistant 内容块顺序输出文字与 `too
 ```json
 {
   "agent": "claude",
-  "cwd": "/home/user/dev/workbench",
+  "cwd": "/home/user/projects/workbench",
   "resumeSessionId": "00000000-0000-4000-8000-000000000040"
 }
 ```
@@ -604,7 +604,7 @@ interface IframePageManifest {
 }
 ```
 
-`GET /api/pages` 的 `data` 为 `{pages: IframePageManifest[]}`，字段就是上述已校验的 manifest 字段。例如首个页面 `ai-usage` 指向 `http://127.0.0.1:8788`。它不是常驻服务：未按需启动时整页不可达；未开启 代理客户端 时页面本身仍可能可达，但部分数据卡片会报错。因此健康接口只判断目标服务是否响应，不能判断数据是否完整。
+`GET /api/pages` 的 `data` 为 `{pages: IframePageManifest[]}`，字段就是上述已校验的 manifest 字段。例如首个页面 `ai-usage` 指向 `http://127.0.0.1:8788`。它不是常驻服务：未按需启动时整页不可达；未开启系统代理时页面本身仍可能可达，但部分数据卡片会报错。因此健康接口只判断目标服务是否响应，不能判断数据是否完整。
 
 `GET /api/pages/:id/health` 最多等待 2 秒，`data` 形状为：
 
@@ -801,7 +801,7 @@ Codex 0.157.1 没有多选字段，统一事件的 `multiSelect` 固定为 `fals
 ```bash
 curl --silent --show-error --request POST http://127.0.0.1:8790/api/sessions \
   --header 'content-type: application/json' \
-  --data '{"agent":"kimi","cwd":"/home/user/dev/workbench/server/test-sandbox","config":{"model":"kimi-code/k3","effort":"high","permissionMode":"default"}}'
+  --data '{"agent":"kimi","cwd":"/home/user/projects/workbench/server/test-sandbox","config":{"model":"kimi-code/k3","effort":"high","permissionMode":"default"}}'
 ```
 
 从响应复制 `data.session.id`，再用 Node 22 内置 WebSocket 客户端拉快照、接增量并自动批准演示请求（不需要 `websocat`）：
@@ -901,7 +901,7 @@ node server/scripts/verify-snapshot.mjs '<sessionId>' --probe-message "只回复
 
 Codex 输入框 `$` 在光标 token 处打开名称+描述面板，支持过滤、上下键、Enter/Tab 插入、Esc 关闭；IME 组合期间不触发。选中插入 `$name `，文本保留，后端按真实 `skills/list` 的启用清单附加 `{type:"skill",name,path}` 到 `turn/start.input`；不接受客户端提供 skill 文件路径、不读取/嵌入 skill 内容、不写 skills 配置。重复提及去重，同名不同文件报错而不猜路径；禁用 skill 不主动附加。列表来源覆盖用户、仓库与系统的实际发现结果；读取错误在面板提示并可在 `/skills` 查看。
 
-不接 `/init`、undo/revert、`/diff`、`/prompts:<name>`、thread/shellCommand 或 MCP 配置改写：写文件/不可逆、无直接对应方法、TUI 本地能力，或超出本单可逆能力范围。详情与真实报文见 `spikes/PROTOCOL-NOTES.md` §12（工单报告已归档到 `~/dev/_notes/backups/workbench-local-docs-20261002.tgz`）。生效需要后端重启（本单不执行 wb restart）；前端重新 build 后由静态文件服务读取。
+不接 `/init`、undo/revert、`/diff`、`/prompts:<name>`、thread/shellCommand 或 MCP 配置改写：写文件/不可逆、无直接对应方法、TUI 本地能力，或超出本单可逆能力范围。详情与真实报文见 `spikes/PROTOCOL-NOTES.md` §12（工单报告为本地归档，未随仓库公开）。生效需要后端重启（本单不执行 wb restart）；前端重新 build 后由静态文件服务读取。
 
 
 ### 性能接口契约（P0 / P1）
@@ -936,7 +936,7 @@ Codex 输入框 `$` 在光标 token 处打开名称+描述面板，支持过滤�
 - 夹具回归：`server/dispatch-subagents.test.ts`；前端有/无子 agent、递归/状态/换行契约：`frontend/scripts/dispatch-flow.test.mjs`。浏览器的 440px 面板和 390px 手机截图由主会话验证。
 
 ### 运行中插话与新建/移除时延（2026-10-01）
-插话的实测证据在 `spikes/PROTOCOL-NOTES.md` 和 `spikes/captures/2026-10-01-steer/`，工单与报告已归档到 `~/dev/_notes/backups/workbench-local-docs-20261002.tgz`。
+插话的实测证据见 `spikes/PROTOCOL-NOTES.md`；原始抓包与工单报告为本地归档，未随仓库公开。
 
 **插话**
 - 会话运行中发送普通文本或附件，即为插话：`user_message.payload.steer=true`。空闲时发送仍走原通道，不带 `steer` 字段。

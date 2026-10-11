@@ -2,8 +2,8 @@
 .SYNOPSIS
     One-time phone-gateway setup in an elevated Windows PowerShell 5.1.
 .NOTES
-    The gateway starts when this Windows account signs in. proxy client also starts only after
-    sign-in (HKCU Run), so a pre-sign-in gateway would have no proxy. No password is stored.
+    The gateway starts when this Windows account signs in. The proxy client also starts only
+    after sign-in (HKCU Run), so a pre-sign-in gateway would have no proxy. No password is stored.
     Reading sources/config through a WSL UNC path may wake WSL during installation.
     The installed gateway stays idle until a phone request arrives. No Chrome window is opened.
 #>

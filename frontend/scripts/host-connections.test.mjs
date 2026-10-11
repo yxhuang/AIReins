@@ -7,8 +7,8 @@ import {
 } from '../src/host-connections.ts';
 
 const local = 'http://127.0.0.1:8790';
-const home = 'https://my-desktop.tailxxxx.ts.net';
-const other = 'https://other-pc.tailxxxx.ts.net';
+const home = 'https://alice-desktop.example.ts.net';
+const other = 'https://other-pc.example.ts.net';
 const appLink = target => `${local}/#wb-goto=${encodeURIComponent(target)}`;
 assert.equal(parseAppWindowRequest(appLink(`${local}/path?x=1#/session/a`)), `${local}/path?x=1#/session/a`);
 for (const bad of ['javascript:alert(1)', 'https://evil.test', 'http://127.0.0.1:9000/',
@@ -18,41 +18,41 @@ for (const bad of ['javascript:alert(1)', 'https://evil.test', 'http://127.0.0.1
 assert.equal(parseAppWindowRequest(`${home}/#wb-goto=${encodeURIComponent(local)}`), null, '远程页不消费本机启动 fragment');
 assert.equal(parseAppWindowRequest(`${local}/#wb-goto=broken%`), null);
 assert.equal(normalizeRemoteOrigin(`${home}/`), home);
-const laptop = 'https://my-laptop.tailxxxx.ts.net';
-const discoveredLaptop = { name: 'my-laptop', origin: laptop, online: true, os: 'windows',
-  ips: ['100.64.0.49', 'fd7a:115c:a1e0::0000:0031'] };
+const laptop = 'https://alice-laptop.example.ts.net';
+const discoveredLaptop = { name: 'Alice-Laptop', origin: laptop, online: true, os: 'windows',
+  ips: ['100.64.1.10', 'fd7a:115c:a1e0::a'] };
 const discovery = { peers: [discoveredLaptop] };
 assert.equal(resolveRemoteHostInput(laptop), laptop, '完整 origin 无需接口');
-for (const bare of ['my-laptop.tailxxxx.ts.net', 'my-laptop.tailxxxx.ts.net/', 'my-laptop.tailxxxx.ts.net.']) {
+for (const bare of ['alice-laptop.example.ts.net', 'ALICE-LAPTOP.example.ts.net/', 'alice-laptop.example.ts.net.']) {
   assert.equal(resolveRemoteHostInput(bare), laptop, '裸 MagicDNS 无需接口');
 }
-assert.equal(resolveRemoteHostInput('100.64.0.49'), null, 'IP 需要发现结果');
-for (const input of ['100.64.0.49', 'fd7a:115c:a1e0::0000:0031', 'FD7A:115C:A1E0::0000:0031',
-  'fd7a:115c:a1e0:0000:0000:0000:0000:0031', 'my-laptop', 'my-laptop', ' my-laptop ']) {
+assert.equal(resolveRemoteHostInput('100.64.1.10'), null, 'IP 需要发现结果');
+for (const input of ['100.64.1.10', 'fd7a:115c:a1e0::a', 'FD7A:115C:A1E0::A',
+  'fd7a:115c:a1e0:0000:0000:0000:0000:000a', 'Alice-Laptop', 'alice-laptop', ' ALICE-LAPTOP ']) {
   assert.equal(resolveRemoteHostInput(input, discovery), laptop, input);
 }
-assert.equal(resolveRemoteHostInput('my-laptop', { peers: [{ ...discoveredLaptop, name: 'Windows laptop' }] }), laptop, '匹配 MagicDNS 首段');
+assert.equal(resolveRemoteHostInput('alice-laptop', { peers: [{ ...discoveredLaptop, name: 'Windows laptop' }] }), laptop, '匹配 MagicDNS 首段');
 assert.equal(resolveRemoteHostInput('Windows Laptop', { peers: [{ ...discoveredLaptop, name: 'Windows laptop' }] }), laptop, '匹配 name，大小写不敏感');
 assert.throws(() => resolveRemoteHostInput('100.64.1.99', discovery), /找不到 100\.64\.1\.99 对应的电脑/);
 assert.throws(() => resolveRemoteHostInput('unknown', { peers: [], reason: 'Tailscale 未运行' }), /找不到 unknown.*Tailscale 未运行/);
-assert.throws(() => resolveRemoteHostInput('my-laptop', { peers: [discoveredLaptop,
+assert.throws(() => resolveRemoteHostInput('alice-laptop', { peers: [discoveredLaptop,
   { ...discoveredLaptop, origin: other, online: false }] }), /多个.*请使用 Tailscale IP 或完整地址/, '同名时拒绝歧义，在线不覆盖离线');
-assert.equal(resolveRemoteHostInput('my-laptop', { peers: [discoveredLaptop, discoveredLaptop] }), laptop, '重复 origin 只算一台');
-assert.throws(() => resolveRemoteHostInput('my-laptop', { peers: [{ ...discoveredLaptop, origin: 'https://evil.test' }] }), /找不到/, '发现地址仍必须通过原校验');
-for (const bad of [`${laptop}/path`, `${laptop}?secret=x`, 'http://my-laptop.tailxxxx.ts.net', 'https://evil.test']) {
+assert.equal(resolveRemoteHostInput('alice-laptop', { peers: [discoveredLaptop, discoveredLaptop] }), laptop, '重复 origin 只算一台');
+assert.throws(() => resolveRemoteHostInput('alice-laptop', { peers: [{ ...discoveredLaptop, origin: 'https://evil.test' }] }), /找不到/, '发现地址仍必须通过原校验');
+for (const bad of [`${laptop}/path`, `${laptop}?secret=x`, 'http://alice-laptop.example.ts.net', 'https://evil.test']) {
   assert.throws(() => resolveRemoteHostInput(bad), /完整的 HTTPS Tailscale 地址/, bad);
 }
 assert.throws(() => resolveRemoteHostInput('   '), /请输入/);
-for (const bad of ['javascript:alert(1)', 'http://my-desktop.tailxxxx.ts.net', `${home}.evil.test`, `${home}/path`, `${home}?token=secret`, `${home}#fragment`, 'https://name:password@my-desktop.tailxxxx.ts.net', 'https://evil.test']) {
+for (const bad of ['javascript:alert(1)', 'http://alice-desktop.example.ts.net', `${home}.evil.test`, `${home}/path`, `${home}?token=secret`, `${home}#fragment`, 'https://name:password@alice-desktop.example.ts.net', 'https://evil.test']) {
   assert.equal(normalizeRemoteOrigin(bad), null, bad);
 }
 assert.equal(normalizeLocalOrigin(`${local}/`), local);
 assert.equal(normalizeLocalOrigin('http://localhost:5173'), 'http://localhost:5173');
 for (const bad of ['https://localhost:8790', 'http://100.64.1.2:8790', 'http://127.0.0.1.evil.test:8790', `${local}/secret`, 'http://user@localhost:8790']) assert.equal(normalizeLocalOrigin(bad), null, bad);
 assert.equal(connectionLabel(`${local}/#/session/a`), '本机');
-assert.equal(connectionLabel(`${home}/#/session/a`), 'my-desktop');
+assert.equal(connectionLabel(`${home}/#/session/a`), 'alice-desktop');
 assert.equal(workbenchWindowTitle(`${local}/`, 0), 'Workbench · 本机');
-assert.equal(workbenchWindowTitle(`${home}/`, 2), '(2) 个闸门待处理 · Workbench · 远程 my-desktop');
+assert.equal(workbenchWindowTitle(`${home}/`, 2), '(2) 个闸门待处理 · Workbench · 远程 alice-desktop');
 
 const initial = connectionsForPage(`${local}/`, { localOrigin: null, remotes: [home, home, 'https://evil.test'] });
 assert.deepEqual(initial, { localOrigin: local, remotes: [home] });
@@ -73,7 +73,7 @@ assert.ok(!('localName' in normalizeConnections({ localName: 'bad\u0000name' }))
 assert.deepEqual(connectionsForPage(`${home}/`, null), { localOrigin: null, remotes: [home] }, '手机直接访问不产生 localhost 返回入口');
 assert.equal(connectionsForPage('http://localhost:8790/', initial).localOrigin, 'http://localhost:8790', '实际本机入口覆盖旧返回地址');
 assert.deepEqual(connectionsForPage(`${home}/`, { localOrigin: null, remotes: [other] }, initial).remotes, [other, home], '保留目标源已保存的其他主机');
-const fullHosts = Array.from({ length: 16 }, (_, i) => `https://pc-${i}.tailxxxx.ts.net`);
+const fullHosts = Array.from({ length: 16 }, (_, i) => `https://pc-${i}.example.ts.net`);
 assert.deepEqual(connectionsWithRemote(initial, other).remotes, [home, other], '一键添加保留已保存主机');
 assert.deepEqual(connectionsWithRemote(initial, home), initial, '重复发现项不会重复添加');
 assert.throws(() => connectionsWithRemote(initial, 'https://evil.test'), /Tailscale/);
@@ -205,9 +205,9 @@ store.clearDraft('draft-test'); store.currentId = null;
 const brand = renderToStaticMarkup(React.createElement(HostSwitcher));
 assert.match(brand, /<button[^>]*class="brand host-switch-button"/);
 assert.ok(brand.includes('brand-mark') && brand.includes('brand-name'));
-assert.match(brand, /class="brand-name"[^>]*>my-desktop<\/span>/);
+assert.match(brand, /class="brand-name"[^>]*>alice-desktop<\/span>/);
 assert.ok(!brand.includes('host-switch-chevron'));
-assert.ok(brand.includes('选择主机，当前：my-desktop'));
+assert.ok(brand.includes('选择主机，当前：alice-desktop'));
 globalThis.window.location.href = `${local}/`;
 initializeHostConnections();
 assert.match(renderToStaticMarkup(React.createElement(HostSwitcher)), /class="brand-name"[^>]*>本机<\/span>/);

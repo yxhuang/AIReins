@@ -3,7 +3,7 @@
 # 托盘方式见 deploy/windows/README.md；本入口保留作无托盘备用。
 # 注意两个坑（都来自之前做 AOE 面板快捷方式时的教训）：
 #   1. 必须先 cd 到 /mnt/c 再调 cmd.exe，否则 cmd 对 WSL 路径会告警；
-#      同时这也绕开了仓库路径里 `dev` 的 `=` 被 cmd 解析截断的问题。
+#      同时这也绕开了路径里的 `=` 被 cmd 解析截断的问题。
 #   2. 用本脚本同目录的 workbench，不依赖用户名或 ~/.local/bin 的 PATH。
 set -uo pipefail
 
