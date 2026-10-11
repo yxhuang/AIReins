@@ -34,11 +34,14 @@ else
 fi
 node_version="$(node --version 2>/dev/null || true)"
 node_major="${node_version#v}"
+node_minor="${node_version#v*.}"
 node_major="${node_major%%.*}"
-if [[ "$node_major" =~ ^[0-9]+$ ]] && (( 10#$node_major >= 22 )); then
-  ok "Node $node_version（≥ 22）"
+node_minor="${node_minor%%.*}"
+# Vite 要求 22.12 起
+if [[ "$node_major" =~ ^[0-9]+$ && "$node_minor" =~ ^[0-9]+$ ]] && (( 10#$node_major > 22 || (10#$node_major == 22 && 10#$node_minor >= 12) )); then
+  ok "Node $node_version（≥ 22.12）"
 else
-  fail "Node 未安装或版本过低（${node_version:-未安装}）；需要 ≥ 22。"
+  fail "Node 未安装或版本过低（${node_version:-未安装}）；需要 ≥ 22.12。"
   printf '%s\n' '  请自行执行（需要 sudo）：' \
     '  sudo apt-get update && sudo apt-get install -y curl' \
     '  curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -' \

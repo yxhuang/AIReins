@@ -9,14 +9,14 @@ What Workbench is designed for:
 - **One person, their own devices, a private network.** The server is a single Node process on your computer. There is no relay, no Workbench account, and no telemetry.
 - **Loopback only.** Both listeners bind to `127.0.0.1`. The local entry (default port 8790) serves the browser on the same computer. The optional remote entry (`~/.workbench/remote.json`) is reached only through [Tailscale Serve](https://tailscale.com/kb/1312/serve), which forwards from your tailnet to loopback.
 - **Who can connect remotely.** A remote request must carry the `Tailscale-User-Login` header that Serve injects (Serve strips any client-supplied copy), and the login must be listed in `allowedLogins`. Write requests and WebSocket handshakes must also carry an `Origin` that exactly matches the configured origin.
-- **Browser attacks.** Every request is checked against a Host allowlist (blocks DNS rebinding). On the local entry, write requests and WebSocket handshakes that carry an `Origin` must come from a local Workbench page (blocks cross-site request forgery and WebSocket hijacking). Pages are served with `X-Frame-Options: DENY` and `frame-ancestors 'none'`.
+- **Browser attacks.** Every request is checked against a Host allowlist (blocks DNS rebinding). On the local entry, write requests and WebSocket handshakes that carry an `Origin` must come from a local Workbench page (blocks cross-site request forgery and WebSocket hijacking). Workbench's own frontend is served with `X-Frame-Options: DENY` and `frame-ancestors 'none'`; extension pages under `/pages/` keep their upstream headers.
 - **Remote terminal is opt-in.** The free-form terminal is available on the remote entry only when `remote.json` sets `"terminal": true`.
 
 What Workbench does **not** protect against:
 
 - **Other processes running as your user.** Local processes can call the local entry directly. This is by design: they already have the same rights.
-- **A compromised device that is on your allowlist.** An allowed phone or laptop has full access.
-- **Public exposure.** Do not use Tailscale Funnel, a reverse proxy, port forwarding, or `0.0.0.0` binding to put Workbench on the internet. These setups are unsupported and remove the identity check.
+- **A compromised device signed in with an allowed Tailscale login.** The allowlist is per login, not per device: any device using that login that your tailnet policy lets reach the computer has full access.
+- **Public exposure.** Do not use Tailscale Funnel, a reverse proxy, port forwarding, or `0.0.0.0` binding to put Workbench on the internet. These setups are unsupported and break the network trust boundary Workbench relies on; forwarding the local entry is especially dangerous because it has no login check.
 - **What the agents themselves do.** Claude Code, Codex and Kimi run with the permission modes you choose. Workbench does not sandbox them beyond what each CLI provides.
 
 ## Reporting a vulnerability

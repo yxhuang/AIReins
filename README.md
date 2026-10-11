@@ -1,6 +1,6 @@
 # Workbench
 
-**A personal AI workbench that runs on your own computer.** Drive Claude Code, Codex and Kimi Code from a browser, on the desktop or on your phone over [Tailscale](https://tailscale.com), and reach every folder, file and terminal on that computer while you do it.
+**A personal AI workbench that runs on your own computer.** Drive Claude Code, Codex and Kimi Code from a browser, on the desktop or on your phone over [Tailscale](https://tailscale.com), and browse that computer's folders, files and terminal while you do it.
 
 English | [简体中文](README.zh-CN.md)
 
@@ -11,7 +11,7 @@ English | [简体中文](README.zh-CN.md)
 The official remote options for coding agents give you a window into **one agent session**. Workbench gives you **the whole computer**, from any browser on your private network:
 
 - Start, resume and switch between Claude Code, Codex and Kimi sessions side by side.
-- Browse any directory (including Windows drives under `/mnt/c`, not just git repos), preview and edit files, open a terminal.
+- Browse any directory (including Windows drives under `/mnt/c`, not just git repos), preview and edit files in your home folder, Windows drives and session folders, open a terminal.
 - Send files between your phone and computer with Taildrop.
 - Keep everything interoperable with the native CLIs and the VS Code extension: sessions started in Workbench can be resumed there, and the other way round.
 
@@ -24,13 +24,13 @@ It is deliberately small: one Node process plus a web page. No relay server, no 
 - Approve or deny tool calls and answer agent questions from any device; pending approvals across all sessions are surfaced in one place.
 - Native history browser: search, filter by folder, and resume any past session from the three CLIs.
 - Per-session model, reasoning effort and permission mode; slash commands, skills and `@` file mentions with completion.
-- Context-usage ring, interrupt and steer mid-turn, side questions, snapshots before risky delegations.
+- Context-usage ring, interrupt and steer mid-turn, side questions.
 - Pin, group and rename sessions; sessions are titled automatically.
 
 **The computer**
-- File panel for any directory: Git status, tabs, and preview for Markdown, code, images, PDF and more; edit and save text files in place.
+- File panel: browse any readable directory with Git status and tabs. Inside your home folder, Windows drives and the session's folder, preview Markdown, code, images and PDF, and edit UTF-8 text files up to 1 MiB in place.
 - Multi-tab terminal (on the remote entry only when you enable it).
-- Taildrop: send a file or folder from the file panel to any device on your tailnet.
+- Taildrop: send a file or folder (zipped) from the file panel to your online Taildrop devices.
 - Dispatch view: see sub-agent and delegated runs as a parent/child tree.
 
 **Remote and multi-computer**
@@ -69,8 +69,10 @@ Requirements:
 
 | Dependency | Notes |
 |---|---|
-| Node.js ≥ 22 with npm | Required |
+| Node.js ≥ 22.12 with npm | Required |
 | `ss` (iproute2), `rg` (ripgrep) | Required |
+| `zip` | For sending folders with Taildrop |
+| `curl`, `python3` | Optional, for full `wb status` output |
 | Claude Code, Codex or Kimi Code CLI | At least one, installed and logged in |
 | Google Chrome on Windows | For the app window |
 | Tailscale on Windows | Optional, for remote access |
@@ -86,11 +88,11 @@ Pin "Workbench" from the Start menu to the taskbar yourself; Windows offers no r
 Daily use:
 
 ```bash
-wb            # start in the background and open the app window
+wb            # start in the background and open it in your default Windows browser
 wb status     # also: wb stop | wb restart | wb logs
 ```
 
-Workbench listens on `http://127.0.0.1:8790` (change with `WORKBENCH_PORT`).
+Workbench listens on `http://127.0.0.1:8790` (change with `WORKBENCH_PORT`). The tray icon and Start-menu shortcut open it as a Chrome app window.
 
 ## Remote access from your phone
 
@@ -103,15 +105,15 @@ Open `https://<your-computer>.<tailnet>.ts.net/` on your phone and add it to the
 
 ## Configuration
 
-Workbench keeps its data in `~/.workbench` (override with `WORKBENCH_HOME`). It does not change the three CLIs' global settings, except the Claude Remote Control default when you toggle it in Workbench.
+Workbench keeps its data in `~/.workbench`. `WORKBENCH_HOME` moves the server's data directory, but the installer, the `wb` log and snapshots still use `~/.workbench`. It does not change the three CLIs' global settings, except the Claude Remote Control default when you toggle it in Workbench.
 
 Environment variables:
 
 | Variable | Default | Purpose |
 |---|---|---|
 | `WORKBENCH_PORT` | `8790` | Local port (always bound to `127.0.0.1`) |
-| `WORKBENCH_HOME` | `~/.workbench` | Data directory |
-| `WORKBENCH_LOG` | `$WORKBENCH_HOME/server.log` | Log file |
+| `WORKBENCH_HOME` | `~/.workbench` | Server data directory |
+| `WORKBENCH_LOG` | `~/.workbench/server.log` | Log file written by `wb` |
 | `WORKBENCH_STATIC_DIR` | `frontend/dist` | Serve another frontend build |
 
 Machine-specific options go in `~/.workbench/prefs.json`. They are not shown in the UI; restart Workbench after editing:

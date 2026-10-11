@@ -32,7 +32,7 @@ The second and third are outside `npm test`; run them too. Tests must not depend
 
 - **Stack**: Node + Vite only. Propose any new runtime dependency in an issue first.
 - **Build**: `npm run build` keeps old hashed assets in `frontend/dist` (`emptyOutDir: false`) because open pages still reference them. Keep it that way.
-- **Running instance**: backend changes take effect after `wb restart`; that stops every running session, so check `wb status` and let the user choose the moment. Frontend changes need only a page refresh.
+- **Running instance**: backend changes take effect after `wb restart`; that stops every running session, so check `wb status` and let the user choose the moment. Frontend changes need `npm run build` and a page refresh (the backend serves `frontend/dist`); under `npm run dev` a refresh is enough.
 - **Security boundary**: both listeners bind `127.0.0.1`. Keep the Host/Origin checks and the Tailscale login allowlist exactly as strict; remote access goes through Tailscale Serve only. See `SECURITY.md`.
 - **CLI state is the user's**: read the three CLIs' global config, never write it; per-session settings stay per-session. The one exception is the Claude Remote Control default (`remoteControlAtStartup`), written through the existing symlink without replacing it.
 - **Deleting native sessions** goes only through `codex delete --force` and Kimi ACP `session/delete`, keeping the realpath, reference and identity guards.

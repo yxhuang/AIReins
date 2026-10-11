@@ -34,7 +34,6 @@ Behaviour and API contracts are documented in `server/README.md`, `frontend/READ
 
 - One topic per pull request; keep unrelated refactors out.
 - Describe what changed, why, and how you tested it (including the platform).
-- By submitting a contribution you agree that it is licensed under the same license as the project.
 
 ## Security issues
 
