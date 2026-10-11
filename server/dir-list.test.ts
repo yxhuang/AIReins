@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, stat, symlink, utimes, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, stat, symlink, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
@@ -98,6 +98,16 @@ await writeFile(join(repo, "子 目录", "fresh", "f.txt"), "f");
 gitIn("mv", "子 目录/deep/old.txt", "子 目录/deep/renamed.txt");
 assert.deepEqual(await gitStatus(repo), { "edit.txt": "M", "子 目录": "R" }, "根目录：文件取自身状态，文件夹取子项最高状态");
 assert.deepEqual(await gitStatus(join(repo, "子 目录")), { "new.txt": "U", fresh: "U", deep: "R" }, "子目录按仓库前缀截成直接子项");
+// 不可信仓库的 core.fsmonitor 会被 git status 当程序执行；浏览目录时不得触发。
+const hookMarker = join(fixture, "fsmonitor-ran");
+await writeFile(join(fixture, "fsmonitor.sh"), `#!/bin/sh\ntouch '${hookMarker}'\n`, { mode: 0o755 });
+gitIn("config", "core.fsmonitor", join(fixture, "fsmonitor.sh"));
+execFileSync("git", ["status"], { cwd: repo, stdio: "ignore" });
+assert.ok(await stat(hookMarker).then(() => true, () => false), "夹具自检：普通 git status 会执行 fsmonitor");
+await rm(hookMarker);
+await gitStatus(repo);
+assert.equal(await stat(hookMarker).then(() => true, () => false), false, "gitStatus 不执行仓库配置的 fsmonitor");
+gitIn("config", "--unset", "core.fsmonitor");
 assert.deepEqual((await listDirectories(repo, { files: true })).git, { "edit.txt": "M", "子 目录": "R" });
 assert.equal((await listDirectories(repo)).git, undefined, "目录选择模式不跑 git");
 assert.equal(await gitStatus(fixture), undefined, "非 Git 目录不返回状态");

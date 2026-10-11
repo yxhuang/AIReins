@@ -6,7 +6,7 @@ function redactString(value: string): string {
     .replace(/\b(sk|sess)-[A-Za-z0-9_-]+/g, "$1-[REDACTED]")
     .replace(/((?:https?|all|no)_proxy=)\S+/gi, "$1[REDACTED]")
     .replace(/:\/\/[^/@\s]+:[^/@\s]+@/g, "://[REDACTED]@")
-    .replace(/([?&](?:token|key|secret|password)=)[^&\s]+/gi, "$1[REDACTED]");
+    .replace(/([?&][^=&\s]*(?:token|key|secret|password)[^=&\s]*=)[^&\s]+/gi, "$1[REDACTED]");
 }
 
 export function redact(value: unknown): unknown {

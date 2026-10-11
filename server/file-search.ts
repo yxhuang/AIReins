@@ -64,7 +64,7 @@ export async function searchFiles(cwd: string, query: string, limit: number): Pr
 
 async function listCandidates(cwd: string): Promise<string[]> {
   try {
-    const output = await run("git", ["ls-files", "--cached", "--others", "--exclude-standard", "-z", "--"], cwd);
+    const output = await run("git", ["-c", "core.fsmonitor=false", "ls-files", "--cached", "--others", "--exclude-standard", "-z", "--"], cwd);
     return splitNull(output);
   } catch (error) {
     const commandError = error as CommandError;

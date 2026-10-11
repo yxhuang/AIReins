@@ -15,6 +15,8 @@ const CHILD_REPOS_BUDGET_MS = 2_000;
 const GIT_RANK = "UARDM!";
 const GIT_MARKS: Record<string, string> = { M: "M", T: "M", A: "A", C: "A", D: "D", R: "R" };
 const run = promisify(execFile);
+// 浏览到的仓库可能不可信：禁止 git 执行仓库配置的 fsmonitor 程序。
+const SAFE_GIT = ["-c", "core.fsmonitor=false", "--no-optional-locks"];
 
 export class DirListError extends Error {}
 
@@ -153,9 +155,9 @@ async function childRepoMarks(dirs: readonly DirectoryEntry[]): Promise<Record<s
 export async function gitStatus(path: string, timeout = GIT_TIMEOUT_MS): Promise<Record<string, string> | undefined> {
   const options = { cwd: path, encoding: "utf8" as const, timeout, maxBuffer: 16 << 20 };
   try {
-    const prefix = (await run("git", ["--no-optional-locks", "rev-parse", "--show-prefix"], options)).stdout.replace(/\n$/, "");
+    const prefix = (await run("git", [...SAFE_GIT, "rev-parse", "--show-prefix"], options)).stdout.replace(/\n$/, "");
     // -z 输出的路径相对仓库根且不转义；pathspec 只扫当前子树。
-    const tokens = (await run("git", ["--no-optional-locks", "status", "-z", "--untracked-files=normal", "--", "."], options)).stdout.split("\0");
+    const tokens = (await run("git", [...SAFE_GIT, "status", "-z", "--untracked-files=normal", "--", "."], options)).stdout.split("\0");
     const marks: Record<string, string> = {};
     for (let index = 0; index < tokens.length; index++) {
       const token = tokens[index]!;
