@@ -458,7 +458,7 @@ await t("文件面板当前浏览目录按钮触发历史共享筛选", () => {
   const panel = componentFixture(() => FilePanel({ onClose() {} }))();
   const contents = treeFind(panel, node => node.type === DirectoryContents);
   const render = componentFixture(() => DirectoryContents(contents.props), [{ path: "/browsed/child", parent: "/browsed", dirs: [], files: [] }, false, null, "/uncommitted/address"]);
-  treeButtons(render()).find(node => node.props.children === "目录内会话").props.onClick();
+  treeButtons(render()).find(node => node.props.children === "会话").props.onClick();
   assert.equal(store.historyOpen, true);
   assert.equal(store.historyCwdFilter, "/browsed/child", "取成功浏览目录而非地址草稿");
 });

@@ -166,7 +166,7 @@ for (const mode of ["dir", "file"]) {
   assert.equal(html.includes("选定此目录"), mode === "dir");
   assert.equal(html.includes('aria-label="目录与文件列表"'), mode === "file");
   assert.ok(html.includes('aria-label="目录路径"'));
-  assert.ok(html.includes("前往"));
+  assert.ok(html.includes(`enterKeyHint="go"`) || html.includes(`enterkeyhint="go"`), "地址栏回车即前往，不再单设按钮");
 }
 console.log("✅ file panel：相对路径、边界插入、复制降级判定、三面板互斥、一次性请求与宽度隔离通过");
 
@@ -209,3 +209,45 @@ try {
   assert.ok(other.includes("/proj/b") && !other.includes("/proj/a"), "切到其他会话回到该会话 cwd");
 } finally { Object.assign(store, previousState); }
 console.log("✅ 文件面板浏览目录按会话归属");
+
+{
+  const tabs = new Store();
+  const hadWindow = "window" in globalThis, oldWindow = globalThis.window;
+  let answer = false;
+  globalThis.window = { ...oldWindow, confirm: () => answer, matchMedia: () => ({ matches: false }) };
+  try {
+    tabs.currentId = "a";
+    const dirty = { target: { path: "/p/a.md", root: "/p" }, loadId: 1, loading: false, saving: false, error: null, draft: "改",
+      file: { path: "/p/a.md", name: "a.md", kind: "markdown", size: 1, editable: true, mimeType: "text/markdown", text: "原", version: "v" } };
+    tabs.filePreview = dirty;
+    tabs.openFileTab({ path: "/p/sub", root: "/p", folder: true });
+    assert.equal(tabs.fileTabs.length, 2);
+    assert.deepEqual(tabs.fileDirectory, { sessionId: "a", path: "/p/sub" }, "文件夹在新标签浏览");
+    assert.equal(tabs.filePreview, null);
+    tabs.switchFileTab(1);
+    assert.equal(tabs.filePreview, dirty, "切回保留未保存草稿");
+    tabs.switchFileTab(2);
+    tabs.closeFileTab(1);
+    assert.equal(tabs.fileTabs.length, 2, "后台标签有未保存修改时取消即不关");
+    answer = true; tabs.closeFileTab(1);
+    assert.deepEqual(tabs.fileTabs.map(tab => tab.id), [2]);
+    tabs.closeFileTab(2);
+    assert.equal(tabs.fileTabs.length, 1, "最后一个标签不关闭");
+    tabs.filePreview = { ...dirty, saving: true };
+    tabs.openFileTab();
+    assert.equal(tabs.fileTabs.length, 1, "保存中不切换标签");
+  } finally { if (hadWindow) globalThis.window = oldWindow; else delete globalThis.window; }
+
+  const previous = { fileTabs: store.fileTabs, fileTabId: store.fileTabId, filePreview: store.filePreview, fileDirectory: store.fileDirectory, sessions: store.sessions, currentId: store.currentId };
+  try {
+    store.sessions = [{ id: "a", cwd: "/proj/a", status: "idle", agent: "claude" }];
+    store.currentId = "a";
+    store.fileTabs = [{ id: 1, directory: null, preview: null }, { id: 2, directory: { sessionId: "a", path: "/proj/a/docs" }, preview: null }];
+    store.fileTabId = 1; store.filePreview = null; store.fileDirectory = null;
+    const html = renderToStaticMarkup(React.createElement(FilePanel, { onClose() {} }));
+    assert.ok(html.includes('aria-label="文件标签页"') && html.includes('aria-label="新建标签页"'));
+    assert.ok(html.includes(">a</span>") && html.includes(">docs</span>") && html.includes('aria-label="关闭 docs"'), "标签显示目录名，可关闭");
+    assert.ok(html.indexOf('aria-label="目录路径"') < html.indexOf('aria-label="文件标签页"') || html.indexOf("地址栏目录层级") < html.indexOf('aria-label="文件标签页"'), "标签行在地址栏下方");
+  } finally { Object.assign(store, previous); }
+}
+console.log("✅ 文件面板标签页：新标签打开文件夹、切换保留草稿、关闭确认与保存中锁定");

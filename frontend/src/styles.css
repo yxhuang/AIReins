@@ -788,11 +788,6 @@ body.resizing {
 .dir-actions { justify-content: flex-end; }
 .dir-location { display: flex; align-items: center; gap: 8px; }
 .dir-history-button { flex-shrink: 0; font-size: 14px; padding-inline: 6px; }
-@container directory-browser (max-width: 380px) {
-  .dir-location { flex-wrap: wrap; }
-  .dir-location .dir-address { flex-basis: calc(100% - 64px); }
-  .dir-history-button { margin-left: auto; }
-}
 .dir-address { position: relative; z-index: 3; display: flex; flex: 1; align-items: stretch; min-width: 0; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
 .dir-address:focus-within { border-color: var(--busy); }
 .dir-address-path { display: flex; flex: 1; min-width: 0; min-height: 40px; }
@@ -3991,11 +3986,21 @@ body.resizing {
   .file-titlebar { height: 52px; }
   .file-nav-icon { width: 40px; height: 40px; }
   .file-nav-btn:not(.file-nav-icon) { height: 36px; }
-  .file-action { min-height: 44px; min-width: 36px; }
+  .file-action { min-height: 44px; min-width: 39px; }
+  .file-action svg { width: 20px; height: 20px; }
   .file-view-toggle { padding: 0; }
   .file-view-option { min-height: 42px; }
 }
 .file-side-panel .dir-contents { padding: 10px 8px; overflow: hidden; }
+/* 文件标签沿用终端标签外形，换成面板底色；触屏也比地址栏一行矮。 */
+.file-tabs { --term-bg: var(--bg); --term-fg: var(--text); padding: 0 4px; }
+.dir-contents > .file-tabs { margin-inline: -8px; }
+.file-tabs .term-tab-list { padding: 4px 8px 0; }
+.file-tabs .term-tab-select { min-height: 30px; }
+@media (pointer: coarse) {
+  .file-tabs .term-tab-select { min-height: 36px; }
+  .file-tabs .term-tab-close, .file-tabs .term-tab-new { min-width: 36px; min-height: 36px; }
+}
 .file-notice { flex: 0 1 auto; min-height: 0; overflow-y: auto; padding: 8px; font-size: 14px; }
 .file-notice p { margin: 0; }
 .file-notice .dir-copy-status { margin-top: 4px; }

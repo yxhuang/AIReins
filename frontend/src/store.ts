@@ -84,6 +84,16 @@ interface DesktopPanelEntry {
   route: MobileRoute;
   order: DesktopPanelSide[];
 }
+export interface FileTab {
+  id: number;
+  directory: { sessionId: string | null; path: string } | null;
+  preview: FilePreviewState | null;
+}
+
+function unsavedFile(preview: FilePreviewState | null): boolean {
+  return !!preview?.file?.editable && preview.draft !== preview.file.text;
+}
+
 function mobileEntryId(): string {
   // HTTP 局域网入口也可用，不依赖仅安全上下文提供的 crypto.randomUUID。
   return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -139,6 +149,10 @@ export class Store {
   fileDirectory: { sessionId: string | null; path: string } | null = null;
   /** 当前目录浏览器注册；侧键先沿成功访问的目录返回，再退出侧栏。 */
   fileBrowserBack: (() => boolean) | null = null;
+  /** 文件面板标签页；当前标签的目录与预览就是上面两项，切走时才存回标签。 */
+  fileTabs: FileTab[] = [{ id: 1, directory: null, preview: null }];
+  fileTabId = 1;
+  private fileTabSequence = 1;
   private fileLoad: AbortController | null = null;
   private fileUnloadBound = false;
   private fileLoadSequence = 0;
@@ -755,17 +769,15 @@ export class Store {
 
   private canReplaceFile(): boolean {
     if (this.filePreview?.saving) return false;
-    const preview = this.filePreview;
-    return !preview?.file?.editable || preview.draft === preview.file.text ||
-      window.confirm("文件有未保存修改。放弃修改并离开此文件？");
+    return !unsavedFile(this.filePreview) || window.confirm("文件有未保存修改。放弃修改并离开此文件？");
   }
 
   async openFilePreview(target: WorkFileTarget): Promise<void> {
     if (!this.canReplaceFile()) return;
     if (!this.fileUnloadBound && typeof window !== "undefined") {
       window.addEventListener("beforeunload", event => {
-        const preview = this.filePreview;
-        if (preview?.file?.editable && (preview.saving || preview.draft !== preview.file.text)) {
+        const previews = [this.filePreview, ...this.fileTabs.filter(tab => tab.id !== this.fileTabId).map(tab => tab.preview)];
+        if (previews.some(preview => preview?.saving || unsavedFile(preview))) {
           event.preventDefault(); event.returnValue = "";
         }
       });
@@ -792,6 +804,52 @@ export class Store {
   clearFilePreview(): boolean {
     if (!this.canReplaceFile()) return false;
     this.fileLoad?.abort(); this.filePreview = null; this.notify(); return true;
+  }
+
+  setFileDirectory(path: string): void {
+    this.fileDirectory = { sessionId: this.currentId, path }; this.notify();
+  }
+
+  private showFileTab(tab: FileTab): void {
+    this.fileLoad?.abort();
+    this.fileTabId = tab.id; this.fileDirectory = tab.directory; this.filePreview = null;
+    // 切走时中断的读取在切回时重来。
+    if (tab.preview?.loading) { void this.openFilePreview(tab.preview.target); return; }
+    this.filePreview = tab.preview; this.notify();
+  }
+
+  private stashFileTab(): void {
+    this.fileTabs = this.fileTabs.map(tab => tab.id === this.fileTabId ? { ...tab, directory: this.fileDirectory, preview: this.filePreview } : tab);
+  }
+
+  switchFileTab(id: number): void {
+    const next = this.fileTabs.find(tab => tab.id === id);
+    if (!next || id === this.fileTabId || this.filePreview?.saving) return;
+    this.stashFileTab(); this.showFileTab(next);
+  }
+
+  /** 无参 = 会话 cwd；文件夹在新标签浏览，文件在新标签预览（返回到其所在目录）。 */
+  openFileTab(entry?: { path: string; root: string; folder: boolean }): void {
+    if (this.filePreview?.saving) return;
+    this.stashFileTab();
+    const tab: FileTab = { id: ++this.fileTabSequence, directory: entry?.folder ? { sessionId: this.currentId, path: entry.path } : null, preview: null };
+    this.fileTabs = [...this.fileTabs, tab];
+    this.showFileTab(tab);
+    if (entry && !entry.folder) void this.openFilePreview({ path: entry.path, root: entry.root, sessionId: this.currentId ?? undefined });
+  }
+
+  closeFileTab(id: number): void {
+    const index = this.fileTabs.findIndex(tab => tab.id === id);
+    if (index < 0 || this.fileTabs.length < 2) return;
+    if (id === this.fileTabId) {
+      if (!this.canReplaceFile()) return;
+      const next = (this.fileTabs[index + 1] ?? this.fileTabs[index - 1])!;
+      this.fileTabs = this.fileTabs.filter(tab => tab.id !== id);
+      this.showFileTab(next);
+      return;
+    }
+    if (unsavedFile(this.fileTabs[index]!.preview) && !window.confirm("该标签页的文件有未保存修改。放弃修改并关闭？")) return;
+    this.fileTabs = this.fileTabs.filter(tab => tab.id !== id); this.notify();
   }
 
   updateFileDraft(draft: string): void {

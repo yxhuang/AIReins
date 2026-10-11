@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState, type RefObject } from "react";
+import { useEffect, useId, useRef, useState, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { fetchDirectories, fetchHistory, pickWindowsDirectory, pickWindowsFile } from "../api";
 import { store } from "../store";
@@ -81,7 +81,7 @@ export function DirectoryBrowser({ initialPath, onSelect, onClose, mode = "dir",
 }
 
 /** 弹窗与右侧面板共用导航、请求和列表；宿主决定点击文件后的行为。 */
-export function DirectoryContents({ initialPath, includeFiles, onSelectFile, onEntryMenu, onSelectDirectory, allowWindowsPicker = false, onPathChange, onBrowseHistory, navigationHistory, registerBrowserBack, navTarget }: {
+export function DirectoryContents({ initialPath, includeFiles, onSelectFile, onEntryMenu, onSelectDirectory, allowWindowsPicker = false, onPathChange, onBrowseHistory, navigationHistory, registerBrowserBack, navTarget, afterLocation }: {
   initialPath: string;
   includeFiles: boolean;
   onSelectFile: (path: string, name: string) => void;
@@ -95,6 +95,8 @@ export function DirectoryContents({ initialPath, includeFiles, onSelectFile, onE
   registerBrowserBack?: (back: () => boolean) => () => void;
   /** 给定时导航（刷新/上一级/WSL/Windows）渲染进宿主标题栏；null = 槽位尚未挂载，先不渲染，避免闪一下内联按钮。 */
   navTarget?: HTMLElement | null;
+  /** 地址栏下方的宿主内容（文件面板标签行）。 */
+  afterLocation?: ReactNode;
 }) {
   const [listing, setListing] = useState<DirectoryListing | null>(null);
   const [loading, setLoading] = useState(true);
@@ -265,7 +267,7 @@ export function DirectoryContents({ initialPath, includeFiles, onSelectFile, onE
               <button type="button" className="dir-address-edit" aria-label="编辑目录路径"
                 title="输入或粘贴完整路径" disabled={busy} onClick={editAddress} />
             </div> : <input ref={addressInput} type="text" className="mono" aria-label="目录路径" value={address} disabled={busy}
-              placeholder="粘贴 Windows 或 Linux 文件夹路径" title="粘贴目录路径，按 Enter 前往；右侧下拉选择最近目录" spellCheck={false}
+              placeholder="粘贴 Windows 或 Linux 文件夹路径" title="粘贴目录路径，按 Enter 前往；右侧下拉选择最近目录" spellCheck={false} enterKeyHint="go"
               onFocus={() => setRecentOpen(false)}
               onChange={(event) => setAddress(event.target.value)}
               onKeyDown={(event) => {
@@ -301,12 +303,11 @@ export function DirectoryContents({ initialPath, includeFiles, onSelectFile, onE
                 onClick={() => { setRecentOpen(false); void load(path).then(() => addressRoot.current?.focus()); }}>{path}</button>)}
             </div>}
           </div>
-          <button className="btn" type="button" title="可粘贴 Windows 或 Linux 文件夹地址，按 Enter 或点击前往" disabled={busy || !address.trim()}
-            onClick={() => void load(normalizeDirectoryPath(address))}>前往</button>
           {onBrowseHistory && <button className="btn dir-history-button" type="button" disabled={busy || !listing}
             title={listing ? `查看 ${listing.path} 及子目录的对话` : "先浏览目录"}
-            onClick={() => { if (listing) onBrowseHistory(listing.path); }}>目录内会话</button>}
+            onClick={() => { if (listing) onBrowseHistory(listing.path); }}>会话</button>}
         </div>
+        {afterLocation}
         {navTarget === undefined ? <div className="dir-nav">
           <button className="btn" type="button" title="返回当前目录的上一级" disabled={!listing?.parent || busy} onClick={goUp}>上一级</button>
           <button className="btn" type="button" title="打开 WSL 主目录" disabled={busy} onClick={() => void load()}>WSL</button>

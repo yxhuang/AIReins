@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import { sendTaildrop, workFileContentUrl } from "../api";
 import { mentionQueryAt } from "../mentions";
-import { store } from "../store";
+import { store, type FileTab } from "../store";
 import type { SessionRecord, WorkFileTarget } from "../types";
 import { useStore } from "../useStore";
 import { DirectoryContents } from "./DirectoryBrowser";
@@ -64,10 +64,26 @@ export function insertFileMention(text: string, cursor: number, path: string): {
 export function FilePanel({ onClose }: { onClose: () => void }) {
   const session = useStore((value) => value.currentId ? value.session(value.currentId) : undefined);
   const preview = useStore(value => value.filePreview);
+  const tabs = useStore(value => value.fileTabs);
+  const tabId = useStore(value => value.fileTabId);
+  const fileDirectory = useStore(value => value.fileDirectory);
   // 浏览中的路径由 DirectoryContents 自己维护；宿主通知不应再次初始化并读取同一目录。
   const sessionDirectory = () => store.fileDirectory && store.fileDirectory.sessionId === (session?.id ?? null) ? store.fileDirectory.path : null;
-  const directoryInitialPath = useMemo(() => sessionDirectory() ?? session?.cwd ?? "", [preview, session?.id, session?.cwd]);
-  const directoryHistory = useRef<string[]>([]);
+  const directoryInitialPath = useMemo(() => sessionDirectory() ?? session?.cwd ?? "", [preview, tabId, session?.id, session?.cwd]);
+  // 各标签成功访问过的目录，供侧键返回；随面板卸载清空，与单标签时一致。
+  const tabHistories = useRef(new Map<number, string[]>());
+  const directoryHistory = useMemo(() => {
+    const history = tabHistories.current.get(tabId) ?? [];
+    tabHistories.current.set(tabId, history);
+    return { current: history };
+  }, [tabId]);
+  const tabPath = (tab: FileTab) => {
+    const live = tab.id === tabId;
+    const shown = live ? preview : tab.preview;
+    if (shown) return { path: shown.target.path, folder: false };
+    const directory = live ? fileDirectory : tab.directory;
+    return { path: directory && directory.sessionId === (session?.id ?? null) ? directory.path : session?.cwd ?? "", folder: true };
+  };
   const registerBrowserBack = useCallback((back: () => boolean) => {
     store.fileBrowserBack = back;
     return () => { if (store.fileBrowserBack === back) store.fileBrowserBack = null; };
@@ -97,10 +113,10 @@ export function FilePanel({ onClose }: { onClose: () => void }) {
       setNotice({ path, copied: null, reason: "已引用到当前会话。" });
     } else setNotice({ path, copied: null, reason: plan.reason });
   };
-  const [sendMenu, setSendMenu] = useState<{ target: WorkFileTarget; name: string; folder: boolean; x: number; y: number } | null>(null);
-  // 菜单约 240 宽；纵向留给设备列表，别贴出视口。
-  const openSendMenu = (target: WorkFileTarget, name: string, folder: boolean, x: number, y: number) =>
-    setSendMenu({ target, name, folder, x: Math.max(8, Math.min(x, window.innerWidth - 248)), y: Math.max(8, Math.min(y, window.innerHeight - 208)) });
+  const [sendMenu, setSendMenu] = useState<{ target: WorkFileTarget; name: string; folder: boolean; row: boolean; x: number; y: number } | null>(null);
+  // 菜单约 240 宽；纵向留给设备列表，别贴出视口。row = 目录行菜单，多一项「在新标签页内打开」。
+  const openSendMenu = (target: WorkFileTarget, name: string, folder: boolean, x: number, y: number, row = false) =>
+    setSendMenu({ target, name, folder, row, x: Math.max(8, Math.min(x, window.innerWidth - 248)), y: Math.max(8, Math.min(y, window.innerHeight - 248)) });
   const sendFile = (target: WorkFileTarget, name: string, folder: boolean, ip: string, device: string) => {
     setSendMenu(null);
     copyId.current += 1;
@@ -119,6 +135,38 @@ export function FilePanel({ onClose }: { onClose: () => void }) {
       if (id === copyId.current) setNotice({ path, copied, reason: null });
     })();
   };
+
+  const tabRow = <div className="term-tabs file-tabs">
+    <div className="term-tab-list" role="tablist" aria-label="文件标签页" onKeyDown={event => {
+      const direction = event.key === "ArrowRight" ? 1 : event.key === "ArrowLeft" ? -1 : 0;
+      const items = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>("[role=tab]"));
+      const index = items.indexOf(event.target as HTMLButtonElement);
+      if (!direction || index < 0) return;
+      event.preventDefault();
+      items[(index + direction + items.length) % items.length]?.click();
+      // 目录标签切换会重挂载 DirectoryContents（标签行随之重建），渲染后再把焦点交回当前标签。
+      requestAnimationFrame(() => document.querySelector<HTMLElement>("#file-panel .file-tabs [role=tab][aria-selected=true]")?.focus());
+    }}>
+      {tabs.map(tab => {
+        const active = tab.id === tabId;
+        const { path, folder } = tabPath(tab);
+        const name = path.split("/").filter(Boolean).pop() ?? "/";
+        return <div key={tab.id} className={`term-tab${active ? " active" : ""}`}>
+          <button type="button" role="tab" aria-selected={active} tabIndex={active ? 0 : -1} className="term-tab-select" title={path}
+            onClick={() => { if (!active) setNotice(null); store.switchFileTab(tab.id); }}>
+            <svg className="term-tab-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d={folder ? "M3 7V5h6l2 2h10v13H3Z" : "M14 3H5v18h14V8ZM14 3v5h5"} />
+            </svg>
+            <span className="term-tab-label">{name}</span>
+          </button>
+          {tabs.length > 1 && <button type="button" className="term-tab-close" aria-label={`关闭 ${name}`} title="关闭标签页" onClick={() => store.closeFileTab(tab.id)}>×</button>}
+        </div>;
+      })}
+    </div>
+    <button type="button" className="term-tab-new" aria-label="新建标签页" title="新建标签页（会话目录）" onClick={() => { setNotice(null); store.openFileTab(); }}>
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="M12 4v16M4 12h16" /></svg>
+    </button>
+  </div>;
 
   return <>
     <SidePanelResize label="文件" width={width} setWidth={setWidth} minWidth={FILE_WIDTH_OPTIONS.minWidth} defaultWidth={FILE_WIDTH_OPTIONS.defaultWidth} />
@@ -155,13 +203,18 @@ export function FilePanel({ onClose }: { onClose: () => void }) {
         {notice.reason && <p>{notice.reason}</p>}
         {notice.copied !== null && <p className="dir-copy-status">{notice.copied ? "路径已复制。" : <>无法自动复制，请手动复制：<span className="mono">{notice.path}</span></>}</p>}
       </div>}
-      {preview ? <FilePreview key={preview.target.path} preview={preview} source={source} /> : <DirectoryContents initialPath={directoryInitialPath} includeFiles allowWindowsPicker
-        navigationHistory={directoryHistory} registerBrowserBack={registerBrowserBack} navTarget={navSlot}
-        onPathChange={path => { store.fileDirectory = { sessionId: session?.id ?? null, path }; }}
+      {preview && tabRow}
+      {preview ? <FilePreview key={preview.target.path} preview={preview} source={source} /> : <DirectoryContents key={tabId} initialPath={directoryInitialPath} includeFiles allowWindowsPicker
+        navigationHistory={directoryHistory} registerBrowserBack={registerBrowserBack} navTarget={navSlot} afterLocation={tabRow}
+        onPathChange={path => store.setFileDirectory(path)}
         onBrowseHistory={path => store.navigateHistory(path)}
         onSelectFile={path => { setNotice(null); void store.openFilePreview({ path, root: sessionDirectory() ?? session?.cwd ?? "/", sessionId: session?.id }); }}
-        onEntryMenu={(entry, x, y) => openSendMenu({ path: entry.path, root: entry.root, sessionId: session?.id }, entry.name, entry.folder, x, y)} />}
+        onEntryMenu={(entry, x, y) => openSendMenu({ path: entry.path, root: entry.root, sessionId: session?.id }, entry.name, entry.folder, x, y, true)} />}
       {sendMenu && <TaildropMenu position={sendMenu} folder={sendMenu.folder} onClose={() => setSendMenu(null)}
+        leadingItems={sendMenu.row ? [{ id: "new-tab", icon: "plus", label: "在新标签页内打开", onSelect: () => {
+          setSendMenu(null); setNotice(null);
+          store.openFileTab({ path: sendMenu.target.path, root: sendMenu.target.root, folder: sendMenu.folder });
+        } }] : undefined}
         onSend={(ip, device) => sendFile(sendMenu.target, sendMenu.name, sendMenu.folder, ip, device)} />}
     </div>
   </>;
