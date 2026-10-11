@@ -6,7 +6,7 @@ import { log } from "./logger.js";
 export interface RemoteConfig {
   /** 远程专用监听端口：同样只 bind 127.0.0.1，由 tailscale serve 转发进来 */
   port: number;
-  /** 手机地址栏里的源，形如 https://my-desktop.tailxxxx.ts.net（全小写，无路径、无结尾斜杠） */
+  /** 手机地址栏里的源，形如 https://alice-desktop.example.ts.net（全小写，无路径、无结尾斜杠） */
   origin: string;
   /** 允许的 Tailscale 登录名（Serve 注入的 Tailscale-User-Login 头） */
   allowedLogins: string[];

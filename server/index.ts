@@ -1,6 +1,5 @@
 import { createReadStream, statSync } from "node:fs";
 import { execFile, spawn } from "node:child_process";
-import { homedir } from "node:os";
 import { promisify } from "node:util";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { join, resolve } from "node:path";
@@ -20,7 +19,7 @@ import { NativeDeleteError } from "./native-session-delete.js";
 import { getMeta, getServerHostName, SERVER_VERSION } from "./meta.js";
 import { appWindowEnabled, findWindowsChrome, openAppWindow, AppWindowError } from "./app-window.js";
 import { getTaildropTargets, getTailscalePeers, sendTaildrop, TaildropError } from "./tailscale-peers.js";
-import { busySessionCount, createPowerOff } from "./power-off.js";
+import { busySessionCount, createPowerOff, powerOffEnabled } from "./power-off.js";
 import { feishuSender, GateNotifier, larkCliSender, loadNotifyConfig, type NotifyConfig } from "./notify.js";
 import { checkPageHealth, proxyPage, readLinks, scanPages } from "./pages.js";
 import { pruneStorage, workbenchHome } from "./persistence.js";
@@ -101,12 +100,13 @@ try {
   log("warn", "storage prune failed", { message: error instanceof Error ? error.message : String(error) });
 }
 const manager = new SessionManager();
-// 关机走用户的 win-shutdown（默认 60 秒后 /sg /f，abort 取消）；不在 PATH 假设上，直接用固定位置。
+// 关机命令仅由本机 prefs 配置；无参数排定关机，abort 取消。
 const powerOff = createPowerOff({
   busy: () => busySessionCount(manager.list()),
   run: async (args) => {
     try {
-      await promisify(execFile)(join(homedir(), ".local/bin/win-shutdown"), args, { timeout: 30_000 });
+      if (!powerOffEnabled(prefs.shutdownCommand)) throw new Error("未配置可执行的关机命令");
+      await promisify(execFile)(prefs.shutdownCommand!, args, { timeout: 30_000 });
     } catch (error) {
       // abort 时 Windows 报 1116「没有正在进行的关机」：目标状态已达成，按取消成功处理。
       if (!(args[0] === "abort" && String((error as { stderr?: unknown }).stderr ?? "").includes("(1116)"))) throw error;
@@ -406,7 +406,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
         ...meta,
         hostName: getServerHostName(REMOTE_CONFIG?.origin),
         capabilities: { terminal: terminalEnabled(policy, REMOTE_CONFIG), windowsDirectoryPicker: windowsPickerEnabled(policy.kind === "local"),
-          appWindow: appWindowEnabled(policy, APP_CHROME) },
+          appWindow: appWindowEnabled(policy, APP_CHROME), powerOff: powerOffEnabled(prefs.shutdownCommand) },
       }, requestId);
     } else if (method === "POST" && url.pathname === "/api/open-app-window") {
       if (policy.kind !== "local") throw new ApiError(403, 40300, "仅本机入口可打开 WB 窗口");
@@ -481,6 +481,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       }
       await respond(response, 202, 0, "accepted", { restarting: true }, requestId);
     } else if (url.pathname === "/api/power-off" && ["GET", "POST", "DELETE"].includes(method)) {
+      if (!powerOffEnabled(prefs.shutdownCommand)) throw new ApiError(503, 50300, "未配置可执行的关机命令");
       const status = method === "POST" ? await powerOff.request() : method === "DELETE" ? await powerOff.cancel() : powerOff.status();
       if (method !== "GET") log("info", "power-off", { method, state: status.state, busy: status.busy, error: status.error });
       await respond(response, 200, 0, "success", status, requestId);

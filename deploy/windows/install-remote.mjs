@@ -9,7 +9,7 @@ const powershell = '/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.ex
 const windowsPowerShell = 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe';
 const taskName = 'Workbench Remote Gateway';
 
-// Keep in step with server/access.ts loadRemoteConfig; terminal defaults to enabled (user choice 2026-10-06, both machines share it).
+// Keep in step with server/access.ts loadRemoteConfig; new configs require an explicit terminal opt-in.
 export function validateConfig(value, localPort = 8790) {
   const { port, origin, allowedLogins, terminal } = value ?? {};
   if (!Number.isInteger(port) || port < 1 || port > 65535 || port === localPort) {
@@ -33,7 +33,7 @@ export function configFromStatus(status, localPort = 8790) {
   const key = String(status.Self?.UserID);
   const login = Object.hasOwn(status.User ?? {}, key) ? status.User[key]?.LoginName : undefined;
   if (typeof login !== 'string' || !login) throw new Error('User 映射缺少 Self.UserID 的 LoginName');
-  return validateConfig({ port: 8793, origin: `https://${dns.replace(/\.$/, '')}`, allowedLogins: [login], terminal: true }, localPort);
+  return validateConfig({ port: 8793, origin: `https://${dns.replace(/\.$/, '')}`, allowedLogins: [login], terminal: false }, localPort);
 }
 
 const psLiteral = value => "'" + value.replaceAll("'", "''") + "'";
@@ -83,8 +83,8 @@ export function setupRemote({ check = false, home, repo, distro, user, localPort
       writeFileSync(path, JSON.stringify(generated) + '\n', { flag: 'wx', mode: 0o600 });
       config = generated;
       result.created = true;
-      print(`✅ remote.json：已生成 ${config.origin}（权限 600，terminal: true）`);
-      print('远程终端已开启（白名单内账号可在远程使用本机 shell）；如需关闭改为 false 后 wb restart');
+      print(`✅ remote.json：已生成 ${config.origin}（权限 600，terminal: false）`);
+      print('远程终端默认关闭；如需允许白名单内账号远程使用本机 shell，将 ~/.workbench/remote.json 的 terminal 改为 true 后 wb restart');
     } catch (error) { print(`⚠ remote.json：未生成，保留现有文件（${error.message}）`); }
   }
   if (available(tailscale)) {

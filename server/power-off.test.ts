@@ -1,6 +1,20 @@
 import assert from "node:assert/strict";
 import { setTimeout as sleep } from "node:timers/promises";
-import { busySessionCount, createPowerOff } from "./power-off.js";
+import { chmod, mkdtemp, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { busySessionCount, createPowerOff, powerOffEnabled } from "./power-off.js";
+
+const root = await mkdtemp(join(tmpdir(), "wb-power-command-"));
+const command = join(root, "power-command");
+assert.equal(powerOffEnabled(), false);
+assert.equal(powerOffEnabled(command), false, "不存在的命令不支持关机");
+assert.equal(powerOffEnabled(root), false, "目录不能当命令");
+assert.equal(powerOffEnabled("relative"), false);
+await writeFile(command, "#!/bin/sh\nexit 0\n", { mode: 0o600 });
+assert.equal(powerOffEnabled(command), false, "不可执行文件不支持关机");
+await chmod(command, 0o700);
+assert.equal(powerOffEnabled(command), true);
 
 assert.equal(busySessionCount([
   { status: "running" },

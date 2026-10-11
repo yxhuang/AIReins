@@ -1,12 +1,12 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { pipeline } from "node:stream";
 import { request as httpRequest, type IncomingMessage, type OutgoingHttpHeaders, type ServerResponse } from "node:http";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import { performance } from "node:perf_hooks";
-import { fileURLToPath } from "node:url";
 import { log } from "./logger.js";
+import { workbenchHome } from "./persistence.js";
 
-const DEFAULT_PAGES_ROOT = resolve(fileURLToPath(new URL("../pages", import.meta.url)));
+const DEFAULT_PAGES_ROOT = join(workbenchHome, "pages");
 const PAGE_ID_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const EMOJI_PATTERN = /\p{Extended_Pictographic}/u;
 const PAGE_HEALTH_TIMEOUT_MS = 2_000;

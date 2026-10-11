@@ -14,6 +14,7 @@ import type {
 } from "../types.js";
 import { BaseDriver, mentionFallbackNote, parseJsonLine, tryReadMentionText, userMessageText, withTimeout } from "./base.js";
 import { readClaudeEffectiveSettings } from "../claude-settings.js";
+import { loadPrefs } from "../prefs.js";
 import type { RemoteControlState } from "../types.js";
 import { supportsClaudeFastMode, type McpAction, type SideQuestionInput } from "../session-menu.js";
 
@@ -320,14 +321,17 @@ export class ClaudeDriver extends BaseDriver {
     this.validateConfig(this.config);
     const args = claudeLaunchArgs(this.config, this.resumeSessionId);
     const env = { ...process.env };
-    env.CLAUDE_CODE_ENTRYPOINT = "claude-vscode";
+    delete env.CLAUDE_CODE_ENTRYPOINT;
+    const entrypoint = loadPrefs().claudeCodeEntrypoint;
+    if (entrypoint) env.CLAUDE_CODE_ENTRYPOINT = entrypoint;
     // Same tool set as the VSCode extension, so a session resumed on either side sees identical tools.
     env.CLAUDE_CODE_ENABLE_TASKS = "0";
     env.MCP_CONNECTION_NONBLOCKING = "true";
     // Inherited when wb is started from a VSCode terminal; wb is not an IDE host.
     delete env.CLAUDE_CODE_SSE_PORT;
-    // wb reloads from disk before sending (refreshBeforeSend), so the global fork-guard hook is redundant here.
-    env.CC_FORK_GUARD = "0";
+    // Hooks can identify workers that reload native history before sending.
+    delete env.CC_FORK_GUARD;
+    env.WORKBENCH_WORKER = "1";
     this.spawnProcess("claude", args, { env });
     try {
       await this.refreshCommands();

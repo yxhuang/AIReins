@@ -10,8 +10,8 @@
 [CmdletBinding()]
 param(
     [string]$Distro = 'ubuntu',
-    [string]$LinuxUser = 'user',
-    [string]$LinuxHome = '/home/user',
+    [Parameter(Mandatory = $true)][string]$LinuxUser,
+    [Parameter(Mandatory = $true)][string]$LinuxHome,
     [ValidateRange(1024, 65535)][int]$Port = 8794,
     [string]$TaskName = 'Workbench Remote Gateway'
 )

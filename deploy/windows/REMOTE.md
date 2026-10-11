@@ -10,10 +10,10 @@
 
 新电脑先安装并登录 Windows Tailscale，在 WSL 仓库内运行 `bash install.sh` 即可自动配置：
 
-- 仅 WSL 且 Windows Tailscale `status --json` 的 `BackendState` 为 `Running` 时，生成缺失的 `~/.workbench/remote.json`。origin 为本机 `Self.DNSName` 去末尾点后的 HTTPS `*.ts.net` 地址，白名单只含 `User[String(Self.UserID)].LoginName`；默认 `port: 8793`、`terminal: true`，权限 `600`。已有配置只校验、打印 origin，绝不覆盖；无有效 DNSName 或用户映射时提示跳过。
+- 仅 WSL 且 Windows Tailscale `status --json` 的 `BackendState` 为 `Running` 时，生成缺失的 `~/.workbench/remote.json`。origin 为本机 `Self.DNSName` 去末尾点后的 HTTPS `*.ts.net` 地址，白名单只含 `User[String(Self.UserID)].LoginName`；默认 `port: 8793`、`terminal: false`，权限 `600`。已有配置只校验、打印 origin，绝不覆盖；无有效 DNSName 或用户映射时提示跳过。
 - `Workbench Remote Gateway` 任务不存在时，从 WSL 弹出一次 UAC，用 `Start-Process -Verb RunAs -Wait` 运行 Windows PowerShell 5.1 安装器，UNC 路径使用 `\\wsl.localhost\<distro>\...`，自动传入 `WSL_DISTRO_NAME`、`USER` 与 `HOME`。请使用拥有该 WSL 发行版的 Windows 账户允许提权；已有任务仅打印状态并跳过。
 - UAC 拒绝或安装失败不阻断其余安装，打印包含实际发行版、Linux 用户、HOME 与仓库路径的手动命令。非 WSL、无 Tailscale 或未登录时跳过，登录后可重跑。
-- 新配置若遇到正在运行的 WB，提示「运行 wb restart 使远程入口生效」；不自动重启。未运行则沿用现有冒烟启动、验证、停止流程，后续由桌面 WB 或远程请求启动。远程终端默认关闭，如需远程终端改为 `true` 后 `wb restart`。
+- 新配置若遇到正在运行的 WB，提示「运行 wb restart 使远程入口生效」；不自动重启。未运行则沿用现有冒烟启动、验证、停止流程，后续由桌面 WB 或远程请求启动。远程终端默认关闭；如需允许白名单内账号远程使用本机 shell，将 `~/.workbench/remote.json` 的 `terminal` 显式改为 `true` 后运行 `wb restart`。已有开启配置保持原样。
 
 `bash install.sh --check` 只读体检 remote.json、Serve HTTPS `/` 是否指向 `127.0.0.1:8794`、登录任务及状态，不写文件、不提权、不触发 WB 启停。重跑安装不会覆盖 remote.json 或重新安装已有任务；已有任务但 Serve 不匹配时须根据体检提示人工处理。
 

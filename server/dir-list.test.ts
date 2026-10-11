@@ -3,9 +3,11 @@ import { mkdir, mkdtemp, stat, symlink, utimes, writeFile } from "node:fs/promis
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
-import { DirListError, gitStatus, listDirectories } from "./dir-list.js";
 
 const fixture = await mkdtemp(join(tmpdir(), "workbench-dir-list-test-"));
+process.env.WORKBENCH_HOME = fixture;
+const { DirListError, gitStatus, listDirectories } = await import("./dir-list.js");
+const { savePrefs } = await import("./prefs.js");
 await mkdir(join(fixture, "zeta"));
 await mkdir(join(fixture, "alpha"));
 await mkdir(join(fixture, ".hidden"));
@@ -46,9 +48,12 @@ for (const path of ["relative", "", join(fixture, "missing"), join(fixture, "fil
 const previousHome = process.env.HOME;
 try {
   process.env.HOME = fixture;
-  assert.equal((await listDirectories()).path, fixture, "没有 dev 时缺省 $HOME");
-  await mkdir(join(fixture, "dev"));
-  assert.equal((await listDirectories()).path, join(fixture, "dev"), "有 dev 时缺省 ~/dev");
+  assert.equal((await listDirectories()).path, fixture, "无配置时缺省 $HOME");
+  await mkdir(join(fixture, "projects"));
+  assert.equal((await listDirectories()).path, fixture, "存在项目目录也仍缺省 $HOME");
+  savePrefs({ idleReleaseMinutes: 30, retentionDays: 30, directoryBrowserHome: join(fixture, "projects") });
+  assert.equal((await listDirectories()).path, join(fixture, "projects"), "本机配置覆盖主目录");
+  assert.equal((await listDirectories(fixture)).path, fixture, "显式路径优先于主目录配置");
 } finally {
   if (previousHome === undefined) delete process.env.HOME;
   else process.env.HOME = previousHome;

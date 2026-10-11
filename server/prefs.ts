@@ -1,5 +1,5 @@
 import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
 import { workbenchHome } from "./persistence.js";
 
 export interface WorkbenchPrefs {
@@ -7,6 +7,12 @@ export interface WorkbenchPrefs {
   idleReleaseMinutes: number;
   /** 会话保留天数：最后活动早于此的会话在启动时清掉（对标 Claude 的 cleanupPeriodDays）；0 = 不清 */
   retentionDays: number;
+  /** 本机配置：绝对路径；无参数排定 60 秒后关机，abort 取消。 */
+  shutdownCommand?: string;
+  /** 省略时使用 Claude CLI 默认入口身份。 */
+  claudeCodeEntrypoint?: "claude-vscode";
+  /** 目录浏览器主目录；省略时使用 $HOME。 */
+  directoryBrowserHome?: string;
 }
 
 const MAX_IDLE_RELEASE_MINUTES = 1_440;
@@ -43,10 +49,17 @@ export function loadPrefs(): WorkbenchPrefs {
     return {
       idleReleaseMinutes: isValidIdleReleaseMinutes(idle) ? idle : DEFAULT_PREFS.idleReleaseMinutes,
       retentionDays: isValidRetentionDays(retention) ? retention : DEFAULT_PREFS.retentionDays,
+      ...(validPath(record?.shutdownCommand) ? { shutdownCommand: record!.shutdownCommand as string } : {}),
+      ...(record?.claudeCodeEntrypoint === "claude-vscode" ? { claudeCodeEntrypoint: "claude-vscode" as const } : {}),
+      ...(validPath(record?.directoryBrowserHome) ? { directoryBrowserHome: record!.directoryBrowserHome as string } : {}),
     };
   } catch {
     return { ...DEFAULT_PREFS };
   }
+}
+
+function validPath(value: unknown): value is string {
+  return typeof value === "string" && isAbsolute(value) && !value.includes("\u0000");
 }
 
 export function savePrefs(prefs: WorkbenchPrefs): void {

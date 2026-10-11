@@ -20,6 +20,13 @@ assert.equal(existsSync(prefsPath()), true);
 assert.deepEqual(loadPrefs(), { idleReleaseMinutes: 15, retentionDays: 7 });
 
 // 0 是合法值（关闭），不能被当成缺省
+const localPrefs = { idleReleaseMinutes: 15, retentionDays: 7, shutdownCommand: "/opt/bin/power-off",
+  claudeCodeEntrypoint: "claude-vscode" as const, directoryBrowserHome: "/opt/projects" };
+savePrefs(localPrefs);
+assert.deepEqual(loadPrefs(), localPrefs, "本机可选字段持久化往返");
+await writeFile(prefsPath(), JSON.stringify({ ...localPrefs, shutdownCommand: "relative", claudeCodeEntrypoint: "invalid", directoryBrowserHome: "/bad\u0000path" }));
+assert.deepEqual(loadPrefs(), { idleReleaseMinutes: 15, retentionDays: 7 }, "拒绝无效的本机字段");
+
 savePrefs({ idleReleaseMinutes: 0, retentionDays: 0 });
 assert.deepEqual(loadPrefs(), { idleReleaseMinutes: 0, retentionDays: 0 });
 

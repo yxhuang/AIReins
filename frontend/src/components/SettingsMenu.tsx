@@ -8,6 +8,7 @@ import { BODY_FONT_MAX, BODY_FONT_MIN, BODY_FONT_STEP, BODY_FONT_STORAGE_KEY, TE
 import { fetchClaudeStartupSettings, fetchPrefs, fetchSessions, powerOff, restartWorkbench, saveClaudeStartupSettings, savePrefs, type PowerOffStatus } from "../api";
 import { restartAndReconnect, restartBusyCount } from "../restart";
 import { store } from "../store";
+import { useStore } from "../useStore";
 import {
   FONT_SCALE_EVENT,
   FONT_SCALE_STORAGE_KEY,
@@ -119,6 +120,7 @@ function applyTheme(choice: ThemeChoice) {
 }
 
 export function SettingsMenu() {
+  const powerSupported = useStore(value => value.meta?.capabilities?.powerOff === true);
   const [open, setOpen] = useState(false);
   const [storageDialogOpen, setStorageDialogOpen] = useState(false);
   const [theme, setTheme] = useState<ThemeChoice>(() => readTheme());
@@ -225,7 +227,7 @@ export function SettingsMenu() {
 
   // 关机状态在服务端；打开菜单读一次，等待/已排定时每 3 秒刷新
   useEffect(() => {
-    if (!open) return;
+    if (!open || !powerSupported) return;
     let cancelled = false;
     const load = () => powerOff().then((status) => { if (!cancelled) applyPower(status); }).catch(() => { /* 保持当前显示 */ });
     void load();
@@ -234,7 +236,7 @@ export function SettingsMenu() {
       cancelled = true;
       clearInterval(timer);
     };
-  }, [open, powerActive]);
+  }, [open, powerActive, powerSupported]);
 
   // 倒计时每秒走一格；到点后的复位由上面的 3 秒刷新从服务端拿
   useEffect(() => {
@@ -472,13 +474,13 @@ export function SettingsMenu() {
               <button type="button" className="settings-action settings-hosts" onClick={openHostMenu} aria-haspopup="menu">
                 主机与连接（Tailscale）
               </button>
-              <button type="button" className={`settings-action settings-power${powerActive ? " is-pending" : ""}`} ref={powerButton}
+              {powerSupported && <button type="button" className={`settings-action settings-power${powerActive ? " is-pending" : ""}`} ref={powerButton}
                 aria-haspopup={powerActive ? undefined : "dialog"} onClick={() => void togglePowerOff()}>
                 {powerActive ? <span aria-hidden="true">✕</span> : <span aria-hidden="true">⏻</span>}
                 {power?.state === "waiting" ? `取消关机（等 ${power.busy} 个会话完成）`
                   : power?.state === "scheduled" ? (powerSeconds === null ? "取消关机" : `取消关机（${powerSeconds} 秒后关机）`) : "关机"}
-              </button>
-              {(power?.error || powerError) && <span className="new-error" role="alert">{power?.error || powerError}</span>}
+              </button>}
+              {powerSupported && (power?.error || powerError) && <span className="new-error" role="alert">{power?.error || powerError}</span>}
             </section>
           </div>
         </div>

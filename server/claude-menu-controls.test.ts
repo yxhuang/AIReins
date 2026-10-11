@@ -12,6 +12,7 @@ const root = mkdtempSync(join(tmpdir(), "wb-menu-controls-"));
 process.env.WORKBENCH_HOME = join(root, "wb");
 process.env.CLAUDE_CONFIG_DIR = join(root, "config");
 const [{ ClaudeDriver }, { SessionManager }] = await Promise.all([import("./drivers/claude.js"), import("./session-manager.js")]);
+const { savePrefs } = await import("./prefs.js");
 const models = [{ value: "default", resolvedModel: "opus-native", supportsFastMode: true }, { value: "opus", resolvedModel: "opus-native", supportsFastMode: true }, { value: "haiku", resolvedModel: "haiku-native" }];
 assert.equal(supportsClaudeFastMode(models, null), true);
 for (const model of ["opus", "opus[1m]", "opus-native", "opus-native[1m]"]) assert.equal(supportsClaudeFastMode(models, model), true);
@@ -31,7 +32,9 @@ class FixtureCLI extends ClaudeDriver {
   frames: Record<string, any>[] = [];
   failThinking = false;
   pendingSide = false;
-  protected spawnProcess(_command: string, _args: string[], _options: SpawnOptionsWithoutStdio) {
+  launchEnv?: NodeJS.ProcessEnv;
+  protected spawnProcess(_command: string, _args: string[], options: SpawnOptionsWithoutStdio) {
+    this.launchEnv = options.env;
     this.child = { pid: 123, stdin: { writable: true } } as unknown as ChildProcessWithoutNullStreams;
     this.callbacks.metadata({ nativeSessionId: "fixture-native" });
   }
@@ -53,10 +56,17 @@ const drivers: FixtureCLI[] = [];
 const nativeReader = { capture: async () => ({ nativeSessionId: "fixture-native", path: join(root, "native"), size: 0 }), changed: async () => undefined } as unknown as NativeConversationReader;
 const manager = new SessionManager((_agent, opts) => { const cli = new FixtureCLI(opts); drivers.push(cli); return cli; }, () => ({ model: null, effort: null }), async () => null, nativeReader);
 const events: UnifiedEvent[] = []; manager.onEvent(event => events.push(event));
+const inheritedEntry = process.env.CLAUDE_CODE_ENTRYPOINT;
+const inheritedGuard = process.env.CC_FORK_GUARD;
+process.env.CLAUDE_CODE_ENTRYPOINT = "inherited-ide";
+process.env.CC_FORK_GUARD = "0";
 try {
   const session = await manager.create({ agent: "claude", cwd: root, snapshot: "skip", config: { model: "haiku", thinkingLevel: "off" }, resumeSessionId: "fixture-native" });
   await drivers[0].ready;
   const cli = drivers[0];
+  assert.equal(cli.launchEnv?.CLAUDE_CODE_ENTRYPOINT, undefined, "公开默认不设入口，即使父进程继承了身份");
+  assert.equal(cli.launchEnv?.WORKBENCH_WORKER, "1");
+  assert.equal(cli.launchEnv?.CC_FORK_GUARD, undefined, "不向 worker 传旧标记");
   assert.deepEqual(cli.frames[1].request, { subtype: "set_max_thinking_tokens", max_thinking_tokens: 0 });
   assert.equal(manager.get(session.id)!.config.thinkingLevel, "off");
   assert.deepEqual(await manager.queryInfo(session.id, "capabilities"), { supportsFastMode: false });
@@ -101,8 +111,10 @@ try {
   await manager.setThinking(session.id, true);
   assert.equal(drivers.length, 1, "释放后只保存，不启动 worker");
   assert.equal(manager.get(session.id)!.config.thinkingLevel, "default_on");
+  savePrefs({ idleReleaseMinutes: 30, retentionDays: 30, claudeCodeEntrypoint: "claude-vscode" });
   await manager.queryInfo(session.id, "capabilities");
   assert.equal(drivers.length, 2);
+  assert.equal(drivers[1].launchEnv?.CLAUDE_CODE_ENTRYPOINT, "claude-vscode", "本机配置打开入口身份");
   assert.deepEqual(drivers[1].frames[1].request, { subtype: "set_max_thinking_tokens", max_thinking_tokens: 31999, thinking_display: null });
   const saved = JSON.parse(readFileSync(join(root, "wb", "sessions.json"), "utf8"));
   assert.match(JSON.stringify(saved), /"thinkingLevel":"default_on"/);
@@ -113,5 +125,9 @@ try {
   drivers[1].receive({ type: "system", subtype: "init", model: "haiku-native" });
   assert.deepEqual(await drivers[1].queryInfo("menu_capabilities"), { supportsFastMode: false });
   await assert.rejects(manager.stopTask(session.id, "task1"), /不在当前/);
-} finally { await manager.shutdown(); }
+} finally {
+  await manager.shutdown();
+  if (inheritedEntry === undefined) delete process.env.CLAUDE_CODE_ENTRYPOINT; else process.env.CLAUDE_CODE_ENTRYPOINT = inheritedEntry;
+  if (inheritedGuard === undefined) delete process.env.CC_FORK_GUARD; else process.env.CC_FORK_GUARD = inheritedGuard;
+}
 console.log("✅ Claude 菜单：Thinking 持久化/续接/失败、Fast 能力、任务白名单、侧问并发/取消/事件隔离");

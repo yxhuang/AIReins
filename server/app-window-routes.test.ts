@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
-import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
 import { request } from "node:http";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
@@ -12,6 +12,11 @@ import { fileURLToPath } from "node:url";
 const home = await mkdtemp(join(tmpdir(), "workbench-app-window-"));
 const bin = join(home, "bin");
 await mkdir(bin);
+const shutdownCommand = join(bin, "power-command");
+await writeFile(shutdownCommand, "#!/bin/sh\nprintf '%s\\n' \"${1:-schedule}\" > \"$WORKBENCH_HOME/power-called\"\n", { mode: 0o700 });
+const localPrefs = { idleReleaseMinutes: 30, retentionDays: 30, shutdownCommand,
+  claudeCodeEntrypoint: "claude-vscode", directoryBrowserHome: home };
+await writeFile(join(home, "prefs.json"), JSON.stringify(localPrefs));
 for (const name of ["codex", "claude", "kimi"]) {
   await writeFile(join(bin, name), "#!/bin/sh\nprintf 'fixture 1.0\\n'\n", { mode: 0o700 });
 }
@@ -52,6 +57,20 @@ try {
     signal: AbortSignal.timeout(5000),
   });
   const localBase = `http://127.0.0.1:${port}`, remoteBase = `http://127.0.0.1:${remotePort}`;
+  const localMeta = () => fetch(`${localBase}/api/meta`, { signal: AbortSignal.timeout(10_000) }).then(res => res.json()) as Promise<any>;
+  assert.equal((await localMeta()).data.capabilities.powerOff, true);
+  const updated = await fetch(`${localBase}/api/prefs`, { method: "PUT", headers: { origin: localBase, "content-type": "application/json" },
+    body: JSON.stringify({ idleReleaseMinutes: 15, shutdownCommand: "/untrusted" }) });
+  assert.equal(updated.status, 200);
+  assert.deepEqual(JSON.parse(await readFile(join(home, "prefs.json"), "utf8")), { ...localPrefs, idleReleaseMinutes: 15 }, "UI 保存现有偏好不会丢失或覆盖本机字段");
+  for (const [method, expected] of [["POST", "schedule"], ["DELETE", "abort"]]) {
+    const power = await fetch(`${localBase}/api/power-off`, { method, headers: { origin: localBase } });
+    assert.equal(power.status, 200);
+    assert.equal((await readFile(join(home, "power-called"), "utf8")).trim(), expected, "仅调用隔离的假关机命令");
+  }
+  await chmod(shutdownCommand, 0o600);
+  assert.equal((await localMeta()).data.capabilities.powerOff, false, "失去可执行权限时能力关闭");
+  assert.equal((await fetch(`${localBase}/api/power-off`, { method: "POST", headers: { origin: localBase } })).status, 503);
   const remoteHeaders = { host: "desk.tail1234.ts.net", origin, "tailscale-user-login": "me" };
   const remote = await post(remoteBase, remoteHeaders, `${localBase}/#/session/a`);
   assert.equal(remote.status, 403, "有合法 Tailscale 身份的远程入口仍禁止启动程序");

@@ -2,9 +2,15 @@ import assert from "node:assert/strict";
 import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { readLinks, scanPages } from "./pages.js";
 
 const root = await mkdtemp(join(tmpdir(), "wb-links-"));
+process.env.WORKBENCH_HOME = root;
+const { readLinks, scanPages } = await import("./pages.js");
+await mkdir(join(root, "pages", "local"), { recursive: true });
+await writeFile(join(root, "pages", "local", "manifest.json"), JSON.stringify({ id: "local", name: "Local", icon: "📊", type: "iframe", url: "https://example.com" }));
+await writeFile(join(root, "pages", "links.json"), JSON.stringify({ links: [{ name: "Local", url: "https://example.com" }] }));
+assert.deepEqual(scanPages().map(page => page.id), ["local"], "缺省从 WORKBENCH_HOME/pages 扫描");
+assert.equal(readLinks()[0]?.name, "Local", "直达与扩展页共用用户目录");
 await mkdir(join(root, "ok"));
 await writeFile(join(root, "ok", "manifest.json"), JSON.stringify({ id: "ok", name: "OK", icon: "📊", type: "iframe", url: "https://example.com" }));
 assert.deepEqual(readLinks(root), [], "配置缺失时为空");

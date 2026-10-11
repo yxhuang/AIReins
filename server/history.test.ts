@@ -532,3 +532,25 @@ assert.equal(cwdLast.nextCursor, undefined);
 assert.equal((await cwdHistory.list({ agent: "claude", cwd: "/", limit: 20 })).sessions.length, cwdRows.length);
 assert.equal((await cwdHistory.list({ agent: "codex", cwd: "/a/b", limit: 20 })).sessions.length, 0);
 console.log("history cwd segment filtering / combined query / cursor passed");
+
+// 入口偏好关闭时：CLI 默认身份或缺少 entrypoint，创建/导入仍靠注册表正确区分。
+const cliRoot = join(fixture, "cli-default");
+const cliRoots = { ...roots, claude: cliRoot, workbenchRegistry: join(cliRoot, "sessions.json") };
+await mkdir(join(cliRoot, "project"), { recursive: true });
+for (const entrypoint of ["cli", undefined]) {
+  const created = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+  const imported = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+  for (const id of [created, imported]) {
+    await writeJsonl(join(cliRoot, "project", `${id}.jsonl`), [{ type: "user", cwd: "/repo/cli-default", entrypoint,
+      message: { role: "user", content: `会话 ${id}` } }]);
+  }
+  await writeFile(cliRoots.workbenchRegistry, JSON.stringify([
+    { agent: "claude", nativeSessionId: created },
+    { agent: "claude", nativeSessionId: imported, resumedFrom: { agent: "claude", nativeSessionId: imported } },
+  ]));
+  const cliHistory = new HistoryIndex({ roots: cliRoots });
+  const listed = await cliHistory.list({ agent: "claude", limit: 20 });
+  assert.equal(findSession(listed, "claude", created).source, "workbench");
+  assert.equal(findSession(listed, "claude", imported).source, entrypoint ? "interactive" : "unknown");
+}
+console.log("history CLI default entrypoint creation/import classification passed");

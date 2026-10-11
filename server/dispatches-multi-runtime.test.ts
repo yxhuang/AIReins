@@ -72,6 +72,11 @@ const keys = ["WORKBENCH_CODEX_HISTORY_DIR", "WORKBENCH_KIMI_HISTORY_DIR", "WORK
 const previous = keys.map((key) => process.env[key]);
 for (const [index, key] of keys.entries()) process.env[key] = [codex, kimi, claude][index];
 try {
+  const missingDelegate = join(root, "missing-delegate");
+  const nativeOnly = await listDispatches(50, missingDelegate, () => sessions);
+  assert.equal(nativeOnly.length, 5, "delegate 目录不存在时仍显示 Codex/Kimi 原生子代理");
+  assert.ok(nativeOnly.every(run => run.native), "没有外部工单，不报错");
+  assert.equal((await listParentDispatches("codex-main", missingDelegate, "codex", () => sessions)).length, 2);
   const list = await listDispatches(50, delegate, () => sessions);
   assert.equal(list.filter((run) => run.native && run.tool === "codex").length, 2);
   assert.equal(list.find((run) => run.session === "luna")?.model, "gpt-6-luna");

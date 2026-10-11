@@ -5,6 +5,7 @@
 wb 放进独立的 systemd scope 启动：本连接结束、实例退出时不会连坐杀掉 wb。
 """
 import os
+import shlex
 import socket
 import subprocess
 import sys
@@ -25,7 +26,7 @@ except OSError:
     # -o：锁只由 flock 本身持有，否则被拉起的 wb 会继承锁 fd、永久占着锁。
     subprocess.run(["flock", "-o", f"/run/user/{os.getuid()}/wb-remote.lock",
                     "systemd-run", "--user", "--scope", "-q",
-                    "/bin/bash", "-lc", "WORKBENCH_NO_OPEN=1 /home/user/.local/bin/wb start"],
+                    "/bin/bash", "-lc", f"WORKBENCH_NO_OPEN=1 {shlex.quote(os.path.expanduser('~/.local/bin/wb'))} start"],
                    stdin=subprocess.DEVNULL, timeout=60)  # 不把手机连接交给子进程；挂死也有期限
     for _ in range(60):
         try:

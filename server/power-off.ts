@@ -1,4 +1,14 @@
+import { accessSync, constants, statSync } from "node:fs";
+import { isAbsolute } from "node:path";
 import type { SessionRecord } from "./types.js";
+
+export function powerOffEnabled(command?: string): boolean {
+  if (!command || !isAbsolute(command)) return false;
+  try {
+    accessSync(command, constants.X_OK);
+    return statSync(command).isFile();
+  } catch { return false; }
+}
 
 export interface PowerOffStatus {
   state: "idle" | "waiting" | "scheduled";

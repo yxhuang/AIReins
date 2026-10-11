@@ -4,6 +4,7 @@ import { access, readdir, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { promisify } from "node:util";
+import { loadPrefs } from "./prefs.js";
 
 const MAX_DIRS = 1_000;
 const MAX_FILES = 1_000;
@@ -36,21 +37,9 @@ export interface DirectoryListing {
   git?: Record<string, string>;
 }
 
-/** 目录浏览器「主目录」按钮的落点：~/dev（用户的项目根），不存在时退回 $HOME。 */
-async function defaultRoot(): Promise<string> {
-  const home = process.env.HOME || homedir();
-  const dev = join(home, "dev");
-  try {
-    if ((await stat(dev)).isDirectory()) return dev;
-  } catch {
-    // 没有 dev 就用 $HOME
-  }
-  return home;
-}
-
 /** 只读枚举一级子目录；保留逻辑路径，使符号链接中的「上一级」可返回原位置。files=true 时同层普通文件一并列出。 */
 export async function listDirectories(rawPath?: string, options: { files?: boolean } = {}): Promise<DirectoryListing> {
-  const input = rawPath === undefined ? await defaultRoot() : rawPath;
+  const input = rawPath ?? loadPrefs().directoryBrowserHome ?? process.env.HOME ?? homedir();
   if (!isAbsolute(input) || input.includes("\u0000")) {
     throw new DirListError("path 必须是绝对路径");
   }
@@ -121,7 +110,7 @@ export async function listDirectories(rawPath?: string, options: { files?: boole
       }
     }));
   }
-  // 当前目录不在仓库里时（如 ~/dev），子文件夹若本身是仓库，取其整仓最高状态作文件夹标记。
+  // 当前目录不在仓库里时（如 ~/projects），子文件夹若本身是仓库，取其整仓最高状态作文件夹标记。
   const marks = (await git) ?? (options.files === true ? await childRepoMarks(dirs) : undefined);
   return {
     path,

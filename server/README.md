@@ -82,7 +82,7 @@ Claude 停止走 `control_request {subtype:"interrupt"}`（与 CLI/扩展按 Esc
 - `port`：1–65535，不能与本机端口相同，且须与 Serve 转发目标一致。
 - `origin`：手机地址栏里的源；全小写，无路径、无结尾斜杠。
 - `allowedLogins`：允许访问的 Tailscale 登录名。未知时可先填占位值，手机打开页面后，403 提示会显示实际登录名。
-- `terminal`：可选布尔值。只有显式设为 `true` 才允许远程入口使用自由终端；缺省或类型不对均按 `false` 处理，类型错误会记日志。
+- `terminal`：可选布尔值。只有显式设为 `true` 才允许远程入口使用自由终端；缺省或类型不对均按 `false` 处理，类型错误会记日志。新安装自动生成 `terminal: false`，已有配置不覆盖；要开启远程终端，编辑此文件设为 `"terminal": true`，然后由用户执行 `wb restart`。
 
 Serve 会剥掉客户端自带的同名身份头，再注入真实身份。远程端口只绑定 `127.0.0.1`；DNS 重绑定网页的 Host 过不了检查。本机进程可伪造此头，但本来就能访问本机入口。
 
@@ -101,7 +101,7 @@ Serve 会剥掉客户端自带的同名身份头，再注入真实身份。远�
 
 ## 闸门提醒
 
-配了 `~/.workbench/notify.json` 才开启：闸门挂起超过 `delaySeconds` 秒（默认 60）还没人处理，就发一条飞书提醒。两种发送方式二选一：`feishuWebhook` 走群里的自定义机器人；`larkUserId` 调本机 `lark-cli im +messages-send --as bot` 让应用机器人私聊该 open_id（租户关了自定义机器人时用，凭据由 lark-cli 管，要先 `lark-cli auth status` 看 bot 身份是 ready）。
+通知是可选功能，目前仅支持飞书，配置位于 `~/.workbench/notify.json`。配好后才开启：闸门挂起超过 `delaySeconds` 秒（默认 60）还没人处理，就发一条飞书提醒。两种发送方式二选一：`feishuWebhook` 走群里的自定义机器人；`larkUserId` 调本机 `lark-cli im +messages-send --as bot` 让应用机器人私聊该 open_id（租户关了自定义机器人时用，凭据由 lark-cli 管，要先 `lark-cli auth status` 看 bot 身份是 ready）。
 
 - **限频**：同一会话 60 秒内最多发一条；冷却中到期的闸门顺延，冷却结束时仍未处理再发。
 - **取消提醒**：收到 `permission_resolved`（已处理），或 `process_exited`（进程退出，闸门没法再操作）。
@@ -127,7 +127,7 @@ webhook 地址就是密钥：文件权限设为 600，也不要写进日志或�
 
 - `POST /api/sessions`：创建会话，统一配置见下文
 - `POST /api/snapshot/preflight`：建会话前检查 cwd 是否需要及能够自动快照
-- `GET /api/fs/dirs?path=<绝对路径>&files=1`：只读列出一级子目录；省略 `path` 时使用 `~/dev`（不存在则 `$HOME`）；带 `files=1` 时同层普通文件一并列出，并为文件/目录补充 `size` 和 `modifiedAt`（Unix 毫秒）。普通文件大小为字节，文件夹大小为 `null`，不递归累加；无法 stat 时字段为 `null`，保留可列出的名称。只对已收集的条目读取元数据，并发最多8个；文件夹/文件分别最多1000个，超限标记 `truncated`。不带 `files=1` 的目录选择模式保持原返回与读取范围。
+- `GET /api/fs/dirs?path=<绝对路径>&files=1`：只读列出一级子目录；省略 `path` 时使用 `$HOME`，可由 `prefs.json` 的 `directoryBrowserHome` 覆盖；带 `files=1` 时同层普通文件一并列出，并为文件/目录补充 `size` 和 `modifiedAt`（Unix 毫秒）。普通文件大小为字节，文件夹大小为 `null`，不递归累加；无法 stat 时字段为 `null`，保留可列出的名称。只对已收集的条目读取元数据，并发最多8个；文件夹/文件分别最多1000个，超限标记 `truncated`。不带 `files=1` 的目录选择模式保持原返回与读取范围。
 - `POST /api/fs/pick-directory`：仅本机监听允许，WSL＋Windows PowerShell 7 可用时 `GET /api/meta` 返回 `capabilities.windowsDirectoryPicker:true`；远程始终为false且POST返回403。JSON `{path?:string}` 指定起点，Windows盘符与 `/mnt/<盘符>` 支持，Linux cwd/空值从 Windows 用户目录打开。通过固定 PowerShell 程序调用现代 WinForms `FolderBrowserDialog`，路径以环境变量传入，单实例，进程内120秒自动退出（后端130秒超时，前端135秒）。取消返回 `{path:null}`；选定盘符目录后映射并检查可浏览性，返回 `{path:"/mnt/c/..."}`；已有窗口409，输入/目录不合法400，调用失败/超时503。保留所有原有 Host/Origin 检查，不启动常驻 Windows 服务。
 - `POST /api/fs/pick-file`：右侧文件面板的原生 Windows 浏览入口；与目录选择共享上述本机能力、起点、单窗口、取消及超时规则。调用 WinForms `OpenFileDialog`，`All files (*.*)|*.*` 显示所有扩展名，仅选一个既有文件；返回映射到 `/mnt/<盘符>/...` 并经 `stat` 确认为普通文件的路径。预览仍由工作文件接口独立检查授权根与 realpath，不因原生选择而放宽读取权限。
 - `POST /api/uploads?sessionId=<id>&name=<文件名>`：上传附件，请求体为原始字节（非 multipart）；保存到 `~/.workbench/uploads/<sessionId>/`，返回 `{path,name,size,mimeType}` 同秒同名文件通过 `wx` 原子预留路径，再用该文件描述符写流；并发上传各自保留，失败只删除自己的半截文件。
@@ -163,7 +163,7 @@ Workbench 新建的 Codex 会话在首个 `item/completed.userMessage` 后、没
 - `GET /api/tailscale/file-targets`：文件面板「发送到设备」的 Taildrop 目标。调用 `tailscale file cp --targets`（查找顺序与超时同上），成功信封 `data:{targets:[{name,ip,online,self}],reason?}`；`self` 仅远程入口按 Tailscale Serve 覆盖写入的 `X-Forwarded-For` 标出来访设备，本机入口恒为 false。排序为本机、在线、名称。CLI 不存在、未运行、超时都返回 `code:0`、空列表加 `reason`。
 - `POST /api/tailscale/send`：JSON `{path,root,sessionId?,target}`，`target` 为上一接口返回的 IP。`path/root/sessionId` 沿用工作文件的授权根与 realpath 检查；普通文件以 fd 流式读取，文件夹先在临时目录 `zip -r -y` 打包为 `<名称>.zip`（符号链接存为链接，10 分钟超时，发送后删除临时目录）。发送前重新取 `--targets`，只接受列表内在线 IP，再不经 shell 执行 `tailscale file cp --name=<名称> - <ip>:` 由 stdin 喂内容，30 分钟超时；请求持续到发送结束。成功 `data:{sent:true,name}`。路径错误同文件接口（`status*100+90`，空文件夹 400/`40090`，打包失败 500/`50090`）；目标不在列表或取 `--targets` 失败 400/`40091`（消息为原因），离线 409/`40991`，CLI 启动失败或非零退出 502/`50291`（附 stderr 末行），读取待发送内容出错 500/`50091`。文件夹以 `O_DIRECTORY|O_NOFOLLOW` fd 锚定并复核 realpath，zip 在 `/proc/<pid>/fd/<fd>` 内打包 `.`，条目不带顶层目录。前端请求超时 45 分钟；客户端断开不会取消服务端已开始的发送。Taildrop CLI 本身不收目录（`directories not supported`），因此由服务端打包。
 - `POST /api/restart`：无请求体，返回 HTTP 202，信封 `{code:0,msg:"accepted",data:{restarting:true},request_id}`；表示已接受，不表示重启已完成。沿用两个入口的 Host / Origin 校验，远程入口还须 Tailscale 身份白名单；不新增豁免。同一进程内重复请求仍回 202，只启动一次重启。
-- `GET|POST|DELETE /api/power-off`：关机。信封 `data:{state:"idle"|"waiting"|"scheduled",busy,remainingMs?,error?}`，`busy` 为 running、starting 或带后台任务的会话数（比重启多算 starting）。POST 时无忙会话立即执行 `~/.local/bin/win-shutdown`（默认 60 秒后 `/sg /f`），否则进入 `waiting`，每 5 秒检查一次，全部空闲后自动执行、不再确认；重复 POST 不重复执行。`scheduled` 且命令已落地时带 `remainingMs`（距关机的剩余毫秒，前端据此倒计时）；过了关机时刻 60 秒仍在运行，回到 `idle` 并带 `error`。DELETE 取消等待；已排定时执行 `win-shutdown abort`，Windows 报 1116（没有正在进行的关机）按取消成功处理。失败回到 `idle` 并带 `error`。等待状态只在内存，WB 重启即丢失。远程入口可用，沿用同样的 Host/Origin 与 Tailscale 身份白名单。
+- `GET|POST|DELETE /api/power-off`：关机。信封 `data:{state:"idle"|"waiting"|"scheduled",busy,remainingMs?,error?}`，`busy` 为 running、starting 或带后台任务的会话数（比重启多算 starting）。POST 时无忙会话立即执行 `prefs.json` 中的 `shutdownCommand`（无参数排定 60 秒后关机），否则进入 `waiting`，每 5 秒检查一次，全部空闲后自动执行、不再确认；重复 POST 不重复执行。`scheduled` 且命令已落地时带 `remainingMs`（距关机的剩余毫秒，前端据此倒计时）；过了关机时刻 60 秒仍在运行，回到 `idle` 并带 `error`。DELETE 取消等待；已排定时执行 `win-shutdown abort`，Windows 报 1116（没有正在进行的关机）按取消成功处理。失败回到 `idle` 并带 `error`。等待状态只在内存，WB 重启即丢失。远程入口可用，沿用同样的 Host/Origin 与 Tailscale 身份白名单。
 - `GET /api/pages`：启动时已注册的扩展页面列表
 - `GET /api/pages/:id/health`：限时探测一个扩展页面的目标服务
 
@@ -285,8 +285,8 @@ Claude 额外固定返回四个字段；未显式覆盖时的初始形状如下�
 
 ### 派单只读接口
 
-实现在 `server/dispatches.ts`，路由在 `server/index.ts`。默认读取 `~/.cache/delegate`，可用
-`WB_DELEGATE_DIR` 覆盖；两秒共享扫描缓存，不启动或控制派单进程，不写入数据源。
+`delegate` 是可选的外部派单工具，Workbench 不要求安装它。实现在 `server/dispatches.ts`，路由在 `server/index.ts`。默认读取 `~/.cache/delegate`，可用
+`WB_DELEGATE_DIR` 覆盖。约定每项工单置于 `YYYYMMDD-HHMMSS-<执行端>-<名称>/`，包含 `run.json`（兼容旧 `meta.json`）及可选日志；目录缺失时仍独立显示已注册会话的原生子代理，不报错。两秒共享扫描缓存，不启动或控制派单进程，不写入数据源。
 三个接口均走现有 `/api` 访问控制和 `{code,msg,data,request_id}` 信封：
 
 - `GET /api/dispatches?limit=50` → `data: {dispatches: Dispatch[]}`。有效目录名按字符串倒序；
@@ -484,7 +484,7 @@ interface HistoryListData {
 
 标题提取不会把注入包装当成人类输入：Claude 跳过 `isMeta`、sidechain、`local-command-caveat / local-command-stdout / system-reminder / task-notification / ide_selection / ide_opened_file`；斜杠命令包装只提取真正的 `command-args`，无参数时退化为 `command-name`。Codex 跳过 role 非 user 的记录，以及 `recommended_plugins / AGENTS.md instructions / environment_context / skills / permissions / apps / plugins / multi_agent_mode` 等注入块。Kimi 优先使用有效的原生 `state.title`，否则从第一条非 `system-reminder` 的 `turn.prompt` 取标题。
 
-`source` 表示原生会话的可识别创建来源，而不是当前读取者。Claude 老会话首个 `entrypoint:"sdk-cli"` 仍为 `workbench`；新 worker 明确设置 `CLAUDE_CODE_ENTRYPOINT=claude-vscode`，其新建会话靠 `~/.workbench/sessions.json` 中未带 `resumedFrom` 的注册表记录判为 `workbench`，其他 `claude-vscode` 会话为 `interactive`。Codex 的 `originator` 以 `workbench` 开头为 `workbench`，其他已知 originator 为 `interactive`；Kimi 的多代落盘格式没有稳定的客户端来源字段，也用未带 `resumedFrom` 的注册表记录回退为 `workbench`，其余为 `unknown`。导入的 VSCode/Kimi 原生会话保留原来源。
+`source` 表示原生会话的可识别创建来源，而不是当前读取者。Claude 老会话首个 `entrypoint:"sdk-cli"` 仍为 `workbench`；新 worker 默认不设 `CLAUDE_CODE_ENTRYPOINT`，可在本机 `prefs.json` 设置 `claudeCodeEntrypoint: "claude-vscode"`；两种入口身份的新建会话都靠 `~/.workbench/sessions.json` 中未带 `resumedFrom` 的注册表记录判为 `workbench`，其他已知 CLI/VSCode 入口会话为 `interactive`，缺少入口身份时为 `unknown`。Codex 的 `originator` 以 `workbench` 开头为 `workbench`，其他已知 originator 为 `interactive`；Kimi 的多代落盘格式没有稳定的客户端来源字段，也用未带 `resumedFrom` 的注册表记录回退为 `workbench`，其余为 `unknown`。导入的 VSCode/Kimi 原生会话保留原来源。
 
 
 完整历史使用 `GET /api/history/:agent/:nativeSessionId/messages?limit=<默认50>&cursor=<可选>`。`limit` 范围 1–200；不传 cursor 时读取最新一页，带回服务端给出的不透明 `nextCursor` 可继续向更早消息翻页。每页内部仍按时间正序返回，前端可直接 prepend 到现有消息列表。单次最多倒读 4 MiB 原生 NDJSON，不会为了取一页全文解析巨大 transcript，也不会在三家原生目录或 Workbench 目录写索引、缓存或修复文件。
@@ -524,7 +524,7 @@ Claude 跳过 meta/sidechain，按 assistant 内容块顺序输出文字与 `too
 }
 ```
 
-这里没有 fork 语义：Claude 用 `--resume`，Codex 用 `thread/resume`，Kimi 用 `session/resume`。续接后，Workbench 中的新回合会由原生 CLI 追写进用户选择的真实会话；Claude worker 以 `claude-vscode` 身份落盘，工作台新建会话因此可进入 VSCode/CLI 的 resume 列表。仅做 initialize 的 Claude 模型标签探针不发送用户消息、不产生会话，仍清除该环境变量。
+这里没有 fork 语义：Claude 用 `--resume`，Codex 用 `thread/resume`，Kimi 用 `session/resume`。续接后，Workbench 中的新回合会由原生 CLI 追写进用户选择的真实会话；Claude worker 默认使用 CLI 自身入口身份；本机可选 `claudeCodeEntrypoint: "claude-vscode"`，保持 VSCode 入口身份。来源仍按创建注册表判定，导入不改原来源。仅做 initialize 的 Claude 模型标签探针不发送用户消息、不产生会话，仍清除该环境变量。
 
 空闲会话发消息前，服务端只读原生记录的末尾最多 4 MiB，比较最后一条归一化用户/助手/工具调用消息的身份：Claude 用 `uuid`，Codex/Kimi 用追加文件的字节偏移与该行 SHA-256；标题、摘要、token 等元数据变化不触发。指纹之后若只有助手或工具消息，视为本端上一轮在 `turn_completed` 之后才刷盘：静默推进指纹，不重启、不发事件。只有出现新的用户消息才判为外部续聊；第一条新用户消息之前的助手和工具消息不进入事件。此时先停旧 worker、起新进程并以同一原生 ID 续接，再发送消息。Codex app-server 的 `thread/resume` 和 Kimi ACP 的 `session/resume` 都在新进程里执行，避免复用旧进程内存中的线程/会话。取不到原生 ID、文件或对话指纹时记录 warn 并照常发送；正在运行的回合不检测。重新续接失败会广播 `session_error`（`source:"external_resume"`），拒绝本轮发送，不回退到旧 worker。尾部窗口装不下全部外部消息时，事件只带读到的最新消息，并标 `truncated:true`。
 
@@ -550,6 +550,12 @@ worker 的 `processId` 原本就持久化；新启动的 Linux worker 使用独�
 
 空闲自动释放：服务端每分钟扫一次，对 `idle`、未释放、`now - lastActivityAt ≥ idleReleaseMinutes` 且满足上述前提的会话执行释放；**开着 Remote Control（connected/connecting/reconnecting）的 Claude 会话跳过**（开 RC 就是要手机能随时找到它，释放会断开）。阈值存 `~/.workbench/prefs.json`（`{"idleReleaseMinutes":30}`，缺省 30，0 = 关闭，文件缺失或无效按默认值），经 `GET/PUT /api/prefs` 读写，PUT 立即生效无需重启。
 
+本机专用行为统一放在 `${workbenchHome}/prefs.json`（默认 `~/.workbench/prefs.json`，由 `WORKBENCH_HOME` 覆盖），不写入仓库，也无需额外启动环境变量；托盘和 `wb start` 读取同一份配置。UI 的 PUT 仅更新空闲释放阈值并保留以下字段；这些字段不在 UI 暴露。修改后重启后端生效。
+
+- `shutdownCommand`：可执行文件的绝对路径，公开默认不设。无参数应排定约 60 秒后关机，`abort` 应取消；Workbench 不经 shell 执行。未配置、文件缺失或不可执行时，`GET /api/meta` 的 `capabilities.powerOff` 为 `false`，设置隐藏关机入口，关机 API 返回 503。
+- `claudeCodeEntrypoint`：可选值 `"claude-vscode"`；公开默认不设，交给 Claude CLI 自身默认。Worker 统一带 `WORKBENCH_WORKER=1`，不传旧 `CC_FORK_GUARD`；会按发送前刷新原生记录的机制续接。
+- `directoryBrowserHome`：目录浏览器「主目录」的绝对路径，公开默认 `$HOME`。
+
 使用 `resumeSessionId` 成功建出的 session 会同时包含：
 
 ```json
@@ -568,13 +574,19 @@ worker 的 `processId` 原本就持久化；新启动的 Linux worker 使用独�
 
 ## `pages/` 扩展页面
 
-`GET /api/links` 返回 `data: {links: [{name, url, icon?, group?}]}`，与 `/api/pages` 共用请求前置的访问控制。每次请求现读根目录 `pages/links.json`，改文件后刷新页面或重新打开「直达」即可生效；新增接口本身需重启 wb。文件缺失返回空列表；坏 JSON、非法顶层返回空列表并 warn，非法条目逐条跳过并 warn，不导致接口 500。`name`、`url` 为必填非空字符串，`icon`、`group` 为可选非空字符串；支持 http/https 和 `vscode://`、`obsidian://` 等显式 URL scheme，拒绝 `javascript:`、`data:`、`vbscript:`、`file:`、`blob:`、`filesystem:`、`about:` 和含控制字符或未编码空格的 URL。根目录文件不参与 `scanPages` 的子目录扫描。
+`GET /api/links` 返回 `data: {links: [{name, url, icon?, group?}]}`，与 `/api/pages` 共用请求前置的访问控制。每次请求现读用户目录 `${workbenchHome}/pages/links.json`（默认 `~/.workbench/pages/links.json`），改文件后刷新页面或重新打开「直达」即可生效；新增接口本身需重启 wb。文件缺失返回空列表；坏 JSON、非法顶层返回空列表并 warn，非法条目逐条跳过并 warn，不导致接口 500。`name`、`url` 为必填非空字符串，`icon`、`group` 为可选非空字符串；支持 http/https 和 `vscode://`、`obsidian://` 等显式 URL scheme，拒绝 `javascript:`、`data:`、`vbscript:`、`file:`、`blob:`、`filesystem:`、`about:` 和含控制字符或未编码空格的 URL。根目录文件不参与 `scanPages` 的子目录扫描。
 
 ```json
-{"links":[{"name":"Tibo (X)","url":"https://x.com/thsottiaux?lang=en","icon":"𝕏","group":"关注"},{"name":"LLM 排行","url":"https://artificialanalysis.ai/leaderboards/models","icon":"📈","group":"参考"}]}
+{"links":[{"name":"示例网站","url":"https://example.com","icon":"🌐","group":"参考"}]}
 ```
 
-仓库根目录的 `pages/` 每个直接子目录代表一个页面，子目录内必须有 `manifest.json`。server 仅在启动时扫描一次；增删或修改 manifest 后需重启，不做热插拔、沙箱或版本管理。单个 manifest 缺失、JSON 语法错误、字段无效或 `id` 重复时，该页面会被跳过并记录一条 warn 日志，不影响 server 启动。
+用户目录 `${workbenchHome}/pages`（默认 `~/.workbench/pages`）的每个直接子目录代表一个页面，子目录内必须有 `manifest.json`。server 仅在启动时扫描一次；增删或修改 manifest 后需重启，不做热插拔、沙箱或版本管理。单个 manifest 缺失、JSON 语法错误、字段无效或 `id` 重复时，该页面会被跳过并记录一条 warn 日志，不影响 server 启动。
+
+例如在 `~/.workbench/pages/example/manifest.json` 放入下列配置；仓库不附带个人页面。`WORKBENCH_HOME` 可覆盖整个用户数据目录，代码调用仍可显式传入扫描根目录。
+
+```json
+{"id":"example","name":"示例页面","icon":"🌐","type":"iframe","url":"https://example.com"}
+```
 
 本轮唯一支持的字段形状如下；没有额外的嵌套配置：
 
