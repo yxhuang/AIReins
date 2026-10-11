@@ -4,7 +4,7 @@ import { spawnSync } from "node:child_process";
 import { syncBuiltinESMExports } from "node:module";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { getWorkFile, saveWorkFile, getWorkContent, normalizeWorkPath, WorkFileError, TEXT_LIMIT, MEDIA_LIMIT } from "./work-files.js";
+import { getWorkFile, saveWorkFile, getWorkContent, normalizeWorkPath, openWorkSendSource, WorkFileError, TEXT_LIMIT, MEDIA_LIMIT } from "./work-files.js";
 
 const root = await mkdtemp(join(tmpdir(), "workbench-work-files-"));
 const options = { sessionCwd: root };
@@ -106,4 +106,27 @@ try {
 } finally { prototype.sync = sync; await probe.close(); }
 assert.equal(await readFile(input("a.txt").path, "utf8"), current.text);
 assert.ok(!(await readdir(root)).some(name => name.startsWith(".workbench-save-")), "fsync失败清理本次临时文件");
-console.log("work-files: formats, authorization, symlinks, UTF-8, limits, atomic writes and conflicts passed");
+const sendText = async (source: Awaited<ReturnType<typeof openWorkSendSource>>) => {
+  const chunks: Buffer[] = [];
+  for await (const chunk of source.stream) chunks.push(chunk as Buffer);
+  await source.cleanup();
+  return Buffer.concat(chunks);
+};
+const single = await openWorkSendSource(input("a.txt"), options);
+assert.equal(single.name, "a.txt");
+assert.equal((await sendText(single)).toString("utf8"), current.text);
+await mkdir(input("-发送/sub").path, { recursive: true });
+await writeFile(input("-发送/sub/x.txt").path, "x");
+await symlink("/etc/passwd", input("-发送/link").path);
+const folder = await openWorkSendSource(input("-发送"), options);
+assert.equal(folder.name, "-发送.zip", "文件夹打包为 zip，前导 - 不被当成 zip 选项");
+const zipPath = join(root, "sent.zip");
+await writeFile(zipPath, await sendText(folder));
+const listing = spawnSync("unzip", ["-Z1", zipPath], { encoding: "utf8" }).stdout.split("\n").filter(Boolean).sort();
+assert.deepEqual(listing, ["link", "sub/", "sub/x.txt"], "条目相对文件夹本身，解压按 zip 名建目录");
+assert.equal(spawnSync("unzip", ["-p", zipPath, "link"], { encoding: "utf8" }).stdout, "/etc/passwd", "符号链接存为链接，不打进根外内容");
+await assert.rejects(openWorkSendSource({ path: root, root: "/" }, options), fails(403), "root 不在授权根内");
+await assert.rejects(openWorkSendSource({ path: "/etc", root }, options), fails(403));
+await mkdir(input("空").path);
+await assert.rejects(openWorkSendSource(input("空"), options), fails(400), "空文件夹 zip 退出码 12 映射为 400");
+console.log("work-files: formats, authorization, symlinks, UTF-8, limits, atomic writes, conflicts and Taildrop sources passed");

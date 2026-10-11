@@ -81,10 +81,12 @@ export function DirectoryBrowser({ initialPath, onSelect, onClose, mode = "dir",
 }
 
 /** 弹窗与右侧面板共用导航、请求和列表；宿主决定点击文件后的行为。 */
-export function DirectoryContents({ initialPath, includeFiles, onSelectFile, onSelectDirectory, allowWindowsPicker = false, onPathChange, onBrowseHistory, navigationHistory, registerBrowserBack, navTarget }: {
+export function DirectoryContents({ initialPath, includeFiles, onSelectFile, onEntryMenu, onSelectDirectory, allowWindowsPicker = false, onPathChange, onBrowseHistory, navigationHistory, registerBrowserBack, navTarget }: {
   initialPath: string;
   includeFiles: boolean;
   onSelectFile: (path: string, name: string) => void;
+  /** 表格行右键/长按；root 是当前列出的目录。 */
+  onEntryMenu?: (entry: { path: string; root: string; name: string; folder: boolean }, x: number, y: number) => void;
   onSelectDirectory?: (path: string) => void;
   allowWindowsPicker?: boolean;
   onPathChange?: (path: string) => void;
@@ -320,7 +322,8 @@ export function DirectoryContents({ initialPath, includeFiles, onSelectFile, onS
         <div className={`dir-list${includeFiles ? " dir-list-table" : ""}`} aria-label={includeFiles ? "目录与文件列表" : "子目录列表"}>
           {loading ? <p className="new-hint">正在读取…</p> : includeFiles && listing ?
             listing.dirs.length + (listing.files?.length ?? 0) > 0 ? <DirectoryTable listing={listing} busy={busy}
-              onActivate={(path, name, folder) => folder ? void load(path) : onSelectFile(path, name)} /> :
+              onActivate={(path, name, folder) => folder ? void load(path) : onSelectFile(path, name)}
+              onMenu={onEntryMenu && ((path, name, folder, x, y) => onEntryMenu({ path, root: listing.path, name, folder }, x, y))} /> :
               <p className="new-hint">没有可浏览的目录或文件。</p> : entries.length > 0 ? (
             <>
               {entries.map(entry => (

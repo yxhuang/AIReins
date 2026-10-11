@@ -850,6 +850,8 @@ body.resizing {
 .dir-table-name { display: block; width: 100%; min-height: 21px; padding: 0 0 0 22px; border: 0; background: linear-gradient(var(--text-muted), var(--text-muted)) 2px 3px / 11px 15px no-repeat; color: var(--busy); font: inherit; text-align: left; overflow-wrap: anywhere; cursor: pointer; }
 .dir-table-folder { background: linear-gradient(var(--folder-fill), var(--folder-fill)) 1px 4px / 15px 11px no-repeat, linear-gradient(var(--folder-edge), var(--folder-edge)) 1px 1px / 7px 4px no-repeat; }
 .dir-table-name:focus-visible, .dir-table-sort:focus-visible { outline-offset: -2px; }
+/* 长按弹发送菜单，不要 iOS 的系统预览/选字。 */
+.dir-table tbody { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
 /* Git 仓库内名称左侧留 14px 槽放状态：文件字母、文件夹圆点；图标随之右移，名称仍对齐。 */
 .dir-table-git .dir-table-name { position: relative; padding-left: 36px; background-position: 16px 3px; }
 .dir-table-git .dir-table-folder { background-position: 15px 4px, 15px 1px; }
@@ -1030,6 +1032,9 @@ body.resizing {
   border: 1px solid var(--border); border-radius: 6px; background: var(--surface); color: var(--text);
 }
 .row-menu-error { margin: 4px 6px 2px; font-size: 14px; color: var(--danger); }
+.row-menu-note { margin: 4px 6px 2px; font-size: 14px; color: var(--text-muted); }
+/* 触屏点按目标至少 44px，菜单项之间留缝，避免点到相邻设备/操作。 */
+@media (pointer: coarse) { .row-menu-main { gap: 2px; } .row-menu-item { min-height: 44px; padding: 8px 12px; font-size: 15px; } }
 
 /* 分区小标签：14px 淡色，无分隔线（参照 Claude.ai / ChatGPT 侧栏，10-03） */
 .sidebar-section-label {

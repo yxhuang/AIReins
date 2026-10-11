@@ -14,12 +14,12 @@ import { log } from "./logger.js";
 import { DirListError, listDirectories } from "./dir-list.js";
 import { pickWindowsDirectory, pickWindowsFile, WindowsPickerError, windowsPickerEnabled } from "./windows-directory-picker.js";
 import { normalizeFileQuery, searchFiles } from "./file-search.js";
-import { getWorkFile, getWorkContent, saveWorkFile, WorkFileError, TEXT_LIMIT } from "./work-files.js";
+import { getWorkFile, getWorkContent, openWorkSendSource, saveWorkFile, WorkFileError, TEXT_LIMIT } from "./work-files.js";
 import { HistoryIndex, HistoryQueryError } from "./history.js";
 import { NativeDeleteError } from "./native-session-delete.js";
 import { getMeta, getServerHostName, SERVER_VERSION } from "./meta.js";
 import { appWindowEnabled, findWindowsChrome, openAppWindow, AppWindowError } from "./app-window.js";
-import { getTailscalePeers } from "./tailscale-peers.js";
+import { getTaildropTargets, getTailscalePeers, sendTaildrop, TaildropError } from "./tailscale-peers.js";
 import { busySessionCount, createPowerOff } from "./power-off.js";
 import { feishuSender, GateNotifier, larkCliSender, loadNotifyConfig, type NotifyConfig } from "./notify.js";
 import { checkPageHealth, proxyPage, readLinks, scanPages } from "./pages.js";
@@ -419,6 +419,27 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       await respond(response, 200, 0, "success", { opened: true }, requestId);
     } else if (method === "GET" && url.pathname === "/api/tailscale/peers") {
       await respond(response, 200, 0, "success", await getTailscalePeers(), requestId);
+    } else if (method === "GET" && url.pathname === "/api/tailscale/file-targets") {
+      // 只信远程入口：X-Forwarded-For 由 tailscale serve 覆盖写入来访设备 IP，用来标出「本机」。
+      const forwarded = policy.kind === "remote" ? request.headers["x-forwarded-for"] : undefined;
+      await respond(response, 200, 0, "success", await getTaildropTargets(typeof forwarded === "string" ? forwarded.split(",")[0]!.trim() : undefined), requestId);
+    } else if (method === "POST" && url.pathname === "/api/tailscale/send") {
+      const body = await readJson(request, 64 * 1024, true);
+      try {
+        if (!body || typeof body !== "object" || Array.isArray(body)) throw new WorkFileError(400, "请求必须包含 path、root 和 target");
+        const input = body as { path: string; root: string; sessionId?: string; target: unknown };
+        if (input.sessionId !== undefined && (typeof input.sessionId !== "string" || !input.sessionId)) throw new WorkFileError(400, "sessionId 必须是非空字符串");
+        const session = input.sessionId === undefined ? undefined : manager.get(input.sessionId);
+        if (input.sessionId !== undefined && !session) throw new WorkFileError(404, "会话不存在");
+        const source = await openWorkSendSource(input, { sessionCwd: session?.cwd });
+        try { await sendTaildrop(input.target, source.name, source.stream); }
+        finally { await source.cleanup(); }
+        await respond(response, 200, 0, "success", { sent: true, name: source.name }, requestId);
+      } catch (error) {
+        if (error instanceof WorkFileError) throw new ApiError(error.status, error.status * 100 + 90, error.message);
+        if (error instanceof TaildropError) throw new ApiError(error.status, error.status * 100 + 91, error.message);
+        throw error;
+      }
     } else if (method === "GET" && url.pathname === "/api/storage") {
       await respond(response, 200, 0, "success", getStorageStats(manager), requestId);
     } else if (method === "POST" && url.pathname === "/api/storage/clean") {

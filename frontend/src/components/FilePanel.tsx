@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
-import { workFileContentUrl } from "../api";
+import { sendTaildrop, workFileContentUrl } from "../api";
 import { mentionQueryAt } from "../mentions";
 import { store } from "../store";
-import type { SessionRecord } from "../types";
+import type { SessionRecord, WorkFileTarget } from "../types";
 import { useStore } from "../useStore";
 import { DirectoryContents } from "./DirectoryBrowser";
 import { FILE_WIDTH_OPTIONS, PanelBackButton, PanelRightIcon, SidePanelResize, useSidePanelWidth } from "./SidePanelResize";
 import { FilePreview } from "./FilePreview";
 import { Segmented } from "./Segmented";
+import { TaildropMenu } from "./TaildropMenu";
 
 const PREVIEW_OPTIONS = [{ value: "preview", label: "预览", title: "查看渲染后的文档" }, { value: "source", label: "源码", title: "查看或编辑文档源码" }] as const;
 const TABLE_OPTIONS = [{ value: "preview", label: "表格", title: "按表格查看数据" }, { value: "source", label: "源码", title: "查看或编辑原始数据" }] as const;
@@ -18,6 +19,7 @@ const ACTION_PATHS = {
   open: "M15 3h6v6 M21 3 10 14 M10 3H3v18h18v-7",
   download: "M12 3v12 m-5-5 5 5 5-5 M4 17v4h16v-4",
   save: "M3 3h15l3 3v15H3z M7 3v6h10V3 M7 21v-8h10v8",
+  send: "M22 2 11 13 M22 2l-7 20-4-9-9-4Z",
 };
 function FileActionIcon({ kind }: { kind: keyof typeof ACTION_PATHS }) {
   return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={ACTION_PATHS[kind]} /></svg>;
@@ -95,6 +97,19 @@ export function FilePanel({ onClose }: { onClose: () => void }) {
       setNotice({ path, copied: null, reason: "已引用到当前会话。" });
     } else setNotice({ path, copied: null, reason: plan.reason });
   };
+  const [sendMenu, setSendMenu] = useState<{ target: WorkFileTarget; name: string; folder: boolean; x: number; y: number } | null>(null);
+  // 菜单约 240 宽；纵向留给设备列表，别贴出视口。
+  const openSendMenu = (target: WorkFileTarget, name: string, folder: boolean, x: number, y: number) =>
+    setSendMenu({ target, name, folder, x: Math.max(8, Math.min(x, window.innerWidth - 248)), y: Math.max(8, Math.min(y, window.innerHeight - 208)) });
+  const sendFile = (target: WorkFileTarget, name: string, folder: boolean, ip: string, device: string) => {
+    setSendMenu(null);
+    copyId.current += 1;
+    setNotice({ path: target.path, copied: null, reason: `正在${folder ? "打包并" : ""}发送 ${name} 到 ${device}…` });
+    // 发送结果总要显示，不受后续复制/引用提示的序号约束。
+    sendTaildrop(target, ip).then(
+      result => setNotice({ path: target.path, copied: null, reason: `已发送 ${result.name} 到 ${device}，在该设备的 Tailscale 或下载目录查看。` }),
+      (error: Error) => setNotice({ path: target.path, copied: null, reason: error.message }));
+  };
   const copyFile = (path: string) => {
     const id = ++copyId.current;
     setNotice({ path, copied: null, reason: "正在复制路径…" });
@@ -120,6 +135,10 @@ export function FilePanel({ onClose }: { onClose: () => void }) {
           }}><FileActionIcon kind="back" /><span className="file-action-label">返回</span></button>
           <button className="file-action" type="button" aria-label="引用" title="引用到会话" onClick={() => referenceFile(preview.target.path)}><FileActionIcon kind="mention" /><span className="file-action-label">引用</span></button>
           <button className="file-action" type="button" aria-label="复制路径" title="复制路径" onClick={() => copyFile(preview.target.path)}><FileActionIcon kind="copy" /><span className="file-action-label">复制路径</span></button>
+          <button className="file-action" type="button" aria-label="发送到设备" title="用 Taildrop 发送到 tailnet 内的设备" aria-haspopup="menu" aria-expanded={sendMenu !== null} onClick={event => {
+            const rect = event.currentTarget.getBoundingClientRect();
+            openSendMenu(preview.target, preview.file?.name ?? preview.target.path.split("/").pop()!, false, rect.left, rect.bottom + 4);
+          }}><FileActionIcon kind="send" /><span className="file-action-label">发送</span></button>
           {preview.file && preview.file.kind !== "unsupported" && <a className="file-action" aria-label={downloadOnly ? "下载" : "外部打开"} title={downloadOnly ? "下载" : "外部打开"}
             href={downloadOnly ? workFileContentUrl(preview.target, true) : `${workFileContentUrl(preview.target)}&v=${preview.loadId}`}
             download={downloadOnly ? preview.file.name : undefined} target={downloadOnly ? undefined : "_blank"} rel={downloadOnly ? undefined : "noopener noreferrer"} onClick={downloadOnly ? confirmDownload : undefined}>
@@ -140,7 +159,10 @@ export function FilePanel({ onClose }: { onClose: () => void }) {
         navigationHistory={directoryHistory} registerBrowserBack={registerBrowserBack} navTarget={navSlot}
         onPathChange={path => { store.fileDirectory = { sessionId: session?.id ?? null, path }; }}
         onBrowseHistory={path => store.navigateHistory(path)}
-        onSelectFile={path => { setNotice(null); void store.openFilePreview({ path, root: sessionDirectory() ?? session?.cwd ?? "/", sessionId: session?.id }); }} />}
+        onSelectFile={path => { setNotice(null); void store.openFilePreview({ path, root: sessionDirectory() ?? session?.cwd ?? "/", sessionId: session?.id }); }}
+        onEntryMenu={(entry, x, y) => openSendMenu({ path: entry.path, root: entry.root, sessionId: session?.id }, entry.name, entry.folder, x, y)} />}
+      {sendMenu && <TaildropMenu position={sendMenu} folder={sendMenu.folder} onClose={() => setSendMenu(null)}
+        onSend={(ip, device) => sendFile(sendMenu.target, sendMenu.name, sendMenu.folder, ip, device)} />}
     </div>
   </>;
 }

@@ -1,7 +1,10 @@
 import { constants, type Stats } from "node:fs";
-import { access, open, readdir, realpath, rename, stat, unlink, type FileHandle } from "node:fs/promises";
+import { access, mkdtemp, open, readdir, realpath, rename, rm, stat, unlink, type FileHandle } from "node:fs/promises";
+import { execFile } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { homedir } from "node:os";
+import { homedir, tmpdir } from "node:os";
+import type { Readable } from "node:stream";
+import { promisify } from "node:util";
 import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
 export const TEXT_LIMIT = 1024 * 1024;
@@ -166,6 +169,42 @@ export async function getWorkContent(input: WorkFileInput, options: WorkFileOpti
     return { file: metadata(target.path, bytes.length), bytes };
   } catch (error) { fsError(error); }
   finally { await target.handle.close(); }
+}
+/** Taildrop 发送源：文件直接流式读取；文件夹先在临时目录打成 zip（tailscale file cp 不收目录）。 */
+export async function openWorkSendSource(input: WorkFileInput, options: WorkFileOptions = {}): Promise<{ name: string; stream: Readable; cleanup: () => Promise<void> }> {
+  const target = await resolveFile(input, options);
+  let info: Stats;
+  try { info = await stat(target.real); } catch (error) { fsError(error); }
+  if (!info.isDirectory()) {
+    const file = await openFile(input, options);
+    const stream = file.handle.createReadStream();
+    return { name: basename(file.path), stream, cleanup: async () => { stream.destroy(); } };
+  }
+  const name = basename(target.path);
+  if (!name) throw new WorkFileError(400, "不能发送根目录");
+  const temporary = await mkdtemp(join(tmpdir(), "wb-taildrop-"));
+  const archive = join(temporary, `${name}.zip`);
+  let directory: FileHandle | undefined;
+  let zipping = false;
+  try {
+    // 与 openFile 同样锚定 fd：检查后祖先目录被换成链接也只会打包已检查的那个目录。
+    directory = await open(target.real, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
+    const checked = await resolveFile(input, options);
+    if (await realpath(`/proc/self/fd/${directory.fd}`) !== checked.real) throw new WorkFileError(409, "读取时文件夹路径已变化，请重试");
+    // -y 把符号链接存成链接本身，不跟随到授权根目录之外；条目不带顶层目录，解压时按 zip 名建文件夹。
+    zipping = true;
+    await promisify(execFile)("zip", ["-r", "-y", "-q", archive, "."], { cwd: `/proc/${process.pid}/fd/${directory.fd}`, timeout: 10 * 60_000, maxBuffer: 1024 * 1024 });
+    zipping = false;
+    const handle = await open(archive, constants.O_RDONLY);
+    const stream = handle.createReadStream();
+    return { name: `${name}.zip`, stream, cleanup: async () => { stream.destroy(); await rm(temporary, { recursive: true, force: true }); } };
+  } catch (error) {
+    await rm(temporary, { recursive: true, force: true });
+    if (!zipping) fsError(error);
+    const failure = error as Omit<NodeJS.ErrnoException, "code"> & { code?: string | number; killed?: boolean; stderr?: string };
+    if (failure.code === 12) throw new WorkFileError(400, "文件夹为空，没有可发送的内容");
+    throw new WorkFileError(500, failure.code === "ENOENT" ? "服务器未安装 zip，无法发送文件夹" : failure.killed ? "打包文件夹超时（10 分钟）" : `打包文件夹失败：${failure.stderr?.trim() || failure.message}`);
+  } finally { await directory?.close(); }
 }
 export async function saveWorkFile(input: WorkFileInput & { version: string; text: string }, options: WorkFileOptions = {}): Promise<WorkFile> {
   if (typeof input.version !== "string" || !/^[a-f0-9]{64}$/.test(input.version) || typeof input.text !== "string") {

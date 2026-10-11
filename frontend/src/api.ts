@@ -2,7 +2,7 @@ import type { ApiEnvelope, CommandInfo, DirectoryListing, HistoryListData, Histo
 import type { AgentKind, SessionGroup, SessionOrganizationPatch } from "./types";
 import { buildHistoryQuery, type HistoryQueryInput } from "./history";
 import type { DispatchRun } from "./dispatch-flow";
-import type { TailscalePeersResult } from "../../server/tailscale-peers";
+import type { TaildropTargetsResult, TailscalePeersResult } from "../../server/tailscale-peers";
 
 // REST 信封统一为 {code,msg,data,request_id}；code 非 0 时 msg 是中文错误消息。
 async function call<T>(path: string, init?: RequestInit): Promise<T> {
@@ -46,6 +46,16 @@ export function openAppWindow(target: string): Promise<{ opened: boolean }> {
 
 export function fetchTailscalePeers(signal?: AbortSignal): Promise<TailscalePeersResult> {
   return call("/api/tailscale/peers", { signal });
+}
+
+export function fetchTaildropTargets(signal?: AbortSignal): Promise<TaildropTargetsResult> {
+  return call("/api/tailscale/file-targets", { signal });
+}
+
+/** 文件夹会先在服务端打成 zip；请求持续到 Taildrop 发送完成，超时覆盖服务端打包 10 分钟 + 发送 30 分钟。 */
+export function sendTaildrop(target: import("./types").WorkFileTarget, ip: string): Promise<{ sent: true; name: string }> {
+  return call("/api/tailscale/send", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...target, target: ip }),
+    signal: AbortSignal.timeout(45 * 60_000) });
 }
 
 export function pickWindowsDirectory(path: string): Promise<{ path: string | null }> {

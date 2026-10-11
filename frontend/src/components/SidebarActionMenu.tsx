@@ -2,11 +2,11 @@ import { useEffect, useRef, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { sidebarMenuKey } from '../sidebar-menu';
 export interface SidebarMenuItem {
-  id: string; label: string; icon?: 'pin' | 'rename' | 'folder' | 'delete' | 'back' | 'plus' | 'ungroup';
+  id: string; label: string; icon?: 'pin' | 'rename' | 'folder' | 'delete' | 'back' | 'plus' | 'ungroup' | 'send';
   shortcut?: string; trailing?: string; danger?: boolean; divider?: boolean; disabled?: boolean; onSelect: () => void;
 }
 function MenuIcon({ name }: { name: SidebarMenuItem['icon'] }) {
-  const paths = { pin: 'm8 3 8 0-1 6 3 3-5 0-1 9-1-9-5 0 3-3Z', rename: 'm4 16 0 4 4 0L20 8 16 4Z M14 6l4 4', folder: 'M3 5h7l2 3h9v12H3Z', delete: 'M3 6h18 M9 6V3h6v3 M6 6l1 15h10l1-15 M10 10v7 M14 10v7', back: 'm14 5-7 7 7 7', plus: 'M12 4v16 M4 12h16', ungroup: 'M3 5h7l2 3h9v12H3Z M9 12h6' };
+  const paths = { pin: 'm8 3 8 0-1 6 3 3-5 0-1 9-1-9-5 0 3-3Z', rename: 'm4 16 0 4 4 0L20 8 16 4Z M14 6l4 4', folder: 'M3 5h7l2 3h9v12H3Z', delete: 'M3 6h18 M9 6V3h6v3 M6 6l1 15h10l1-15 M10 10v7 M14 10v7', back: 'm14 5-7 7 7 7', plus: 'M12 4v16 M4 12h16', ungroup: 'M3 5h7l2 3h9v12H3Z M9 12h6', send: 'M22 2 11 13 M22 2l-7 20-4-9-9-4Z' };
   return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={paths[name ?? 'folder']} /></svg>;
 }
 export function SidebarActionMenu({ position, label, items, submenuItems, children, error, onClose }: {
@@ -17,7 +17,8 @@ export function SidebarActionMenu({ position, label, items, submenuItems, childr
   const activeItems = submenuItems ?? items;
   // 父行随时钟/流式重渲染会让本 effect 反复触发：自动聚焦只在进入菜单或切屏时做一次，
   // 否则 ↑↓ 键盘导航到的位置会被下一次渲染抢回第一项。
-  const screenKey = submenuItems ? `sub:${submenuItems.map(item => item.id).join(',')}` : 'main';
+  // 主屏项异步到达（如 Taildrop 设备列表）时也算新屏，补一次聚焦。
+  const screenKey = submenuItems ? `sub:${submenuItems.map(item => item.id).join(',')}` : `main:${items.length > 0}`;
   const focusedScreen = useRef<string | null>(null);
   useEffect(() => {
     const root = rootRef.current;

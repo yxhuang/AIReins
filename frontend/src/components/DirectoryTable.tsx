@@ -5,13 +5,26 @@ import type { DirectoryListing } from "../types";
 const GIT_LABELS: Record<string, string> = { M: "已修改", A: "已新增", R: "已改名", D: "已删除", U: "未跟踪", "!": "有冲突" };
 
 /** 表体直接生成文本 DOM；只在目录变化时建行，排序移动已有行，避免大目录逐行挂载 React 状态。 */
-export function DirectoryTable({ listing, busy, onActivate }: {
+export function DirectoryTable({ listing, busy, onActivate, onMenu }: {
   listing: DirectoryListing;
   busy: boolean;
   onActivate: (path: string, name: string, folder: boolean) => void;
+  /** 右键、Android 长按、菜单键走 contextmenu；iOS 长按自己计时。 */
+  onMenu?: (path: string, name: string, folder: boolean, x: number, y: number) => void;
 }) {
   const body = useRef<HTMLTableSectionElement>(null);
   const rows = useRef(new Map<string, HTMLTableRowElement>());
+  const longPress = useRef<{ timer: number; x: number; y: number } | null>(null);
+  const suppressClick = useRef(false);
+  const clearLongPress = () => { if (longPress.current) window.clearTimeout(longPress.current.timer); longPress.current = null; };
+  const entryAt = (target: EventTarget) => {
+    if (busy || !(target instanceof Element)) return null;
+    const row = target.closest<HTMLTableRowElement>("tr[data-path]");
+    if (!row || !body.current?.contains(row)) return null;
+    const folder = listing.dirs.find(entry => entry.path === row.dataset.path);
+    const entry = folder ?? listing.files?.find(entry => entry.path === row.dataset.path);
+    return entry ? { entry, folder: Boolean(folder), row } : null;
+  };
   const [sort, setSort] = useState<DirectorySort>({ key: "name", direction: "asc" });
 
   useLayoutEffect(() => {
@@ -76,12 +89,32 @@ export function DirectoryTable({ listing, busy, onActivate }: {
         </th>)}
     </tr></thead>
     <tbody ref={body} onClick={event => {
-      if (busy || !(event.target instanceof Element)) return;
-      const row = event.target.closest<HTMLTableRowElement>("tr[data-path]");
-      if (!row || !body.current?.contains(row)) return;
-      const folder = listing.dirs.find(entry => entry.path === row.dataset.path);
-      const entry = folder ?? listing.files?.find(entry => entry.path === row.dataset.path);
-      if (entry) onActivate(entry.path, entry.name, Boolean(folder));
-    }} />
+      // 只吞长按后的那次触屏点击；键盘 Enter/Space 的 click detail 为 0，不受残留标记影响。
+      if (suppressClick.current) { suppressClick.current = false; if (event.detail !== 0) return; }
+      const hit = entryAt(event.target);
+      if (hit) onActivate(hit.entry.path, hit.entry.name, hit.folder);
+    }} onContextMenu={onMenu && (event => {
+      const hit = entryAt(event.target);
+      if (!hit) return;
+      event.preventDefault();
+      clearLongPress();
+      const rect = hit.row.getBoundingClientRect();
+      if (event.clientX === 0 && event.clientY === 0) onMenu(hit.entry.path, hit.entry.name, hit.folder, rect.left + 24, rect.bottom);
+      else onMenu(hit.entry.path, hit.entry.name, hit.folder, event.clientX, event.clientY);
+    })} onPointerDown={onMenu && (event => {
+      suppressClick.current = false;
+      if (event.pointerType !== "touch") return;
+      const hit = entryAt(event.target);
+      if (!hit) return;
+      const { clientX: x, clientY: y } = event;
+      longPress.current = { x, y, timer: window.setTimeout(() => {
+        longPress.current = null;
+        suppressClick.current = true;
+        onMenu(hit.entry.path, hit.entry.name, hit.folder, x, y);
+      }, 500) };
+    })} onPointerMove={event => {
+      const start = longPress.current;
+      if (start && Math.hypot(event.clientX - start.x, event.clientY - start.y) > 10) clearLongPress();
+    }} onPointerUp={clearLongPress} onPointerCancel={clearLongPress} />
   </table>;
 }
