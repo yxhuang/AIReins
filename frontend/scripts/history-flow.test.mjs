@@ -26,6 +26,7 @@ const {
 } = await import("../src/history.ts");
 const { fetchHistory, fetchHistoryMessages } = await import("../src/api.ts");
 const { Store, store } = await import("../src/store.ts");
+store.meta = { capabilities: { terminal: true, windowsPaths: true }, drivers: {} };
 const { HistoryRow, HistoryPreviewPane, HistoryView } = await import("../src/components/HistoryView.tsx");
 const { Sidebar } = await import("../src/components/Sidebar.tsx");
 const { FilePanel } = await import("../src/components/FilePanel.tsx");
@@ -136,6 +137,7 @@ await t("fetchHistory：query 正确，data 字段（含 nextCursor/truncated/sk
 
 await t("文件目录跳历史：共享筛选生效，关闭保留，显式清除", () => {
   const s = new Store();
+  s.meta = { capabilities: { terminal: true, windowsPaths: true }, drivers: {} };
   s.navigateHistory("C:\\Users\\project\\");
   assert.equal(s.historyOpen, true);
   assert.equal(s.historyCwdFilter, "/mnt/c/Users/project");
@@ -429,7 +431,7 @@ await t("目录按钮：手机/无能力用 DirectoryBrowser，桌面有能力�
   globalThis.fetch = async (url, init) => { calls.push({ url, init }); return envelope({ path: "D:\\project" }); };
   for (const [mobile, capable] of [[true, true], [false, false], [false, true]]) {
     window.matchMedia = () => ({ matches: mobile });
-    store.meta = { ...oldMeta, capabilities: { windowsDirectoryPicker: capable } };
+    store.meta = { ...oldMeta, capabilities: { windowsDirectoryPicker: capable, windowsPaths: true } };
     store.setHistoryCwdFilter("/a/b");
     const render = componentFixture(() => HistoryView());
     await treeButtons(render()).find(node => node.props["aria-label"] === "选择目录筛选").props.onClick();

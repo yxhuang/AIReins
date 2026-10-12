@@ -661,7 +661,7 @@ export class Store {
   }
 
   setHistoryCwdFilter(cwd: string): void {
-    const next = normalizeHistoryDirectory(cwd, this.meta?.homeDir);
+    const next = normalizeHistoryDirectory(cwd, this.meta?.homeDir, this.meta?.capabilities.windowsPaths === true);
     if (next === this.historyCwdFilter) return;
     this.historyCwdFilter = next;
     this.notify();

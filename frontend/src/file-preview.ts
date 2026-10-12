@@ -1,7 +1,7 @@
 import { normalizeDirectoryPath } from "./directory-path";
 
 /** 普通网页保持外链；只有明确文件 URI 或会话所属 cwd 的路径才接入面板。 */
-export function resolveLocalFileLink(href: string, cwd?: string): string | null {
+export function resolveLocalFileLink(href: string, cwd?: string, windowsPaths = true): string | null {
   if (!href || href.startsWith("#") || href.startsWith("//")) return null;
   let path = href;
   if (/^file:/i.test(path)) {
@@ -17,11 +17,12 @@ export function resolveLocalFileLink(href: string, cwd?: string): string | null 
   path = path.split(/[?#]/, 1)[0]!.replace(/:\d+(?::\d+)?$/, "");
   try { path = decodeURIComponent(path); } catch { return null; }
   if (/^vscode:\/\/file/i.test(href) && /^\/[a-z]:[\\/]/i.test(path)) path = path.slice(1);
-  path = normalizeDirectoryPath(path);
+  if (!windowsPaths && /^[a-z]:[\\/]/i.test(path)) return null;
+  path = normalizeDirectoryPath(path, windowsPaths);
   if (!path || path.includes("\0")) return null;
   if (!path.startsWith("/")) {
-    if (!cwd || !normalizeDirectoryPath(cwd).startsWith("/")) return null;
-    path = `${normalizeDirectoryPath(cwd)}/${path}`;
+    if (!cwd || !normalizeDirectoryPath(cwd, windowsPaths).startsWith("/")) return null;
+    path = `${normalizeDirectoryPath(cwd, windowsPaths)}/${path}`;
   }
   const parts: string[] = [];
   for (const part of path.split("/")) {

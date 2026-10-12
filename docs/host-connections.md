@@ -1,12 +1,30 @@
 # 本机与远程 Workbench
 
-每台电脑独立运行 Workbench 和所在 WSL/Linux 的 Agent。点击左上角 **wb｜本机/远程机器名** 整体按钮（文字沿用 Workbench 字体样式），菜单收窄为300px，选择「机器名（本机）」或已保存的 Tailscale 机器；按钮保留 wb 标志，使用描边、高光、轻投影和按压反馈，去掉小箭头。窗口标题显示 `Workbench · 本机` 或 `Workbench · 远程 <机器名>`，待处理闸门计数仍保留。通过 Tailscale 地址访问，即使是这台机器自身，也按远程入口显示。
+每台电脑独立运行 Workbench 和所在 WSL/原生 Linux/macOS 的 Agent。点击左上角 **wb｜本机/远程机器名** 整体按钮（文字沿用 Workbench 字体样式），菜单收窄为300px，选择「机器名（本机）」或已保存的 Tailscale 机器；按钮保留 wb 标志，使用描边、高光、轻投影和按压反馈，去掉小箭头。窗口标题显示 `Workbench · 本机` 或 `Workbench · 远程 <机器名>`，待处理闸门计数仍保留。通过 Tailscale 地址访问，即使是这台机器自身，也按远程入口显示。
 
 ## 另一台电脑安装
 
-在它自己的 WSL/Linux 中 clone 本仓库，进入仓库运行 `bash install.sh`；依赖要求见 [新电脑安装](../README.md#新电脑安装)。脚本安装 `wb` 命令，WSL 下也安装 Windows 托盘与快捷方式；完成后手动固定到任务栏。Windows Tailscale 已安装、登录并运行时，脚本自动生成缺失的 `~/.workbench/remote.json`（本机 MagicDNS origin、本机用户白名单、8793 端口、权限 600、远程终端默认开启 `terminal: true`），已有配置只校验并打印 origin、不覆盖。登录任务缺失时弹出一次 UAC，允许后安装 Windows 远程网关及 Serve；已有任务打印状态并跳过，拒绝或失败时打印手动命令且继续本机安装。新配置遇到已运行 WB 时提示「运行 wb restart 使远程入口生效」，不会自动重启；未运行则按现有冒烟流程处理。
+在该电脑的 WSL2、原生 Linux 或 macOS 中 clone 本仓库并运行 `bash install.sh`；依赖要求见 [README 平台支持](../README.zh-CN.md#平台支持)。WSL2 是日常主力，原生 Linux 有必过的 Ubuntu CI；macOS 为实验性、仅 CI 覆盖，作者没有实机，欢迎在 issue 反馈。CI 首次执行需公开仓库启用，本次不声称 Actions 已通过。
 
-`git pull` 后重跑同一命令即可更新；`bash install.sh --check` 只读报告 remote.json、Serve 与计划任务状态，不写文件或弹 UAC。非 WSL、无 Tailscale 或未登录时跳过远程配置，登录后可重跑。CLI 安装、登录和本地工作目录属于那台电脑，clone 仓库不会复制这些状态。远程终端默认开启；如需关闭把 `terminal` 改为 `false` 后 `wb restart`（旧配置缺 `terminal` 字段时终端关闭，补上 `"terminal": true` 即开）。系统代理须把 `*.ts.net` 加入绕过，否则浏览器可能报 `ERR_TUNNEL_CONNECTION_FAILED`。
+| 平台 | 依赖与浏览器 | 桌面集成 | 远程入口 |
+|---|---|---|---|
+| WSL2 | Node ≥ 22.12、npm、ss、rg；wslview/explorer.exe | Windows 托盘、快捷方式、Chrome App 窗口 | Windows Tailscale + 网关，沿用原安装流程 |
+| 原生 Linux | Node ≥ 22.12、npm、ss、rg；xdg-open | 默认浏览器；systemd 为可选部署 | 同机 Tailscale Serve 直连远程 loopback |
+| macOS 实验性 | Node ≥ 22.12、npm、lsof、rg；open | 默认浏览器，无托盘/网关 | 同机 Tailscale Serve 直连远程 loopback |
+
+`wb` 安装到 `~/.local/bin`；macOS 通常需将其加入 `~/.zshrc` 的 PATH。WSL 下仍安装 Windows 托盘与快捷方式，任务栏固定需手动操作。WSL 的 Windows Tailscale 已登录时生成缺失 `~/.workbench/remote.json`（MagicDNS origin、登录白名单、8793、权限 600、`terminal:false`）；已有配置不覆盖，登录任务缺失仍按原流程经 UAC 安装网关/Serve。Windows 登录启动参考 [REMOTE.md](../deploy/windows/REMOTE.md)。
+
+原生 Linux/macOS 上须在同一台主机安装并登录 Tailscale。安装器仅读 `tailscale status --json`，生成缺失的 `${WORKBENCH_HOME:-~/.workbench}/remote.json`，保留已有或无效文件；不会改用户 Tailscale 配置，只打印需要自行执行的命令：
+
+```bash
+tailscale serve --bg http://127.0.0.1:8793
+```
+
+端口按 remote.json/安装器打印值替换。macOS PATH 未找到 CLI 时回退 `/Applications/Tailscale.app/Contents/MacOS/Tailscale`；命令打印该实际路径。没有网关，Serve 直接转发本机远程监听，仍只绑定 loopback，完整 Host/Origin、Tailscale 登录白名单和禁止 Funnel 的安全边界不变。
+
+`git pull` 后重跑即可更新；`bash install.sh --check` 只读体检，不安装或写配置。新配置遇到正在运行的 WB 时只提示择时 `wb restart`，不自动重启。远程终端新配置默认关闭，要启用须显式 `terminal:true`；已有 true 保留。CLI 登录/配置和工作目录属于目标机器，不由 clone 复制。系统代理须绕过 `*.ts.net`。
+
+`deploy/systemd/` 是 Linux/WSL 的可选无人值守入口，非安装器必需项，macOS 不使用 systemd。macOS 的文件编辑及文件夹 Taildrop 暂隐藏以保留目录 fd 安全保证；预览/下载及普通文件发送可用。
 
 ## 双向连接
 

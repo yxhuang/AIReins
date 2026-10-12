@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { existsSync, readdirSync } from "node:fs";
-import { release } from "node:os";
+import { platform } from "./platform.js";
 import type { AccessPolicy } from "./access.js";
 
 export class AppWindowError extends Error {
@@ -12,8 +12,7 @@ function mountedPath(value: string): string {
 }
 
 /** 与托盘一致的两个系统安装目录和用户 LOCALAPPDATA 安装目录；只读文件，不运行 Windows 命令。 */
-export function findWindowsChrome(wsl = process.platform === "linux" &&
-  (Boolean(process.env.WSL_INTEROP || process.env.WSL_DISTRO_NAME) || /microsoft/i.test(release()))): string | null {
+export function findWindowsChrome(wsl = platform === "wsl"): string | null {
   if (!wsl) return null;
   const candidates = [
     `${mountedPath(process.env.ProgramFiles || "C:\\Program Files")}/Google/Chrome/Application/chrome.exe`,

@@ -1,11 +1,26 @@
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
+import childProcess, { spawn } from "node:child_process";
 import fs, { readFileSync } from "node:fs";
 import { syncBuiltinESMExports } from "node:module";
 import { once } from "node:events";
-import { captureWorkerIdentity, oldWorkerGone, readSystemBootTime } from "./worker-process.js";
+import { captureWorkerIdentity as captureIdentity, oldWorkerGone as workerGone, readSystemBootTime as bootTime } from "./worker-process.js";
 import type { WorkerProcessIdentity } from "./types.js";
 
+const captureWorkerIdentity = (pid?: number) => captureIdentity(pid, "linux");
+const oldWorkerGone = (record: Parameters<typeof workerGone>[0]) => workerGone(record, "linux");
+const readSystemBootTime = () => bootTime("linux");
+// Linux fixtures run on BSD too; only the real-platform observation below reads /proc.
+if (process.platform === "linux") assert.ok(captureIdentity(process.pid, "linux"));
+const originalRead = fs.readFileSync;
+const fixtureBoot = "01234567-89ab-4cde-8012-3456789abcde";
+const fixtureStat = `${process.pid} (fixture) S 1 1 ` + Array(16).fill("0").join(" ") + " 123456";
+fs.readFileSync = ((path: unknown, ...args: unknown[]) => {
+  if (path === "/proc/sys/kernel/random/boot_id") return fixtureBoot;
+  if (path === `/proc/${process.pid}/stat`) return fixtureStat;
+  if (typeof path === "string" && /^\/proc\/\d+\/stat$/.test(path)) throw Object.assign(new Error("absent"), { code: "ENOENT" });
+  return (originalRead as (...args: unknown[]) => unknown)(path, ...args);
+}) as typeof fs.readFileSync;
+syncBuiltinESMExports();
 const absentPid = 2_000_000_000;
 const current = captureWorkerIdentity(process.pid);
 assert.ok(current, "Linux 当前进程身份应可读取");
@@ -115,7 +130,9 @@ console.log("✅ worker process: system-boot-time-parses-complete-btime-and-bloc
 // 单独拥有的 Node 进程组：leader 退出后 child 仍活着，不能因为 leader ESRCH 就恢复。
 // child 自带 10 秒退出上限；finally 只操作本测试启动的组，并等输出管道关闭确认结束。
 // 当前沙箱内 leader 两次未报告 child PID，实际进程冒烟留给明确开启的外部验收。
-if (process.env.WORKBENCH_TEST_PROCESS_GROUP === "1") {
+fs.readFileSync = originalRead;
+syncBuiltinESMExports();
+if (process.env.WORKBENCH_TEST_PROCESS_GROUP === "1" && process.platform === "linux") {
 const childSource = "setTimeout(() => process.exit(0), 10000)";
 const leaderSource = `
   const { spawn } = require('node:child_process');
@@ -166,3 +183,48 @@ try {
 } else {
   console.log("⏭ worker process: real-owned-group-child smoke skipped; WORKBENCH_TEST_PROCESS_GROUP=1 enables it");
 }
+
+const originalExec = childProcess.execFileSync;
+let darwinBoot = fixtureBoot;
+let psOutput = `Mon Oct 12 08:00:00 2020 ${process.pid}`;
+let bootOutput = "{ sec = 1700000000, usec = 123456 }";
+childProcess.execFileSync = ((command: string, args: string[]) => {
+  if (command === "ps") return psOutput;
+  assert.equal(command, "sysctl");
+  return args[1] === "kern.boottime" ? bootOutput : darwinBoot;
+}) as typeof childProcess.execFileSync;
+syncBuiltinESMExports();
+try {
+  const identity = captureIdentity(process.pid, "darwin");
+  assert.ok(identity);
+  assert.equal(identity.processGroupId, process.pid);
+  assert.equal(identity.startTime, String(Date.parse("Mon Oct 12 08:00:00 2020")));
+  assert.equal(bootTime("darwin"), 1_700_000_000_123);
+  bootOutput = "{ sec = 1700000000, usec = 123456 } Tue Nov 14 22:13:20 2023";
+  assert.equal(bootTime("darwin"), 1_700_000_000_123);
+  assert.equal(workerGone({ processId: process.pid, processIdentity: identity }, "darwin"), false);
+  withKill(pid => { if (pid === absentPid || pid === -absentPid) throw errno("ESRCH"); return true; }, () => {
+    assert.equal(workerGone({ processId: absentPid, processIdentity: { ...identity, processGroupId: absentPid } }, "darwin"), true);
+  });
+  withKill(pid => { if (pid === absentPid) throw errno("ESRCH"); return true; }, () => {
+    assert.equal(workerGone({ processId: absentPid, processIdentity: { ...identity, processGroupId: absentPid } }, "darwin"), false);
+  });
+  withKill(() => { throw errno("EPERM"); }, () => assert.equal(workerGone({ processId: absentPid, processIdentity: identity }, "darwin"), false));
+  assert.equal(workerGone({ processId: process.pid, processIdentity: { ...identity, startTime: "1" } }, "darwin"), false,
+    "BSD 秒级启动时间不能证明存活 PID 已复用");
+  darwinBoot = "11234567-89ab-4cde-8012-3456789abcde";
+  assert.equal(workerGone({ processId: process.pid, processIdentity: identity }, "darwin"), true);
+  darwinBoot = "unavailable";
+  assert.equal(captureIdentity(process.pid, "darwin"), undefined);
+  assert.equal(workerGone({ processId: absentPid, processIdentity: identity }, "darwin"), false);
+  darwinBoot = fixtureBoot;
+  for (const bad of ["", "invalid", "Mon Oct 12 08:00:00 2099 1"]) {
+    psOutput = bad;
+    assert.equal(captureIdentity(process.pid, "darwin"), undefined);
+  }
+  for (const bad of ["", "{ sec = 1700000000, usec = 1000000 }", "{ sec = 9007199254740991, usec = 0 }", "{ sec = 9999999999, usec = 0 }"]) {
+    bootOutput = bad;
+    assert.equal(bootTime("darwin"), undefined);
+  }
+  console.log("✅ worker process: BSD identity boot proof and conservative recovery");
+} finally { childProcess.execFileSync = originalExec; syncBuiltinESMExports(); }

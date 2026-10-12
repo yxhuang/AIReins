@@ -2,7 +2,9 @@
 # 新电脑安装；git pull 后重跑即更新。--check 只体检，不安装。
 set -uo pipefail
 
-REPO="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)" || exit 1
+REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)" || exit 1
+source "$REPO/bin/workbench"
+# 被 source 的启动器目录仍是同一个仓库。
 successes=()
 warnings=()
 errors=()
@@ -27,11 +29,11 @@ esac
 if (( $# > 1 )); then printf '用法：bash install.sh [--check]\n' >&2; exit 2; fi
 
 printf 'Workbench 安装依赖体检\n'
-if [[ "$(uname -s)" == Linux ]]; then
-  ok 'Linux'
-else
-  fail '需要 Linux；请在 WSL Ubuntu 中运行 bash install.sh。'
-fi
+case "$PLATFORM" in
+  wsl|linux) ok 'Linux' ;;
+  darwin) ok 'macOS（实验性）' ;;
+  *) fail '需要 WSL2、原生 Linux 或 macOS（实验性）。' ;;
+esac
 node_version="$(node --version 2>/dev/null || true)"
 node_major="${node_version#v}"
 node_minor="${node_version#v*.}"
@@ -42,30 +44,44 @@ if [[ "$node_major" =~ ^[0-9]+$ && "$node_minor" =~ ^[0-9]+$ ]] && (( 10#$node_m
   ok "Node $node_version（≥ 22.12）"
 else
   fail "Node 未安装或版本过低（${node_version:-未安装}）；需要 ≥ 22.12。"
-  printf '%s\n' '  请自行执行（需要 sudo）：' \
-    '  sudo apt-get update && sudo apt-get install -y curl' \
-    '  curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -' \
-    '  sudo apt-get install -y nodejs'
+  if [[ "$PLATFORM" == darwin ]]; then
+    printf '%s\n' '  请安装 Node ≥ 22.12（https://nodejs.org/），或自行执行 brew install node。'
+  else
+    printf '%s\n' '  请自行执行（需要 sudo）：' \
+      '  sudo apt-get update && sudo apt-get install -y curl' \
+      '  curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -' \
+      '  sudo apt-get install -y nodejs'
+  fi
 fi
-for dep in npm ss rg; do
+port_tool=ss
+[[ "$PLATFORM" == darwin ]] && port_tool=lsof
+for dep in npm "$port_tool" rg; do
   if command -v "$dep" >/dev/null 2>&1; then
     ok "$dep 已安装"
   elif [[ "$dep" == ss ]]; then
     fail '缺少 ss；修复：sudo apt-get install -y iproute2'
+  elif [[ "$dep" == lsof ]]; then
+    fail '缺少 lsof（macOS 端口检测需要）。'
   elif [[ "$dep" == rg ]]; then
-    fail '缺少 rg（ripgrep，文件检索需要）；修复：sudo apt-get install -y ripgrep'
+    if [[ "$PLATFORM" == darwin ]]; then fail '缺少 rg（ripgrep，文件检索需要）；修复：brew install ripgrep'
+    else fail '缺少 rg（ripgrep，文件检索需要）；修复：sudo apt-get install -y ripgrep'; fi
   else
+    if [[ "$PLATFORM" == darwin ]]; then
+      fail '缺少 npm；请重新安装 Node ≥ 22.12（含 npm）。'
+      continue
+    fi
     fail '缺少 npm；修复：用 NodeSource 22 安装 nodejs（含 npm）。'
     # Node 已达标但 npm 缺失时，也给出完整修复入口。
     printf '%s\n' '  sudo apt-get update && sudo apt-get install -y curl' \
-      '  curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash - && sudo apt-get install -y nodejs'
+        '  curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash - && sudo apt-get install -y nodejs'
   fi
 done
 for dep in python3 curl; do
   if command -v "$dep" >/dev/null 2>&1; then
     ok "$dep 已安装"
   else
-    warn "$dep 未安装（wb status 使用它）；可执行 sudo apt-get install -y $dep。"
+    if [[ "$PLATFORM" == darwin ]]; then warn "$dep 未安装（wb status 使用它）；可自行安装。"
+    else warn "$dep 未安装（wb status 使用它）；可执行 sudo apt-get install -y $dep。"; fi
   fi
 done
 cli_found=false
@@ -85,13 +101,15 @@ fi
 if [[ ":$PATH:" == *":$HOME/.local/bin:"* ]]; then
   ok '~/.local/bin 已在 PATH 中'
 else
-  warn '~/.local/bin 不在 PATH；请把下面一行加入 ~/.bashrc，再 source ~/.bashrc：'
+  if [[ "$PLATFORM" == darwin ]]; then warn '~/.local/bin 不在 PATH；请把下面一行加入当前 shell 的配置（通常 ~/.zshrc），重新打开终端：'
+  else warn '~/.local/bin 不在 PATH；请把下面一行加入 ~/.bashrc，再 source ~/.bashrc：'; fi
   printf '%s\n' '  export PATH="$HOME/.local/bin:$PATH"'
 fi
-if [[ -n "${WSL_DISTRO_NAME:-}" ]]; then
+if [[ "$PLATFORM" == wsl ]]; then
   if command -v powershell.exe >/dev/null 2>&1; then
-    ok "WSL $WSL_DISTRO_NAME：powershell.exe 可用（安装时检查 interop）"
-    windows=true
+    ok "WSL ${WSL_DISTRO_NAME:-未知发行版}：powershell.exe 可用（安装时检查 interop）"
+    if [[ -n "${WSL_DISTRO_NAME:-}" ]]; then windows=true
+    else warn '缺少 WSL_DISTRO_NAME；跳过依赖发行版名称的 Windows 安装。'; fi
   else
     warn 'WSL 中 powershell.exe 不可用，interop 未开启或 Windows PATH 未导入；跳过托盘安装。'
   fi
@@ -102,7 +120,9 @@ fi
 if [[ "${1:-}" == --check ]] || (( ${#errors[@]} > 0 )); then
   if [[ "$node_major" =~ ^[0-9]+$ ]] && (( 10#$node_major >= 22 )); then
     printf '\n远程入口体检（只读）\n'
-    node "$REPO/deploy/windows/install-remote.mjs" --check || warn '远程入口体检未完成，请检查上面的提示。'
+    if [[ "$PLATFORM" == wsl ]]; then remote_installer="$REPO/deploy/windows/install-remote.mjs"
+    else remote_installer="$REPO/deploy/install-posix-remote.mjs"; fi
+    node "$remote_installer" --check || warn '远程入口体检未完成，请检查上面的提示。'
   else
     warn 'remote.json / Serve / Workbench Remote Gateway：需要 Node ≥ 22 才能体检。'
   fi
@@ -169,7 +189,9 @@ if "$windows"; then
 fi
 
 printf '\n配置 Tailscale 远程入口\n'
-node "$REPO/deploy/windows/install-remote.mjs"
+if [[ "$PLATFORM" == wsl ]]; then remote_installer="$REPO/deploy/windows/install-remote.mjs"
+else remote_installer="$REPO/deploy/install-posix-remote.mjs"; fi
+node "$remote_installer"
 remote_rc=$?
 case "$remote_rc" in
   0) ;;
@@ -254,7 +276,7 @@ if [[ -n "$started_pid" ]]; then
 fi
 
 summary
-if [[ -n "${WSL_DISTRO_NAME:-}" ]]; then
+if [[ "$PLATFORM" == wsl ]]; then
   printf '\n最后一步：开始菜单（或桌面）找到“Workbench 工作台” → 右键 → 固定到任务栏（Windows 不提供程序化固定任务栏的可靠接口）。\n'
   printf '已有同名任务栏固定项时，安装器已一并更新，安装成功后无需重固定。\n'
 fi

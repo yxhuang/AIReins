@@ -1,3 +1,4 @@
+import { vscodeFileUri } from "./platform.js";
 import { homedir } from "node:os";
 import { isAbsolute, join } from "node:path";
 
@@ -54,13 +55,7 @@ export function parseMcpAction(input: unknown): McpAction {
 }
 
 /** 与续接按钮相同的协议打开方式；不会在服务器上启动编辑器。 */
-export function menuFileUri(path: string, distro = process.env.WSL_DISTRO_NAME): string | null {
-  if (!isAbsolute(path) || /[\x00-\x1f]/.test(path)) return null;
-  const encoded = path.split("/").map(encodeURIComponent).join("/");
-  return distro?.trim()
-    ? `vscode://vscode-remote/wsl+${encodeURIComponent(distro.trim())}${encoded}`
-    : `vscode://file${encoded}`;
-}
+export const menuFileUri = vscodeFileUri;
 
 export function menuSettingsFiles(cwd: string, configDir = process.env.CLAUDE_CONFIG_DIR || join(homedir(), ".claude")) {
   return [

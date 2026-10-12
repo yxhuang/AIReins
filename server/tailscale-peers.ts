@@ -1,6 +1,6 @@
 import { execFile, spawn } from "node:child_process";
 import { isIP } from "node:net";
-import { release } from "node:os";
+import { tailscaleExecutables } from "./platform.js";
 import type { Readable } from "node:stream";
 import { promisify } from "node:util";
 
@@ -55,10 +55,6 @@ export function parseTailscalePeers(text: string): TailscalePeersResult {
 }
 
 const run = promisify(execFile);
-function tailscaleExecutables(): string[] {
-  const wsl = process.platform === "linux" && (Boolean(process.env.WSL_INTEROP || process.env.WSL_DISTRO_NAME) || /microsoft/i.test(release()));
-  return ["tailscale", ...(wsl ? ["/mnt/c/Program Files/Tailscale/tailscale.exe"] : [])];
-}
 /** 按顺序找可用的 tailscale CLI；都不存在返回 null。 */
 async function runTailscale(args: string[]): Promise<{ executable: string; stdout: string } | null> {
   for (const executable of tailscaleExecutables()) {

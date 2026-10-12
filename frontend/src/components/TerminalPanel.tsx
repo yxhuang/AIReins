@@ -1,3 +1,4 @@
+import { useStore } from "../useStore";
 import { Fragment, useEffect, useRef, useState } from "react";
 import { Terminal, type ITheme } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
@@ -11,6 +12,7 @@ import {
   isTerminalPasteKey,
   isTerminalCopyKey,
   createTermTitlebarGesture,
+  terminalShellOptions,
   TERM_ACTIVE_STORAGE_KEY,
   TERM_SHORTCUT_KEYS,
   buildTerminalWsUrl,
@@ -78,11 +80,6 @@ function readTermFontFamily(): string {
   return mono ? `${NERD_FONTS}, ${mono}` : `${NERD_FONTS}, monospace`;
 }
 
-const SHELL_OPTIONS: Array<{ value: ShellKind; label: string }> = [
-  { value: "bash", label: "bash" },
-  { value: "powershell", label: "PowerShell" },
-];
-
 interface TermRuntime {
   focus: () => void;
   fit: () => void;
@@ -123,6 +120,8 @@ function writeSavedActiveTerminalId(id: string | null): void {
  * localStorage 记的激活 id，其次第一个未退出终端，都没有就新建 bash。
  */
 export function TerminalPanel({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const powershell = useStore(value => value.meta?.capabilities.powershell === true);
+  const shellOptions = terminalShellOptions(powershell);
   const hostRef = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useSidePanelWidth();
   const [maximized, setMaximized] = useState(false);
@@ -557,7 +556,7 @@ export function TerminalPanel({ open, onClose }: { open: boolean; onClose: () =>
           <Segmented
             className="term-shells"
             buttonClassName="term-shell"
-            options={SHELL_OPTIONS}
+            options={shellOptions}
             value={info?.kind ?? null}
             ariaLabel="切换 shell"
             disabled={confirmKill || switching || killBusy}

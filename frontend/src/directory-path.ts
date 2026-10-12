@@ -1,19 +1,19 @@
 /** 接受资源管理器的盘符路径（含“复制为路径”的双引号）；保留 Linux 路径中的反斜杠。 */
-export function normalizeDirectoryPath(value: string): string {
+export function normalizeDirectoryPath(value: string, windowsPaths = true): string {
   let path = value.trim();
   if (path.startsWith('"') && path.endsWith('"')) path = path.slice(1, -1);
   const drive = /^([a-z]):[\\/](.*)$/is.exec(path);
-  return drive ? `/mnt/${drive[1]!.toLowerCase()}/${drive[2]!.replaceAll("\\", "/")}` : path;
+  return drive && windowsPaths ? `/mnt/${drive[1]!.toLowerCase()}/${drive[2]!.replaceAll("\\", "/")}` : path;
 }
 
-export function recentDirectoryPaths(sessions: readonly { cwd: string; lastActivityAt: string }[], extra: readonly string[] = []): string[] {
+export function recentDirectoryPaths(sessions: readonly { cwd: string; lastActivityAt: string }[], extra: readonly string[] = [], windowsPaths = true): string[] {
   const ordered = [...sessions].sort((a, b) => (Date.parse(b.lastActivityAt) || 0) - (Date.parse(a.lastActivityAt) || 0));
-  return [...new Set([...extra, ...ordered.map(session => session.cwd)].map(normalizeDirectoryPath).filter(path => path.startsWith("/")))].slice(0, 8);
+  return [...new Set([...extra, ...ordered.map(session => session.cwd)].map(path => normalizeDirectoryPath(path, windowsPaths)).filter(path => path.startsWith("/")))].slice(0, 8);
 }
 
-export function directoryBreadcrumbs(path: string): { label: string; path: string }[] {
+export function directoryBreadcrumbs(path: string, windowsPaths = true): { label: string; path: string }[] {
   const parts = path.split("/").filter(Boolean);
-  const windows = parts[0] === "mnt" && /^[a-z]$/i.test(parts[1] ?? "");
+  const windows = windowsPaths && parts[0] === "mnt" && /^[a-z]$/i.test(parts[1] ?? "");
   let current = windows ? `/mnt/${parts[1]}` : "";
   const crumbs = [{ label: windows ? `${parts[1]?.toUpperCase()}:` : "/", path: current || "/" }];
   for (const part of parts.slice(windows ? 2 : 0)) {

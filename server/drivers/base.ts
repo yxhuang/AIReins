@@ -2,6 +2,7 @@ import { spawn, type ChildProcessWithoutNullStreams, type SpawnOptionsWithoutStd
 import { openSync, fstatSync, readSync, closeSync } from "node:fs";
 import { createInterface } from "node:readline";
 import { log } from "../logger.js";
+import { platform } from "../platform.js";
 import type {
   AgentKind,
   Driver,
@@ -57,7 +58,7 @@ export abstract class BaseDriver implements Driver {
     const child = spawn(command, args, {
       cwd: this.cwd,
       // Keep launcher descendants identifiable after wb or the launcher itself is killed.
-      detached: process.platform === "linux",
+      detached: platform === "linux" || platform === "wsl" || platform === "darwin",
       ...options,
       env,
       stdio: ["pipe", "pipe", "pipe"],

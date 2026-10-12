@@ -10,3 +10,5 @@ First public release.
 - Dispatch view for sub-agents and delegated runs.
 - Phone layout; remote access through Tailscale Serve with a login allowlist; switching between computers on the tailnet.
 - Windows + WSL2 installer with tray icon, Start-menu shortcut and remote gateway.
+- Native Linux support and experimental macOS installation/startup, platform capabilities that hide unavailable actions, and Ubuntu/macOS CI with isolated startup checks. macOS file editing and folder Taildrop remain disabled pending secure directory-fd support.
+- Released under the MIT License; [NOTICE](NOTICE) lists what it does not cover.

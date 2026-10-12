@@ -1,3 +1,4 @@
+import { getPlatformCapabilities, platform } from "./platform.js";
 import { createReadStream, statSync } from "node:fs";
 import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
@@ -405,8 +406,10 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       await respond(response, 200, 0, "success", {
         ...meta,
         hostName: getServerHostName(REMOTE_CONFIG?.origin),
-        capabilities: { terminal: terminalEnabled(policy, REMOTE_CONFIG), windowsDirectoryPicker: windowsPickerEnabled(policy.kind === "local"),
-          appWindow: appWindowEnabled(policy, APP_CHROME), powerOff: powerOffEnabled(prefs.shutdownCommand) },
+        platform,
+        capabilities: getPlatformCapabilities({ local: policy.kind === "local", remoteTerminal: REMOTE_CONFIG?.terminal,
+          chrome: appWindowEnabled(policy, APP_CHROME), picker: windowsPickerEnabled(policy.kind === "local"),
+          powerOff: powerOffEnabled(prefs.shutdownCommand) }),
       }, requestId);
     } else if (method === "POST" && url.pathname === "/api/open-app-window") {
       if (policy.kind !== "local") throw new ApiError(403, 40300, "仅本机入口可打开 WB 窗口");

@@ -141,7 +141,8 @@ function installerFixture(running = true, extraEnv = {}) {
   copyFileSync(fileURLToPath(new URL('../../../install.sh', import.meta.url)), join(repo, 'install.sh'));
   const trace = join(home, 'calls');
   const executable = (path, text) => writeFileSync(path, '#!/bin/bash\n' + text + '\n', { mode: 0o755 });
-  executable(join(repo, 'bin/workbench'), `echo "wb $*" >> "$TEST_TRACE"
+  executable(join(repo, 'bin/workbench'), `if [[ "\${BASH_SOURCE[0]}" != "$0" ]]; then PLATFORM=wsl; return 0; fi
+echo "wb $*" >> "$TEST_TRACE"
 case "$1" in
   status) if [[ -f "$TEST_HOME/running" ]]; then echo '运行中（PID 123）'; else echo '未运行'; fi ;;
   start) touch "$TEST_HOME/running"; echo '已启动（PID 123）' ;;

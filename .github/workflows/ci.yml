@@ -1,0 +1,37 @@
+name: CI
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  verify:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    continue-on-error: ${{ matrix.os == 'macos-latest' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.12.0'
+          cache: npm
+      - name: Install file-search dependency
+        shell: bash
+        run: |
+          if [[ "$RUNNER_OS" == macOS ]]; then
+            command -v rg >/dev/null || brew install ripgrep
+          else
+            sudo apt-get update
+            sudo apt-get install -y ripgrep
+          fi
+      - run: npm ci
+      - run: npm run build
+      - run: npm test
+      - run: npm run test:hosts
+      - run: node deploy/windows/tests/install-remote.test.mjs
+      - run: npm run typecheck && npm run typecheck:frontend && npm run check:theme
+      - run: bash -n bin/workbench install.sh
+      - run: node scripts/ci-smoke.mjs

@@ -6,6 +6,7 @@ import { homedir, tmpdir } from "node:os";
 import type { Readable } from "node:stream";
 import { promisify } from "node:util";
 import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { platform, type Platform } from "./platform.js";
 
 export const TEXT_LIMIT = 1024 * 1024;
 export const MEDIA_LIMIT = 32 * 1024 * 1024;
@@ -13,7 +14,7 @@ export class WorkFileError extends Error {
   constructor(public readonly status: number, message: string) { super(message); }
 }
 export interface WorkFileInput { path: string; root: string; }
-export interface WorkFileOptions { sessionCwd?: string; }
+export interface WorkFileOptions { sessionCwd?: string; platform?: Platform; }
 export interface WorkFile {
   path: string;
   name: string;
@@ -32,13 +33,13 @@ const imageTypes: Record<string, string> = {
 const office = new Set([".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx", ".odt", ".ods", ".odp", ".docm", ".xlsm", ".pptm"]);
 const saves = new Map<string, Promise<void>>();
 
-export function normalizeWorkPath(value: unknown): string {
+export function normalizeWorkPath(value: unknown, os: Platform = platform): string {
   if (typeof value !== "string" || !value || /[\u0000-\u001f\u007f]/u.test(value)) {
     throw new WorkFileError(400, "path/root 必须是有效绝对路径");
   }
   let input = value;
   const windows = /^([a-z]):[\\/](.*)$/i.exec(input);
-  if (windows) input = `/mnt/${windows[1]!.toLowerCase()}/${windows[2]!.replace(/\\/g, "/")}`;
+  if (windows && os === "wsl") input = `/mnt/${windows[1]!.toLowerCase()}/${windows[2]!.replace(/\\/g, "/")}`;
   if (!isAbsolute(input) || input.split("/").includes("..")) {
     throw new WorkFileError(400, "path/root 必须是绝对路径且不能含 ..");
   }
@@ -64,12 +65,13 @@ function fsError(error: unknown): never {
   throw error;
 }
 async function resolveFile(input: WorkFileInput, options: WorkFileOptions) {
-  const path = normalizeWorkPath(input.path);
-  const root = normalizeWorkPath(input.root);
+  const os = options.platform ?? platform;
+  const path = normalizeWorkPath(input.path, os);
+  const root = normalizeWorkPath(input.root, os);
   if (!within(root, path)) throw new WorkFileError(403, "文件不在当前目录内");
   const roots = [normalizeWorkPath(process.env.HOME || homedir())];
   try {
-    for (const item of await readdir("/mnt", { withFileTypes: true })) {
+    for (const item of os === "wsl" ? await readdir("/mnt", { withFileTypes: true }) : []) {
       if (/^[a-z]$/i.test(item.name) && item.isDirectory()) roots.push(join("/mnt", item.name));
     }
   } catch { /* 非 WSL 系统没有 /mnt 盘根。 */ }
@@ -97,7 +99,9 @@ async function openFile(input: WorkFileInput, options: WorkFileOptions) {
     handle = await open(target.real, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
     const info = await handle.stat();
     if (!info.isFile()) throw new WorkFileError(400, "只支持普通文件");
-    const actual = await realpath(`/proc/self/fd/${handle.fd}`);
+    // BSD fdescfs does not expose the backing pathname. Re-authorize the canonical path
+    // and match dev/ino against the NOFOLLOW descriptor before reading any bytes.
+    const actual = (options.platform ?? platform) === "darwin" ? target.real : await realpath(`/proc/self/fd/${handle.fd}`);
     const checked = await resolveFile(input, options);
     if (actual !== checked.real || target.realRoot !== checked.realRoot || !sameIdentity(info, await stat(checked.real))) {
       throw new WorkFileError(409, "读取时文件路径已变化，请重新打开");
@@ -154,6 +158,10 @@ export async function getWorkFile(input: WorkFileInput, options: WorkFileOptions
       throw error;
     }
     result.version = fileVersion(bytes, file.info);
+    if ((options.platform ?? platform) === "darwin") {
+      result.reason = "macOS 实验性支持仅提供预览，暂不支持安全的原子保存";
+      return result;
+    }
     try { await access(file.real, constants.W_OK); await access(dirname(file.real), constants.W_OK | constants.X_OK); result.editable = true; }
     catch { result.reason = "没有保存权限，仅可预览"; }
     return result;
@@ -180,6 +188,7 @@ export async function openWorkSendSource(input: WorkFileInput, options: WorkFile
     const stream = file.handle.createReadStream();
     return { name: basename(file.path), stream, cleanup: async () => { stream.destroy(); } };
   }
+  if ((options.platform ?? platform) === "darwin") throw new WorkFileError(400, "macOS 实验性支持暂不提供文件夹发送");
   const name = basename(target.path);
   if (!name) throw new WorkFileError(400, "不能发送根目录");
   const temporary = await mkdtemp(join(tmpdir(), "wb-taildrop-"));
@@ -207,6 +216,7 @@ export async function openWorkSendSource(input: WorkFileInput, options: WorkFile
   } finally { await directory?.close(); }
 }
 export async function saveWorkFile(input: WorkFileInput & { version: string; text: string }, options: WorkFileOptions = {}): Promise<WorkFile> {
+  if ((options.platform ?? platform) === "darwin") throw new WorkFileError(400, "macOS 实验性支持暂不提供文件编辑");
   if (typeof input.version !== "string" || !/^[a-f0-9]{64}$/.test(input.version) || typeof input.text !== "string") {
     throw new WorkFileError(400, "保存必须提供有效 version 和 text");
   }

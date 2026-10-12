@@ -8,6 +8,7 @@ import type { Driver, SessionRecord } from "./types.js";
 const fixture = await mkdtemp(join(tmpdir(), "workbench-permanent-delete-"));
 process.env.HOME = fixture;
 process.env.CODEX_HOME = join(fixture, ".codex");
+process.env.KIMI_CODE_HOME = join(fixture, ".kimi-code");
 process.env.WORKBENCH_HOME = join(fixture, "wb");
 process.env.WORKBENCH_CODEX_HISTORY_DIR = join(fixture, ".codex", "sessions");
 process.env.WORKBENCH_KIMI_HISTORY_DIR = join(fixture, ".kimi-code", "sessions");

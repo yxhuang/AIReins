@@ -156,7 +156,7 @@ export interface SessionSnapshotState {
 export interface WorkerProcessIdentity {
   bootId: string;
   startTime: string;
-  /** Only saved when the worker owns a dedicated Linux process group. */
+  /** Only saved when the worker owns a dedicated POSIX process group. */
   processGroupId?: number;
 }
 

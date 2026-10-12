@@ -36,7 +36,7 @@ const uriCwd = "/home/user/projects/space dir";
 assert.equal(buildVSCodeUri({ agent: "claude", nativeSessionId: claudeId, cwd: uriCwd }, ""), `vscode://anthropic.claude-code/open?session=${claudeId}`);
 for (const agent of ["codex", "kimi"] as const) {
   assert.equal(buildVSCodeUri({ agent, cwd: uriCwd }, "ubuntu"), "vscode://vscode-remote/wsl+ubuntu/home/user/projects/space%20dir");
-  assert.equal(buildVSCodeUri({ agent, cwd: uriCwd }, ""), null);
+  assert.equal(buildVSCodeUri({ agent, cwd: uriCwd }, "", "wsl"), null);
 }
 assert.equal(buildVSCodeUri({ agent: "claude", cwd: uriCwd }, "ubuntu"), null);
 

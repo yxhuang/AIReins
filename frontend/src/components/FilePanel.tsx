@@ -92,6 +92,8 @@ export function FilePanel({ onClose }: { onClose: () => void }) {
   const [width, setWidth] = useSidePanelWidth(FILE_WIDTH_OPTIONS);
   const [navSlot, setNavSlot] = useState<HTMLDivElement | null>(null);
   const [notice, setNotice] = useState<{ path: string; copied: boolean | null; reason: string | null } | null>(null);
+  const taildrop = useStore(value => value.meta?.capabilities.taildrop === true);
+  const folderTaildrop = useStore(value => value.meta?.capabilities.folderTaildrop === true);
   const copyId = useRef(0);
   useEffect(() => () => { copyId.current += 1; }, []);
   const source = preview !== null && sourcePath === preview.target.path;
@@ -183,10 +185,10 @@ export function FilePanel({ onClose }: { onClose: () => void }) {
           }}><FileActionIcon kind="back" /><span className="file-action-label">返回</span></button>
           <button className="file-action" type="button" aria-label="引用" title="引用到会话" onClick={() => referenceFile(preview.target.path)}><FileActionIcon kind="mention" /><span className="file-action-label">引用</span></button>
           <button className="file-action" type="button" aria-label="复制路径" title="复制路径" onClick={() => copyFile(preview.target.path)}><FileActionIcon kind="copy" /><span className="file-action-label">复制路径</span></button>
-          <button className="file-action" type="button" aria-label="发送到设备" title="用 Taildrop 发送到 tailnet 内的设备" aria-haspopup="menu" aria-expanded={sendMenu !== null} onClick={event => {
+          {taildrop && <button className="file-action" type="button" aria-label="发送到设备" title="用 Taildrop 发送到 tailnet 内的设备" aria-haspopup="menu" aria-expanded={sendMenu !== null} onClick={event => {
             const rect = event.currentTarget.getBoundingClientRect();
             openSendMenu(preview.target, preview.file?.name ?? preview.target.path.split("/").pop()!, false, rect.left, rect.bottom + 4);
-          }}><FileActionIcon kind="send" /><span className="file-action-label">发送</span></button>
+          }}><FileActionIcon kind="send" /><span className="file-action-label">发送</span></button>}
           {preview.file && preview.file.kind !== "unsupported" && <a className="file-action" aria-label={downloadOnly ? "下载" : "外部打开"} title={downloadOnly ? "下载" : "外部打开"}
             href={downloadOnly ? workFileContentUrl(preview.target, true) : `${workFileContentUrl(preview.target)}&v=${preview.loadId}`}
             download={downloadOnly ? preview.file.name : undefined} target={downloadOnly ? undefined : "_blank"} rel={downloadOnly ? undefined : "noopener noreferrer"} onClick={downloadOnly ? confirmDownload : undefined}>
@@ -210,7 +212,7 @@ export function FilePanel({ onClose }: { onClose: () => void }) {
         onBrowseHistory={path => store.navigateHistory(path)}
         onSelectFile={path => { setNotice(null); void store.openFilePreview({ path, root: sessionDirectory() ?? session?.cwd ?? "/", sessionId: session?.id }); }}
         onEntryMenu={(entry, x, y) => openSendMenu({ path: entry.path, root: entry.root, sessionId: session?.id }, entry.name, entry.folder, x, y, true)} />}
-      {sendMenu && <TaildropMenu position={sendMenu} folder={sendMenu.folder} onClose={() => setSendMenu(null)}
+      {sendMenu && <TaildropMenu enabled={sendMenu.folder ? folderTaildrop : taildrop} position={sendMenu} folder={sendMenu.folder} onClose={() => setSendMenu(null)}
         leadingItems={sendMenu.row ? [{ id: "new-tab", icon: "plus", label: "在新标签页内打开", onSelect: () => {
           setSendMenu(null); setNotice(null);
           store.openFileTab({ path: sendMenu.target.path, root: sendMenu.target.root, folder: sendMenu.folder });

@@ -25,8 +25,8 @@ export function isHistoryDirectoryInput(value: string): boolean {
   return /^(?:\/|~|[a-z]:[\\/])/i.test(value.trim());
 }
 
-export function normalizeHistoryDirectory(value: string, homeDir?: string): string {
-  let path = normalizeDirectoryPath(value);
+export function normalizeHistoryDirectory(value: string, homeDir?: string, windowsPaths = true): string {
+  let path = normalizeDirectoryPath(value, windowsPaths);
   if (homeDir && (path === "~" || path.startsWith("~/"))) path = homeDir.replace(/\/+$/, "") + path.slice(1);
   return path.replace(/\/+$/, "") || (path.startsWith("/") ? "/" : "");
 }

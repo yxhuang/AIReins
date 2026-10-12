@@ -10,6 +10,8 @@ process.env.HOME = home;
 process.env.WORKBENCH_CLAUDE_HISTORY_DIR = join(home, "claude", "projects");
 process.env.WORKBENCH_CODEX_HISTORY_DIR = join(home, "codex", "sessions");
 process.env.WORKBENCH_KIMI_HISTORY_DIR = join(home, "kimi", "sessions");
+const { captureWorkerIdentity } = await import("./worker-process.js");
+const currentIdentity = captureWorkerIdentity(process.pid);
 const { SessionManager } = await import("./session-manager.js");
 const { appendTranscript, readTranscript, compactClaudeTranscripts } = await import("./persistence.js");
 const { NativeConversationReader } = await import("./native-conversation.js");
@@ -127,10 +129,7 @@ const crashTests: Array<[string, () => Promise<void>]> = [
     await manager.shutdown();
   }],
   ["crash-live-worker-stays-dead", async () => {
-    const stat = readFileSync(`/proc/${process.pid}/stat`, "utf8");
-    const record = { ...crashRecord("crash-live"), processId: process.pid,
-      processIdentity: { bootId: readFileSync("/proc/sys/kernel/random/boot_id", "utf8").trim(),
-        startTime: stat.slice(stat.lastIndexOf(") ") + 2).trim().split(/\s+/)[19]! } };
+    const record = { ...crashRecord("crash-live"), processId: process.pid, processIdentity: currentIdentity };
     const { manager, instances } = loadCrash(record);
     assert.equal(manager.get(record.id)?.status, "dead", "存活的旧 worker 不能同时拉起第二个进程");
     assert.equal(manager.get(record.id)?.released, undefined);
@@ -181,7 +180,8 @@ const crashTests: Array<[string, () => Promise<void>]> = [
     await manager.shutdown();
   }],
   ["crash-previous-boot-allows-recovery-even-if-pid-is-reused", async () => {
-    const bootId = readFileSync("/proc/sys/kernel/random/boot_id", "utf8").trim();
+    if (!currentIdentity) return; // 无可核实 boot 身份的平台保持保守，不伪造重启证明。
+    const bootId = currentIdentity.bootId;
     const record = { ...crashRecord("crash-previous-boot"), processId: process.pid,
       processIdentity: { bootId: bootId[0] === "a" ? `b${bootId.slice(1)}` : `a${bootId.slice(1)}`, startTime: "1" } };
     const { manager } = loadCrash(record);
@@ -191,7 +191,7 @@ const crashTests: Array<[string, () => Promise<void>]> = [
   }],
   ["crash-same-boot-reused-pid-with-unknown-group-stays-dead", async () => {
     const record = { ...crashRecord("crash-reused-pid"), processId: process.pid,
-      processIdentity: { bootId: readFileSync("/proc/sys/kernel/random/boot_id", "utf8").trim(), startTime: "0" } };
+      processIdentity: { bootId: currentIdentity?.bootId ?? "", startTime: "0" } };
     const { manager } = loadCrash(record);
     assert.equal(manager.get(record.id)?.status, "dead", "同 boot PID 复用不能证明旧 launcher 子进程全退出");
     assert.equal(manager.get(record.id)?.released, undefined);
@@ -240,10 +240,8 @@ const crashTests: Array<[string, () => Promise<void>]> = [
     const stored = () => (JSON.parse(readFileSync(join(home, "sessions.json"), "utf8")) as SessionRecord[])
       .find(session => session.id === record.id)!;
     const running = stored();
-    const stat = readFileSync(`/proc/${process.pid}/stat`, "utf8");
     assert.equal(running.processId, process.pid);
-    assert.equal(running.processIdentity?.bootId, readFileSync("/proc/sys/kernel/random/boot_id", "utf8").trim());
-    assert.equal(running.processIdentity?.startTime, stat.slice(stat.lastIndexOf(") ") + 2).trim().split(/\s+/)[19]);
+    assert.deepEqual(running.processIdentity, captureWorkerIdentity(process.pid) ?? { bootId: "", startTime: "" });
     assert.deepEqual(running.releasedMark, record.releasedMark, "活 worker 的恢复指纹也须持续落盘");
     assert.equal(manager.get(record.id)?.processIdentity, undefined, "worker 身份为私有持久化字段");
     assert.equal(manager.get(record.id)?.releasedMark, undefined);

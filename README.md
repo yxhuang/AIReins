@@ -4,7 +4,7 @@
 
 English | [简体中文](README.zh-CN.md)
 
-> Status: early (v0.1). Built and used daily by one person on Windows + WSL2. Native Linux and macOS are not supported yet; see [Platform support](#platform-support).
+> Status: early (v0.1). Built and used daily by one person on Windows + WSL2. Native Linux is supported with required Ubuntu CI checks; macOS is experimental with CI-only coverage; see [Platform support](#platform-support).
 
 ## Why
 
@@ -59,8 +59,8 @@ If you want to run a team of agents in parallel worktrees, use [Orca](https://gi
 | Platform | Status |
 |---|---|
 | Windows 11 + WSL2 (Ubuntu) | Supported: installer, tray, app window, remote gateway |
-| Native Linux | Not yet supported (`install.sh` targets WSL) |
-| macOS | Not yet supported |
+| Native Linux | Supported; required Ubuntu CI checks |
+| macOS | Experimental; CI only, no maintainer hardware |
 | Native Windows (no WSL) | Not planned for now |
 
 ## Install (Windows + WSL2)
@@ -94,6 +94,12 @@ wb status     # also: wb stop | wb restart | wb logs
 
 Workbench listens on `http://127.0.0.1:8790` (change with `WORKBENCH_PORT`). The tray icon and Start-menu shortcut open it as a Chrome app window.
 
+## Install (native Linux / experimental macOS)
+
+Use the same `git clone` and `bash install.sh` commands. Native Linux needs Node ≥ 22.12, npm, `ss` (iproute2) and `rg`; macOS uses `lsof` instead of `ss` and needs `rg` (for example, `brew install ripgrep`). `wb` opens `xdg-open` on Linux or `open` on macOS. Headless hosts can set `WORKBENCH_NO_OPEN=1`. No Windows tray, gateway, app window, directory picker or PowerShell is installed or offered on these platforms. Linux systemd deployment is optional; see [host setup](docs/host-connections.md).
+
+WSL2 is the maintainer's daily platform. Ubuntu CI is a required gate; macOS CI may fail while experimental. The maintainer has no Mac, so macOS is tested only in CI. macOS supports file browsing and preview, but file editing and folder Taildrop remain disabled until secure directory-fd operations are available. Ordinary file Taildrop is supported. Please report macOS results in an issue.
+
 ## Remote access from your phone
 
 When Tailscale is installed and logged in on Windows, `install.sh` sets up remote access:
@@ -101,11 +107,19 @@ When Tailscale is installed and logged in on Windows, `install.sh` sets up remot
 1. It writes `~/.workbench/remote.json` (only if missing) with your MagicDNS HTTPS address and your Tailscale login. The remote terminal is **off** by default.
 2. It installs a small Windows gateway plus `tailscale serve`, after one UAC prompt.
 
+On native Linux and macOS, install and log in to Tailscale **on the same machine as Workbench**. The installer only creates a missing `remote.json` with `terminal: false` and prints the command for you to run; it never changes Tailscale Serve configuration:
+
+```bash
+tailscale serve --bg http://127.0.0.1:8793
+```
+
+Use the port printed by the installer if your existing configuration differs. On macOS the app CLI at `/Applications/Tailscale.app/Contents/MacOS/Tailscale` is a fallback when `tailscale` is absent from PATH. Serve forwards directly to the remote loopback listener; no Windows gateway is needed. Host/Origin checks and the Tailscale login allowlist are identical on all platforms. Remote terminal access requires an explicit `terminal: true` opt-in.
+
 Open `https://<your-computer>.<tailnet>.ts.net/` on your phone and add it to the home screen. Details and troubleshooting: [deploy/windows/REMOTE.md](deploy/windows/REMOTE.md). If your browser uses a system proxy, add `*.ts.net` to its bypass list.
 
 ## Configuration
 
-Workbench keeps its data in `~/.workbench`. `WORKBENCH_HOME` moves the server's data directory, but the installer, the `wb` log and snapshots still use `~/.workbench`. It does not change the three CLIs' global settings, except the Claude Remote Control default when you toggle it in Workbench.
+Workbench keeps its data in `~/.workbench`. `WORKBENCH_HOME` moves the server's data directory and the native POSIX remote installer's config directory. WSL installation, `wb` logs and snapshots retain their existing paths. It does not change the three CLIs' global settings, except the Claude Remote Control default when you toggle it in Workbench.
 
 Environment variables:
 
@@ -159,4 +173,4 @@ Anyone who can reach Workbench has the power of your user account on that comput
 
 ## License
 
-Not chosen yet; a license will be added before the first public release. Until then, all rights are reserved.
+The code is released under the [MIT License](LICENSE). The project name and logo and the third-party brand icons are not covered by it; see [NOTICE](NOTICE) for details and for what this repository does not include.

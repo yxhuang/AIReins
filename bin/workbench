@@ -1,32 +1,62 @@
 #!/usr/bin/env bash
 # wb（workbench）—— 个人 Agent 工作台的启动器。
 # 用法：wb [start|stop|status|restart|logs]   （不带参数 = start）
-# 启动后自动在 Windows 侧默认浏览器打开；置 WORKBENCH_NO_OPEN=1 可跳过。
+# 启动后打开本平台默认浏览器；置 WORKBENCH_NO_OPEN=1 可跳过。
 set -uo pipefail
 
-REPO="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
+# BSD readlink 没有 -f；逐层解析安装器建立的软链接。
+script="${BASH_SOURCE[0]}"
+while [[ -L "$script" ]]; do
+  directory="$(cd "$(dirname "$script")" && pwd)"
+  script="$(readlink "$script")"
+  [[ "$script" == /* ]] || script="$directory/$script"
+done
+REPO="$(cd "$(dirname "$script")/.." && pwd)"
+platform() {
+  case "$(uname -s)" in
+    Darwin) printf darwin ;;
+    Linux)
+      if [[ "$(uname -r)" == *[Mm][Ii][Cc][Rr][Oo][Ss][Oo][Ff][Tt]* || -e /proc/sys/fs/binfmt_misc/WSLInterop ]]; then printf wsl; else printf linux; fi ;;
+    *) printf unsupported ;;
+  esac
+}
+PLATFORM="$(platform)"
 PORT="${WORKBENCH_PORT:-8790}"
 LOG="${WORKBENCH_LOG:-$HOME/.workbench/server.log}"
 URL="http://127.0.0.1:$PORT"
 
-port_pid() { ss -ltnp 2>/dev/null | grep -oP "127\.0\.0\.1:$PORT\b.*pid=\K[0-9]+" | head -1; }
-
-is_ours() {                       # 占用 $PORT 的进程是不是本工作台
-  local pid="$1" cmd
-  cmd="$(tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null)" || return 1
-  [[ "$cmd" == *"server/index.ts"* ]]
+port_pid() {
+  local port="${1:-$PORT}"
+  if [[ "$PLATFORM" == darwin ]]; then
+    lsof -nP -a -iTCP@127.0.0.1:"$port" -sTCP:LISTEN -t 2>/dev/null | head -1
+  else
+    ss -ltnp 2>/dev/null | awk -v address="127.0.0.1:$port" '
+      $4 == address && match($0, /pid=[0-9]+/) { print substr($0, RSTART + 4, RLENGTH - 4); exit }'
+  fi
 }
 
-open_browser() {                   # 在 Windows 侧默认浏览器打开工作台
+process_command() {
+  if [[ "$PLATFORM" == darwin ]]; then ps -p "$1" -o command= 2>/dev/null
+  else tr '\0' ' ' < "/proc/$1/cmdline" 2>/dev/null; fi
+}
+is_ours() {                       # 占用端口的进程必须是本仓库的工作台
+  local pid="$1" cmd
+  cmd="$(process_command "$pid")" || return 1
+  [[ "$cmd" == *"$REPO/server/index.ts"* ]] && return 0
+  # 保留更新前 Linux/WSL 启动的相对路径进程的识别。
+  [[ "$PLATFORM" != darwin && "$cmd" == *"server/index.ts"* && "$(readlink "/proc/$pid/cwd" 2>/dev/null)" == "$REPO" ]]
+}
+
+open_browser() {
   [[ -n "${WORKBENCH_NO_OPEN:-}" ]] && return 0
-  # wslview（wslu 提供）最规范；没有就退到 explorer.exe，它是 WSL 自带的。
-  # 两者打开 URL 成功时也可能返回非 0（explorer.exe 几乎总是返回 1），
-  # 退出码不可信，一律吞掉，绝不让它影响 start 的返回值。
-  if command -v wslview >/dev/null 2>&1; then
-    wslview "$URL" >/dev/null 2>&1 || true
-  elif command -v explorer.exe >/dev/null 2>&1; then
-    explorer.exe "$URL" >/dev/null 2>&1 || true
-  fi
+  case "$PLATFORM" in
+    wsl)
+      # WSL 的 URL 打开器退出码不可信，保留原来的忽略规则。
+      if command -v wslview >/dev/null 2>&1; then wslview "$URL" >/dev/null 2>&1 || true
+      elif command -v explorer.exe >/dev/null 2>&1; then explorer.exe "$URL" >/dev/null 2>&1 || true; fi ;;
+    darwin) open "$URL" >/dev/null 2>&1 || true ;;
+    linux) command -v xdg-open >/dev/null 2>&1 && xdg-open "$URL" >/dev/null 2>&1 || true ;;
+  esac
   return 0
 }
 
@@ -37,7 +67,7 @@ start() {
       echo "工作台已在运行（PID $pid） → $URL"; open_browser; return 0
     fi
     echo "❌ 端口 $PORT 被别的程序占用（PID $pid）：" >&2
-    tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null | cut -c1-120 >&2
+    process_command "$pid" | cut -c1-120 >&2
     echo "   换端口：WORKBENCH_PORT=8791 workbench" >&2
     return 1
   fi
@@ -54,12 +84,16 @@ start() {
   fi
   mkdir -p "$(dirname "$LOG")"
   # 日志超过 5MB 就轮转成 .1，只留一份旧的（对标 kimi 的按大小轮转）
-  (( $(stat -c %s "$LOG" 2>/dev/null || echo 0) > 5242880 )) && mv -f "$LOG" "$LOG.1"
+  [[ -f "$LOG" ]] && (( $(wc -c < "$LOG") > 5242880 )) && mv -f "$LOG" "$LOG.1"
   # setsid 而非仅 nohup：快捷方式经 `wsl.exe -e` 启动时，wsl.exe 退出会连坐清理
   # 整个进程组，nohup 只挡 SIGHUP 挡不住。必须新建会话彻底脱离。
   # exec：让后台那份 bash 直接换成 setsid，别留一个占着调用方 stdout 的壳（否则 `workbench start | cat` 永不返回）
-  ( cd "$REPO" && exec setsid env WORKBENCH_PORT="$PORT" node --import tsx server/index.ts >>"$LOG" 2>&1 < /dev/null & )
-  for _ in $(seq 1 40); do
+  if [[ "$PLATFORM" == darwin ]]; then
+    ( cd "$REPO" && exec nohup env WORKBENCH_PORT="$PORT" node --import tsx "$REPO/server/index.ts" >>"$LOG" 2>&1 < /dev/null & )
+  else
+    ( cd "$REPO" && exec setsid env WORKBENCH_PORT="$PORT" node --import tsx "$REPO/server/index.ts" >>"$LOG" 2>&1 < /dev/null & )
+  fi
+  for (( attempt=0; attempt<40; attempt++ )); do
     pid="$(port_pid)"; [[ -n "$pid" ]] && { echo "已启动（PID $pid） → $URL"; open_browser; return 0; }
     sleep 0.25
   done
@@ -71,7 +105,7 @@ stop() {
   [[ -z "$pid" ]] && { echo "没有在运行"; return 0; }
   if ! is_ours "$pid"; then echo "❌ 端口 $PORT 上不是本工作台，拒绝停它（PID $pid）" >&2; return 1; fi
   kill "$pid"
-  for _ in $(seq 1 20); do [[ -z "$(port_pid)" ]] && { echo "已停止"; return 0; }; sleep 0.25; done
+  for (( attempt=0; attempt<20; attempt++ )); do [[ -z "$(port_pid)" ]] && { echo "已停止"; return 0; }; sleep 0.25; done
   echo "⚠ 仍未退出，可手动：kill -9 $pid" >&2; return 1
 }
 
@@ -80,7 +114,7 @@ remote_status() {
   [[ -f "$cfg" ]] || { echo "  远程：未配置（见 server/README.md「远程入口配置」）"; return 0; }
   read -r port origin < <(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(d["port"], d["origin"])' "$cfg" 2>/dev/null)
   if [[ -z "$port" ]]; then echo "  远程：$cfg 解析失败"; return 0; fi
-  rpid="$(ss -ltnp 2>/dev/null | grep -oP "127\.0\.0\.1:$port\b.*pid=\K[0-9]+" | head -1)"
+  rpid="$(port_pid "$port")"
   if [[ "$rpid" == "${1:-}" ]]; then
     echo "  远程：$origin → 127.0.0.1:$port 监听中"
   elif [[ -n "$rpid" ]]; then
@@ -101,6 +135,8 @@ status() {
     echo "端口 $PORT 被别的程序占用（PID $pid）"; return 1
   fi
 }
+
+[[ "${BASH_SOURCE[0]}" != "$0" ]] && return 0
 
 case "${1:-start}" in
   start)   start ;;

@@ -115,6 +115,34 @@ Serve 会剥掉客户端自带的同名身份头，再注入真实身份。远�
 
 webhook 地址就是密钥：文件权限设为 600，也不要写进日志或仓库。更改配置后须重启 workbench 才生效。
 
+## 平台能力
+
+服务端 `platform.ts` 是平台策略的唯一入口，区分 `wsl`、原生 `linux`、`darwin`（其他系统为 `unsupported`，原生 Windows 不在支持范围）。WSL 通过 Linux 内核版本中的 `microsoft` 或 `/proc/sys/fs/binfmt_misc/WSLInterop` 判定，不依赖 `WSL_DISTRO_NAME`/`WSL_INTEROP`；发行版环境变量只用于生成 VS Code WSL 链接。测试向函数注入平台、存在性和 CLI 输出，不提供平台覆盖环境变量。
+
+`GET /api/meta` 的 `data.platform` 返回上述值，`data.capabilities` 逐项声明当前入口的能力。缺字段时前端不显示对应入口；平台支持不代表可选命令已安装。
+
+| 能力字段 | WSL2 | 原生 Linux | macOS 实验性 |
+|---|---|---|---|
+| `terminal` | 本机开；远程须显式开启 | 同左，默认 bash | 同左，默认 bash |
+| `windowsDirectoryPicker` | 本机且 PowerShell 7 存在 | false | false |
+| `appWindow` | 本机且 Windows Chrome 存在 | false | false |
+| `powerOff` | 可执行 `prefs.shutdownCommand` 配置后开启 | 同左 | 同左 |
+| `windowsPaths` | true | false | false |
+| `powershell` | Windows pwsh 7/PowerShell 存在 | false | false |
+| `fileEdit` | true | true | false |
+| `taildrop` | Tailscale CLI 可用 | 同左 | 同左 |
+| `folderTaildrop` | Tailscale CLI 与 zip 可用 | 同左 | false |
+| `windowsTray` | 本机 true，远程 false | false | false |
+| `remoteGateway` | true（Windows 网关拓扑） | false（Serve 直连） | false（Serve 直连） |
+
+能力是 UI 提示，服务端继续独立验证每个接口的权限与参数。关机不引入平台默认命令，仍按本机 prefs 显式配置（无参数排定约 60 秒后关机，`abort` 取消），公开默认关闭，WSL 已有配置不变。三家 CLI 会话、历史、文件浏览/预览、原生文件检索都使用现有 POSIX 路径；`rg` 为安装依赖。默认登录交互 shell 保留 `bash -l -i`，Windows shell 不接受任意可执行路径。
+
+Linux/WSL 文件读取和目录操作保持 `/proc` fd 锚定。macOS 文件预览/下载/普通文件发送在授权 realpath 上以 `NOFOLLOW|NONBLOCK` 打开，并在再次授权检查后比较路径与 fd 的 dev/ino；由于 Node 没有可用的 BSD openat 目录锚定 API，文件保存和目录打包按能力隐藏，后端也拒绝。不会用普通路径 rename/cwd 替换目录 fd 以降低原有安全保证。
+
+Tailscale 优先 PATH；WSL 保留 Windows CLI 回退，macOS 回退 `/Applications/Tailscale.app/Contents/MacOS/Tailscale`，原生 Linux 不探测或调用 `tailscale.exe`。Linux/WSL worker 继续保存内核 boot ID/start ticks；macOS 使用 `sysctl kern.bootsessionuuid/kern.boottime` 和 BSD `ps`。BSD 的秒级启动时间不用于判定存活 PID 复用：仅不同 boot UUID 或 PID 与所属组明确 ESRCH 才授予恢复资格，EPERM/未知状态保守阻止恢复。三平台 worker 都使用 POSIX detached 进程组。
+
+原生 Linux/macOS 上 Tailscale 和 WB 位于同一主机：`tailscale serve --bg http://127.0.0.1:<remote.port>` 直接进入远程监听。安装器只读 Tailscale 状态、生成缺失的 `remote.json`（权限 600、`terminal:false`）并打印命令；不改变 Serve，也不覆盖已有或无效配置。入口仍绑定 `127.0.0.1`，`remotePolicy` 的 Host、写操作/WS 的完整 Origin，以及 Serve 注入的 Tailscale 登录白名单检查不变。禁止 Funnel；本机伪造身份头不属于远程认证，因为本机进程本来拥有本机入口权限。
+
 ## REST
 
 所有 REST 成功和错误都使用同一个信封；`request_id` 是 ULID，也会出现在同次请求的服务端 JSON 日志中。
@@ -152,7 +180,7 @@ Workbench 新建的 Codex 会话在首个 `item/completed.userMessage` 后、没
 - `GET /api/sessions/:id/info/:kind` 新增 `status` → `get_status`（`{sections:[{title,rows:[{label,value}]}]}`）；`usage` → `get_usage`（会话费用、订阅与额度）；`memory` / `instructions` → `get_memory_dialog`（files/folders/memories、自动记忆状态）；`skills` → `get_skills_dialog`；`sandbox` → `get_sandbox_dialog`；`export` → `export_conversation`（`{text,default_filename}`，纯文本，以 CLI 导出内容为准，不受前端事件窗口限制）；均为只读控制请求，错误沿用 400 / 40063。
 - `output` 先 `initialize` 获取 `available_output_styles`，再 `get_settings` 刷新磁盘设置，返回 `{outputStyle,availableStyles,settingsFiles}`，两次请求各 15 秒、前端总上限 40 秒。仅返回样式字段，不暴露整个 settings（可能含环境变量）。
 - `settings` 直接返回 `{settingsFiles:[{source,label,path,uri}]}`，无需 worker，dead 会话也可打开；三个范围为用户、项目、项目本地。用户路径尊重 `CLAUDE_CONFIG_DIR`，默认 `~/.claude/settings.json`。hooks/permissions/skills/sandbox/memory/output 查看也附带 `settingsFiles`；memory/instructions 的文件及目录行附带 `uri`。
-- `uri` 仅为协议链接：WSL 返回 `vscode://vscode-remote/wsl+<distro>/<encoded-path>`，其他 Linux 返回 `vscode://file/<encoded-path>`；路径分段编码，非绝对路径或控制字符返回 null。后端不启动 VSCode，不写 settings；文件可以尚未创建。Hooks 等在编辑器保存后重新打开面板查看，某些配置需下次续接。插件/策略提供的 Hooks 仍按原来源展示，不伪装成用户 settings 中的条目。
+- `uri` 仅为协议链接：WSL 返回 `vscode://vscode-remote/wsl+<distro>/<encoded-path>`，原生 Linux/macOS 返回 `vscode://file/<encoded-path>`；路径分段编码，非绝对路径或控制字符返回 null。后端不启动 VSCode，不写 settings；文件可以尚未创建。Hooks 等在编辑器保存后重新打开面板查看，某些配置需下次续接。插件/策略提供的 Hooks 仍按原来源展示，不伪装成用户 settings 中的条目。
 - 新菜单只用于 Claude；Rewind 没有接入：虽然协议有 `rewind_files {user_message_id,dry_run}`，当前 worker 未启用 SDK 文件检查点且 wb 事件没有原生用户 UUID，实测 `canRewind:false,error:"File rewinding is not enabled."`，无法提供可信的文件/消息预览。扩展的会话回退另走宿主 fork + resume 截点，不能直接移植。调查表与冒烟证据为本地归档（`.work-orders/2026-10-01-slash-ext-report.md`、`scratch/slash-ext/`），未随仓库公开。
 - `GET /api/sessions/:id/files?q=<关键词>&limit=<默认50>`：在会话 `cwd` 内检索可引用的普通文件
 - `DELETE /api/sessions/:id`：停止 worker；删注册表条目，并删 wb 自己的副本（transcript、未被引用的附件）；三家原生记录不动。响应的 `transcriptsDeleted:true` 仅指 wb 副本，`workbenchTranscriptPreserved:false`、`nativeTranscriptPreserved:true` 如实报告；续接/检查中的移除返回 400 / 40063，IO 错误仍返回 500。
@@ -198,7 +226,7 @@ Claude 菜单按扩展分成「上下文 / 模型 / 自定义 / 设置 / 支持�
 
 ### 重启当前实例
 
-`POST /api/restart` 先完成 202 响应，再延迟 200ms 以 POSIX `detached`（新 session / process group）启动仓库的 `bin/workbench restart`。继承当前进程环境，明确传入当前监听的 `WORKBENCH_PORT`、`workbenchHome` 和 `WORKBENCH_NO_OPEN=1`；数据目录和日志路径按当前进程工作目录转为绝对路径；`WORKBENCH_LOG` 保留显式路径，未设置时落到当前 `WORKBENCH_HOME/server.log`。显式 `WORKBENCH_STATIC_DIR` 同样透传已解析的绝对路径，其他环境原样继承。因此远程入口发起重启也会停本实例的主监听端口，重新读取同一数据目录的远程配置，不弹浏览器。启动器与旧服务进程组分离；脚本的 SIGTERM 走既有 `shutdown()` 释放会话与终端，再启动服务加载新代码。`bin/workbench` 行为未改。
+`POST /api/restart` 先完成 202 响应，再延迟 200ms 以 POSIX `detached`（新 session / process group）启动仓库的 `bin/workbench restart`。继承当前进程环境，明确传入当前监听的 `WORKBENCH_PORT`、`workbenchHome` 和 `WORKBENCH_NO_OPEN=1`；数据目录和日志路径按当前进程工作目录转为绝对路径；`WORKBENCH_LOG` 保留显式路径，未设置时落到当前 `WORKBENCH_HOME/server.log`。显式 `WORKBENCH_STATIC_DIR` 同样透传已解析的绝对路径，其他环境原样继承。因此远程入口发起重启也会停本实例的主监听端口，重新读取同一数据目录的远程配置，不弹浏览器。启动器与旧服务进程组分离；脚本的 SIGTERM 走既有 `shutdown()` 释放会话与终端，再启动服务加载新代码。`bin/workbench` 保留 WSL 的 setsid 启动，macOS 改用 nohup 与 BSD lsof/ps；重启仍只操作当前端口。
 
 停服一开始，本机与远程入口均拒绝新的 WS 升级，新的 HTTP 请求返回 503 并带 `Connection: close`；已有 WS 发出关闭通知。两个监听保持到 worker 停完，保留 `wb stop` 以主端口空出判断 worker 已停止的语义。随后并行关闭两个监听，主动断开残留 HTTP、普通 WS 与终端 WS 连接，显式退出 0；关闭失败退出 1，整个关闭流程超过 10 秒则记录错误并强制退出 1。
 
@@ -210,7 +238,7 @@ Kimi 配置探测仍通过 `session/new` 读取 configOptions。探测进程关�
 
 `GET /api/fs/file?path=<绝对路径>&root=<当前目录>&sessionId=<可选会话ID>` 返回信封 `data:{path,name,size,kind,mimeType,text?,version?,editable,reason?}`。`kind` 为 `text|markdown|csv|tsv|html|image|pdf|unsupported`；文本（包括未知扩展的有效文本）、Markdown、CSV/TSV、HTML 使用严格 UTF-8，可保留 BOM，最多 1 MiB。NUL/控制字符、无效 UTF-8、Office 或超限文件返回 `unsupported` 与原因，不返回文本/版本；图片、PDF 仅预览，最多 32 MiB。只读文本仍可预览，但 `editable:false`。
 
-`root` 是当前浏览目录或会话 cwd，不能授予权限：授权根仅为 `$HOME`、已存在的 `/mnt/<单字母盘符>` 目录、已存在 `sessionId` 的服务端 cwd。路径支持 POSIX 与 `C:\\...`，拒绝相对路径、控制字符和 `..`。逻辑目标与真实目标都须位于 root；root 的真实路径也须位于对应授权根，内部符号链接可用，逃逸链接、目录/FIFO等非普通文件被拒绝。读取通过 `NOFOLLOW|NONBLOCK` fd 检查身份与真实路径；依赖 Linux/WSL 的 `/proc/self/fd`。全部接口沿用现有 Host、远程登录白名单以及写操作 Origin 检查。
+`root` 是当前浏览目录或会话 cwd，不能授予权限：授权根仅为 `$HOME`、WSL 上已存在的 `/mnt/<单字母盘符>` 目录、已存在 `sessionId` 的服务端 cwd。路径支持 POSIX，WSL 另支持 `C:\\...`，拒绝相对路径、控制字符和 `..`。逻辑目标与真实目标都须位于 root；root 的真实路径也须位于对应授权根，内部符号链接可用，逃逸链接、目录/FIFO等非普通文件被拒绝。读取通过 `NOFOLLOW|NONBLOCK` fd 检查身份与真实路径；Linux/WSL 使用 `/proc/self/fd`，macOS 使用授权路径与 fd 的 dev/ino 复核（保存/目录发送关闭，见平台能力）。全部接口沿用现有 Host、远程登录白名单以及写操作 Origin 检查。
 
 `POST /api/fs/file` JSON 为 `{path,root,sessionId?,version,text}`，显式保存上述可编辑文本，返回更新后的同一 metadata（含 `text/version`）。文本最多 1 MiB；为容纳 JSON 转义，请求体独立上限为 6 MiB + 64 KiB，并严格解码 UTF-8，其他 JSON 路由仍为 1 MiB。版本包含内容 hash 与文件身份/元数据；同一 inode 的保存串行执行，磁盘内容、身份、时间或权限变化返回 HTTP 409。写入同目录唯一 `wx` 临时文件、保留权限、fsync 后 rename；内部符号链接保留，更新其真实目标。失败只清理本次创建的临时文件，rename 前的失败保留原件。目录 fd 锚定临时与目标名称，并在 rename 前复核目标、根和父目录，减少路径置换竞态；外部程序未参与本进程锁，最后检查到 rename 之间仍存在无法由 Node 原生 API 原子消除的窗口，不能承诺与外部写者绝对无冲突。
 
@@ -532,7 +560,7 @@ Claude 跳过 meta/sidechain，按 assistant 内容块顺序输出文字与 `too
 
 ### 释放（release）worker
 
-`POST /api/sessions/:id/release` 把会话的 worker 停掉但保留会话：状态保持 `idle`，记录新增持久化字段 `released:true`，`processId` 置空，广播 `worker_released`（payload `{reason:"manual"|"idle"|"shutdown", resumeCommand, idleMinutes?}`，写进统一 transcript）。成功响应的 `data` 为 `{session, resumeCommand, vscodeUri: string | null}`。Claude 链接为 `vscode://anthropic.claude-code/open?session=<编码后的 nativeSessionId>`；Codex/Kimi 链接为 `vscode://vscode-remote/wsl+<WSL_DISTRO_NAME><cwd>`，发行版名及路径各段分别 URL 编码（`=` → `%3D`、空格 → `%20`），无 `WSL_DISTRO_NAME` 时为 null。链接由浏览器在释放成功后导航，服务端不启动任何 Windows 程序。释放前提：会话 `idle`、没有进行中的回合或待处理闸门、不在重启/检查中、已有 `nativeSessionId`；不满足时手动释放返回 400 可读错误，自动释放直接跳过。worker 先从内存表删除再停止，因此 `exited` 回调不会把会话标成 `dead`；Claude 会话同时把 `remoteControl` 置为 `disconnected` 并广播 `remote_control_updated`。
+`POST /api/sessions/:id/release` 把会话的 worker 停掉但保留会话：状态保持 `idle`，记录新增持久化字段 `released:true`，`processId` 置空，广播 `worker_released`（payload `{reason:"manual"|"idle"|"shutdown", resumeCommand, idleMinutes?}`，写进统一 transcript）。成功响应的 `data` 为 `{session, resumeCommand, vscodeUri: string | null}`。Claude 链接为 `vscode://anthropic.claude-code/open?session=<编码后的 nativeSessionId>`；Codex/Kimi 链接为 `vscode://vscode-remote/wsl+<WSL_DISTRO_NAME><cwd>`，发行版名及路径各段分别 URL 编码（`=` → `%3D`、空格 → `%20`），WSL 无 `WSL_DISTRO_NAME` 时为 null；原生 Linux/macOS 为 `vscode://file<encoded-cwd>`。链接由浏览器在释放成功后导航，服务端不启动任何 Windows 程序。释放前提：会话 `idle`、没有进行中的回合或待处理闸门、不在重启/检查中、已有 `nativeSessionId`；不满足时手动释放返回 400 可读错误，自动释放直接跳过。worker 先从内存表删除再停止，因此 `exited` 回调不会把会话标成 `dead`；Claude 会话同时把 `remoteControl` 置为 `disconnected` 并广播 `remote_control_updated`。
 
 `resumeCommand` 是带 cwd 的原生续接命令，cwd 做 shell 单引号转义：Claude `cd '<cwd>' && claude --resume <id>`，Codex `cd '<cwd>' && codex resume <id>`，Kimi `cd '<cwd>' && kimi -S <id>`。
 
@@ -540,13 +568,13 @@ Claude 跳过 meta/sidechain，按 assistant 内容块顺序输出文字与 `too
 
 退出释放：server 收到 SIGTERM/SIGINT（`wb stop`/`wb restart`、托盘退出）时，先停掉全部 worker（停服期间不再起新 worker），再把停止成功、有 `nativeSessionId`、没有待处理闸门、且原生存档已落盘（Claude 须发过消息或是导入续接）的会话按释放处理（`reason:"shutdown"`，不检查 idle，进行中的回合随进程中断），其余标 `dead`。正常释放记录仍按 `released:true` + `nativeSessionId` 恢复为 `idle`+`released`，下次发送原地续接。最近已同步的原生指纹随注册表以内部字段 `releasedMark` 保存，释放及异常退出恢复共用 `nativeMarks`、`promptedSessions` 与续接路径；连续重启且未发送也保留指纹，停服期间的外部续聊在首次发送时照常补成 `external_messages_added`。
 
-异常退出恢复（2026-10-03）：没有标记 `released`、有 `nativeSessionId` 的记录，须同时满足 Workbench transcript 没有坏行或不完整尾行、当前 worker 生命周期没有 `process_exited` 或终止错误、没有未决审批、原生存档可续接、且旧 worker 已确认消失，才恢复为 `idle`+`released`。原状态为 `idle/running/starting` 时按 PID/身份检查；旧代码已写成 `dead`、PID 已清空时，允许用 Linux `/proc/stat` 的 `btime` 证明重启：启动时间必须严格晚于注册表 `lastActivityAt` 及全部 transcript 事件时间的最大值。boot 时间、活动时间缺失或不可信、空 transcript、同次启动均不恢复；不按文件 mtime 或服务器重启时间推断关机。运行中的回合视为已中断，不重发原消息。
+异常退出恢复（2026-10-03）：没有标记 `released`、有 `nativeSessionId` 的记录，须同时满足 Workbench transcript 没有坏行或不完整尾行、当前 worker 生命周期没有 `process_exited` 或终止错误、没有未决审批、原生存档可续接、且旧 worker 已确认消失，才恢复为 `idle`+`released`。原状态为 `idle/running/starting` 时按 PID/身份检查；旧代码已写成 `dead`、PID 已清空时，允许用 Linux/WSL `/proc/stat` 的 `btime` 或 macOS `sysctl kern.boottime` 证明重启：启动时间必须严格晚于注册表 `lastActivityAt` 及全部 transcript 事件时间的最大值。boot 时间、活动时间缺失或不可信、空 transcript、同次启动均不恢复；不按文件 mtime 或服务器重启时间推断关机。运行中的回合视为已中断，不重发原消息。
 
 生命周期终止证据按事件顺序判定：`session_created` 或 `config_updated.workerRestarted:true` 开始新 worker 生命周期；普通配置、回合完成及 `worker_released` 不清除之前的退出证据。`process_exited` 及非明确 `severity:"warning", nonBlocking:true` 的 `session_error` 保守阻止恢复。CLI 自己崩溃退出依然 `dead`；即使随后机器重启也不复活。旧审批虽已失效，仍和 shutdown 一样保持 `dead`。原状态 `error` 不授予新增恢复资格，transcript 错误仍优先显示 `error`。
 
 存档定位复用 `NativeConversationReader`：Claude 须实际落盘且含用户/助手记录（首条消息前只有 session_id 不算）；Codex 须有 ID 匹配的 rollout/session_meta；Kimi 须有可读 wire 和 ID、cwd 相符的 state。原生只作有界头部检查，不扫描整份大存档。
 
-worker 的 `processId` 原本就持久化；新启动的 Linux worker 使用独立进程组，并保存内部 `processIdentity:{bootId,startTime,processGroupId?}`，用于识别 PID 复用及 launcher 退出后尚存的子进程。不同 boot 可证明旧进程树已消失；同 boot 必须确认 PID 及已记录的独立组均不存在，同 boot PID 已复用时还须确认旧组消失。旧记录只有 PID 时须 `process.kill(pid,0)` 明确返回 ESRCH；未取得上述系统重启证据时，活着的 PID、权限错误、缺失 PID 或损坏身份字段均不授予恢复资格。只检查，不接管或终止旧进程。载入后 `processId` 清空，Claude RC 状态为 `disconnected`，发送续接时按既有配置重新启动。
+worker 的 `processId` 原本就持久化；新启动的 POSIX worker 使用独立进程组，并保存内部 `processIdentity:{bootId,startTime,processGroupId?}`，用于识别 PID 复用及 launcher 退出后尚存的子进程。不同 boot 可证明旧进程树已消失；同 boot 必须确认 PID 及已记录的独立组均不存在，同 boot PID 已复用时还须确认旧组消失。旧记录只有 PID 时须 `process.kill(pid,0)` 明确返回 ESRCH；未取得上述系统重启证据时，活着的 PID、权限错误、缺失 PID 或损坏身份字段均不授予恢复资格。只检查，不接管或终止旧进程。载入后 `processId` 清空，Claude RC 状态为 `disconnected`，发送续接时按既有配置重新启动。
 
 空闲自动释放：服务端每分钟扫一次，对 `idle`、未释放、`now - lastActivityAt ≥ idleReleaseMinutes` 且满足上述前提的会话执行释放；**开着 Remote Control（connected/connecting/reconnecting）的 Claude 会话跳过**（开 RC 就是要手机能随时找到它，释放会断开）。阈值存 `~/.workbench/prefs.json`（`{"idleReleaseMinutes":30}`，缺省 30，0 = 关闭，文件缺失或无效按默认值），经 `GET/PUT /api/prefs` 读写，PUT 立即生效无需重启。
 

@@ -31,7 +31,7 @@ const FileLinkContext = createContext<{ cwd: string; sessionId?: string } | unde
 
 function MessageLink({ href, children }: { href?: string; children?: ReactNode }) {
   const context = useContext(FileLinkContext);
-  const path = href ? resolveLocalFileLink(href, context?.cwd) : null;
+  const path = href ? resolveLocalFileLink(href, context?.cwd, store.meta?.capabilities.windowsPaths === true) : null;
   if (context && path) return <a href={href} title={`打开文件：${path}`} onClick={event => {
     event.preventDefault();
     const root = path.startsWith(`${context.cwd.replace(/\/$/, "")}/`) ? context.cwd : path.slice(0, path.lastIndexOf("/")) || "/";
@@ -81,7 +81,7 @@ const ParsedMarkdownMessage = memo(function ParsedMarkdownMessage({ text, stream
         skipHtml
         remarkPlugins={[remarkGfm]}
         components={markdownComponents}
-        urlTransform={(url, key) => key === "href" && cwd && resolveLocalFileLink(url, cwd) ? url : defaultUrlTransform(url)}
+        urlTransform={(url, key) => key === "href" && cwd && resolveLocalFileLink(url, cwd, store.meta?.capabilities.windowsPaths === true) ? url : defaultUrlTransform(url)}
       >{text}</Markdown>
       </FileLinkContext>
       </StreamingContext>

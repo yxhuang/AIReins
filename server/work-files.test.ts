@@ -4,6 +4,7 @@ import { spawnSync } from "node:child_process";
 import { syncBuiltinESMExports } from "node:module";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { platform } from "./platform.js";
 import { getWorkFile, saveWorkFile, getWorkContent, normalizeWorkPath, openWorkSendSource, WorkFileError, TEXT_LIMIT, MEDIA_LIMIT } from "./work-files.js";
 
 const root = await mkdtemp(join(tmpdir(), "workbench-work-files-"));
@@ -19,7 +20,7 @@ for (const [name, kind, contents] of [
   await writeFile(input(name).path, contents);
   const file = await getWorkFile(input(name), options);
   assert.equal(file.kind, kind);
-  assert.equal(file.editable, !["image", "pdf"].includes(kind));
+  assert.equal(file.editable, platform !== "darwin" && !["image", "pdf"].includes(kind));
   if (file.editable) assert.equal(file.text, contents);
 }
 await assert.rejects(getWorkFile(input("a.txt")), fails(403), "客户端 root 不是授权");
@@ -28,7 +29,7 @@ await assert.rejects(getWorkFile({ path: "/etc/passwd", root }, options), fails(
 await assert.rejects(getWorkFile({ path: root, root }, options), fails(400));
 assert.equal(spawnSync("mkfifo", [input("pipe").path]).status, 0);
 await assert.rejects(getWorkFile(input("pipe"), options), fails(400), "FIFO打开不阻塞且不能预览");
-assert.equal(normalizeWorkPath("C:\\Users\\中文 文件.txt"), "/mnt/c/Users/中文 文件.txt");
+assert.equal(normalizeWorkPath("C:\\Users\\中文 文件.txt", "wsl"), "/mnt/c/Users/中文 文件.txt");
 for (const bad of ["relative", "/tmp/a\0b", "C:\\a\\..\\b", "/tmp/a/../b"]) {
   assert.throws(() => normalizeWorkPath(bad), fails(400));
 }
@@ -57,6 +58,7 @@ assert.equal((await getWorkFile(input("no-extension"), options)).kind, "text");
 await writeFile(input("bom.txt").path, Buffer.concat([Buffer.from([239, 187, 191]), Buffer.from("初版")]));
 const bom = await getWorkFile(input("bom.txt"), options);
 assert.equal(bom.text, "\ufeff初版");
+if (platform !== "darwin") {
 const saved = await saveWorkFile({ ...input("bom.txt"), version: bom.version!, text: "\ufeff新版" }, options);
 assert.deepEqual(await readFile(input("bom.txt").path), Buffer.from("\ufeff新版"));
 assert.notEqual(saved.version, bom.version);
@@ -106,6 +108,23 @@ try {
 } finally { prototype.sync = sync; await probe.close(); }
 assert.equal(await readFile(input("a.txt").path, "utf8"), current.text);
 assert.ok(!(await readdir(root)).some(name => name.startsWith(".workbench-save-")), "fsync失败清理本次临时文件");
+}
+const current = await getWorkFile(input("a.txt"), options);
+const darwinOptions = { ...options, platform: "darwin" as const };
+const darwinFile = await getWorkFile(input("a.txt"), darwinOptions);
+assert.equal(darwinFile.text, current.text);
+assert.equal(darwinFile.editable, false);
+await assert.rejects(saveWorkFile({ ...input("a.txt"), version: darwinFile.version!, text: "blocked" }, darwinOptions), fails(400));
+assert.equal((await getWorkContent(input("a.txt"), darwinOptions)).bytes.toString("utf8"), current.text);
+for (const os of ["linux", "darwin"] as const) assert.throws(() => normalizeWorkPath("C:\\Users\\file.txt", os), fails(400));
+const fileStat = promises.stat;
+promises.stat = (async (path: Parameters<typeof fileStat>[0]) => {
+  const result = await fileStat(path);
+  return String(path) === input("a.txt").path ? Object.assign(result, { ino: Number(result.ino) + 1 }) : result;
+}) as typeof promises.stat;
+syncBuiltinESMExports();
+try { await assert.rejects(getWorkFile(input("a.txt"), darwinOptions), fails(409), "BSD 路径与已打开 fd 身份不同必须拒绝读取"); }
+finally { promises.stat = fileStat; syncBuiltinESMExports(); }
 const sendText = async (source: Awaited<ReturnType<typeof openWorkSendSource>>) => {
   const chunks: Buffer[] = [];
   for await (const chunk of source.stream) chunks.push(chunk as Buffer);
@@ -118,6 +137,10 @@ assert.equal((await sendText(single)).toString("utf8"), current.text);
 await mkdir(input("-发送/sub").path, { recursive: true });
 await writeFile(input("-发送/sub/x.txt").path, "x");
 await symlink("/etc/passwd", input("-发送/link").path);
+await assert.rejects(openWorkSendSource(input("-发送"), darwinOptions), fails(400));
+const darwinSingle = await openWorkSendSource(input("a.txt"), darwinOptions);
+assert.equal((await sendText(darwinSingle)).toString("utf8"), current.text);
+if (platform !== "darwin") {
 const folder = await openWorkSendSource(input("-发送"), options);
 assert.equal(folder.name, "-发送.zip", "文件夹打包为 zip，前导 - 不被当成 zip 选项");
 const zipPath = join(root, "sent.zip");
@@ -129,4 +152,5 @@ await assert.rejects(openWorkSendSource({ path: root, root: "/" }, options), fai
 await assert.rejects(openWorkSendSource({ path: "/etc", root }, options), fails(403));
 await mkdir(input("空").path);
 await assert.rejects(openWorkSendSource(input("空"), options), fails(400), "空文件夹 zip 退出码 12 映射为 400");
+}
 console.log("work-files: formats, authorization, symlinks, UTF-8, limits, atomic writes, conflicts and Taildrop sources passed");

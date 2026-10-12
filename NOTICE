@@ -1,0 +1,21 @@
+Workbench
+Copyright (c) 2026 yxhuang. The code is licensed under the MIT License (LICENSE).
+
+Not covered by the MIT License:
+
+- The project name and logo (frontend/public/icon.svg and the icons generated
+  from it). Please use your own name and logo for a fork or derived product.
+- Third-party marks. The Claude, OpenAI/Codex, Kimi and Visual Studio Code
+  icons in frontend/src/components/AgentIcon.tsx are trademarks of their
+  owners and appear only to identify the tools this project drives. Their SVG
+  paths come from @lobehub/icons-static-svg (MIT License,
+  Copyright (c) 2023 LobeHub).
+
+Not part of this repository:
+
+- Claude Code, Codex and Kimi Code. This project drives their official CLIs;
+  install them separately and use them under their own terms and accounts.
+- The author's personal configuration, pages and helper tools. Machine-specific
+  settings live in ~/.workbench on each computer. The dispatch panel can read
+  run records from an optional external `delegate` tool; that tool is not
+  included.

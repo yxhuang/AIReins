@@ -18,7 +18,7 @@ for (const buildFails of [true, false]) {
 if [[ "$TEST_BUILD_FAIL" == 1 ]]; then exit 1; fi
 mkdir -p frontend/dist
 echo '<script src="/assets/fixture.js"></script>' > frontend/dist/index.html`);
-  executable("ss", `if [[ -f "$TEST_STARTED" ]]; then echo '127.0.0.1:8877 pid=123'; fi`);
+  executable("ss", `if [[ -f "$TEST_STARTED" ]]; then echo 'LISTEN 0 511 127.0.0.1:8877 0.0.0.0:* users:(("node",pid=123,fd=20))'; fi`);
   executable("setsid", `echo backend >> "$TEST_TRACE"; touch "$TEST_STARTED"`);
   const result = spawnSync("bash", [join(repo, "bin/workbench"), "start"], {
     encoding: "utf8", timeout: 15_000,

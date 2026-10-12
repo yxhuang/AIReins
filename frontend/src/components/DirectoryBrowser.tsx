@@ -101,7 +101,9 @@ export function DirectoryContents({ initialPath, includeFiles, onSelectFile, onE
   const [listing, setListing] = useState<DirectoryListing | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [address, setAddress] = useState(() => normalizeDirectoryPath(initialPath));
+  const windowsPaths = useStore(value => value.meta?.capabilities?.windowsPaths === true);
+  const normalizePath = (value: string) => normalizeDirectoryPath(value, windowsPaths);
+  const [address, setAddress] = useState(() => normalizePath(initialPath));
   const [addressEditing, setAddressEditing] = useState(false);
   const [recentOpen, setRecentOpen] = useState(false);
   const addressRoot = useRef<HTMLDivElement>(null);
@@ -131,10 +133,11 @@ export function DirectoryContents({ initialPath, includeFiles, onSelectFile, onE
     if (addressEditing) { addressInput.current?.focus(); addressInput.current?.select(); }
   }, [listing?.path, addressEditing]);
   useEffect(() => {
+    if (!windowsPaths) return;
     let active = true;
     void loadWindowsHistory().then((history) => { if (active) setWindowsHistory(history); });
     return () => { active = false; };
-  }, []);
+  }, [windowsPaths]);
 
   function recordPath(path: string, back = false) {
     const visited = navigationHistory?.current;
@@ -184,7 +187,7 @@ export function DirectoryContents({ initialPath, includeFiles, onSelectFile, onE
   }
 
   useEffect(() => {
-    const path = normalizeDirectoryPath(initialPath);
+    const path = normalizePath(initialPath);
     void load(path || undefined, path ? "" : undefined);
     return () => { requestId.current += 1; };
     // 宿主在会话切换时重新挂载；后续目录导航由按钮触发。
@@ -199,7 +202,7 @@ export function DirectoryContents({ initialPath, includeFiles, onSelectFile, onE
   }), [busy, navigationHistory, registerBrowserBack]);
 
   const entries = includeFiles ? [] : sortedDirectoryEntries(listing, false, { key: "name", direction: "asc" });
-  const recentPaths = recentDirectoryPaths([...sessions, ...windowsHistory], [initialPath, savedCwd]).filter(path => path !== listing?.path);
+  const recentPaths = recentDirectoryPaths([...sessions, ...windowsHistory], [initialPath, savedCwd], windowsPaths).filter(path => path !== listing?.path);
   function editAddress() {
     if (busy) return;
     setRecentOpen(false);
@@ -219,7 +222,7 @@ export function DirectoryContents({ initialPath, includeFiles, onSelectFile, onE
     setError(null);
     try {
       const picker = includeFiles ? pickWindowsFile : pickWindowsDirectory;
-      const result = await picker(listing?.path ?? normalizeDirectoryPath(address));
+      const result = await picker(listing?.path ?? normalizePath(address));
       // 面板关闭或切换会话后不应用迟到选择；取消保留当前目录。
       if (id === requestId.current && result.path) {
         if (includeFiles) {
@@ -257,7 +260,7 @@ export function DirectoryContents({ initialPath, includeFiles, onSelectFile, onE
                   const pasted = event.clipboardData.getData("text/plain");
                   if (!busy && pasted.trim()) { event.preventDefault(); setAddress(pasted); editAddress(); }
                 }}>
-                {directoryBreadcrumbs(listing.path).map((crumb, index) => <span className="dir-address-part" key={crumb.path}>
+                {directoryBreadcrumbs(listing.path, windowsPaths).map((crumb, index) => <span className="dir-address-part" key={crumb.path}>
                   {index > 0 && <span className="dir-address-separator" aria-hidden="true">›</span>}
                   <button type="button" title={crumb.path} disabled={busy}
                     aria-current={crumb.path === listing.path ? "location" : undefined}
@@ -267,14 +270,14 @@ export function DirectoryContents({ initialPath, includeFiles, onSelectFile, onE
               <button type="button" className="dir-address-edit" aria-label="编辑目录路径"
                 title="输入或粘贴完整路径" disabled={busy} onClick={editAddress} />
             </div> : <input ref={addressInput} type="text" className="mono" aria-label="目录路径" value={address} disabled={busy}
-              placeholder="粘贴 Windows 或 Linux 文件夹路径" title="粘贴目录路径，按 Enter 前往；右侧下拉选择最近目录" spellCheck={false} enterKeyHint="go"
+              placeholder={windowsPaths ? "粘贴 Windows 或 Linux 文件夹路径" : "粘贴文件夹路径"} title="粘贴目录路径，按 Enter 前往；右侧下拉选择最近目录" spellCheck={false} enterKeyHint="go"
               onFocus={() => setRecentOpen(false)}
               onChange={(event) => setAddress(event.target.value)}
               onKeyDown={(event) => {
                 if (event.key === "Enter") {
                   event.preventDefault();
                   event.stopPropagation();
-                  if (!busy && address.trim()) void load(normalizeDirectoryPath(address));
+                  if (!busy && address.trim()) void load(normalizePath(address));
                 } else if (event.key === "Escape" && listing) {
                   event.preventDefault();
                   event.stopPropagation();
@@ -310,13 +313,13 @@ export function DirectoryContents({ initialPath, includeFiles, onSelectFile, onE
         {afterLocation}
         {navTarget === undefined ? <div className="dir-nav">
           <button className="btn" type="button" title="返回当前目录的上一级" disabled={!listing?.parent || busy} onClick={goUp}>上一级</button>
-          <button className="btn" type="button" title="打开 WSL 主目录" disabled={busy} onClick={() => void load()}>WSL</button>
-          <button className="btn" type="button" title="打开最近使用的 Windows 目录" disabled={busy} onClick={openWindows}>Windows</button>
+          <button className="btn" type="button" title={windowsPaths ? "打开 WSL 主目录" : "打开主目录"} disabled={busy} onClick={() => void load()}>{windowsPaths ? "WSL" : "主目录"}</button>
+          {windowsPaths && <button className="btn" type="button" title="打开最近使用的 Windows 目录" disabled={busy} onClick={openWindows}>Windows</button>}
         </div> : navTarget && createPortal(<>
-          <button className="file-nav-btn file-nav-icon" type="button" aria-label="刷新" title="重新读取当前目录（含 Git 状态）" disabled={busy} onClick={() => void load(listing?.path ?? (normalizeDirectoryPath(address) || undefined))}><NavIcon d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8 M21 3v5h-5" /></button>
+          <button className="file-nav-btn file-nav-icon" type="button" aria-label="刷新" title="重新读取当前目录（含 Git 状态）" disabled={busy} onClick={() => void load(listing?.path ?? (normalizePath(address) || undefined))}><NavIcon d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8 M21 3v5h-5" /></button>
           <button className="file-nav-btn file-nav-icon" type="button" aria-label="上一级" title="返回当前目录的上一级" disabled={!listing?.parent || busy} onClick={goUp}><NavIcon d="M12 19V5 M5 12l7-7 7 7" /></button>
-          <button className="file-nav-btn" type="button" title="打开 WSL 主目录" disabled={busy} onClick={() => void load()}>WSL</button>
-          <button className="file-nav-btn" type="button" title="打开最近使用的 Windows 目录" disabled={busy} onClick={openWindows}>Windows</button>
+          <button className="file-nav-btn" type="button" title={windowsPaths ? "打开 WSL 主目录" : "打开主目录"} disabled={busy} onClick={() => void load()}>{windowsPaths ? "WSL" : "主目录"}</button>
+          {windowsPaths && <button className="file-nav-btn" type="button" title="打开最近使用的 Windows 目录" disabled={busy} onClick={openWindows}>Windows</button>}
         </>, navTarget)}
         {error && <p className="new-error" role="alert">{error}</p>}
         {listing?.truncated && <p className="new-hint">{includeFiles ? "条目较多，文件夹和文件各最多显示 1000 个。" : "此目录下子目录超过 1000 个，仅显示前 1000 个。"}</p>}

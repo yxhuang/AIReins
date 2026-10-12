@@ -1,11 +1,10 @@
 import { execFile } from "node:child_process";
-import { existsSync } from "node:fs";
 import { stat } from "node:fs/promises";
-import { release } from "node:os";
+import { powershellCandidates, windowsPickerAvailable } from "./platform.js";
 import { promisify } from "node:util";
 import { listDirectories } from "./dir-list.js";
 
-const POWERSHELL = "/mnt/c/Program Files/PowerShell/7/pwsh.exe";
+const POWERSHELL = powershellCandidates[0]!;
 const execute = promisify(execFile);
 let active = false;
 
@@ -14,7 +13,7 @@ export class WindowsPickerError extends Error {
 }
 
 export function windowsPickerEnabled(local: boolean): boolean {
-  return local && /microsoft/i.test(release()) && existsSync(POWERSHELL);
+  return windowsPickerAvailable(local);
 }
 
 /** 盘符路径通过环境变量传入，不拼入 PowerShell 源码。 */

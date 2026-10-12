@@ -258,3 +258,8 @@ export function createTermTitlebarGesture(options: {
     },
   };
 }
+
+/** 只有后端确认的 Windows shell 才进入选择器。 */
+export function terminalShellOptions(powershell: boolean): Array<{ value: ShellKind; label: string }> {
+  return [{ value: "bash", label: "bash" }, ...(powershell ? [{ value: "powershell" as const, label: "PowerShell" }] : [])];
+}

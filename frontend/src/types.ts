@@ -231,7 +231,10 @@ export interface MetaInfo {
   /** 旧后端可省略；历史目录输入用来展开 ~。 */
   homeDir?: string;
   cliVersions: Record<AgentKind, string>;
-  capabilities: { terminal: boolean; windowsDirectoryPicker?: boolean; appWindow?: boolean; powerOff?: boolean };
+  platform?: "wsl" | "linux" | "darwin" | "unsupported";
+  capabilities: { terminal: boolean; windowsDirectoryPicker?: boolean; appWindow?: boolean; powerOff?: boolean;
+    windowsPaths?: boolean; powershell?: boolean; fileEdit?: boolean; taildrop?: boolean; folderTaildrop?: boolean;
+    windowsTray?: boolean; remoteGateway?: boolean };
   drivers: Record<AgentKind, DriverMeta>;
 }
 

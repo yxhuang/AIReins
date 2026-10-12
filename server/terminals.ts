@@ -2,6 +2,7 @@ import { statSync } from "node:fs";
 import { resolve } from "node:path";
 import { spawn, type IPty } from "@lydell/node-pty";
 import type { AccessPolicy, RemoteConfig } from "./access.js";
+import { platform, findPowerShell, type WorkbenchPlatform } from "./platform.js";
 import { ulid } from "./ulid.js";
 
 export const MAX_SCROLLBACK_BYTES = 256 * 1024;
@@ -69,16 +70,11 @@ function validateTerminalSize(cols: unknown, rows: unknown): { cols: number; row
   return { cols, rows };
 }
 
-const POWERSHELL_CANDIDATES = [
-  "/mnt/c/Program Files/PowerShell/7/pwsh.exe",
-  "/mnt/c/WINDOWS/System32/WindowsPowerShell/v1.0/powershell.exe",
-];
-
 /** 只认白名单种类，不接受路径——远程入口也会调到这里。 */
-export function resolveShell(kind: unknown, exists: (path: string) => boolean = fileExists): { kind: ShellKind; file: string; args: string[] } {
+export function resolveShell(kind: unknown, exists: (path: string) => boolean = fileExists, host: WorkbenchPlatform = platform): { kind: ShellKind; file: string; args: string[] } {
   if (kind === undefined || kind === "bash") return { kind: "bash", file: "bash", args: ["-l", "-i"] };
   if (kind !== "powershell") throw new TerminalError("invalid", "shell 只能是 bash 或 powershell");
-  const file = POWERSHELL_CANDIDATES.find(exists);
+  const file = findPowerShell(host, exists);
   if (!file) throw new TerminalError("invalid", "本机没有找到 PowerShell");
   return { kind, file, args: ["-NoLogo"] };
 }

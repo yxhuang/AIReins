@@ -125,8 +125,8 @@ try {
   await resync;
   assert.equal([...frames].reverse().find((frame) => frame.type === "resync_required")!.currentSeq, 1002); // 其后还有 ack，不能取最后一帧
   const launcher = readFileSync("bin/workbench", "utf8");
-  assert.match(launcher, /exec setsid env WORKBENCH_PORT="\$PORT" node --import tsx server\/index\.ts >>"\$LOG" 2>&1 < \/dev\/null/);
-  assert.match(launcher, /\[\[ "\$cmd" == \*"server\/index\.ts"\* \]\]/);
+  assert.match(launcher, /exec setsid env WORKBENCH_PORT="\$PORT" node --import tsx "\$REPO\/server\/index\.ts" >>"\$LOG" 2>&1 < \/dev\/null/);
+  assert.match(launcher, /\[\[ "\$cmd" == \*"\$REPO\/server\/index\.ts"\* \]\]/);
 } finally {
   ws?.terminate(); child.kill("SIGTERM"); await exited; clearTimeout(timeout);
 }

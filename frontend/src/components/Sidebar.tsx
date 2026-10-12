@@ -1075,7 +1075,7 @@ function NewSessionForm({ onDone, initialCwd }: { onDone: () => void; initialCwd
     const input: CreateSessionInput = {
       snapshot: "skip",
       agent,
-      cwd: normalizeDirectoryPath(cwd),
+      cwd: normalizeDirectoryPath(cwd, meta?.capabilities.windowsPaths === true),
       ...(Object.keys(config).length > 0 ? { config } : {}),
       ...(message.trim() ? { initialMessage: message.trim() } : {}),
     };
@@ -1121,8 +1121,8 @@ function NewSessionForm({ onDone, initialCwd }: { onDone: () => void; initialCwd
         ))}
       </div>
       <div className="new-field">
-        <label htmlFor="new-session-cwd">工作目录（Windows / Linux 路径）</label>
-        <p className="new-hint">可直接粘贴 Windows 文件夹路径，自动转换；点“浏览…”选择目录，地址栏左侧文件夹按钮可调用 Windows 选择窗口。</p>
+        <label htmlFor="new-session-cwd">{meta?.capabilities.windowsPaths ? "工作目录（Windows / Linux 路径）" : "工作目录"}</label>
+        <p className="new-hint">{meta?.capabilities.windowsPaths ? "可直接粘贴 Windows 文件夹路径，自动转换；点“浏览…”选择目录，地址栏左侧文件夹按钮可调用 Windows 选择窗口。" : "粘贴本机文件夹路径，或点“浏览…”选择目录。"}</p>
         <div className="cwd-input-row">
           <input
             id="new-session-cwd"

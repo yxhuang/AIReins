@@ -175,3 +175,11 @@ node frontend/scripts/smoke-ws.mjs  # 需后端；会创建测试会话、批准
 - 左下扩展页面入口（包括 AI 用量）打开后变为“‹ 后退”，再次点击收起页面并回到会话列表；图标态也保留返回箭头和可访问标签，与历史会话一致。
 
 - 会话菜单的「删除」已改为「移除」；其下方「彻底删除」打开模态确认框，列出完整标题、工具与原生ID，说明无法恢复。默认聚焦取消，支持Esc/遮罩取消和Tab循环；进行中不可取消/重复提交。Codex/Kimi可确认；Claude菜单不显示彻底删除，缺失原生ID显示原因并禁用确认；执行中/后台任务需先停止。成功清除会话状态、草稿、选中的原生历史并触发历史重载；失败保留弹层及WB条目。新增前端调用专用接口，旧后端返回404，不误执行移除。见 [PermanentDeleteConfirm.tsx](src/components/PermanentDeleteConfirm.tsx) 与 `.work-orders/2026-10-05-permanent-session-delete/REPORT.md`。
+
+## 平台入口（2026-10-12）
+
+界面使用 `/api/meta` 的 `platform` 和 `capabilities`，不以浏览器操作系统猜测后端平台。能力缺失或 false 时隐藏入口：`appWindow` 控制 WB 独立 App 窗口，`windowsDirectoryPicker` 控制文件/目录/历史的原生选择按钮，`powerOff` 控制关机，`powershell` 控制终端 shell 选择，`taildrop`/`folderTaildrop` 分别控制普通文件/目录的发送菜单。目录行的「在新标签页内打开」始终可用，不因 Taildrop 缺失而隐藏。
+
+`windowsPaths` 为 true 时保留 WSL 主目录、最近 Windows 目录和盘符转换；否则按钮显示「主目录」，不预取 `/mnt` 历史，不提供 Windows 导航/提示，输入与文件链接不转换盘符，`/mnt/c` 按普通 POSIX 目录显示。新建会话、历史目录筛选、文件面板和消息文件链接沿用同一能力判断。前端不展示托盘或网关安装入口；后端字段用于平台契约。
+
+macOS 实验性 `fileEdit:false`：文件 metadata 的 `editable` 同时为 false，源码只读、保存按钮隐藏，后端拒绝写入。`folderTaildrop:false` 时目录行菜单仍允许开标签页，隐藏设备发送项并不请求 Taildrop 列表。远程 `terminal` 仍仅在 remote.json 显式 true 时可见。所有 API 继续独立验证访问控制，UI 隐藏不承担授权职责。

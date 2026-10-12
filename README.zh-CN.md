@@ -4,7 +4,7 @@
 
 [English](README.md) | 简体中文
 
-> 状态：早期版本（v0.1）。由一个人在 Windows + WSL2 上日常构建和使用。暂不支持原生 Linux 和 macOS；见[平台支持](#平台支持)。
+> 状态：早期版本（v0.1）。由一个人在 Windows + WSL2 上日常构建和使用。原生 Linux 支持并设 Ubuntu CI 必过门禁；macOS 为实验性，仅以 CI 覆盖；见[平台支持](#平台支持)。
 
 ## 为什么
 
@@ -59,8 +59,8 @@
 | 平台 | 状态 |
 |---|---|
 | Windows 11 + WSL2 (Ubuntu) | 支持：安装器、托盘、应用窗口、远程网关 |
-| 原生 Linux | 暂不支持（`install.sh` 面向 WSL） |
-| macOS | 暂不支持 |
+| 原生 Linux | 支持；Ubuntu CI 为必过门禁 |
+| macOS | 实验性；仅 CI 覆盖，作者无实机 |
 | 原生 Windows（无 WSL） | 暂无计划 |
 
 ## 安装（Windows + WSL2）
@@ -94,6 +94,12 @@ wb status     # 还有：wb stop | wb restart | wb logs
 
 Workbench 监听 `http://127.0.0.1:8790`（可用 `WORKBENCH_PORT` 修改）。托盘图标和开始菜单快捷方式会以 Chrome 应用窗口打开它。
 
+## 安装（原生 Linux / macOS 实验性）
+
+使用相同的 clone 和 `bash install.sh` 命令。原生 Linux 需要 Node ≥ 22.12、npm、`ss`（iproute2）与 `rg`；macOS 用 `lsof` 查询端口，还需 `rg`（例如 `brew install ripgrep`）。`wb` 在 Linux 调用 `xdg-open`，macOS 调用 `open`；无桌面环境可设 `WORKBENCH_NO_OPEN=1`。这些平台不安装 Windows 托盘或网关，界面隐藏 Chrome App 窗口、Windows 选择窗口、盘符转换和 PowerShell。Linux 的 systemd 部署是可选项，见[主机设置](docs/host-connections.md)。
+
+WSL2 是作者日常使用的主力平台。Ubuntu CI 为必过门禁，macOS CI 允许实验性失败；作者没有 Mac，macOS 只在 CI 中测试。macOS 支持文件浏览与预览，安全目录 fd 操作未实现前隐藏文件编辑与文件夹 Taildrop；普通文件 Taildrop 可用。欢迎 macOS 用户在 issue 反馈。
+
 ## 从手机远程访问
 
 当 Windows 上已安装并登录 Tailscale 时，`install.sh` 会配置远程访问：
@@ -101,11 +107,19 @@ Workbench 监听 `http://127.0.0.1:8790`（可用 `WORKBENCH_PORT` 修改）。�
 1. 写入 `~/.workbench/remote.json`（仅当不存在时），其中包含你的 MagicDNS HTTPS 地址和 Tailscale 登录名。远程终端默认**关闭**。
 2. 在一次 UAC 提示之后，安装一个小型 Windows 网关和 `tailscale serve`。
 
+原生 Linux/macOS 的 Tailscale 与 Workbench 必须在同一台机器。安装器仅生成缺失的 `remote.json`（`terminal: false`）并打印命令，不修改 Tailscale 配置；请自行执行：
+
+```bash
+tailscale serve --bg http://127.0.0.1:8793
+```
+
+已有配置端口不同时用安装器打印的端口。macOS 的 PATH 找不到 CLI 时回退 `/Applications/Tailscale.app/Contents/MacOS/Tailscale`。Serve 直接指向远程 loopback 监听，不需要 Windows 网关；Host/Origin 与 Tailscale 身份白名单的严格检查三平台完全相同。远程终端仍需显式 `terminal: true`。
+
 在手机上打开 `https://<your-computer>.<tailnet>.ts.net/`，添加到主屏幕。细节与故障排查见 [deploy/windows/REMOTE.md](deploy/windows/REMOTE.md)。如果你的浏览器使用系统代理，请把 `*.ts.net` 加入绕过列表。
 
 ## 配置
 
-Workbench 把数据保存在 `~/.workbench`。`WORKBENCH_HOME` 可以移动服务器的数据目录，但安装器、`wb` 日志和快照仍使用 `~/.workbench`。它不会改变三家 CLI 的全局设置，唯一的例外是你在 Workbench 中切换的 Claude Remote Control 默认值。
+Workbench 把数据保存在 `~/.workbench`。`WORKBENCH_HOME` 可以移动服务器数据目录和原生 POSIX 远程安装器的配置目录；WSL 安装、`wb` 日志和快照保留原有路径。它不会改变三家 CLI 的全局设置，唯一的例外是你在 Workbench 中切换的 Claude Remote Control 默认值。
 
 环境变量：
 
@@ -159,4 +173,4 @@ npm run typecheck && npm run typecheck:frontend
 
 ## 许可证
 
-尚未选定；首个公开发布版本之前会添加许可证。在此之前，保留所有权利。
+代码使用 [MIT 许可证](LICENSE)。项目名称和 Logo、第三方品牌图标不在许可范围内；详情及本仓库不包含的内容见 [NOTICE](NOTICE)。

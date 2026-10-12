@@ -101,11 +101,11 @@ assert.equal(registry.create({ shell: "bash", cols: 80, rows: 24 }).kind, "bash"
 for (const bad of ["pwsh", "/bin/sh", "/mnt/c/Program Files/PowerShell/7/pwsh.exe", 1, null]) {
   assert.throws(() => registry.create({ shell: bad, cols: 80, rows: 24 }), /shell 只能是/, `拒绝 ${String(bad)}`);
 }
-assert.deepEqual(resolveShell("powershell", (path) => path.endsWith("powershell.exe")), {
+assert.deepEqual(resolveShell("powershell", (path) => path.endsWith("powershell.exe"), "wsl"), {
   kind: "powershell", file: "/mnt/c/WINDOWS/System32/WindowsPowerShell/v1.0/powershell.exe", args: ["-NoLogo"],
 }, "没有 pwsh 7 时退到 Windows PowerShell");
-assert.equal(resolveShell("powershell", () => true).file, "/mnt/c/Program Files/PowerShell/7/pwsh.exe", "优先 pwsh 7");
-assert.throws(() => resolveShell("powershell", () => false), /没有找到 PowerShell/);
+assert.equal(resolveShell("powershell", () => true, "wsl").file, "/mnt/c/Program Files/PowerShell/7/pwsh.exe", "优先 pwsh 7");
+assert.throws(() => resolveShell("powershell", () => false, "wsl"), /没有找到 PowerShell/);
 assert.deepEqual(["/mnt/c", "/mnt/d/work", "/mnt/cdrom", "/home/me", "/mnt"].map(isWindowsMount), [true, true, false, false, false]);
 assert.equal(windowsHome("/usr/bin:/mnt/c/Users/user/AppData/Local/Microsoft/WindowsApps:/mnt/c/WINDOWS", () => true), "/mnt/c/Users/user");
 assert.equal(windowsHome("/usr/bin:/mnt/c/WINDOWS", () => true), "/mnt/c", "PATH 里没有用户目录退 /mnt/c");

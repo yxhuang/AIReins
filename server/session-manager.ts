@@ -1,3 +1,4 @@
+import { platform, vscodeFileUri, type Platform } from "./platform.js";
 import { sessionTitle } from "../shared/session-title.js";
 import { configOptionsForModel } from "../shared/model-config.js";
 import { statSync } from "node:fs";
@@ -1613,13 +1614,12 @@ function pendingGatesFrom(events: UnifiedEvent[]): Set<string> {
 }
 
 /** 浏览器协议链接；不在服务端启动 VSCode，WSL cwd 保留目录分隔符。 */
-export function buildVSCodeUri(record: Pick<SessionRecord, "agent" | "nativeSessionId" | "cwd">, distro = process.env.WSL_DISTRO_NAME): string | null {
+export function buildVSCodeUri(record: Pick<SessionRecord, "agent" | "nativeSessionId" | "cwd">, distro = platform === "wsl" ? process.env.WSL_DISTRO_NAME : undefined, host: Platform = platform): string | null {
   if (record.agent === "claude") {
     return record.nativeSessionId ? `vscode://anthropic.claude-code/open?session=${encodeURIComponent(record.nativeSessionId)}` : null;
   }
-  if (!distro?.trim()) return null;
-  const cwd = record.cwd.split("/").map(encodeURIComponent).join("/");
-  return `vscode://vscode-remote/wsl+${encodeURIComponent(distro.trim())}${cwd}`;
+  if (host === "wsl" && !distro?.trim()) return null;
+  return vscodeFileUri(record.cwd, distro);
 }
 
 /** 带 cwd 的原生续接命令；cwd 做 shell 单引号转义（' → '\''）。 */
