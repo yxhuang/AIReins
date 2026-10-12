@@ -183,3 +183,11 @@ node frontend/scripts/smoke-ws.mjs  # 需后端；会创建测试会话、批准
 `windowsPaths` 为 true 时保留 WSL 主目录、最近 Windows 目录和盘符转换；否则按钮显示「主目录」，不预取 `/mnt` 历史，不提供 Windows 导航/提示，输入与文件链接不转换盘符，`/mnt/c` 按普通 POSIX 目录显示。新建会话、历史目录筛选、文件面板和消息文件链接沿用同一能力判断。前端不展示托盘或网关安装入口；后端字段用于平台契约。
 
 macOS 实验性 `fileEdit:false`：文件 metadata 的 `editable` 同时为 false，源码只读、保存按钮隐藏，后端拒绝写入。`folderTaildrop:false` 时目录行菜单仍允许开标签页，隐藏设备发送项并不请求 Taildrop 列表。远程 `terminal` 仍仅在 remote.json 显式 true 时可见。所有 API 继续独立验证访问控制，UI 隐藏不承担授权职责。
+
+## 中英双语界面
+
+轻量入口 [i18n.ts](src/i18n.ts) 合并 `src/i18n/` 内的 `core`、`ui`、`server` 三组 `zh-CN` / `en` 词典，无新增依赖。默认按 `navigator.language` 选择：`zh*` 使用简体中文，其他使用英文。设置「外观 → 语言」可选跟随系统、中文、English，偏好以 `workbench-language` 保存到浏览器 localStorage，沿用字号/字体的本机偏好机制；切换后整页刷新生效。各浏览器独立保存；无法读取存储时跟随系统。页面 `lang`、数量、日期和相对时间使用所选语言，窗口标题保留原值以兼容 Windows 托盘。
+
+新增文案时在对应两份词典中添加相同键，组件调用 `t(key, {name: value})`。动态值使用 `{name}` 占位符，不在调用处拼接汉字；`{product}` 由入口统一替换为 `PRODUCT_NAME`（定义在 `shared/product-name.ts`）。数字参数自动按语言格式化，日期/相对时间使用 `formatDate` / `formatRelativeTime`；原始 ID 和版本号作为字符串传入。术语以 [TERMS.md](src/i18n/TERMS.md) 为准。服务端自产文案的 `i18n` 元数据在 API / WS / 终端接收入口译成显示字段，旧信封和未知键保留原文，用户/模型正文不翻译；接口详见 server README。
+
+提交前运行 `npm run check:i18n`：使用现有构建工具的 TS/TSX parser 查中文字面量（不检查注释和 console 输出），检查两份词典键集、空译文、参数占位符和英文中文残留。兼容性/数据识别/校准例外逐条登记在 [check-i18n.mjs](scripts/check-i18n.mjs)，历史 vendor 模板以精确 hash 固定。已有文案测试通过 `i18n-zh.mjs` 在模块加载前固定中文；`npm run test:i18n` 覆盖语言选择、插值、回退、服务端元数据与英文视图渲染。

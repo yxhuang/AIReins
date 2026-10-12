@@ -15,6 +15,7 @@
 // 浏览器依赖（WebSocket / fetch）全部打桩，不需要真实 server。运行：npm run test:effective-ask
 import { strict as assert } from "node:assert";
 import { readFileSync } from "node:fs";
+import uiZh from "../src/i18n/ui.zh-CN.ts";
 
 // --- 浏览器全局打桩（须在 import store 之前） ---
 globalThis.WebSocket = { CONNECTING: 0, OPEN: 1, CLOSING: 2, CLOSED: 3 };
@@ -403,8 +404,8 @@ await t("源码接线：提问走 QuestionBlock 且共用 pendingGates 贴条；
   const qEnd = block.indexOf("export function SystemLine");
   const qBody = block.slice(qStart, qEnd);
   assert.ok(!qBody.includes("btn-danger"), "提问卡片不应有拒绝样式按钮");
-  assert.ok(qBody.includes("已选择："), "已处理的提问卡片应有「已选择」降级态");
-  assert.ok(qBody.includes("已跳过"), "已处理的提问卡片应有「已跳过」降级态");
+  assert.ok((qBody.includes("ui.StreamItems.selected") && uiZh["ui.StreamItems.selected"].includes("已选择：")), "已处理的提问卡片应有「已选择」降级态");
+  assert.ok((qBody.includes("ui.common.skipped") && uiZh["ui.common.skipped"].includes("已跳过")), "已处理的提问卡片应有「已跳过」降级态");
 });
 
 // --- 验收 5b 打桩侧：QuestionBlock「其他…」源码接线（P1-5）---
@@ -413,7 +414,7 @@ await t("源码接线：每题选项末尾追加「其他…」按钮，选中�
   const qStart = block.indexOf("export const QuestionBlock");
   const qEnd = block.indexOf("export function SystemLine");
   const qBody = block.slice(qStart, qEnd);
-  assert.ok(qBody.includes("其他…"), "「其他…」按钮缺失");
+  assert.ok((qBody.includes("ui.StreamItems.other") && uiZh["ui.StreamItems.other"].includes("其他…")), "「其他…」按钮缺失");
   assert.ok(qBody.includes("question-other"), "「其他」按钮/输入区缺少 question-other 类");
   assert.ok(qBody.includes("toggleOther(selection, other, q)"), "「其他…」按钮未走 toggleOther");
   assert.ok(qBody.includes("setOtherText(current, q,"), "输入框未走 setOtherText");

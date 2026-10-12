@@ -1,3 +1,4 @@
+import { t } from "../i18n";
 import { memo, useMemo } from "react";
 import type { AgentKind, HistoryMessage } from "../types";
 import { focusVisible, type ExternalHistoryBlock } from "../render-items";
@@ -28,9 +29,9 @@ export const HistoryTimeline = memo(function HistoryTimeline({ messages: all, ag
 });
 
 export function ExternalHistoryView({ item, agent, cwd, sessionId }: { item: ExternalHistoryBlock; agent: AgentKind; cwd: string; sessionId?: string }) {
-  return <section className="session-history" aria-label="在别处继续的对话">
-    <p className="session-history-note">以下在 VSCode / 终端 / 手机上继续</p>
-    {item.truncated && <p className="session-history-note">部分较早内容或工具正文因大小限制已省略。</p>}
+  return <section className="session-history" aria-label={t("ui.HistoryTimeline.conversation_continued_elsewhere")}>
+    <p className="session-history-note">{t("ui.HistoryTimeline.continued_below_in_vs_code_a_terminal")}</p>
+    {item.truncated && <p className="session-history-note">{t("ui.HistoryTimeline.some_older_content_or_tool_output_was")}</p>}
     <HistoryTimeline messages={item.messages} agent={agent} cwd={cwd} sessionId={sessionId} />
     <div className="session-history-divider" role="separator" />
   </section>;

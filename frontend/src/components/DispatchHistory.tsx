@@ -1,3 +1,4 @@
+import { t, getLocale } from "../i18n";
 import { useEffect, useState } from "react";
 import { fetchDispatchHistory } from "../api";
 import { dispatchName, dispatchTime, type DispatchRun } from "../dispatch-flow";
@@ -39,16 +40,16 @@ export function DispatchHistory() {
     document.addEventListener("visibilitychange", load);
     return () => { active = false; controller.abort(); window.clearInterval(timer); document.removeEventListener("visibilitychange", load); };
   }, [page, open]);
-  return <details className="dispatch-history" aria-label="近 7 天历史派单" open={open} onToggle={(event) => setOpen(event.currentTarget.open)}>
-    <summary className="dispatch-section-head"><h2>近 7 天历史</h2><span>{loaded ? `${total} 单已结束` : "展开查看"}</span></summary>
-    {error && <p className="dispatch-error" role="alert">历史加载失败：{error}</p>}
-    {!loaded ? <p className="dispatch-note">正在加载…</p> : !runs.length ? <p className="dispatch-note">近 7 天没有已结束派单</p> : <div className="dispatch-history-list">{runs.map((run) => <button className="dispatch-history-row" key={run.runId} onClick={() => store.navigateDispatches([run.runId])}>
-      <span className="dispatch-history-name">{dispatchName(run)}<span className="dispatch-note">{run.tool} · {run.model || "模型未知"}</span></span>
+  return <details className="dispatch-history" aria-label={t("ui.DispatchHistory.dispatch_history_from_the_last_7_days")} open={open} onToggle={(event) => setOpen(event.currentTarget.open)}>
+    <summary className="dispatch-section-head"><h2>{t("ui.DispatchHistory.last_7_days")}</h2><span>{loaded ? t("ui.DispatchHistory.dispatches_ended", { p0: (total) }) : t("ui.DispatchHistory.expand_to_view")}</span></summary>
+    {error && <p className="dispatch-error" role="alert">{t("ui.DispatchHistory.failed_to_load_history_sentence", { p0: (error) })}</p>}
+    {!loaded ? <p className="dispatch-note">{t("ui.common.loading")}</p> : !runs.length ? <p className="dispatch-note">{t("ui.DispatchHistory.no_dispatches_ended_in_the_last_7")}</p> : <div className="dispatch-history-list">{runs.map((run) => <button className="dispatch-history-row" key={run.runId} onClick={() => store.navigateDispatches([run.runId])}>
+      <span className="dispatch-history-name">{dispatchName(run)}<span className="dispatch-note">{run.tool} · {run.model || t("ui.common.model_unknown")}</span></span>
       <span className={`dispatch-badge ${run.status === "OK" ? "" : "failed"}`}>{run.status}</span>
       <span className="mono">{dispatchTime(run.elapsedS)}</span>
-      <time>{new Date(run.endedAt || (Date.parse(run.startedAt || "") + (run.elapsedS || 0) * 1000)).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })}</time>
+      <time>{new Date(run.endedAt || (Date.parse(run.startedAt || "") + (run.elapsedS || 0) * 1000)).toLocaleString(getLocale(), { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })}</time>
       <span aria-hidden="true">›</span>
     </button>)}</div>}
-    {next !== null && <button className="btn dispatch-history-more" disabled={busy} onClick={() => setPage((value) => value + 1)}>{busy ? "加载中…" : "加载更多"}</button>}
+    {next !== null && <button className="btn dispatch-history-more" disabled={busy} onClick={() => setPage((value) => value + 1)}>{busy ? t("ui.common.loading_2") : t("ui.common.load_more")}</button>}
   </details>;
 }

@@ -11,6 +11,7 @@
 // 浏览器依赖（WebSocket / fetch）全部打桩，不需要真实 server。运行：npm run test:resume
 import { strict as assert } from "node:assert";
 import { readFileSync } from "node:fs";
+import uiZh from "../src/i18n/ui.zh-CN.ts";
 
 // --- 浏览器全局打桩（须在 import store 之前） ---
 globalThis.WebSocket = { CONNECTING: 0, OPEN: 1, CLOSING: 2, CLOSED: 3 };
@@ -284,11 +285,11 @@ await t("源码接线：resumedFrom 才挂历史区；分隔线文案；共用�
     "SessionView 未按 resumedFrom 挂载历史区",
   );
   const history = readFileSync(new URL("../src/components/ResumedHistory.tsx", import.meta.url), "utf8");
-  assert.ok(history.includes("用户、助手与工具调用；工具可展开。"), "历史来源与省略项说明缺失");
+  assert.ok((history.includes("ui.ResumedHistory.native_session_user_assistant_and_tool_calls_sentence") && uiZh["ui.ResumedHistory.native_session_user_assistant_and_tool_calls_sentence"].includes("用户、助手与工具调用；工具可展开。")), "历史来源与省略项说明缺失");
   assert.ok(history.includes('className="session-history-divider" role="separator" ref={dividerRef}'), "滚动补偿分隔线缺失");
-  assert.ok(history.includes("加载更早的消息"), "翻页按钮文案缺失");
-  assert.ok(history.includes("加载中…"), "加载中文案缺失");
-  assert.ok(history.includes("重试"), "失败重试缺失");
+  assert.ok((history.includes("ui.ResumedHistory.load_earlier_messages") && uiZh["ui.ResumedHistory.load_earlier_messages"].includes("加载更早的消息")), "翻页按钮文案缺失");
+  assert.ok((history.includes("ui.common.loading_2") && uiZh["ui.common.loading_2"].includes("加载中…")), "加载中文案缺失");
+  assert.ok((history.includes("ui.common.retry") && uiZh["ui.common.retry"].includes("重试")), "失败重试缺失");
   const sharedMessage = readFileSync(new URL("../src/components/HistoryTimeline.tsx", import.meta.url), "utf8");
   assert.ok(history.includes("<HistoryTimeline messages={state.messages} agent={agent}"), "应复用用户/助手消息视图");
   assert.ok(sharedMessage.includes("<UserBlockView") && sharedMessage.includes("<ToolCard") && sharedMessage.includes("<MarkdownMessage"), "历史三态应复用实时组件");

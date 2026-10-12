@@ -1,3 +1,4 @@
+import { getLocale } from "./i18n";
 /** 接受资源管理器的盘符路径（含“复制为路径”的双引号）；保留 Linux 路径中的反斜杠。 */
 export function normalizeDirectoryPath(value: string, windowsPaths = true): string {
   let path = value.trim();
@@ -24,7 +25,7 @@ export function directoryBreadcrumbs(path: string, windowsPaths = true): { label
 }
 
 export type DirectorySort = { key: "name" | "size" | "modifiedAt"; direction: "asc" | "desc" };
-const names = new Intl.Collator("zh-CN", { numeric: true, sensitivity: "base" });
+const names = new Intl.Collator(getLocale(), { numeric: true, sensitivity: "base" });
 
 /** 文件夹始终在前；未知元数据始终在同类末尾，不把缺失值当成零。 */
 export function sortedDirectoryEntries(listing: DirectoryListing | null, includeFiles: boolean, sort: DirectorySort) {
@@ -51,7 +52,7 @@ export function directoryEntrySize(size: number | null | undefined): string {
   return `${Number((size / 1024 ** unit).toFixed(1))} ${["B", "KB", "MB", "GB", "TB"][unit]}`;
 }
 
-const dates = new Intl.DateTimeFormat("zh-CN", { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false });
+const dates = new Intl.DateTimeFormat(getLocale(), { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false });
 export function directoryEntryDate(time: number | null | undefined): string {
   return typeof time === "number" && Number.isFinite(time) && !Number.isNaN(new Date(time).getTime()) ? dates.format(time) : "—";
 }

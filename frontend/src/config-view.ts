@@ -1,3 +1,4 @@
+import { t } from "./i18n";
 import type { AgentKind, ConfigOptionId, DriverConfigOption, EffectiveSource, SessionRecord } from "./types";
 export { configOptionsForModel, modelConfigPatch } from "../../shared/model-config";
 
@@ -15,7 +16,7 @@ export function newSessionConfig(agent: AgentKind): Partial<Record<ConfigOptionI
  * mutableVia:"restart" 选项旁的一行小字（事实说明，不是警告）：
  * claude 的 model/effort 切换 = 停 worker → --resume 同一原生会话 → 带新参数重启。
  */
-export const RESTART_NOTE = "切换会重启底层进程并续接当前会话";
+export const RESTART_NOTE = t("core.015");
 
 /** 该选项是否需要「重启切换」代价标注（schema 的 mutableVia:"restart"）。 */
 export function needsRestartNote(option: Pick<DriverConfigOption, "mutableVia">): boolean {
@@ -24,13 +25,13 @@ export function needsRestartNote(option: Pick<DriverConfigOption, "mutableVia">)
 
 /** effective* 来源的极小字标注：session=会话覆盖、settings=Claude 设置、init=运行时回报。 */
 export const EFFECTIVE_SOURCE_LABELS: Record<Exclude<EffectiveSource, null>, string> = {
-  session: "会话",
-  settings: "设置",
-  init: "运行时",
+  session: t("core.016"),
+  settings: t("core.017"),
+  init: t("core.018"),
 };
 
 /** settings 来源的有效模型是别名（claude CLI 无枚举接口），不是精确 id。 */
-export const ALIAS_NOTE = "别名为 Claude 设置的最新该档位模型";
+export const ALIAS_NOTE = t("core.019");
 
 interface EffectiveValue {
   value: string;
@@ -70,7 +71,7 @@ export function pillText(
     option.values.find((v) => v.value !== null && value.includes(v.value))?.label ??
     value;
   const value = current || effective || option.default;
-  return value ? labelOf(value) : "默认";
+  return value ? labelOf(value) : t("core.020");
 }
 
 /** 会话头的模型短名：去掉 claude- 前缀与日期后缀，版本号连字符改点（claude-opus-5-5 → opus-5.5）。 */

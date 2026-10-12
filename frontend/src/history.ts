@@ -1,3 +1,4 @@
+import { t } from "./i18n";
 import type { AgentKind, HistorySession, HistorySource, SessionRecord } from "./types";
 import { normalizeDirectoryPath } from "./directory-path";
 
@@ -5,19 +6,19 @@ import { normalizeDirectoryPath } from "./directory-path";
 
 /** 来源徽标文案：workbench 一眼可辨；interactive（CLI/VS Code/codex exec 委派等工作台以外启动）显示「其他」；unknown 如实显示「未知」，不猜。 */
 export const SOURCE_LABELS: Record<HistorySource, string> = {
-  interactive: "其他",
-  workbench: "工作台",
-  unknown: "未知",
+  interactive: t("core.039"),
+  workbench: t("core.040"),
+  unknown: t("core.024"),
 };
 
 /** 来源筛选项（「全部」= 不过滤任何东西，默认）。 */
 export type SourceFilter = "all" | HistorySource;
 
 export const SOURCE_FILTER_LABELS: Record<SourceFilter, string> = {
-  all: "全部",
-  interactive: "其他",
-  workbench: "工作台",
-  unknown: "未知",
+  all: t("core.041"),
+  interactive: t("core.039"),
+  workbench: t("core.040"),
+  unknown: t("core.024"),
 };
 
 /** 路径输入只在 Enter 时提交，不参与实时关键词搜索。 */

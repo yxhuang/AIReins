@@ -360,7 +360,7 @@ function transcriptPage(path: string, beforeSeq?: number) {
 export function readTranscriptPage(path: string, beforeSeq?: number) { return transcriptPage(path, beforeSeq).page; }
 export function readTranscriptTail(path: string) {
   const { cached, page } = transcriptPage(path);
-  return { ...page, state: structuredClone(cached.index.state), title: cached.title };
+  return { ...page, state: structuredClone(cached.index.state), title: cached.title, titleIsFallback: !cached.hasFirstUser };
 }
 export function readTranscriptDerived(path: string) {
   const cached = cachedTranscript(path);

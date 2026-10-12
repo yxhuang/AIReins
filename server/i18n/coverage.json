@@ -1,0 +1,3555 @@
+{
+  "templates": 481,
+  "coveredSourceSites": 571,
+  "errorSourceSites": 433,
+  "sources": [
+    {
+      "file": "server/access.ts",
+      "line": 53,
+      "key": "server.message000",
+      "category": "other"
+    },
+    {
+      "file": "server/access.ts",
+      "line": 53,
+      "key": "server.message001",
+      "category": "other"
+    },
+    {
+      "file": "server/access.ts",
+      "line": 53,
+      "key": "server.message002",
+      "category": "other"
+    },
+    {
+      "file": "server/access.ts",
+      "line": 53,
+      "key": "server.message003",
+      "category": "other"
+    },
+    {
+      "file": "server/access.ts",
+      "line": 56,
+      "key": "server.message004",
+      "category": "other"
+    },
+    {
+      "file": "server/access.ts",
+      "line": 62,
+      "key": "server.message005",
+      "category": "other"
+    },
+    {
+      "file": "server/access.ts",
+      "line": 65,
+      "key": "server.message006",
+      "category": "other"
+    },
+    {
+      "file": "server/access.ts",
+      "line": 67,
+      "key": "server.message007",
+      "category": "other"
+    },
+    {
+      "file": "server/access.ts",
+      "line": 67,
+      "key": "server.message003",
+      "category": "other"
+    },
+    {
+      "file": "server/access.ts",
+      "line": 84,
+      "key": "server.message008",
+      "category": "Error"
+    },
+    {
+      "file": "server/access.ts",
+      "line": 88,
+      "key": "server.message009",
+      "category": "Error"
+    },
+    {
+      "file": "server/access.ts",
+      "line": 91,
+      "key": "server.message010",
+      "category": "Error"
+    },
+    {
+      "file": "server/access.ts",
+      "line": 98,
+      "key": "server.message011",
+      "category": "Error"
+    },
+    {
+      "file": "server/access.ts",
+      "line": 101,
+      "key": "server.message012",
+      "category": "log"
+    },
+    {
+      "file": "server/app-window.ts",
+      "line": 50,
+      "key": "server.message013",
+      "category": "AppWindowError"
+    },
+    {
+      "file": "server/app-window.ts",
+      "line": 57,
+      "key": "server.message014",
+      "category": "AppWindowError"
+    },
+    {
+      "file": "server/app-window.ts",
+      "line": 58,
+      "key": "server.message015",
+      "category": "AppWindowError"
+    },
+    {
+      "file": "server/app-window.ts",
+      "line": 61,
+      "key": "server.message016",
+      "category": "AppWindowError"
+    },
+    {
+      "file": "server/claude-plugins.ts",
+      "line": 17,
+      "key": "server.message017",
+      "category": "Error"
+    },
+    {
+      "file": "server/claude-plugins.ts",
+      "line": 21,
+      "key": "server.message018",
+      "category": "String"
+    },
+    {
+      "file": "server/claude-plugins.ts",
+      "line": 39,
+      "key": "server.message019",
+      "category": "Error"
+    },
+    {
+      "file": "server/claude-plugins.ts",
+      "line": 57,
+      "key": "server.message020",
+      "category": "Error"
+    },
+    {
+      "file": "server/claude-plugins.ts",
+      "line": 59,
+      "key": "server.message021",
+      "category": "Error"
+    },
+    {
+      "file": "server/claude-plugins.ts",
+      "line": 61,
+      "key": "server.message022",
+      "category": "Error"
+    },
+    {
+      "file": "server/claude-plugins.ts",
+      "line": 65,
+      "key": "server.message023",
+      "category": "Error"
+    },
+    {
+      "file": "server/claude-settings.ts",
+      "line": 24,
+      "key": "server.message024",
+      "category": "Error"
+    },
+    {
+      "file": "server/claude-settings.ts",
+      "line": 35,
+      "key": "server.message025",
+      "category": "Error"
+    },
+    {
+      "file": "server/codex-commands.ts",
+      "line": 5,
+      "key": "server.message026",
+      "category": "description"
+    },
+    {
+      "file": "server/codex-commands.ts",
+      "line": 6,
+      "key": "server.message027",
+      "category": "description"
+    },
+    {
+      "file": "server/codex-commands.ts",
+      "line": 7,
+      "key": "server.message028",
+      "category": "description"
+    },
+    {
+      "file": "server/codex-commands.ts",
+      "line": 8,
+      "key": "server.message029",
+      "category": "description"
+    },
+    {
+      "file": "server/codex-commands.ts",
+      "line": 9,
+      "key": "server.message030",
+      "category": "description"
+    },
+    {
+      "file": "server/codex-commands.ts",
+      "line": 10,
+      "key": "server.message031",
+      "category": "description"
+    },
+    {
+      "file": "server/codex-commands.ts",
+      "line": 10,
+      "key": "server.message032",
+      "category": "argHint"
+    },
+    {
+      "file": "server/codex-commands.ts",
+      "line": 11,
+      "key": "server.message033",
+      "category": "description"
+    },
+    {
+      "file": "server/codex-commands.ts",
+      "line": 12,
+      "key": "server.message034",
+      "category": "description"
+    },
+    {
+      "file": "server/codex-commands.ts",
+      "line": 16,
+      "key": "server.message035",
+      "category": "Error"
+    },
+    {
+      "file": "server/codex-commands.ts",
+      "line": 19,
+      "key": "server.message036",
+      "category": "Error"
+    },
+    {
+      "file": "server/codex-commands.ts",
+      "line": 22,
+      "key": "server.message037",
+      "category": "Error"
+    },
+    {
+      "file": "server/codex-commands.ts",
+      "line": 25,
+      "key": "server.message038",
+      "category": "Error"
+    },
+    {
+      "file": "server/codex-commands.ts",
+      "line": 56,
+      "key": "server.message039",
+      "category": "Error"
+    },
+    {
+      "file": "server/dir-list.ts",
+      "line": 46,
+      "key": "server.message040",
+      "category": "DirListError"
+    },
+    {
+      "file": "server/dir-list.ts",
+      "line": 56,
+      "key": "server.message041",
+      "category": "DirListError"
+    },
+    {
+      "file": "server/dispatches.ts",
+      "line": 117,
+      "key": "server.message042",
+      "category": "other"
+    },
+    {
+      "file": "server/dispatches.ts",
+      "line": 498,
+      "key": "server.message043",
+      "category": "(async () => {\n    try {\n      const transcript = new NativeConversationReader(roots).transcriptPath({ agent: kind, nativeSessionId: sessionId } as SessionRecord);\n      if (!transcript) return null;\n      const path = kind === \"kimi\" ? join(dirname(dirname(dirname(transcript))), \"state.json\") : transcript;\n      const metadata = await new HistoryIndex({ roots }).sessionMetadata(kind, path);\n      return metadata?.nativeSessionId === sessionId && metadata.title !== \"无标题会话\" ? metadata.title : null;\n    } catch { return null; }\n  })"
+    },
+    {
+      "file": "server/dispatches.ts",
+      "line": 569,
+      "key": "server.message044",
+      "category": "Error"
+    },
+    {
+      "file": "server/dispatches.ts",
+      "line": 571,
+      "key": "server.message045",
+      "category": "Error"
+    },
+    {
+      "file": "server/dispatches.ts",
+      "line": 617,
+      "key": "server.message046",
+      "category": "Error"
+    },
+    {
+      "file": "server/dispatches.ts",
+      "line": 619,
+      "key": "server.message047",
+      "category": "Error"
+    },
+    {
+      "file": "server/dispatches.ts",
+      "line": 677,
+      "key": "server.message048",
+      "category": "Error"
+    },
+    {
+      "file": "server/dispatches.ts",
+      "line": 923,
+      "key": "server.message042",
+      "category": "other"
+    },
+    {
+      "file": "server/dispatches.ts",
+      "line": 923,
+      "key": "server.message049",
+      "category": "other"
+    },
+    {
+      "file": "server/dispatches.ts",
+      "line": 1000,
+      "key": "server.message050",
+      "category": "DispatchQueryError"
+    },
+    {
+      "file": "server/dispatches.ts",
+      "line": 1035,
+      "key": "server.message051",
+      "category": "DispatchQueryError"
+    },
+    {
+      "file": "server/dispatches.ts",
+      "line": 1111,
+      "key": "server.message052",
+      "category": "DispatchQueryError"
+    },
+    {
+      "file": "server/dispatches.ts",
+      "line": 1114,
+      "key": "server.message053",
+      "category": "DispatchQueryError"
+    },
+    {
+      "file": "server/drivers/base.ts",
+      "line": 92,
+      "key": "server.message054",
+      "category": "Error"
+    },
+    {
+      "file": "server/drivers/base.ts",
+      "line": 151,
+      "key": "server.message055",
+      "category": "Error"
+    },
+    {
+      "file": "server/drivers/base.ts",
+      "line": 162,
+      "key": "server.message055",
+      "category": "Error"
+    },
+    {
+      "file": "server/drivers/base.ts",
+      "line": 167,
+      "key": "server.message056",
+      "category": "Error"
+    },
+    {
+      "file": "server/drivers/base.ts",
+      "line": 185,
+      "key": "server.message057",
+      "category": "other"
+    },
+    {
+      "file": "server/drivers/base.ts",
+      "line": 194,
+      "key": "server.message058",
+      "category": "Error"
+    },
+    {
+      "file": "server/drivers/claude.ts",
+      "line": 54,
+      "key": "server.message059",
+      "category": "fable"
+    },
+    {
+      "file": "server/drivers/claude.ts",
+      "line": 55,
+      "key": "server.message060",
+      "category": "opus"
+    },
+    {
+      "file": "server/drivers/claude.ts",
+      "line": 56,
+      "key": "server.message061",
+      "category": "sonnet"
+    },
+    {
+      "file": "server/drivers/claude.ts",
+      "line": 57,
+      "key": "server.message062",
+      "category": "haiku"
+    },
+    {
+      "file": "server/drivers/claude.ts",
+      "line": 156,
+      "key": "server.message063",
+      "category": "name"
+    },
+    {
+      "file": "server/drivers/claude.ts",
+      "line": 158,
+      "key": "server.message064",
+      "category": "label"
+    },
+    {
+      "file": "server/drivers/claude.ts",
+      "line": 159,
+      "key": "server.message059",
+      "category": "label"
+    },
+    {
+      "file": "server/drivers/claude.ts",
+      "line": 160,
+      "key": "server.message060",
+      "category": "label"
+    },
+    {
+      "file": "server/drivers/claude.ts",
+      "line": 161,
+      "key": "server.message061",
+      "category": "label"
+    },
+    {
+      "file": "server/drivers/claude.ts",
+      "line": 162,
+      "key": "server.message062",
+      "category": "label"
+    },
+    {
+      "file": "server/drivers/claude.ts",
+      "line": 170,
+      "key": "server.message065",
+      "category": "name"
+    },
+    {
+      "file": "server/drivers/claude.ts",
+      "line": 172,
+      "key": "server.message064",
+      "category": "label"
+    },
+    {
+      "file": "server/drivers/claude.ts",
+      "line": 181,
+      "key": "server.message066",
+      "category": "name"
+    },
+    {
+      "file": "server/drivers/claude.ts",
+      "line": 342,
+      "key": "server.message067",
+      "category": "warning"
+    },
+    {
+      "file": "server/drivers/claude.ts",
+      "line": 344,
+      "key": "server.message068",
+      "category": "Error"
+    },
+    {
+      "file": "server/drivers/claude.ts",
+      "line": 356,
+      "key": "server.message069",
+      "category": "Error"
+    },
+    {
+      "file": "server/drivers/claude.ts",
+      "line": 408,
+      "key": "server.message070",
+      "category": "Error"
+    },
+    {
+      "file": "server/drivers/claude.ts",
+      "line": 411,
+      "key": "server.message071",
+      "category": "Error"
+    },
+    {
+      "file": "server/drivers/claude.ts",
+      "line": 492,
+      "key": "server.message072",
+      "category": "Error"
+    },
+    {
+      "file": "server/drivers/claude.ts",
+      "line": 496,
+      "key": "server.message073",
+      "category": "Error"
+    },
+    {
+      "file": "server/drivers/claude.ts",
+      "line": 498,
+      "key": "server.message074",
+      "category": "Error"
+    },
+    {
+      "file": "server/drivers/claude.ts",
+      "line": 501,
+      "key": "server.message075",
+      "category": "Error"
+    },
+    {
+      "file": "server/drivers/claude.ts",
+      "line": 504,
+      "key": "server.message076",
+      "category": "Error"
+    },
+    {
+      "file": "server/drivers/claude.ts",
+      "line": 512,
+      "key": "server.message077",
+      "category": "Error"
+    },
+    {
+      "file": "server/drivers/claude.ts",
+      "line": 519,
+      "key": "server.message078",
+      "category": "message"
+    },
+    {
+      "file": "server/drivers/claude.ts",
+      "line": 601,
+      "key": "server.message079",
+      "category": "warning"
+    },
+    {
+      "file": "server/drivers/claude.ts",
+      "line": 621,
+      "key": "server.message080",
+      "category": "String"
+    },
+    {
+      "file": "server/drivers/claude.ts",
+      "line": 641,
+      "key": "server.message081",
+      "category": "String"
+    },
+    {
+      "file": "server/drivers/claude.ts",
+      "line": 648,
+      "key": "server.message082",
+      "category": "Error"
+    },
+    {
+      "file": "server/drivers/claude.ts",
+      "line": 666,
+      "key": "server.message083",
+      "category": "Error"
+    },
+    {
+      "file": "server/drivers/claude.ts",
+      "line": 676,
+      "key": "server.message084",
+      "category": "Error"
+    },
+    {
+      "file": "server/drivers/claude.ts",
+      "line": 714,
+      "key": "server.message085",
+      "category": "error"
+    },
+    {
+      "file": "server/drivers/claude.ts",
+      "line": 845,
+      "key": "server.message086",
+      "category": "Error"
+    },
+    {
+      "file": "server/drivers/claude.ts",
+      "line": 858,
+      "key": "server.message087",
+      "category": "Error"
+    },
+    {
+      "file": "server/drivers/claude.ts",
+      "line": 870,
+      "key": "server.message087",
+      "category": "Error"
+    },
+    {
+      "file": "server/drivers/claude.ts",
+      "line": 901,
+      "key": "server.message088",
+      "category": "Error"
+    },
+    {
+      "file": "server/drivers/claude.ts",
+      "line": 918,
+      "key": "server.message089",
+      "category": "Error"
+    },
+    {
+      "file": "server/drivers/claude.ts",
+      "line": 919,
+      "key": "server.message090",
+      "category": "Error"
+    },
+    {
+      "file": "server/drivers/codex.ts",
+      "line": 78,
+      "key": "server.message087",
+      "category": "Error"
+    },
+    {
+      "file": "server/drivers/codex.ts",
+      "line": 80,
+      "key": "server.message087",
+      "category": "Error"
+    },
+    {
+      "file": "server/drivers/codex.ts",
+      "line": 206,
+      "key": "server.message091",
+      "category": "Error"
+    },
+    {
+      "file": "server/drivers/codex.ts",
+      "line": 225,
+      "key": "server.message092",
+      "category": "label"
+    },
+    {
+      "file": "server/drivers/codex.ts",
+      "line": 258,
+      "key": "server.message063",
+      "category": "name"
+    },
+    {
+      "file": "server/drivers/codex.ts",
+      "line": 260,
+      "key": "server.message092",
+      "category": "label"
+    },
+    {
+      "file": "server/drivers/codex.ts",
+      "line": 272,
+      "key": "server.message065",
+      "category": "name"
+    },
+    {
+      "file": "server/drivers/codex.ts",
+      "line": 283,
+      "key": "server.message093",
+      "category": "name"
+    },
+    {
+      "file": "server/drivers/codex.ts",
+      "line": 285,
+      "key": "server.message094",
+      "category": "description"
+    },
+    {
+      "file": "server/drivers/codex.ts",
+      "line": 286,
+      "key": "server.message095",
+      "category": "description"
+    },
+    {
+      "file": "server/drivers/codex.ts",
+      "line": 287,
+      "key": "server.message096",
+      "category": "description"
+    },
+    {
+      "file": "server/drivers/codex.ts",
+      "line": 357,
+      "key": "server.message097",
+      "category": "Error"
+    },
+    {
+      "file": "server/drivers/codex.ts",
+      "line": 370,
+      "key": "server.message098",
+      "category": "warning"
+    },
+    {
+      "file": "server/drivers/codex.ts",
+      "line": 414,
+      "key": "server.message099",
+      "category": "Error"
+    },
+    {
+      "file": "server/drivers/codex.ts",
+      "line": 455,
+      "key": "server.message100",
+      "category": "Error"
+    },
+    {
+      "file": "server/drivers/codex.ts",
+      "line": 460,
+      "key": "server.message101",
+      "category": "Error"
+    },
+    {
+      "file": "server/drivers/codex.ts",
+      "line": 467,
+      "key": "server.message102",
+      "category": "Error"
+    },
+    {
+      "file": "server/drivers/codex.ts",
+      "line": 469,
+      "key": "server.message103",
+      "category": "message"
+    },
+    {
+      "file": "server/drivers/codex.ts",
+      "line": 471,
+      "key": "server.message104",
+      "category": "Error"
+    },
+    {
+      "file": "server/drivers/codex.ts",
+      "line": 482,
+      "key": "server.message105",
+      "category": "message"
+    },
+    {
+      "file": "server/drivers/codex.ts",
+      "line": 482,
+      "key": "server.message106",
+      "category": "message"
+    },
+    {
+      "file": "server/drivers/codex.ts",
+      "line": 518,
+      "key": "server.message107",
+      "category": "Error"
+    },
+    {
+      "file": "server/drivers/codex.ts",
+      "line": 519,
+      "key": "server.message108",
+      "category": "Error"
+    },
+    {
+      "file": "server/drivers/codex.ts",
+      "line": 563,
+      "key": "server.message109",
+      "category": "withTimeout"
+    },
+    {
+      "file": "server/drivers/codex.ts",
+      "line": 564,
+      "key": "server.message110",
+      "category": "Error"
+    },
+    {
+      "file": "server/drivers/codex.ts",
+      "line": 606,
+      "key": "server.message111",
+      "category": "Error"
+    },
+    {
+      "file": "server/drivers/codex.ts",
+      "line": 609,
+      "key": "server.message112",
+      "category": "Error"
+    },
+    {
+      "file": "server/drivers/codex.ts",
+      "line": 611,
+      "key": "server.message113",
+      "category": "Error"
+    },
+    {
+      "file": "server/drivers/codex.ts",
+      "line": 615,
+      "key": "server.message114",
+      "category": "Error"
+    },
+    {
+      "file": "server/drivers/codex.ts",
+      "line": 619,
+      "key": "server.message115",
+      "category": "Error"
+    },
+    {
+      "file": "server/drivers/codex.ts",
+      "line": 628,
+      "key": "server.message116",
+      "category": "Error"
+    },
+    {
+      "file": "server/drivers/codex.ts",
+      "line": 630,
+      "key": "server.message117",
+      "category": "Error"
+    },
+    {
+      "file": "server/drivers/codex.ts",
+      "line": 718,
+      "key": "server.message118",
+      "category": "warning"
+    },
+    {
+      "file": "server/drivers/codex.ts",
+      "line": 730,
+      "key": "server.message119",
+      "category": "protocolLimitations"
+    },
+    {
+      "file": "server/drivers/codex.ts",
+      "line": 730,
+      "key": "server.message120",
+      "category": "protocolLimitations"
+    },
+    {
+      "file": "server/drivers/codex.ts",
+      "line": 751,
+      "key": "server.message107",
+      "category": "Error"
+    },
+    {
+      "file": "server/drivers/codex.ts",
+      "line": 766,
+      "key": "server.message087",
+      "category": "Error"
+    },
+    {
+      "file": "server/drivers/codex.ts",
+      "line": 773,
+      "key": "server.message087",
+      "category": "Error"
+    },
+    {
+      "file": "server/drivers/codex.ts",
+      "line": 781,
+      "key": "server.message121",
+      "category": "withTimeout"
+    },
+    {
+      "file": "server/drivers/codex.ts",
+      "line": 783,
+      "key": "server.message122",
+      "category": "withTimeout"
+    },
+    {
+      "file": "server/drivers/codex.ts",
+      "line": 798,
+      "key": "server.message087",
+      "category": "Error"
+    },
+    {
+      "file": "server/drivers/codex.ts",
+      "line": 817,
+      "key": "server.message123",
+      "category": "withTimeout"
+    },
+    {
+      "file": "server/drivers/codex.ts",
+      "line": 822,
+      "key": "server.message124",
+      "category": "Error"
+    },
+    {
+      "file": "server/drivers/codex.ts",
+      "line": 824,
+      "key": "server.message125",
+      "category": "Error"
+    },
+    {
+      "file": "server/drivers/codex.ts",
+      "line": 827,
+      "key": "server.message126",
+      "category": "Error"
+    },
+    {
+      "file": "server/drivers/codex.ts",
+      "line": 830,
+      "key": "server.message087",
+      "category": "Error"
+    },
+    {
+      "file": "server/drivers/codex.ts",
+      "line": 834,
+      "key": "server.message127",
+      "category": "withTimeout"
+    },
+    {
+      "file": "server/drivers/codex.ts",
+      "line": 842,
+      "key": "server.message128",
+      "category": "Error"
+    },
+    {
+      "file": "server/drivers/codex.ts",
+      "line": 844,
+      "key": "server.message129",
+      "category": "withTimeout"
+    },
+    {
+      "file": "server/drivers/codex.ts",
+      "line": 846,
+      "key": "server.message130",
+      "category": "withTimeout"
+    },
+    {
+      "file": "server/drivers/codex.ts",
+      "line": 867,
+      "key": "server.message131",
+      "category": "Error"
+    },
+    {
+      "file": "server/drivers/codex.ts",
+      "line": 1143,
+      "key": "server.message132",
+      "category": "Error"
+    },
+    {
+      "file": "server/drivers/codex.ts",
+      "line": 1148,
+      "key": "server.message133",
+      "category": "Error"
+    },
+    {
+      "file": "server/drivers/kimi.ts",
+      "line": 142,
+      "key": "server.message063",
+      "category": "model"
+    },
+    {
+      "file": "server/drivers/kimi.ts",
+      "line": 143,
+      "key": "server.message065",
+      "category": "effort"
+    },
+    {
+      "file": "server/drivers/kimi.ts",
+      "line": 144,
+      "key": "server.message066",
+      "category": "permissionMode"
+    },
+    {
+      "file": "server/drivers/kimi.ts",
+      "line": 276,
+      "key": "server.message141",
+      "category": "Error"
+    },
+    {
+      "file": "server/drivers/kimi.ts",
+      "line": 297,
+      "key": "server.message142",
+      "category": "Error"
+    },
+    {
+      "file": "server/drivers/kimi.ts",
+      "line": 305,
+      "key": "server.message143",
+      "category": "Error"
+    },
+    {
+      "file": "server/drivers/kimi.ts",
+      "line": 340,
+      "key": "server.message144",
+      "category": "Error"
+    },
+    {
+      "file": "server/drivers/kimi.ts",
+      "line": 364,
+      "key": "server.message145",
+      "category": "this.cancelQueuedPrompts"
+    },
+    {
+      "file": "server/drivers/kimi.ts",
+      "line": 374,
+      "key": "server.message146",
+      "category": "message"
+    },
+    {
+      "file": "server/drivers/kimi.ts",
+      "line": 385,
+      "key": "server.message147",
+      "category": "Error"
+    },
+    {
+      "file": "server/drivers/kimi.ts",
+      "line": 387,
+      "key": "server.message148",
+      "category": "Error"
+    },
+    {
+      "file": "server/drivers/kimi.ts",
+      "line": 393,
+      "key": "server.message149",
+      "category": "Error"
+    },
+    {
+      "file": "server/drivers/kimi.ts",
+      "line": 398,
+      "key": "server.message150",
+      "category": "Error"
+    },
+    {
+      "file": "server/drivers/kimi.ts",
+      "line": 403,
+      "key": "server.message151",
+      "category": "Error"
+    },
+    {
+      "file": "server/drivers/kimi.ts",
+      "line": 405,
+      "key": "server.message152",
+      "category": "Error"
+    },
+    {
+      "file": "server/drivers/kimi.ts",
+      "line": 413,
+      "key": "server.message153",
+      "category": "Error"
+    },
+    {
+      "file": "server/drivers/kimi.ts",
+      "line": 420,
+      "key": "server.message154",
+      "category": "this.cancelQueuedPrompts"
+    },
+    {
+      "file": "server/drivers/kimi.ts",
+      "line": 427,
+      "key": "server.message155",
+      "category": "this.cancelQueuedPrompts"
+    },
+    {
+      "file": "server/drivers/kimi.ts",
+      "line": 511,
+      "key": "server.message156",
+      "category": "this.replyError"
+    },
+    {
+      "file": "server/drivers/kimi.ts",
+      "line": 557,
+      "key": "server.message157",
+      "category": "warning"
+    },
+    {
+      "file": "server/drivers/kimi.ts",
+      "line": 568,
+      "key": "server.message158",
+      "category": "protocolLimitations"
+    },
+    {
+      "file": "server/drivers/kimi.ts",
+      "line": 574,
+      "key": "server.message159",
+      "category": "this.cancelQueuedPrompts"
+    },
+    {
+      "file": "server/drivers/kimi.ts",
+      "line": 812,
+      "key": "server.message160",
+      "category": "Error"
+    },
+    {
+      "file": "server/drivers/kimi.ts",
+      "line": 814,
+      "key": "server.message161",
+      "category": "Error"
+    },
+    {
+      "file": "server/drivers/rpc-probe.ts",
+      "line": 31,
+      "key": "server.message162",
+      "category": "Error"
+    },
+    {
+      "file": "server/event-pages.ts",
+      "line": 18,
+      "key": "server.message163",
+      "category": "InvalidEventPageCursor"
+    },
+    {
+      "file": "server/event-pages.ts",
+      "line": 62,
+      "key": "server.message164",
+      "category": "InvalidEventPageCursor"
+    },
+    {
+      "file": "server/event-pages.ts",
+      "line": 97,
+      "key": "server.message165",
+      "category": "other"
+    },
+    {
+      "file": "server/event-pages.ts",
+      "line": 171,
+      "key": "server.message165",
+      "category": "other"
+    },
+    {
+      "file": "server/event-pages.ts",
+      "line": 182,
+      "key": "server.message163",
+      "category": "InvalidEventPageCursor"
+    },
+    {
+      "file": "server/event-pages.ts",
+      "line": 194,
+      "key": "server.message164",
+      "category": "InvalidEventPageCursor"
+    },
+    {
+      "file": "server/event-stream.ts",
+      "line": 29,
+      "key": "server.message166",
+      "category": "Error"
+    },
+    {
+      "file": "server/event-stream.ts",
+      "line": 31,
+      "key": "server.message167",
+      "category": "Error"
+    },
+    {
+      "file": "server/file-search.ts",
+      "line": 18,
+      "key": "server.message168",
+      "category": "Error"
+    },
+    {
+      "file": "server/file-search.ts",
+      "line": 19,
+      "key": "server.message169",
+      "category": "Error"
+    },
+    {
+      "file": "server/file-search.ts",
+      "line": 23,
+      "key": "server.message170",
+      "category": "Error"
+    },
+    {
+      "file": "server/file-search.ts",
+      "line": 27,
+      "key": "server.message171",
+      "category": "Error"
+    },
+    {
+      "file": "server/file-search.ts",
+      "line": 32,
+      "key": "server.message172",
+      "category": "Error"
+    },
+    {
+      "file": "server/file-search.ts",
+      "line": 34,
+      "key": "server.message173",
+      "category": "Error"
+    },
+    {
+      "file": "server/file-search.ts",
+      "line": 72,
+      "key": "server.message174",
+      "category": "Error"
+    },
+    {
+      "file": "server/file-search.ts",
+      "line": 75,
+      "key": "server.message175",
+      "category": "Error"
+    },
+    {
+      "file": "server/file-search.ts",
+      "line": 93,
+      "key": "server.message176",
+      "category": "Error"
+    },
+    {
+      "file": "server/file-search.ts",
+      "line": 100,
+      "key": "server.message174",
+      "category": "Error"
+    },
+    {
+      "file": "server/file-search.ts",
+      "line": 102,
+      "key": "server.message177",
+      "category": "Error"
+    },
+    {
+      "file": "server/history.ts",
+      "line": 329,
+      "key": "server.message178",
+      "category": "HistoryQueryError"
+    },
+    {
+      "file": "server/history.ts",
+      "line": 333,
+      "key": "server.message179",
+      "category": "HistoryQueryError"
+    },
+    {
+      "file": "server/history.ts",
+      "line": 606,
+      "key": "server.message043",
+      "category": "truncateText"
+    },
+    {
+      "file": "server/history.ts",
+      "line": 1029,
+      "key": "server.message180",
+      "category": "HistoryQueryError"
+    },
+    {
+      "file": "server/history.ts",
+      "line": 1053,
+      "key": "server.message181",
+      "category": "HistoryQueryError"
+    },
+    {
+      "file": "server/index.ts",
+      "line": 110,
+      "key": "server.message184",
+      "category": "Error"
+    },
+    {
+      "file": "server/index.ts",
+      "line": 220,
+      "key": "server.message186",
+      "category": "reason"
+    },
+    {
+      "file": "server/index.ts",
+      "line": 245,
+      "key": "server.message167",
+      "category": "msg"
+    },
+    {
+      "file": "server/index.ts",
+      "line": 272,
+      "key": "server.message187",
+      "category": "message"
+    },
+    {
+      "file": "server/index.ts",
+      "line": 278,
+      "key": "server.message188",
+      "category": "Error"
+    },
+    {
+      "file": "server/index.ts",
+      "line": 281,
+      "key": "server.message189",
+      "category": "message"
+    },
+    {
+      "file": "server/index.ts",
+      "line": 286,
+      "key": "server.message190",
+      "category": "message"
+    },
+    {
+      "file": "server/index.ts",
+      "line": 305,
+      "key": "server.message191",
+      "category": "TerminalError"
+    },
+    {
+      "file": "server/index.ts",
+      "line": 416,
+      "key": "server.message013",
+      "category": "ApiError"
+    },
+    {
+      "file": "server/index.ts",
+      "line": 433,
+      "key": "server.message192",
+      "category": "WorkFileError"
+    },
+    {
+      "file": "server/index.ts",
+      "line": 435,
+      "key": "server.message193",
+      "category": "WorkFileError"
+    },
+    {
+      "file": "server/index.ts",
+      "line": 437,
+      "key": "server.message194",
+      "category": "WorkFileError"
+    },
+    {
+      "file": "server/index.ts",
+      "line": 488,
+      "key": "server.message184",
+      "category": "ApiError"
+    },
+    {
+      "file": "server/index.ts",
+      "line": 498,
+      "key": "server.message195",
+      "category": "ApiError"
+    },
+    {
+      "file": "server/index.ts",
+      "line": 515,
+      "key": "server.message196",
+      "category": "ApiError"
+    },
+    {
+      "file": "server/index.ts",
+      "line": 517,
+      "key": "server.message195",
+      "category": "ApiError"
+    },
+    {
+      "file": "server/index.ts",
+      "line": 530,
+      "key": "server.message197",
+      "category": "ApiError"
+    },
+    {
+      "file": "server/index.ts",
+      "line": 542,
+      "key": "server.message198",
+      "category": "WorkFileError"
+    },
+    {
+      "file": "server/index.ts",
+      "line": 544,
+      "key": "server.message193",
+      "category": "WorkFileError"
+    },
+    {
+      "file": "server/index.ts",
+      "line": 546,
+      "key": "server.message194",
+      "category": "WorkFileError"
+    },
+    {
+      "file": "server/index.ts",
+      "line": 553,
+      "key": "server.message199",
+      "category": "WorkFileError"
+    },
+    {
+      "file": "server/index.ts",
+      "line": 592,
+      "key": "server.message167",
+      "category": "ApiError"
+    },
+    {
+      "file": "server/index.ts",
+      "line": 592,
+      "key": "server.message003",
+      "category": "ApiError"
+    },
+    {
+      "file": "server/index.ts",
+      "line": 594,
+      "key": "server.message200",
+      "category": "ApiError"
+    },
+    {
+      "file": "server/index.ts",
+      "line": 603,
+      "key": "server.message201",
+      "category": "ApiError"
+    },
+    {
+      "file": "server/index.ts",
+      "line": 618,
+      "key": "server.message202",
+      "category": "DispatchQueryError"
+    },
+    {
+      "file": "server/index.ts",
+      "line": 637,
+      "key": "server.message203",
+      "category": "ApiError"
+    },
+    {
+      "file": "server/index.ts",
+      "line": 640,
+      "key": "server.message203",
+      "category": "ApiError"
+    },
+    {
+      "file": "server/index.ts",
+      "line": 647,
+      "key": "server.message204",
+      "category": "ApiError"
+    },
+    {
+      "file": "server/index.ts",
+      "line": 661,
+      "key": "server.message195",
+      "category": "ApiError"
+    },
+    {
+      "file": "server/index.ts",
+      "line": 664,
+      "key": "server.message205",
+      "category": "ApiError"
+    },
+    {
+      "file": "server/index.ts",
+      "line": 674,
+      "key": "server.message195",
+      "category": "ApiError"
+    },
+    {
+      "file": "server/index.ts",
+      "line": 678,
+      "key": "server.message025",
+      "category": "ApiError"
+    },
+    {
+      "file": "server/index.ts",
+      "line": 694,
+      "key": "server.message206",
+      "category": "ApiError"
+    },
+    {
+      "file": "server/index.ts",
+      "line": 748,
+      "key": "server.message207",
+      "category": "ApiError"
+    },
+    {
+      "file": "server/index.ts",
+      "line": 753,
+      "key": "server.message167",
+      "category": "ApiError"
+    },
+    {
+      "file": "server/index.ts",
+      "line": 760,
+      "key": "server.message163",
+      "category": "ApiError"
+    },
+    {
+      "file": "server/index.ts",
+      "line": 764,
+      "key": "server.message167",
+      "category": "ApiError"
+    },
+    {
+      "file": "server/index.ts",
+      "line": 772,
+      "key": "server.message167",
+      "category": "ApiError"
+    },
+    {
+      "file": "server/index.ts",
+      "line": 782,
+      "key": "server.message167",
+      "category": "ApiError"
+    },
+    {
+      "file": "server/index.ts",
+      "line": 787,
+      "key": "server.message167",
+      "category": "ApiError"
+    },
+    {
+      "file": "server/index.ts",
+      "line": 794,
+      "key": "server.message167",
+      "category": "ApiError"
+    },
+    {
+      "file": "server/index.ts",
+      "line": 803,
+      "key": "server.message167",
+      "category": "ApiError"
+    },
+    {
+      "file": "server/index.ts",
+      "line": 807,
+      "key": "server.message208",
+      "category": "Error"
+    },
+    {
+      "file": "server/index.ts",
+      "line": 828,
+      "key": "server.message167",
+      "category": "ApiError"
+    },
+    {
+      "file": "server/index.ts",
+      "line": 837,
+      "key": "server.message167",
+      "category": "ApiError"
+    },
+    {
+      "file": "server/index.ts",
+      "line": 840,
+      "key": "server.message195",
+      "category": "ApiError"
+    },
+    {
+      "file": "server/index.ts",
+      "line": 844,
+      "key": "server.message209",
+      "category": "ApiError"
+    },
+    {
+      "file": "server/index.ts",
+      "line": 853,
+      "key": "server.message167",
+      "category": "ApiError"
+    },
+    {
+      "file": "server/index.ts",
+      "line": 864,
+      "key": "server.message210",
+      "category": "ApiError"
+    },
+    {
+      "file": "server/index.ts",
+      "line": 873,
+      "key": "server.message167",
+      "category": "ApiError"
+    },
+    {
+      "file": "server/index.ts",
+      "line": 879,
+      "key": "server.message167",
+      "category": "ApiError"
+    },
+    {
+      "file": "server/index.ts",
+      "line": 883,
+      "key": "server.message211",
+      "category": "ApiError"
+    },
+    {
+      "file": "server/index.ts",
+      "line": 886,
+      "key": "server.message212",
+      "category": "ApiError"
+    },
+    {
+      "file": "server/index.ts",
+      "line": 894,
+      "key": "server.message167",
+      "category": "ApiError"
+    },
+    {
+      "file": "server/index.ts",
+      "line": 904,
+      "key": "server.message213",
+      "category": "ApiError"
+    },
+    {
+      "file": "server/index.ts",
+      "line": 913,
+      "key": "server.message214",
+      "category": "ApiError"
+    },
+    {
+      "file": "server/index.ts",
+      "line": 917,
+      "key": "server.message215",
+      "category": "ApiError"
+    },
+    {
+      "file": "server/index.ts",
+      "line": 919,
+      "key": "server.message206",
+      "category": "ApiError"
+    },
+    {
+      "file": "server/index.ts",
+      "line": 954,
+      "key": "server.message186",
+      "category": "ApiError"
+    },
+    {
+      "file": "server/index.ts",
+      "line": 972,
+      "key": "server.message216",
+      "category": "msg"
+    },
+    {
+      "file": "server/index.ts",
+      "line": 981,
+      "key": "server.message217",
+      "category": "msg"
+    },
+    {
+      "file": "server/index.ts",
+      "line": 986,
+      "key": "server.message218",
+      "category": "Error"
+    },
+    {
+      "file": "server/index.ts",
+      "line": 989,
+      "key": "server.message219",
+      "category": "Error"
+    },
+    {
+      "file": "server/index.ts",
+      "line": 995,
+      "key": "server.message220",
+      "category": "Error"
+    },
+    {
+      "file": "server/index.ts",
+      "line": 998,
+      "key": "server.message221",
+      "category": "Error"
+    },
+    {
+      "file": "server/index.ts",
+      "line": 1001,
+      "key": "server.message222",
+      "category": "Error"
+    },
+    {
+      "file": "server/index.ts",
+      "line": 1015,
+      "key": "server.message223",
+      "category": "Error"
+    },
+    {
+      "file": "server/index.ts",
+      "line": 1018,
+      "key": "server.message224",
+      "category": "Error"
+    },
+    {
+      "file": "server/index.ts",
+      "line": 1035,
+      "key": "server.message225",
+      "category": "Error"
+    },
+    {
+      "file": "server/index.ts",
+      "line": 1039,
+      "key": "server.message226",
+      "category": "Error"
+    },
+    {
+      "file": "server/index.ts",
+      "line": 1043,
+      "key": "server.message227",
+      "category": "Error"
+    },
+    {
+      "file": "server/index.ts",
+      "line": 1046,
+      "key": "server.message228",
+      "category": "Error"
+    },
+    {
+      "file": "server/index.ts",
+      "line": 1064,
+      "key": "server.message229",
+      "category": "ApiError"
+    },
+    {
+      "file": "server/index.ts",
+      "line": 1080,
+      "key": "server.message230",
+      "category": "ApiError"
+    },
+    {
+      "file": "server/index.ts",
+      "line": 1081,
+      "key": "server.message231",
+      "category": "ApiError"
+    },
+    {
+      "file": "server/index.ts",
+      "line": 1082,
+      "key": "server.message232",
+      "category": "ApiError"
+    },
+    {
+      "file": "server/index.ts",
+      "line": 1086,
+      "key": "server.message233",
+      "category": "ApiError"
+    },
+    {
+      "file": "server/index.ts",
+      "line": 1099,
+      "key": "server.message234",
+      "category": "ApiError"
+    },
+    {
+      "file": "server/index.ts",
+      "line": 1108,
+      "key": "server.message235",
+      "category": "ApiError"
+    },
+    {
+      "file": "server/index.ts",
+      "line": 1111,
+      "key": "server.message236",
+      "category": "ApiError"
+    },
+    {
+      "file": "server/index.ts",
+      "line": 1117,
+      "key": "server.message237",
+      "category": "ApiError"
+    },
+    {
+      "file": "server/index.ts",
+      "line": 1126,
+      "key": "server.message238",
+      "category": "ApiError"
+    },
+    {
+      "file": "server/index.ts",
+      "line": 1166,
+      "key": "server.message239",
+      "category": "ApiError"
+    },
+    {
+      "file": "server/index.ts",
+      "line": 1166,
+      "key": "server.message240",
+      "category": "ApiError"
+    },
+    {
+      "file": "server/index.ts",
+      "line": 1173,
+      "key": "server.message241",
+      "category": "ApiError"
+    },
+    {
+      "file": "server/index.ts",
+      "line": 1178,
+      "key": "server.message195",
+      "category": "ApiError"
+    },
+    {
+      "file": "server/index.ts",
+      "line": 1181,
+      "key": "server.message202",
+      "category": "ApiError"
+    },
+    {
+      "file": "server/index.ts",
+      "line": 1183,
+      "key": "server.message242",
+      "category": "ApiError"
+    },
+    {
+      "file": "server/index.ts",
+      "line": 1185,
+      "key": "server.message243",
+      "category": "ApiError"
+    },
+    {
+      "file": "server/index.ts",
+      "line": 1187,
+      "key": "server.message244",
+      "category": "ApiError"
+    },
+    {
+      "file": "server/index.ts",
+      "line": 1188,
+      "key": "server.message245",
+      "category": "ApiError"
+    },
+    {
+      "file": "server/index.ts",
+      "line": 1189,
+      "key": "server.message246",
+      "category": "ApiError"
+    },
+    {
+      "file": "server/index.ts",
+      "line": 1192,
+      "key": "server.message247",
+      "category": "ApiError"
+    },
+    {
+      "file": "server/index.ts",
+      "line": 1197,
+      "key": "server.message248",
+      "category": "ApiError"
+    },
+    {
+      "file": "server/index.ts",
+      "line": 1205,
+      "key": "server.message195",
+      "category": "ApiError"
+    },
+    {
+      "file": "server/index.ts",
+      "line": 1208,
+      "key": "server.message242",
+      "category": "ApiError"
+    },
+    {
+      "file": "server/index.ts",
+      "line": 1214,
+      "key": "server.message249",
+      "category": "ApiError"
+    },
+    {
+      "file": "server/index.ts",
+      "line": 1219,
+      "key": "server.message250",
+      "category": "ApiError"
+    },
+    {
+      "file": "server/index.ts",
+      "line": 1222,
+      "key": "server.message251",
+      "category": "ApiError"
+    },
+    {
+      "file": "server/index.ts",
+      "line": 1230,
+      "key": "server.message252",
+      "category": "ApiError"
+    },
+    {
+      "file": "server/index.ts",
+      "line": 1235,
+      "key": "server.message253",
+      "category": "ApiError"
+    },
+    {
+      "file": "server/index.ts",
+      "line": 1238,
+      "key": "server.message254",
+      "category": "ApiError"
+    },
+    {
+      "file": "server/index.ts",
+      "line": 1241,
+      "key": "server.message255",
+      "category": "ApiError"
+    },
+    {
+      "file": "server/index.ts",
+      "line": 1249,
+      "key": "server.message256",
+      "category": "ApiError"
+    },
+    {
+      "file": "server/index.ts",
+      "line": 1252,
+      "key": "server.message257",
+      "category": "ApiError"
+    },
+    {
+      "file": "server/index.ts",
+      "line": 1256,
+      "key": "server.message258",
+      "category": "ApiError"
+    },
+    {
+      "file": "server/index.ts",
+      "line": 1260,
+      "key": "server.message259",
+      "category": "ApiError"
+    },
+    {
+      "file": "server/index.ts",
+      "line": 1263,
+      "key": "server.message260",
+      "category": "ApiError"
+    },
+    {
+      "file": "server/index.ts",
+      "line": 1266,
+      "key": "server.message261",
+      "category": "ApiError"
+    },
+    {
+      "file": "server/index.ts",
+      "line": 1270,
+      "key": "server.message262",
+      "category": "ApiError"
+    },
+    {
+      "file": "server/native-conversation.ts",
+      "line": 97,
+      "key": "server.message263",
+      "category": "Error"
+    },
+    {
+      "file": "server/native-conversation.ts",
+      "line": 269,
+      "key": "server.message264",
+      "category": "Error"
+    },
+    {
+      "file": "server/native-session-delete.ts",
+      "line": 16,
+      "key": "server.message265",
+      "category": "NativeDeleteError"
+    },
+    {
+      "file": "server/native-session-delete.ts",
+      "line": 19,
+      "key": "server.message266",
+      "category": "NativeDeleteError"
+    },
+    {
+      "file": "server/native-session-delete.ts",
+      "line": 26,
+      "key": "server.message267",
+      "category": "NativeDeleteError"
+    },
+    {
+      "file": "server/native-session-delete.ts",
+      "line": 37,
+      "key": "server.message268",
+      "category": "NativeDeleteError"
+    },
+    {
+      "file": "server/native-session-delete.ts",
+      "line": 46,
+      "key": "server.message269",
+      "category": "NativeDeleteError"
+    },
+    {
+      "file": "server/native-session-delete.ts",
+      "line": 51,
+      "key": "server.message270",
+      "category": "NativeDeleteError"
+    },
+    {
+      "file": "server/native-session-delete.ts",
+      "line": 60,
+      "key": "server.message271",
+      "category": "NativeDeleteError"
+    },
+    {
+      "file": "server/native-session-delete.ts",
+      "line": 69,
+      "key": "server.message272",
+      "category": "NativeDeleteError"
+    },
+    {
+      "file": "server/notify.ts",
+      "line": 27,
+      "key": "server.message008",
+      "category": "Error"
+    },
+    {
+      "file": "server/pages.ts",
+      "line": 114,
+      "key": "server.message282",
+      "category": "Error"
+    },
+    {
+      "file": "server/pages.ts",
+      "line": 136,
+      "key": "server.message283",
+      "category": "embedReason"
+    },
+    {
+      "file": "server/pages.ts",
+      "line": 138,
+      "key": "server.message284",
+      "category": "embedReason"
+    },
+    {
+      "file": "server/pages.ts",
+      "line": 140,
+      "key": "server.message285",
+      "category": "embedReason"
+    },
+    {
+      "file": "server/pages.ts",
+      "line": 146,
+      "key": "server.message286",
+      "category": "embedReason"
+    },
+    {
+      "file": "server/pages.ts",
+      "line": 151,
+      "key": "server.message287",
+      "category": "embedReason"
+    },
+    {
+      "file": "server/pages.ts",
+      "line": 154,
+      "key": "server.message288",
+      "category": "embedReason"
+    },
+    {
+      "file": "server/pages.ts",
+      "line": 156,
+      "key": "server.message289",
+      "category": "embedReason"
+    },
+    {
+      "file": "server/pages.ts",
+      "line": 158,
+      "key": "server.message290",
+      "category": "embedReason"
+    },
+    {
+      "file": "server/pages.ts",
+      "line": 240,
+      "key": "server.message291",
+      "category": "Error"
+    },
+    {
+      "file": "server/pages.ts",
+      "line": 244,
+      "key": "server.message292",
+      "category": "Error"
+    },
+    {
+      "file": "server/pages.ts",
+      "line": 247,
+      "key": "server.message293",
+      "category": "Error"
+    },
+    {
+      "file": "server/pages.ts",
+      "line": 248,
+      "key": "server.message294",
+      "category": "Error"
+    },
+    {
+      "file": "server/pages.ts",
+      "line": 259,
+      "key": "server.message295",
+      "category": "Error"
+    },
+    {
+      "file": "server/pages.ts",
+      "line": 263,
+      "key": "server.message296",
+      "category": "Error"
+    },
+    {
+      "file": "server/pages.ts",
+      "line": 284,
+      "key": "server.message297",
+      "category": "Error"
+    },
+    {
+      "file": "server/pages.ts",
+      "line": 290,
+      "key": "server.message298",
+      "category": "Error"
+    },
+    {
+      "file": "server/pages.ts",
+      "line": 300,
+      "key": "server.message299",
+      "category": "Error"
+    },
+    {
+      "file": "server/pages.ts",
+      "line": 303,
+      "key": "server.message300",
+      "category": "Error"
+    },
+    {
+      "file": "server/pages.ts",
+      "line": 317,
+      "key": "server.message301",
+      "category": "other"
+    },
+    {
+      "file": "server/pages.ts",
+      "line": 325,
+      "key": "server.message302",
+      "category": "other"
+    },
+    {
+      "file": "server/pages.ts",
+      "line": 326,
+      "key": "server.message303",
+      "category": "other"
+    },
+    {
+      "file": "server/pages.ts",
+      "line": 327,
+      "key": "server.message304",
+      "category": "other"
+    },
+    {
+      "file": "server/persistence.ts",
+      "line": 40,
+      "key": "server.message305",
+      "category": "Error"
+    },
+    {
+      "file": "server/persistence.ts",
+      "line": 57,
+      "key": "server.message306",
+      "category": "Error"
+    },
+    {
+      "file": "server/persistence.ts",
+      "line": 272,
+      "key": "server.message307",
+      "category": "Error"
+    },
+    {
+      "file": "server/persistence.ts",
+      "line": 275,
+      "key": "server.message308",
+      "category": "Error"
+    },
+    {
+      "file": "server/persistence.ts",
+      "line": 332,
+      "key": "server.message309",
+      "category": "Error"
+    },
+    {
+      "file": "server/persistence.ts",
+      "line": 347,
+      "key": "server.message310",
+      "category": "Error"
+    },
+    {
+      "file": "server/persistence.ts",
+      "line": 358,
+      "key": "server.message311",
+      "category": "Error"
+    },
+    {
+      "file": "server/persistence.ts",
+      "line": 378,
+      "key": "server.message312",
+      "category": "Error"
+    },
+    {
+      "file": "server/persistence.ts",
+      "line": 424,
+      "key": "server.message313",
+      "category": "Error"
+    },
+    {
+      "file": "server/persistence.ts",
+      "line": 484,
+      "key": "server.message314",
+      "category": "Error"
+    },
+    {
+      "file": "server/power-off.ts",
+      "line": 56,
+      "key": "server.message315",
+      "category": "other"
+    },
+    {
+      "file": "server/session-manager.ts",
+      "line": 198,
+      "key": "server.message316",
+      "category": "title"
+    },
+    {
+      "file": "server/session-manager.ts",
+      "line": 207,
+      "key": "server.message316",
+      "category": "title"
+    },
+    {
+      "file": "server/session-manager.ts",
+      "line": 220,
+      "key": "server.message167",
+      "category": "SessionOrganizationError"
+    },
+    {
+      "file": "server/session-manager.ts",
+      "line": 222,
+      "key": "server.message317",
+      "category": "SessionOrganizationError"
+    },
+    {
+      "file": "server/session-manager.ts",
+      "line": 249,
+      "key": "server.message317",
+      "category": "SessionOrganizationError"
+    },
+    {
+      "file": "server/session-manager.ts",
+      "line": 257,
+      "key": "server.message317",
+      "category": "SessionOrganizationError"
+    },
+    {
+      "file": "server/session-manager.ts",
+      "line": 327,
+      "key": "server.message318",
+      "category": "SessionBusyError"
+    },
+    {
+      "file": "server/session-manager.ts",
+      "line": 329,
+      "key": "server.message319",
+      "category": "Error"
+    },
+    {
+      "file": "server/session-manager.ts",
+      "line": 395,
+      "key": "server.message320",
+      "category": "message"
+    },
+    {
+      "file": "server/session-manager.ts",
+      "line": 451,
+      "key": "server.message321",
+      "category": "Error"
+    },
+    {
+      "file": "server/session-manager.ts",
+      "line": 456,
+      "key": "server.message322",
+      "category": "Error"
+    },
+    {
+      "file": "server/session-manager.ts",
+      "line": 458,
+      "key": "server.message167",
+      "category": "Error"
+    },
+    {
+      "file": "server/session-manager.ts",
+      "line": 462,
+      "key": "server.message323",
+      "category": "Error"
+    },
+    {
+      "file": "server/session-manager.ts",
+      "line": 463,
+      "key": "server.message324",
+      "category": "Error"
+    },
+    {
+      "file": "server/session-manager.ts",
+      "line": 471,
+      "key": "server.message325",
+      "category": "Error"
+    },
+    {
+      "file": "server/session-manager.ts",
+      "line": 489,
+      "key": "server.message326",
+      "category": "Error"
+    },
+    {
+      "file": "server/session-manager.ts",
+      "line": 490,
+      "key": "server.message327",
+      "category": "Error"
+    },
+    {
+      "file": "server/session-manager.ts",
+      "line": 492,
+      "key": "server.message328",
+      "category": "Error"
+    },
+    {
+      "file": "server/session-manager.ts",
+      "line": 500,
+      "key": "server.message101",
+      "category": "Error"
+    },
+    {
+      "file": "server/session-manager.ts",
+      "line": 502,
+      "key": "server.message329",
+      "category": "Error"
+    },
+    {
+      "file": "server/session-manager.ts",
+      "line": 505,
+      "key": "server.message330",
+      "category": "Error"
+    },
+    {
+      "file": "server/session-manager.ts",
+      "line": 510,
+      "key": "server.message331",
+      "category": "Error"
+    },
+    {
+      "file": "server/session-manager.ts",
+      "line": 511,
+      "key": "server.message327",
+      "category": "Error"
+    },
+    {
+      "file": "server/session-manager.ts",
+      "line": 513,
+      "key": "server.message332",
+      "category": "Error"
+    },
+    {
+      "file": "server/session-manager.ts",
+      "line": 539,
+      "key": "server.message333",
+      "category": "Error"
+    },
+    {
+      "file": "server/session-manager.ts",
+      "line": 543,
+      "key": "server.message102",
+      "category": "Error"
+    },
+    {
+      "file": "server/session-manager.ts",
+      "line": 545,
+      "key": "server.message334",
+      "category": "Error"
+    },
+    {
+      "file": "server/session-manager.ts",
+      "line": 550,
+      "key": "server.message335",
+      "category": "Error"
+    },
+    {
+      "file": "server/session-manager.ts",
+      "line": 558,
+      "key": "server.message334",
+      "category": "Error"
+    },
+    {
+      "file": "server/session-manager.ts",
+      "line": 570,
+      "key": "server.message336",
+      "category": "Error"
+    },
+    {
+      "file": "server/session-manager.ts",
+      "line": 571,
+      "key": "server.message327",
+      "category": "Error"
+    },
+    {
+      "file": "server/session-manager.ts",
+      "line": 573,
+      "key": "server.message337",
+      "category": "Error"
+    },
+    {
+      "file": "server/session-manager.ts",
+      "line": 576,
+      "key": "server.message338",
+      "category": "Error"
+    },
+    {
+      "file": "server/session-manager.ts",
+      "line": 583,
+      "key": "server.message339",
+      "category": "Error"
+    },
+    {
+      "file": "server/session-manager.ts",
+      "line": 584,
+      "key": "server.message340",
+      "category": "Error"
+    },
+    {
+      "file": "server/session-manager.ts",
+      "line": 585,
+      "key": "server.message341",
+      "category": "Error"
+    },
+    {
+      "file": "server/session-manager.ts",
+      "line": 595,
+      "key": "server.message342",
+      "category": "Error"
+    },
+    {
+      "file": "server/session-manager.ts",
+      "line": 606,
+      "key": "server.message343",
+      "category": "Error"
+    },
+    {
+      "file": "server/session-manager.ts",
+      "line": 607,
+      "key": "server.message344",
+      "category": "Error"
+    },
+    {
+      "file": "server/session-manager.ts",
+      "line": 608,
+      "key": "server.message345",
+      "category": "Error"
+    },
+    {
+      "file": "server/session-manager.ts",
+      "line": 611,
+      "key": "server.message346",
+      "category": "Error"
+    },
+    {
+      "file": "server/session-manager.ts",
+      "line": 619,
+      "key": "server.message347",
+      "category": "Error"
+    },
+    {
+      "file": "server/session-manager.ts",
+      "line": 620,
+      "key": "server.message348",
+      "category": "Error"
+    },
+    {
+      "file": "server/session-manager.ts",
+      "line": 621,
+      "key": "server.message344",
+      "category": "Error"
+    },
+    {
+      "file": "server/session-manager.ts",
+      "line": 626,
+      "key": "server.message087",
+      "category": "Error"
+    },
+    {
+      "file": "server/session-manager.ts",
+      "line": 627,
+      "key": "server.message349",
+      "category": "Error"
+    },
+    {
+      "file": "server/session-manager.ts",
+      "line": 639,
+      "key": "server.message350",
+      "category": "Error"
+    },
+    {
+      "file": "server/session-manager.ts",
+      "line": 678,
+      "key": "server.message351",
+      "category": "Error"
+    },
+    {
+      "file": "server/session-manager.ts",
+      "line": 682,
+      "key": "server.message352",
+      "category": "Error"
+    },
+    {
+      "file": "server/session-manager.ts",
+      "line": 683,
+      "key": "server.message353",
+      "category": "Error"
+    },
+    {
+      "file": "server/session-manager.ts",
+      "line": 684,
+      "key": "server.message354",
+      "category": "Error"
+    },
+    {
+      "file": "server/session-manager.ts",
+      "line": 686,
+      "key": "server.message167",
+      "category": "Error"
+    },
+    {
+      "file": "server/session-manager.ts",
+      "line": 689,
+      "key": "server.message353",
+      "category": "Error"
+    },
+    {
+      "file": "server/session-manager.ts",
+      "line": 695,
+      "key": "server.message355",
+      "category": "Error"
+    },
+    {
+      "file": "server/session-manager.ts",
+      "line": 696,
+      "key": "server.message356",
+      "category": "Error"
+    },
+    {
+      "file": "server/session-manager.ts",
+      "line": 698,
+      "key": "server.message357",
+      "category": "Error"
+    },
+    {
+      "file": "server/session-manager.ts",
+      "line": 701,
+      "key": "server.message358",
+      "category": "Error"
+    },
+    {
+      "file": "server/session-manager.ts",
+      "line": 707,
+      "key": "server.message359",
+      "category": "Error"
+    },
+    {
+      "file": "server/session-manager.ts",
+      "line": 709,
+      "key": "server.message360",
+      "category": "Error"
+    },
+    {
+      "file": "server/session-manager.ts",
+      "line": 744,
+      "key": "server.message361",
+      "category": "SessionBusyError"
+    },
+    {
+      "file": "server/session-manager.ts",
+      "line": 752,
+      "key": "server.message362",
+      "category": "SessionBusyError"
+    },
+    {
+      "file": "server/session-manager.ts",
+      "line": 756,
+      "key": "server.message363",
+      "category": "SessionBusyError"
+    },
+    {
+      "file": "server/session-manager.ts",
+      "line": 760,
+      "key": "server.message364",
+      "category": "SessionBusyError"
+    },
+    {
+      "file": "server/session-manager.ts",
+      "line": 770,
+      "key": "server.message365",
+      "category": "SessionBusyError"
+    },
+    {
+      "file": "server/session-manager.ts",
+      "line": 819,
+      "key": "server.message319",
+      "category": "Error"
+    },
+    {
+      "file": "server/session-manager.ts",
+      "line": 822,
+      "key": "server.message167",
+      "category": "Error"
+    },
+    {
+      "file": "server/session-manager.ts",
+      "line": 823,
+      "key": "server.message366",
+      "category": "Error"
+    },
+    {
+      "file": "server/session-manager.ts",
+      "line": 870,
+      "key": "server.message319",
+      "category": "other"
+    },
+    {
+      "file": "server/session-manager.ts",
+      "line": 871,
+      "key": "server.message367",
+      "category": "other"
+    },
+    {
+      "file": "server/session-manager.ts",
+      "line": 872,
+      "key": "server.message368",
+      "category": "other"
+    },
+    {
+      "file": "server/session-manager.ts",
+      "line": 873,
+      "key": "server.message369",
+      "category": "other"
+    },
+    {
+      "file": "server/session-manager.ts",
+      "line": 874,
+      "key": "server.message370",
+      "category": "other"
+    },
+    {
+      "file": "server/session-manager.ts",
+      "line": 875,
+      "key": "server.message371",
+      "category": "other"
+    },
+    {
+      "file": "server/session-manager.ts",
+      "line": 876,
+      "key": "server.message372",
+      "category": "other"
+    },
+    {
+      "file": "server/session-manager.ts",
+      "line": 878,
+      "key": "server.message373",
+      "category": "other"
+    },
+    {
+      "file": "server/session-manager.ts",
+      "line": 879,
+      "key": "server.message374",
+      "category": "other"
+    },
+    {
+      "file": "server/session-manager.ts",
+      "line": 880,
+      "key": "server.message375",
+      "category": "other"
+    },
+    {
+      "file": "server/session-manager.ts",
+      "line": 1096,
+      "key": "server.message376",
+      "category": "this.warnMissingNativeMark"
+    },
+    {
+      "file": "server/session-manager.ts",
+      "line": 1136,
+      "key": "server.message377",
+      "category": "this.warnMissingNativeMark"
+    },
+    {
+      "file": "server/session-manager.ts",
+      "line": 1157,
+      "key": "server.message378",
+      "category": "this.warnMissingNativeMark"
+    },
+    {
+      "file": "server/session-manager.ts",
+      "line": 1158,
+      "key": "server.message379",
+      "category": "Error"
+    },
+    {
+      "file": "server/session-manager.ts",
+      "line": 1185,
+      "key": "server.message380",
+      "category": "other"
+    },
+    {
+      "file": "server/session-manager.ts",
+      "line": 1186,
+      "key": "server.message381",
+      "category": "other"
+    },
+    {
+      "file": "server/session-manager.ts",
+      "line": 1207,
+      "key": "server.message167",
+      "category": "Error"
+    },
+    {
+      "file": "server/session-manager.ts",
+      "line": 1210,
+      "key": "server.message382",
+      "category": "Error"
+    },
+    {
+      "file": "server/session-manager.ts",
+      "line": 1218,
+      "key": "server.message167",
+      "category": "Error"
+    },
+    {
+      "file": "server/session-manager.ts",
+      "line": 1219,
+      "key": "server.message383",
+      "category": "Error"
+    },
+    {
+      "file": "server/session-manager.ts",
+      "line": 1224,
+      "key": "server.message384",
+      "category": "Error"
+    },
+    {
+      "file": "server/session-manager.ts",
+      "line": 1233,
+      "key": "server.message319",
+      "category": "Error"
+    },
+    {
+      "file": "server/session-manager.ts",
+      "line": 1268,
+      "key": "server.message359",
+      "category": "Error"
+    },
+    {
+      "file": "server/session-manager.ts",
+      "line": 1274,
+      "key": "server.message385",
+      "category": "Error"
+    },
+    {
+      "file": "server/session-manager.ts",
+      "line": 1277,
+      "key": "server.message386",
+      "category": "Error"
+    },
+    {
+      "file": "server/session-manager.ts",
+      "line": 1288,
+      "key": "server.message387",
+      "category": "message"
+    },
+    {
+      "file": "server/session-manager.ts",
+      "line": 1404,
+      "key": "server.message167",
+      "category": "Error"
+    },
+    {
+      "file": "server/session-manager.ts",
+      "line": 1406,
+      "key": "server.message388",
+      "category": "Error"
+    },
+    {
+      "file": "server/session-manager.ts",
+      "line": 1411,
+      "key": "server.message389",
+      "category": "SessionBusyError"
+    },
+    {
+      "file": "server/session-manager.ts",
+      "line": 1412,
+      "key": "server.message390",
+      "category": "Error"
+    },
+    {
+      "file": "server/session-manager.ts",
+      "line": 1418,
+      "key": "server.message391",
+      "category": "Error"
+    },
+    {
+      "file": "server/session-manager.ts",
+      "line": 1420,
+      "key": "server.message392",
+      "category": "Error"
+    },
+    {
+      "file": "server/session-manager.ts",
+      "line": 1425,
+      "key": "server.message167",
+      "category": "Error"
+    },
+    {
+      "file": "server/session-manager.ts",
+      "line": 1428,
+      "key": "server.message393",
+      "category": "Error"
+    },
+    {
+      "file": "server/session-manager.ts",
+      "line": 1431,
+      "key": "server.message394",
+      "category": "Error"
+    },
+    {
+      "file": "server/session-manager.ts",
+      "line": 1437,
+      "key": "server.message395",
+      "category": "Error"
+    },
+    {
+      "file": "server/session-manager.ts",
+      "line": 1446,
+      "key": "server.message396",
+      "category": "Error"
+    },
+    {
+      "file": "server/session-manager.ts",
+      "line": 1449,
+      "key": "server.message397",
+      "category": "Error"
+    },
+    {
+      "file": "server/session-manager.ts",
+      "line": 1452,
+      "key": "server.message398",
+      "category": "Error"
+    },
+    {
+      "file": "server/session-manager.ts",
+      "line": 1468,
+      "key": "server.message399",
+      "category": "Error"
+    },
+    {
+      "file": "server/session-manager.ts",
+      "line": 1470,
+      "key": "server.message400",
+      "category": "Error"
+    },
+    {
+      "file": "server/session-menu.ts",
+      "line": 11,
+      "key": "server.message195",
+      "category": "Error"
+    },
+    {
+      "file": "server/session-menu.ts",
+      "line": 14,
+      "key": "server.message401",
+      "category": "Error"
+    },
+    {
+      "file": "server/session-menu.ts",
+      "line": 15,
+      "key": "server.message402",
+      "category": "Error"
+    },
+    {
+      "file": "server/session-menu.ts",
+      "line": 18,
+      "key": "server.message403",
+      "category": "Error"
+    },
+    {
+      "file": "server/session-menu.ts",
+      "line": 20,
+      "key": "server.message404",
+      "category": "Error"
+    },
+    {
+      "file": "server/session-menu.ts",
+      "line": 28,
+      "key": "server.message405",
+      "category": "Error"
+    },
+    {
+      "file": "server/session-menu.ts",
+      "line": 45,
+      "key": "server.message195",
+      "category": "Error"
+    },
+    {
+      "file": "server/session-menu.ts",
+      "line": 48,
+      "key": "server.message406",
+      "category": "Error"
+    },
+    {
+      "file": "server/session-menu.ts",
+      "line": 54,
+      "key": "server.message407",
+      "category": "Error"
+    },
+    {
+      "file": "server/session-menu.ts",
+      "line": 62,
+      "key": "server.message408",
+      "category": "label"
+    },
+    {
+      "file": "server/session-menu.ts",
+      "line": 63,
+      "key": "server.message409",
+      "category": "label"
+    },
+    {
+      "file": "server/session-menu.ts",
+      "line": 64,
+      "key": "server.message410",
+      "category": "label"
+    },
+    {
+      "file": "server/session-organization-routes.ts",
+      "line": 28,
+      "key": "server.message411",
+      "category": "SessionOrganizationError"
+    },
+    {
+      "file": "server/session-organization.ts",
+      "line": 16,
+      "key": "server.message195",
+      "category": "SessionOrganizationError"
+    },
+    {
+      "file": "server/session-organization.ts",
+      "line": 19,
+      "key": "server.message412",
+      "category": "SessionOrganizationError"
+    },
+    {
+      "file": "server/session-organization.ts",
+      "line": 28,
+      "key": "server.message413",
+      "category": "SessionOrganizationError"
+    },
+    {
+      "file": "server/session-organization.ts",
+      "line": 32,
+      "key": "server.message414",
+      "category": "SessionOrganizationError"
+    },
+    {
+      "file": "server/session-organization.ts",
+      "line": 34,
+      "key": "server.message415",
+      "category": "SessionOrganizationError"
+    },
+    {
+      "file": "server/session-organization.ts",
+      "line": 38,
+      "key": "server.message416",
+      "category": "SessionOrganizationError"
+    },
+    {
+      "file": "server/session-organization.ts",
+      "line": 47,
+      "key": "server.message417",
+      "category": "SessionOrganizationError"
+    },
+    {
+      "file": "server/session-organization.ts",
+      "line": 49,
+      "key": "server.message418",
+      "category": "SessionOrganizationError"
+    },
+    {
+      "file": "server/snapshot.ts",
+      "line": 55,
+      "key": "server.message419",
+      "category": "super"
+    },
+    {
+      "file": "server/snapshot.ts",
+      "line": 62,
+      "key": "server.message420",
+      "category": "super"
+    },
+    {
+      "file": "server/snapshot.ts",
+      "line": 126,
+      "key": "server.message421",
+      "category": "Error"
+    },
+    {
+      "file": "server/snapshot.ts",
+      "line": 209,
+      "key": "server.message422",
+      "category": "SnapshotPathError"
+    },
+    {
+      "file": "server/snapshot.ts",
+      "line": 217,
+      "key": "server.message423",
+      "category": "SnapshotPathError"
+    },
+    {
+      "file": "server/snapshot.ts",
+      "line": 221,
+      "key": "server.message424",
+      "category": "SnapshotPathError"
+    },
+    {
+      "file": "server/snapshot.ts",
+      "line": 225,
+      "key": "server.message425",
+      "category": "SnapshotPathError"
+    },
+    {
+      "file": "server/snapshot.ts",
+      "line": 314,
+      "key": "server.message391",
+      "category": "SnapshotCwdError"
+    },
+    {
+      "file": "server/snapshot.ts",
+      "line": 321,
+      "key": "server.message426",
+      "category": "SnapshotCwdError"
+    },
+    {
+      "file": "server/snapshot.ts",
+      "line": 323,
+      "key": "server.message427",
+      "category": "SnapshotCwdError"
+    },
+    {
+      "file": "server/storage.ts",
+      "line": 27,
+      "key": "server.message428",
+      "category": "StorageInputError"
+    },
+    {
+      "file": "server/tailscale-peers.ts",
+      "line": 30,
+      "key": "server.message429",
+      "category": "reason"
+    },
+    {
+      "file": "server/tailscale-peers.ts",
+      "line": 32,
+      "key": "server.message430",
+      "category": "reason"
+    },
+    {
+      "file": "server/tailscale-peers.ts",
+      "line": 35,
+      "key": "server.message431",
+      "category": "reason"
+    },
+    {
+      "file": "server/tailscale-peers.ts",
+      "line": 73,
+      "key": "server.message432",
+      "category": "reason"
+    },
+    {
+      "file": "server/tailscale-peers.ts",
+      "line": 75,
+      "key": "server.message433",
+      "category": "reason"
+    },
+    {
+      "file": "server/tailscale-peers.ts",
+      "line": 75,
+      "key": "server.message434",
+      "category": "reason"
+    },
+    {
+      "file": "server/tailscale-peers.ts",
+      "line": 99,
+      "key": "server.message432",
+      "category": "reason"
+    },
+    {
+      "file": "server/tailscale-peers.ts",
+      "line": 101,
+      "key": "server.message435",
+      "category": "reason"
+    },
+    {
+      "file": "server/tailscale-peers.ts",
+      "line": 101,
+      "key": "server.message436",
+      "category": "reason"
+    },
+    {
+      "file": "server/tailscale-peers.ts",
+      "line": 115,
+      "key": "server.message437",
+      "category": "TaildropError"
+    },
+    {
+      "file": "server/tailscale-peers.ts",
+      "line": 116,
+      "key": "server.message438",
+      "category": "TaildropError"
+    },
+    {
+      "file": "server/tailscale-peers.ts",
+      "line": 131,
+      "key": "server.message439",
+      "category": "TaildropError"
+    },
+    {
+      "file": "server/tailscale-peers.ts",
+      "line": 132,
+      "key": "server.message440",
+      "category": "TaildropError"
+    },
+    {
+      "file": "server/tailscale-peers.ts",
+      "line": 132,
+      "key": "server.message441",
+      "category": "TaildropError"
+    },
+    {
+      "file": "server/terminals.ts",
+      "line": 65,
+      "key": "server.message442",
+      "category": "TerminalError"
+    },
+    {
+      "file": "server/terminals.ts",
+      "line": 68,
+      "key": "server.message443",
+      "category": "TerminalError"
+    },
+    {
+      "file": "server/terminals.ts",
+      "line": 76,
+      "key": "server.message444",
+      "category": "TerminalError"
+    },
+    {
+      "file": "server/terminals.ts",
+      "line": 78,
+      "key": "server.message445",
+      "category": "TerminalError"
+    },
+    {
+      "file": "server/terminals.ts",
+      "line": 124,
+      "key": "server.message446",
+      "category": "TerminalError"
+    },
+    {
+      "file": "server/terminals.ts",
+      "line": 127,
+      "key": "server.message447",
+      "category": "TerminalError"
+    },
+    {
+      "file": "server/terminals.ts",
+      "line": 178,
+      "key": "server.message448",
+      "category": "TerminalError"
+    },
+    {
+      "file": "server/terminals.ts",
+      "line": 218,
+      "key": "server.message449",
+      "category": "TerminalError"
+    },
+    {
+      "file": "server/terminals.ts",
+      "line": 224,
+      "key": "server.message450",
+      "category": "TerminalError"
+    },
+    {
+      "file": "server/uploads.ts",
+      "line": 117,
+      "key": "server.message451",
+      "category": "UploadError"
+    },
+    {
+      "file": "server/windows-directory-picker.ts",
+      "line": 23,
+      "key": "server.message452",
+      "category": "WindowsPickerError"
+    },
+    {
+      "file": "server/windows-directory-picker.ts",
+      "line": 30,
+      "key": "server.message453",
+      "category": "WindowsPickerError"
+    },
+    {
+      "file": "server/windows-directory-picker.ts",
+      "line": 86,
+      "key": "server.message455",
+      "category": "WindowsPickerError"
+    },
+    {
+      "file": "server/windows-directory-picker.ts",
+      "line": 86,
+      "key": "server.message456",
+      "category": "WindowsPickerError"
+    },
+    {
+      "file": "server/windows-directory-picker.ts",
+      "line": 93,
+      "key": "server.message457",
+      "category": "WindowsPickerError"
+    },
+    {
+      "file": "server/windows-directory-picker.ts",
+      "line": 100,
+      "key": "server.message458",
+      "category": "WindowsPickerError"
+    },
+    {
+      "file": "server/windows-directory-picker.ts",
+      "line": 102,
+      "key": "server.message458",
+      "category": "WindowsPickerError"
+    },
+    {
+      "file": "server/windows-directory-picker.ts",
+      "line": 106,
+      "key": "server.message459",
+      "category": "WindowsPickerError"
+    },
+    {
+      "file": "server/windows-directory-picker.ts",
+      "line": 106,
+      "key": "server.message460",
+      "category": "WindowsPickerError"
+    },
+    {
+      "file": "server/windows-directory-picker.ts",
+      "line": 111,
+      "key": "server.message461",
+      "category": "WindowsPickerError"
+    },
+    {
+      "file": "server/windows-directory-picker.ts",
+      "line": 114,
+      "key": "server.message462",
+      "category": "WindowsPickerError"
+    },
+    {
+      "file": "server/work-files.ts",
+      "line": 38,
+      "key": "server.message463",
+      "category": "WorkFileError"
+    },
+    {
+      "file": "server/work-files.ts",
+      "line": 44,
+      "key": "server.message464",
+      "category": "WorkFileError"
+    },
+    {
+      "file": "server/work-files.ts",
+      "line": 62,
+      "key": "server.message465",
+      "category": "WorkFileError"
+    },
+    {
+      "file": "server/work-files.ts",
+      "line": 63,
+      "key": "server.message466",
+      "category": "WorkFileError"
+    },
+    {
+      "file": "server/work-files.ts",
+      "line": 64,
+      "key": "server.message467",
+      "category": "WorkFileError"
+    },
+    {
+      "file": "server/work-files.ts",
+      "line": 71,
+      "key": "server.message468",
+      "category": "WorkFileError"
+    },
+    {
+      "file": "server/work-files.ts",
+      "line": 80,
+      "key": "server.message469",
+      "category": "WorkFileError"
+    },
+    {
+      "file": "server/work-files.ts",
+      "line": 87,
+      "key": "server.message470",
+      "category": "WorkFileError"
+    },
+    {
+      "file": "server/work-files.ts",
+      "line": 88,
+      "key": "server.message471",
+      "category": "WorkFileError"
+    },
+    {
+      "file": "server/work-files.ts",
+      "line": 90,
+      "key": "server.message472",
+      "category": "WorkFileError"
+    },
+    {
+      "file": "server/work-files.ts",
+      "line": 101,
+      "key": "server.message473",
+      "category": "WorkFileError"
+    },
+    {
+      "file": "server/work-files.ts",
+      "line": 107,
+      "key": "server.message474",
+      "category": "WorkFileError"
+    },
+    {
+      "file": "server/work-files.ts",
+      "line": 125,
+      "key": "server.message475",
+      "category": "WorkFileError"
+    },
+    {
+      "file": "server/work-files.ts",
+      "line": 130,
+      "key": "server.message476",
+      "category": "WorkFileError"
+    },
+    {
+      "file": "server/work-files.ts",
+      "line": 132,
+      "key": "server.message477",
+      "category": "WorkFileError"
+    },
+    {
+      "file": "server/work-files.ts",
+      "line": 139,
+      "key": "server.message478",
+      "category": "reason"
+    },
+    {
+      "file": "server/work-files.ts",
+      "line": 151,
+      "key": "server.message479",
+      "category": "reason"
+    },
+    {
+      "file": "server/work-files.ts",
+      "line": 154,
+      "key": "server.message480",
+      "category": "WorkFileError"
+    },
+    {
+      "file": "server/work-files.ts",
+      "line": 162,
+      "key": "server.message481",
+      "category": "other"
+    },
+    {
+      "file": "server/work-files.ts",
+      "line": 166,
+      "key": "server.message482",
+      "category": "other"
+    },
+    {
+      "file": "server/work-files.ts",
+      "line": 174,
+      "key": "server.message483",
+      "category": "WorkFileError"
+    },
+    {
+      "file": "server/work-files.ts",
+      "line": 176,
+      "key": "server.message484",
+      "category": "WorkFileError"
+    },
+    {
+      "file": "server/work-files.ts",
+      "line": 191,
+      "key": "server.message485",
+      "category": "WorkFileError"
+    },
+    {
+      "file": "server/work-files.ts",
+      "line": 193,
+      "key": "server.message486",
+      "category": "WorkFileError"
+    },
+    {
+      "file": "server/work-files.ts",
+      "line": 202,
+      "key": "server.message487",
+      "category": "WorkFileError"
+    },
+    {
+      "file": "server/work-files.ts",
+      "line": 214,
+      "key": "server.message488",
+      "category": "WorkFileError"
+    },
+    {
+      "file": "server/work-files.ts",
+      "line": 215,
+      "key": "server.message489",
+      "category": "WorkFileError"
+    },
+    {
+      "file": "server/work-files.ts",
+      "line": 215,
+      "key": "server.message490",
+      "category": "WorkFileError"
+    },
+    {
+      "file": "server/work-files.ts",
+      "line": 215,
+      "key": "server.message491",
+      "category": "WorkFileError"
+    },
+    {
+      "file": "server/work-files.ts",
+      "line": 219,
+      "key": "server.message492",
+      "category": "WorkFileError"
+    },
+    {
+      "file": "server/work-files.ts",
+      "line": 221,
+      "key": "server.message493",
+      "category": "WorkFileError"
+    },
+    {
+      "file": "server/work-files.ts",
+      "line": 223,
+      "key": "server.message494",
+      "category": "WorkFileError"
+    },
+    {
+      "file": "server/work-files.ts",
+      "line": 225,
+      "key": "server.message495",
+      "category": "WorkFileError"
+    },
+    {
+      "file": "server/work-files.ts",
+      "line": 244,
+      "key": "server.message496",
+      "category": "WorkFileError"
+    },
+    {
+      "file": "server/work-files.ts",
+      "line": 245,
+      "key": "server.message497",
+      "category": "WorkFileError"
+    },
+    {
+      "file": "server/work-files.ts",
+      "line": 248,
+      "key": "server.message498",
+      "category": "WorkFileError"
+    },
+    {
+      "file": "server/work-files.ts",
+      "line": 253,
+      "key": "server.message499",
+      "category": "WorkFileError"
+    },
+    {
+      "file": "server/work-files.ts",
+      "line": 264,
+      "key": "server.message500",
+      "category": "WorkFileError"
+    }
+  ],
+  "excluded": [
+    {
+      "file": "server/drivers/kimi.ts",
+      "line": 182,
+      "text": "[kimi probe] 保留 {p0}：{p1}",
+      "reason": "日志或启动诊断，不发送到前端"
+    },
+    {
+      "file": "server/drivers/kimi.ts",
+      "line": 183,
+      "text": "无效 sessionId",
+      "reason": "日志或启动诊断，不发送到前端"
+    },
+    {
+      "file": "server/drivers/kimi.ts",
+      "line": 196,
+      "text": "匹配目录数量 {p0}",
+      "reason": "日志或启动诊断，不发送到前端"
+    },
+    {
+      "file": "server/drivers/kimi.ts",
+      "line": 201,
+      "text": "状态或 wire 路径含软链",
+      "reason": "日志或启动诊断，不发送到前端"
+    },
+    {
+      "file": "server/drivers/kimi.ts",
+      "line": 204,
+      "text": "state.id 不匹配",
+      "reason": "日志或启动诊断，不发送到前端"
+    },
+    {
+      "file": "server/drivers/kimi.ts",
+      "line": 209,
+      "text": "wire 含对话或非探测记录",
+      "reason": "日志或启动诊断，不发送到前端"
+    },
+    {
+      "file": "server/drivers/kimi.ts",
+      "line": 214,
+      "text": "index-dirty 含软链",
+      "reason": "日志或启动诊断，不发送到前端"
+    },
+    {
+      "file": "server/index.ts",
+      "line": 68,
+      "text": "remote.json 无效，远程入口未开启",
+      "reason": "日志或启动诊断，不发送到前端"
+    },
+    {
+      "file": "server/index.ts",
+      "line": 77,
+      "text": "WORKBENCH_PORT 必须是 1 到 65535 的整数",
+      "reason": "日志或启动诊断，不发送到前端"
+    },
+    {
+      "file": "server/index.ts",
+      "line": 179,
+      "text": "notify.json 无效，闸门提醒未开启",
+      "reason": "日志或启动诊断，不发送到前端"
+    },
+    {
+      "file": "server/notify.ts",
+      "line": 31,
+      "text": "{p0}：feishuWebhook 与 larkUserId 必须且只能配一个",
+      "reason": "外部飞书提醒或通知配置/发送诊断，不属于界面文案"
+    },
+    {
+      "file": "server/notify.ts",
+      "line": 34,
+      "text": "{p0}：feishuWebhook 必须是 https:// 开头的飞书机器人 webhook 地址",
+      "reason": "外部飞书提醒或通知配置/发送诊断，不属于界面文案"
+    },
+    {
+      "file": "server/notify.ts",
+      "line": 37,
+      "text": "{p0}：larkUserId 必须是 ou_ 开头的飞书 open_id",
+      "reason": "外部飞书提醒或通知配置/发送诊断，不属于界面文案"
+    },
+    {
+      "file": "server/notify.ts",
+      "line": 40,
+      "text": "{p0}：delaySeconds 必须是不小于 0 的数字",
+      "reason": "外部飞书提醒或通知配置/发送诊断，不属于界面文案"
+    },
+    {
+      "file": "server/notify.ts",
+      "line": 48,
+      "text": "提问",
+      "reason": "外部飞书提醒或通知配置/发送诊断，不属于界面文案"
+    },
+    {
+      "file": "server/notify.ts",
+      "line": 49,
+      "text": "审批",
+      "reason": "外部飞书提醒或通知配置/发送诊断，不属于界面文案"
+    },
+    {
+      "file": "server/notify.ts",
+      "line": 53,
+      "text": "[workbench] {p0} @ {p1} 有闸门等你处理：{p2}",
+      "reason": "外部飞书提醒或通知配置/发送诊断，不属于界面文案"
+    },
+    {
+      "file": "server/notify.ts",
+      "line": 129,
+      "text": "飞书返回 HTTP {p0}，code {p1}{p2}",
+      "reason": "外部飞书提醒或通知配置/发送诊断，不属于界面文案"
+    },
+    {
+      "file": "server/notify.ts",
+      "line": 152,
+      "text": "lark-cli 发送失败{p0}",
+      "reason": "外部飞书提醒或通知配置/发送诊断，不属于界面文案"
+    },
+    {
+      "file": "server/windows-directory-picker.ts",
+      "line": 23,
+      "text": "(embedded Windows picker script comments)",
+      "reason": "内嵌 PowerShell 脚本中的注释；窗口标题已是英文，本工单禁止启动或更改 Windows 安装/托盘提示"
+    }
+  ]
+}

@@ -1,3 +1,4 @@
+import { localizeContentError, withMessageMetadata } from "./i18n/messages.js";
 import { getPlatformCapabilities, platform } from "./platform.js";
 import { createReadStream, statSync } from "node:fs";
 import { execFile, spawn } from "node:child_process";
@@ -321,7 +322,7 @@ function sendTerminalWs(socket: WebSocket, value: unknown): void {
     socket.terminate();
     return;
   }
-  socket.send(JSON.stringify(value));
+  socket.send(JSON.stringify(withMessageMetadata(value)));
 }
 
 server.listen(PORT, HOST, () => {
@@ -929,7 +930,14 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
     const apiError = error instanceof ApiError || error instanceof SessionOrganizationError
       ? error
       : new ApiError(500, 50000, error instanceof Error ? error.message : String(error));
-    if (!response.headersSent) await respond(response, apiError.status, apiError.code, apiError.message, {}, requestId);
+    if (!response.headersSent) {
+      let contentErrorLocale: string | undefined;
+      try {
+        const target = new URL(request.url ?? "/", "http://localhost");
+        if (target.pathname === "/api/fs/content") contentErrorLocale = target.searchParams.get("lang") ?? undefined;
+      } catch { /* Invalid request targets still receive the original JSON error. */ }
+      await respond(response, apiError.status, apiError.code, apiError.message, {}, requestId, contentErrorLocale);
+    }
     log("error", "request failed", {
       request_id: requestId,
       method: request.method,
@@ -1126,8 +1134,10 @@ async function respond(
   msg: string,
   data: unknown,
   requestId: string,
+  contentErrorLocale?: string,
 ): Promise<void> {
-  const json = JSON.stringify({ code, msg, data, request_id: requestId });
+  const envelope = withMessageMetadata({ code, msg, data, request_id: requestId }) as Record<string, unknown>;
+  const json = JSON.stringify(localizeContentError(envelope, contentErrorLocale));
   // 长会话快照可达十几 MB，手机走远程时 10 秒内下不完；大响应按 Accept-Encoding 用 gzip（level 1：约 1/5 体积、百毫秒内）
   const gzip = json.length > 32 * 1024 && acceptsGzip(String(response.req?.headers["accept-encoding"] ?? ""));
   const body = gzip ? await compressResponse(json) : json;

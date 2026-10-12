@@ -1,3 +1,4 @@
+import { getLocale } from "./i18n";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
@@ -18,6 +19,7 @@ window.addEventListener("vite:preloadError", (event) => {
   location.reload();
 });
 
+document.documentElement.lang = getLocale();
 applyBodyFontSize(readBodyFontSize());
 initializeHostConnections();
 document.title = workbenchWindowTitle(window.location.href, 0);

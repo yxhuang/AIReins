@@ -1,8 +1,9 @@
+import { t } from "../i18n";
 import { useLayoutEffect, useRef, useState } from "react";
 import { directoryEntryDate, directoryEntrySize, sortedDirectoryEntries, type DirectorySort } from "../directory-path";
 import type { DirectoryListing } from "../types";
 
-const GIT_LABELS: Record<string, string> = { M: "已修改", A: "已新增", R: "已改名", D: "已删除", U: "未跟踪", "!": "有冲突" };
+const GIT_LABELS: Record<string, string> = { M: t("ui.DirectoryTable.modified"), A: t("ui.DirectoryTable.added"), R: t("ui.DirectoryTable.renamed"), D: t("ui.DirectoryTable.deleted"), U: t("ui.DirectoryTable.untracked"), "!": t("ui.DirectoryTable.conflicted") };
 
 /** 表体直接生成文本 DOM；只在目录变化时建行，排序移动已有行，避免大目录逐行挂载 React 状态。 */
 export function DirectoryTable({ listing, busy, onActivate, onMenu }: {
@@ -32,7 +33,7 @@ export function DirectoryTable({ listing, busy, onActivate, onMenu }: {
       for (const entry of entries) {
         const row = document.createElement("tr");
         row.dataset.path = entry.path;
-        row.title = `${folder ? "打开文件夹" : "打开文件"}：${entry.path}`;
+        row.title = t("ui.common.message", { p0: (folder ? t("ui.DirectoryBrowser.open_folder_detail") : t("ui.DirectoryBrowser.open_file_detail")), p1: (entry.path) });
         const name = document.createElement("button");
         name.type = "button";
         name.className = `dir-table-name${folder ? " dir-table-folder" : ""}`;
@@ -44,13 +45,13 @@ export function DirectoryTable({ listing, busy, onActivate, onMenu }: {
           badge.textContent = folder ? "●" : mark;
           name.dataset.git = mark;
           name.append(badge);
-          row.title += `\nGit：${folder ? "其下有改动（" : ""}${GIT_LABELS[mark] ?? mark}${folder ? "）" : ""}`;
+          row.title += t("ui.DirectoryTable.git", { p0: (folder ? t("ui.DirectoryTable.changes_below_detail") : ""), p1: (GIT_LABELS[mark] ?? mark), p2: (folder ? "）" : "") });
         }
         row.insertCell().append(name);
         const size = row.insertCell();
         size.className = "dir-table-size";
         size.textContent = folder ? "" : directoryEntrySize(entry.size);
-        size.title = folder ? "文件夹" : entry.size == null ? "大小未知" : `${entry.size} 字节`;
+        size.title = folder ? t("ui.DirectoryTable.folder") : entry.size == null ? t("ui.DirectoryTable.size_unknown") : t("ui.DirectoryTable.bytes", { p0: (entry.size) });
         const date = row.insertCell();
         date.className = "dir-table-date";
         date.textContent = directoryEntryDate(entry.modifiedAt);
@@ -77,12 +78,12 @@ export function DirectoryTable({ listing, busy, onActivate, onMenu }: {
     for (const row of rows.current.values()) row.querySelector("button")!.disabled = busy;
   }, [listing, busy]);
 
-  return <table className={`dir-table${listing.git ? " dir-table-git" : ""}`} aria-label="目录与文件详情" aria-disabled={busy}>
+  return <table className={`dir-table${listing.git ? " dir-table-git" : ""}`} aria-label={t("ui.DirectoryTable.directory_and_file_details")} aria-disabled={busy}>
     <thead><tr>
-      {([["name", "名称"], ["size", "大小"], ["modifiedAt", "修改日期"]] as const).map(([key, label]) =>
+      {([["name", t("ui.DirectoryTable.name")], ["size", t("ui.DirectoryTable.size")], ["modifiedAt", t("ui.DirectoryTable.modified_2")]] as const).map(([key, label]) =>
         <th key={key} scope="col" aria-sort={sort.key === key ? sort.direction === "asc" ? "ascending" : "descending" : "none"}>
-          <button className="dir-table-sort" type="button" aria-label={`按${label}排序`} aria-pressed={sort.key === key}
-            title={`按${label}排序，再次点击切换升降序`} disabled={busy}
+          <button className="dir-table-sort" type="button" aria-label={t("ui.DirectoryTable.sort_by", { p0: (label) })} aria-pressed={sort.key === key}
+            title={t("ui.DirectoryTable.sort_by_click_again_to_reverse_the", { p0: (label) })} disabled={busy}
             onClick={() => setSort(value => ({ key, direction: value.key === key ? value.direction === "asc" ? "desc" : "asc" : key === "name" ? "asc" : "desc" }))}>
             {label}{sort.key === key && <span aria-hidden="true">{sort.direction === "asc" ? " ↑" : " ↓"}</span>}
           </button>

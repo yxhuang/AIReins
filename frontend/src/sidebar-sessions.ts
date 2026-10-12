@@ -1,3 +1,4 @@
+import { t } from "./i18n";
 import type { Store } from "./store";
 import type { SessionRecord } from "./types";
 
@@ -38,7 +39,7 @@ export function selectSidebarSections(value: Pick<Store, 'sessions' | 'now' | 'c
   const groupedIds = new Set(groups.flatMap(group => group.sessions.map(session => session.id)));
   const today = new Date(value.now);
   const buckets: { label: string; sessions: SessionRecord[] }[] = [
-    { label: '进行中', sessions: [] }, { label: '今天', sessions: [] }, { label: '更早', sessions: [] },
+    { label: t("core.084"), sessions: [] }, { label: t("core.085"), sessions: [] }, { label: t("core.086"), sessions: [] },
   ];
   for (const session of active) {
     if (pinnedIds.has(session.id) || groupedIds.has(session.id)) continue;

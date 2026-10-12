@@ -1,3 +1,4 @@
+import { t } from "../i18n";
 import { useEffect, useMemo, useRef } from "react";
 import { directoryEntryDate, directoryEntrySize, sortedDirectoryEntries } from "../directory-path";
 import type { DirectoryListing } from "../types";
@@ -33,6 +34,7 @@ function tableDocument(listing: DirectoryListing): string {
   const data = JSON.stringify(rows).replaceAll("<", "\\u003c");
   const bridge = `<script>
 const entries=${data};
+const copy=${JSON.stringify({openFolder:t('ui.ChromeDirectoryTable.open_folder'),openFile:t('ui.ChromeDirectoryTable.open_file'),sort:t('ui.ChromeDirectoryTable.sort'),sortHint:t('ui.ChromeDirectoryTable.sort_hint')}).replaceAll('<', '\\u003c')};
 for(const entry of entries) {
   addRow(entry.name, '', entry.folder, entry.size ?? -1, entry.sizeText, entry.modifiedAt ?? -1, entry.dateText);
   const row=document.getElementById('tbody').lastElementChild, link=row.querySelector('a');
@@ -40,7 +42,7 @@ for(const entry of entries) {
   row.cells[1].dataset.unknown=String(!entry.folder && entry.size == null);
   row.cells[2].dataset.unknown=String(entry.modifiedAt == null);
   link.href='#'; link.draggable=false; link.setAttribute('aria-label', entry.name);
-  link.title=(entry.folder ? '打开文件夹：' : '打开文件：')+entry.path;
+  link.title=(entry.folder ? copy.openFolder : copy.openFile)+entry.path;
   link.addEventListener('click',event=>{event.preventDefault();parent.postMessage({type:'wb-directory-open',path:entry.path},'*')});
 }
 // Keep native ordering within each group; preserve WB folders-first/unknown-last behavior.
@@ -57,8 +59,8 @@ sortTable=function(column) {
   }
 };
 for(const [index,cell] of Array.from(document.getElementById('theader').cells).entries()) {
-  cell.setAttribute('aria-label','按'+cell.textContent.trim()+'排序');
-  cell.title='按'+cell.textContent.trim()+'排序，再次点击切换升降序';
+  cell.setAttribute('aria-label',copy.sort.replace('{name}',cell.textContent.trim()));
+  cell.title=copy.sortHint.replace('{name}',cell.textContent.trim());
   cell.setAttribute('aria-sort',index===0?'ascending':'none');
 }
 window.addEventListener('message',event=>{
@@ -106,6 +108,6 @@ export function ChromeDirectoryTable({ listing, busy, onActivate }: {
     observer.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme", "class", "style"] });
     return () => { window.removeEventListener("message", listener); observer.disconnect(); };
   }, [listing, busy, onActivate]);
-  return <iframe ref={frame} className="dir-native-table" title="目录与文件列表" sandbox="allow-scripts" srcDoc={srcDoc}
+  return <iframe ref={frame} className="dir-native-table" title={t("ui.common.directories_and_files")} sandbox="allow-scripts" srcDoc={srcDoc}
     aria-disabled={busy} tabIndex={busy ? -1 : undefined} onLoad={updateTheme} />;
 }

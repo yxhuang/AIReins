@@ -176,7 +176,7 @@ const pdfPreview = { target: { path: "/a/b/中文.pdf", root: "/a/b" }, loadId: 
   file: { path: "/a/b/中文.pdf", name: "中文.pdf", kind: "pdf", size: 120, editable: false, mimeType: "application/pdf" } };
 try {
   store.filePreview = pdfPreview;
-  Object.defineProperty(globalThis, "navigator", { configurable: true, value: { pdfViewerEnabled: true } });
+  Object.defineProperty(globalThis, "navigator", { configurable: true, value: { language: "zh-CN", pdfViewerEnabled: true } });
   const pdfHtml = renderToStaticMarkup(React.createElement(FilePanel, { onClose() {} }));
   assert.ok(pdfHtml.includes('title="PDF 文件预览"') && pdfHtml.includes("<iframe"), "支持 PDF 时通过 iframe 导航到原生查看器");
   assert.ok(pdfHtml.includes('role="toolbar"') && pdfHtml.indexOf("外部打开") < pdfHtml.indexOf("<iframe"), "文件操作集中在顶栏");
@@ -188,7 +188,7 @@ try {
   assert.ok(markdownHtml.includes('aria-label="文件显示方式"') && markdownHtml.includes("segmented-slider"), "文本预览使用终端同款滑动切换");
   assert.ok(markdownHtml.includes('aria-label="下载"') && !markdownHtml.includes('aria-label="外部打开"'), "普通文本只保留一个下载入口");
   store.filePreview = pdfPreview;
-  Object.defineProperty(globalThis, "navigator", { configurable: true, value: { pdfViewerEnabled: false } });
+  Object.defineProperty(globalThis, "navigator", { configurable: true, value: { language: "zh-CN", pdfViewerEnabled: false } });
   const fallbackHtml = renderToStaticMarkup(React.createElement(FilePanel, { onClose() {} }));
   assert.ok(!fallbackHtml.includes("<iframe") && !fallbackHtml.includes("<object"), "不支持内嵌时不留下空白查看区");
   assert.ok(fallbackHtml.includes("未启用内嵌 PDF") && fallbackHtml.includes("外部打开"));

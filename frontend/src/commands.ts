@@ -1,3 +1,4 @@
+import { t } from "./i18n";
 import type { CommandInfo } from "./types";
 
 // 斜杠命令面板的纯逻辑（无 DOM 依赖，可单测）：
@@ -91,10 +92,10 @@ export function filterCommands(
 
 /** WB 接管的侧问命令：Claude /btw；Codex /side 及其原生别名 /btw。 */
 const SIDE_COMMANDS: Record<string, CommandInfo[]> = {
-  claude: [{ name: "btw", description: "侧问：单独问答，不加入主对话", argHint: "问题", source: "claude" }],
+  claude: [{ name: "btw", description: t("core.011"), argHint: t("core.012"), source: "claude" }],
   codex: [
-    { name: "side", description: "侧聊：在当前线程的临时分支里问答，不加入主对话", argHint: "问题", source: "codex" },
-    { name: "btw", description: "侧聊（/side 的别名）", argHint: "问题", source: "codex" },
+    { name: "side", description: t("core.013"), argHint: t("core.012"), source: "codex" },
+    { name: "btw", description: t("core.014"), argHint: t("core.012"), source: "codex" },
   ],
 };
 

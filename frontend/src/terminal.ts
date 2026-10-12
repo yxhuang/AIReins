@@ -1,3 +1,4 @@
+import { localizeServerData, t } from "./i18n";
 // 终端面板纯逻辑（无 DOM 依赖，tsx 单测直接 import）。
 // 接口形状以 docs/terminal-panel-design.md §9 为唯一契约，不自创字段。
 import type { ShellKind, TerminalInfo } from "./types";
@@ -29,14 +30,14 @@ interface TermShortcutKey {
 }
 
 export const TERM_SHORTCUT_KEYS: TermShortcutKey[] = [
-  { id: "esc", label: "Esc", seq: "\x1b", ariaLabel: "发送 Esc 到终端" },
-  { id: "tab", label: "Tab", seq: "\t", ariaLabel: "发送 Tab 到终端" },
-  { id: "ctrl-c", label: "Ctrl-C", seq: "\x03", ariaLabel: "发送 Ctrl-C（中断）到终端" },
-  { id: "ctrl-d", label: "Ctrl-D", seq: "\x04", ariaLabel: "发送 Ctrl-D（EOF）到终端" },
-  { id: "up", label: "↑", seq: "\x1b[A", ariaLabel: "发送上方向键到终端" },
-  { id: "down", label: "↓", seq: "\x1b[B", ariaLabel: "发送下方向键到终端" },
-  { id: "left", label: "←", seq: "\x1b[D", ariaLabel: "发送左方向键到终端" },
-  { id: "right", label: "→", seq: "\x1b[C", ariaLabel: "发送右方向键到终端" },
+  { id: "esc", label: "Esc", seq: "\x1b", ariaLabel: t("core.106") },
+  { id: "tab", label: "Tab", seq: "\t", ariaLabel: t("core.107") },
+  { id: "ctrl-c", label: "Ctrl-C", seq: "\x03", ariaLabel: t("core.108") },
+  { id: "ctrl-d", label: "Ctrl-D", seq: "\x04", ariaLabel: t("core.109") },
+  { id: "up", label: "↑", seq: "\x1b[A", ariaLabel: t("core.110") },
+  { id: "down", label: "↓", seq: "\x1b[B", ariaLabel: t("core.111") },
+  { id: "left", label: "←", seq: "\x1b[D", ariaLabel: t("core.112") },
+  { id: "right", label: "→", seq: "\x1b[C", ariaLabel: t("core.113") },
 ];
 
 /** /ws/terminal 的 URL：与 store.ts 的 /ws 同一取法（https 入口用 wss）。 */
@@ -79,11 +80,11 @@ export function reduceTermFrame(
   frame: unknown,
 ): { state: TermSessionState; effects: TermEffect[] } {
   if (!frame || typeof frame !== "object") return { state, effects: [] };
-  const f = frame as Record<string, unknown>;
+  const f = localizeServerData(frame) as Record<string, unknown>;
   const frameId = typeof f.terminalId === "string" ? f.terminalId : null;
   if (f.type === "error") {
     if (frameId !== null && frameId !== terminalId) return { state, effects: [] };
-    const message = typeof f.message === "string" && f.message ? f.message : "未知错误";
+    const message = typeof f.message === "string" && f.message ? f.message : t("core.094");
     return { state, effects: [{ type: "error", message }] };
   }
   if (frameId !== terminalId) return { state, effects: [] };

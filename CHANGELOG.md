@@ -4,6 +4,8 @@
 
 First public release.
 
+- English and Simplified Chinese interface, with a per-browser language preference.
+
 - Claude Code, Codex and Kimi Code sessions in one browser UI: approvals, questions, slash commands, skills, `@` mentions, model and effort switching, interrupt and steer.
 - Native history browser with folder filter; resume sessions from and into the CLIs and the VS Code extension.
 - File panel: browse any directory with Git status and tabs; preview and edit supported files in your home folder, Windows drives and session folders; multi-tab terminal; Taildrop sending.

@@ -1,3 +1,4 @@
+import { t } from "./i18n";
 // 工具行人话化（消息显示改版阶段 2：动词 + 对象 + 附注 + 状态）。
 // 纯函数：把三家形状不一的工具调用归一成「动词 + 对象 + 附注 + 展开体」，不依赖 React/DOM。
 // 覆盖 §2 表里的阶段差异：claude 名字不变、codex 名字是 item 类型、
@@ -76,12 +77,12 @@ export function summarizeTool(agent: AgentKind, tool: ToolSummarySource, cwd: st
       const summaries = calls.map((call) => {
         if (call.name === "apply_patch") {
           const paths = [...call.argument.matchAll(/^\*\*\* (?:Update|Add|Delete) File: (.+)$/gm)].map((m) => relPath(m[1]!, cwd));
-          return { verb: "编辑", target: paths.length === 1 ? paths[0]! : paths.length ? `${paths.length} 个文件` : "文件改动", input: call.argument };
+          return { verb: t("core.114"), target: paths.length === 1 ? paths[0]! : paths.length ? t("core.115", { p0: paths.length }) : t("core.116"), input: call.argument };
         }
         const alias: Record<string, string> = { exec_command: "commandExecution", write_stdin: "commandExecution", web__run: "webSearch", view_image: "Read" };
         const name = Object.hasOwn(alias, call.name) ? alias[call.name]! : call.name;
         const args = { ...call.fields, ...(call.command !== undefined ? { command: call.command } : {}) };
-        if (call.name === "write_stdin") args.command = `终端 ${call.fields.session_id ?? ""}`.trim();
+        if (call.name === "write_stdin") args.command = t("core.117", { p0: call.fields.session_id ?? "" }).trim();
         const summary = summarizeTool(agent, { ...tool, toolName: name, baseToolName: name,
           toolKind: undefined, rawInput: args, rawResult: undefined, input: call.argument, result: "", status: "unknown" }, cwd);
         return { verb: summary.verb, target: summary.target, input: call.command !== undefined ? stripShellWrapper(call.command) : call.argument };
@@ -90,7 +91,7 @@ export function summarizeTool(agent: AgentKind, tool: ToolSummarySource, cwd: st
       const first = summaries[0]!;
       const allCommands = commands.length === calls.length;
       return { verb: first.verb, target: first.target,
-        note: [calls.length > 1 ? `等 ${calls.length} ${allCommands ? "条命令" : "项调用"}` : "", tool.status === "error" ? firstLine(resultText(tool)) : ""].filter(Boolean).join(" · "),
+        note: [calls.length > 1 ? t("core.118", { p0: calls.length, p1: allCommands ? t("core.commands") : t("core.calls") }) : "", tool.status === "error" ? firstLine(resultText(tool)) : ""].filter(Boolean).join(" · "),
         body: { type: "exec", calls: summaries, input: source, result: resultText(tool) } };
     }
   }
@@ -107,15 +108,15 @@ export function summarizeTool(agent: AgentKind, tool: ToolSummarySource, cwd: st
 
   switch (cls) {
     case "read": {
-      verb = "读取";
+      verb = t("core.055");
       target = pathOf();
       const lineCount = tool.status !== "ok" ? null : countTextLines(text) || null; // 失败时结果是错误文本，不算文件行数
-      note = lineCount ? `${lineCount} 行` : "";
+      note = lineCount ? t("core.119", { p0: lineCount }) : "";
       body = { type: "read", path: target, lineCount };
       break;
     }
     case "grep": {
-      verb = "搜索";
+      verb = t("core.054");
       const pattern = str(input.pattern) || titleArg;
       target = pattern ? `"${pattern}"` : "";
       const hits = tool.status === "running" ? 0 : countTextLines(text);
@@ -123,21 +124,21 @@ export function summarizeTool(agent: AgentKind, tool: ToolSummarySource, cwd: st
       // 模式判不定（没给 output_mode、结果也不像 content 行）就省略附注，不写误导数字。
       const mode = str(input.output_mode);
       if (hits > 0) {
-        if (mode === "content") note = `${hits} 处`;
-        else if (mode === "files_with_matches") note = `${hits} 个文件`;
-        else if (!mode && grepResultLooksLikeContent(text)) note = `${hits} 处`;
+        if (mode === "content") note = t("core.120", { p0: hits });
+        else if (mode === "files_with_matches") note = t("core.115", { p0: hits });
+        else if (!mode && grepResultLooksLikeContent(text)) note = t("core.120", { p0: hits });
       }
       break;
     }
     case "glob": {
-      verb = "列出";
+      verb = t("core.053");
       target = str(input.pattern) || titleArg;
       const files = tool.status === "running" ? 0 : countTextLines(text);
-      note = files ? `${files} 个文件` : "";
+      note = files ? t("core.115", { p0: files }) : "";
       break;
     }
     case "edit": {
-      verb = "编辑";
+      verb = t("core.114");
       target = pathOf();
       const chunks = editChunksOf(input);
       note = diffNote(sumLines(chunks, "added"), sumLines(chunks, "removed"));
@@ -145,7 +146,7 @@ export function summarizeTool(agent: AgentKind, tool: ToolSummarySource, cwd: st
       break;
     }
     case "write": {
-      verb = "写入";
+      verb = t("core.121");
       target = pathOf();
       const chunks = [{ removed: "", added: str(input.content) }];
       note = diffNote(sumLines(chunks, "added"), 0);
@@ -153,19 +154,19 @@ export function summarizeTool(agent: AgentKind, tool: ToolSummarySource, cwd: st
       break;
     }
     case "command": {
-      verb = "运行";
+      verb = t("core.122");
       const command = commandOf(agent, input, resultItem) || titleArg;
       // Claude 的 Bash 自带一句 description（同 VSCode 扩展的工具标题），有就用它，命令留在展开区
       target = str(input.description) || command;
       const run = commandResult(agent, tool, resultItem, text);
       if (tool.status === "error") {
-        note = run.exitCode !== null ? `退出码 ${run.exitCode}` : firstLine(run.output);
+        note = run.exitCode !== null ? t("core.123", { p0: run.exitCode }) : firstLine(run.output);
       }
       body = { type: "command", command, ...run };
       break;
     }
     case "fetch": {
-      verb = "抓取";
+      verb = t("core.124");
       target = hostOf(str(input.url) || titleArg);
       break;
     }
@@ -174,23 +175,23 @@ export function summarizeTool(agent: AgentKind, tool: ToolSummarySource, cwd: st
       const action = asRecord(resultItem.action);
       const openUrl = str(action.url);
       if (agent === "codex" && openUrl) {
-        verb = "抓取";
+        verb = t("core.124");
         target = hostOf(openUrl);
       } else {
-        verb = "搜索";
+        verb = t("core.054");
         const query = str(resultItem.query) || str(input.query);
         target = query ? `"${query}"` : "";
       }
       break;
     }
     case "todo": {
-      verb = "更新待办";
+      verb = t("core.125");
       const todos = Array.isArray(input.todos) ? input.todos.length : 0;
-      note = todos ? `${todos} 项` : "";
+      note = todos ? t("core.126", { p0: todos }) : "";
       break;
     }
     case "task": {
-      verb = "委派";
+      verb = t("core.127");
       target = str(input.description) || oneLine(str(input.prompt), 60);
       break;
     }
@@ -204,28 +205,28 @@ export function summarizeTool(agent: AgentKind, tool: ToolSummarySource, cwd: st
       }));
       const kinds = changes.map((c) => str(asRecord(c.kind).type));
       verb =
-        changes.length !== 1 ? "编辑"
-        : kinds[0] === "add" ? "写入"
-        : kinds[0] === "delete" ? "删除"
-        : asRecord(changes[0]?.kind).move_path ? "移动"
-        : "编辑";
+        changes.length !== 1 ? t("core.114")
+        : kinds[0] === "add" ? t("core.121")
+        : kinds[0] === "delete" ? t("core.128")
+        : asRecord(changes[0]?.kind).move_path ? t("core.129")
+        : t("core.114");
       target =
         changes.length === 1 ? relPath(str(changes[0]?.path), cwd)
-        : changes.length > 1 ? `${changes.length} 个文件`
+        : changes.length > 1 ? t("core.115", { p0: changes.length })
         : "";
       note = diffNote(sumLines(chunks, "added"), sumLines(chunks, "removed"));
       body = { type: "diff", path: target, chunks };
       break;
     }
     case "mcp": {
-      verb = "调用";
+      verb = t("core.130");
       const item = Object.keys(resultItem).length > 0 ? resultItem : input;
       target = [str(item.server), str(item.tool)].filter(Boolean).join("/");
       break;
     }
     case "delete":
     case "move": {
-      verb = cls === "delete" ? "删除" : "移动";
+      verb = cls === "delete" ? t("core.128") : t("core.129");
       target = pathOf();
       break;
     }

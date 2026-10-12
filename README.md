@@ -17,6 +17,8 @@ The official remote options for coding agents give you a window into **one agent
 
 It is deliberately small: one Node process plus a web page. No relay server, no account, no telemetry, no desktop app to keep open. It is built for one person working with their own agents, not for running a fleet of agents in parallel worktrees.
 
+The interface supports English and Simplified Chinese; choose a language under Settings → Appearance.
+
 ## Features
 
 **Sessions**

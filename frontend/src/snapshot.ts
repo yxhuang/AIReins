@@ -1,3 +1,4 @@
+import { t } from "./i18n";
 import type { SnapshotPreflight } from "./types";
 
 // 建会话前快照的决策与流程编排（无 DOM 依赖，可单测）。
@@ -25,10 +26,10 @@ export function snapshotFlowDecision(preflight: SnapshotPreflight): SnapshotFlow
 export function snapshotConfirmReasons(preflight: SnapshotPreflight): string[] {
   const reasons: string[] = [];
   if (preflight.exceeds) {
-    reasons.push("该目录超过自动快照阈值（500MB 或 20000 个文件），完整复制可能需要较长时间。");
+    reasons.push(t("core.087"));
   }
   if (!preflight.freeSpaceOk) {
-    reasons.push("快照目标盘的可用空间不足，直接快照会失败。");
+    reasons.push(t("core.088"));
   }
   return reasons;
 }

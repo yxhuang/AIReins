@@ -1,3 +1,4 @@
+import { fallbackTitleMetadata } from "./i18n/messages.js";
 import { open, readdir, readFile, realpath, stat } from "node:fs/promises";
 import { createReadStream } from "node:fs";
 import { createInterface } from "node:readline";
@@ -603,6 +604,7 @@ function sessionFromCandidate(
     nativeSessionId: value.nativeSessionId,
     cwd: value.cwd,
     title: truncateText(value.title || "无标题会话", TITLE_LIMIT),
+    ...fallbackTitleMetadata({}, value.title || undefined, "server.message043"),
     lastActivityAt: new Date(candidate.mtimeMs).toISOString(),
     source: value.source,
     filePath: candidate.path,

@@ -1,3 +1,4 @@
+import uiZh from "../src/i18n/ui.zh-CN.ts";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { Store } from "../src/store.ts";
@@ -150,5 +151,6 @@ assert.equal(large.data.get(id).dropped, 0);
 const view = readFileSync(new URL("../src/components/SessionView.tsx", import.meta.url), "utf8");
 assert.match(view, /new IntersectionObserver/);
 assert.match(view, /anchor\.element\.getBoundingClientRect\(\)\.top - anchor\.top/);
-assert.match(view, /加载更早的消息失败，点击重试/);
+assert.ok(view.includes("ui.SessionView.failed_to_load_earlier_messages_click_to"));
+assert.equal(uiZh["ui.SessionView.failed_to_load_earlier_messages_click_to"], "加载更早的消息失败，点击重试");
 console.log("✅ snapshot paging: tail/state parity, full stitching/render grouping, concurrent/retry, live cursor, stale resync, >2000 retention");

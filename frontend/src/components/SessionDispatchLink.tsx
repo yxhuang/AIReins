@@ -1,3 +1,4 @@
+import { t } from "../i18n";
 import { useEffect, useRef, useState } from "react";
 import { fetchParentDispatches } from "../api";
 import { store } from "../store";
@@ -36,9 +37,9 @@ export function SessionDispatchBadge({ runs, backgroundCount }: { runs: Dispatch
 export function SessionDispatchLink({ runs, backgroundCount, desktop = false }: { runs: DispatchRun[]; backgroundCount: number; desktop?: boolean }) {
   if (!backgroundCount && !runs.length) return null;
   if (desktop) return <button type="button" className="session-dispatch-link" onClick={() => store.navigateDispatches(runs.length ? runs.map((run) => run.runId) : undefined)}>
-    {backgroundCount > 0 && `后台 ${backgroundCount} 个任务 · `}查看派单{runs.length > 1 ? `（${runs.length}）` : ""}
+    {backgroundCount > 0 && t("ui.SessionDispatchLink.background_tasks", { p0: (backgroundCount) })}{t("ui.SessionDispatchLink.view_dispatches")}{runs.length > 1 ? `（${runs.length}）` : ""}
   </button>;
-  return <div className={`session-dispatch-link${runs.length ? " has-runs" : ""}`}>{backgroundCount > 0 && <span>后台 {backgroundCount} 个任务</span>}
-    {runs.length > 0 && <button className="btn" onClick={() => store.navigateDispatches(runs.map((run) => run.runId))}>查看派单{runs.length > 1 ? `（${runs.length}）` : ""}</button>}
+  return <div className={`session-dispatch-link${runs.length ? " has-runs" : ""}`}>{backgroundCount > 0 && <span>{t("ui.SessionDispatchLink.background_tasks_sentence", { p0: (backgroundCount) })}</span>}
+    {runs.length > 0 && <button className="btn" onClick={() => store.navigateDispatches(runs.map((run) => run.runId))}>{t("ui.SessionDispatchLink.view_dispatches_sentence", { p0: (runs.length > 1 ? `（${runs.length}）` : "") })}</button>}
   </div>;
 }

@@ -1,3 +1,4 @@
+import { t } from "./i18n";
 import type { AgentKind, AskQuestion, HistoryMessage, Mention, PermissionDecision, UnifiedEvent } from "./types";
 import { asRecord, stringifyBlock } from "./format";
 import { normalizeQuestions } from "./ask";
@@ -170,8 +171,8 @@ function foldableTool(tool: ToolView, agent: AgentKind, cwd: string) {
   const summary = summarizeTool(agent, tool, cwd);
   const name = tool.baseToolName || tool.toolName || "tool";
   if (summary.body.type === "read") return { cls: "read" as const, path: summary.body.path };
-  if (summary.verb === "列出" && name !== summary.verb) return { cls: "glob" as const, path: "" };
-  if (summary.verb === "搜索" && (tool.toolKind === "search" ||
+  if (summary.verb === t("core.053") && name !== summary.verb) return { cls: "glob" as const, path: "" };
+  if (summary.verb === t("core.054") && (tool.toolKind === "search" ||
       (name.toLowerCase() !== "websearch" && name !== summary.verb))) {
     return { cls: "grep" as const, path: "" };
   }
@@ -192,9 +193,9 @@ export function groupReadOnlyTools(items: readonly RenderItem[], agent: AgentKin
     else {
       const summaryParts: ToolGroupView["summaryParts"] = [];
       const files = paths.size + unlocatedReads;
-      if (reads) summaryParts.push({ verb: "读取", count: `${files} 个文件${files < reads ? `（${reads} 次）` : ""}` });
-      if (greps) summaryParts.push({ verb: "搜索", count: `${greps} 次` });
-      if (globs) summaryParts.push({ verb: "列出", count: `${globs} 次` });
+      if (reads) summaryParts.push({ verb: t("core.055"), count: t("core.056", { p0: files, p1: files < reads ? t("core.readCount", { count: reads }) : "" }) });
+      if (greps) summaryParts.push({ verb: t("core.054"), count: t("core.057", { p0: greps }) });
+      if (globs) summaryParts.push({ verb: t("core.053"), count: t("core.057", { p0: globs }) });
       const first = tools[0]!;
       grouped.push({ kind: "tool-group", key: `tool-group:${first.key}`, seq: first.seq,
         turn: first.turn, tools, summaryParts,
@@ -280,7 +281,7 @@ export function gateFromEvent(event: UnifiedEvent, agent: AgentKind): GateView {
   } else if (Array.isArray(input.edits)) {
     const edits = input.edits.map(asRecord);
     editChunks = edits.map((e, i) => ({
-      title: `改动 #${i + 1}`,
+      title: t("core.058", { p0: i + 1 }),
       removed: typeof e.old_string === "string" ? e.old_string : "",
       added: typeof e.new_string === "string" ? e.new_string : "",
     }));
@@ -327,31 +328,31 @@ export function gateFromEvent(event: UnifiedEvent, agent: AgentKind): GateView {
 }
 
 const TURN_ERROR_LABELS: Record<string, string> = {
-  error_during_execution: "执行时发生错误",
-  error_max_turns: "已达到回合数上限",
-  error_max_budget_usd: "已达到费用上限",
-  error_json_schema: "输出格式校验失败",
-  error_max_structured_output_retries: "输出格式重试次数已用尽",
-  failed: "执行失败",
-  cancelled: "执行已取消",
-  canceled: "执行已取消",
-  interrupted: "执行已中断",
-  max_tokens: "已达到输出长度上限",
-  refusal: "模型拒绝了本次请求",
+  error_during_execution: t("core.059"),
+  error_max_turns: t("core.060"),
+  error_max_budget_usd: t("core.061"),
+  error_json_schema: t("core.062"),
+  error_max_structured_output_retries: t("core.063"),
+  failed: t("core.064"),
+  cancelled: t("core.065"),
+  canceled: t("core.065"),
+  interrupted: t("core.066"),
+  max_tokens: t("core.067"),
+  refusal: t("core.068"),
 };
 
 // 按 seq 顺序把事件流折叠为渲染条目。
 function abnormalTurnReason(payload: Record<string, unknown>, agent: AgentKind): string | null {
   if (agent === "claude") {
     if (typeof payload.subtype === "string" && payload.subtype !== "success") return payload.subtype;
-    return payload.isError === true ? "Claude 报告错误" : null;
+    return payload.isError === true ? t("core.069") : null;
   }
   if (agent === "codex") {
     const error = asRecord(payload.error);
     const message = typeof error.message === "string" ? error.message :
       typeof payload.error === "string" ? payload.error : "";
     if (message) return message;
-    if (payload.error != null) return "Codex 报告错误";
+    if (payload.error != null) return t("core.070");
     return typeof payload.status === "string" && payload.status !== "completed" ? payload.status : null;
   }
   return typeof payload.stopReason === "string" && payload.stopReason !== "end_turn" ? payload.stopReason : null;
@@ -544,7 +545,7 @@ function renderItemsReducer(events: UnifiedEvent[], agent: AgentKind) {
           kind: "system",
           key: `sys:${event.seq}`,
           seq: event.seq,
-          text: `会话已创建（${String(p.agent ?? agent)} · ${String(p.cwd ?? "")}）`,
+          text: t("core.071", { p0: String(p.agent ?? agent), p1: String(p.cwd ?? "") }),
           tone: "muted",
         });
         break;
@@ -555,14 +556,14 @@ function renderItemsReducer(events: UnifiedEvent[], agent: AgentKind) {
         const reason = abnormalTurnReason(p, agent);
         // 用户按停止：三家分别报 interrupted 标记 / interrupted / cancelled，按中性提示而非出错
         if (p.interrupted === true || reason === "interrupted" || reason === "cancelled") {
-          items.push({ kind: "system", key: `sys:${event.seq}`, seq: event.seq, text: "已打断，可直接发消息继续", tone: "muted" });
+          items.push({ kind: "system", key: `sys:${event.seq}`, seq: event.seq, text: t("core.072"), tone: "muted" });
         } else if (reason) {
           const label = Object.hasOwn(TURN_ERROR_LABELS, reason) ? TURN_ERROR_LABELS[reason]
-            : /^[a-z][a-z_]+$/.test(reason) ? "执行未正常完成" : reason;
+            : /^[a-z][a-z_]+$/.test(reason) ? t("core.073") : reason;
           const raw = agent === "claude" ? p.subtype : agent === "codex" ? p.status : p.stopReason;
           items.push({
             kind: "system", key: `sys:${event.seq}`, seq: event.seq,
-            text: `本轮异常结束：${label}`, tone: "error", rawCode: typeof raw === "string" ? raw : reason,
+            text: t("core.074", { p0: String(label) }), tone: "error", rawCode: typeof raw === "string" ? raw : reason,
           });
         }
         break;
@@ -573,7 +574,7 @@ function renderItemsReducer(events: UnifiedEvent[], agent: AgentKind) {
           kind: "system",
           key: `sys:${event.seq}`,
           seq: event.seq,
-          text: `出错：${String(p.message ?? "未知错误")}`,
+          text: t("core.075", { p0: String(p.message ?? t("core.094")) }),
           tone: "error",
         });
         break;
@@ -583,7 +584,7 @@ function renderItemsReducer(events: UnifiedEvent[], agent: AgentKind) {
           kind: "system",
           key: `sys:${event.seq}`,
           seq: event.seq,
-          text: `进程已退出（code=${String(p.code ?? "null")}）`,
+          text: t("core.076", { p0: String(p.code ?? "null") }),
           tone: "muted",
         });
         break;
@@ -783,13 +784,13 @@ function toolResultText(result: unknown): string {
 
 // worker_released 的弱化系统行文案：空闲自动释放带分钟数，手动释放不带来源细节。
 function workerReleasedText(p: Record<string, unknown>): string {
-  if (p.reason === "shutdown") return "Workbench 退出时已释放；下次发送时从磁盘续接";
+  if (p.reason === "shutdown") return t("core.077");
   if (p.reason === "idle") {
     const minutes = Number(p.idleMinutes);
-    const why = Number.isFinite(minutes) && minutes > 0 ? `空闲 ${minutes} 分钟` : "空闲超时";
-    return `已释放（${why}）；下次发送时从磁盘续接`;
+    const why = Number.isFinite(minutes) && minutes > 0 ? t("core.078", { p0: minutes }) : t("core.079");
+    return t("core.080", { p0: why });
   }
-  return "已释放（手动）；下次发送时从磁盘续接";
+  return t("core.081");
 }
 
 /**

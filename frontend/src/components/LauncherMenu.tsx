@@ -1,3 +1,4 @@
+import { t } from "../i18n";
 import { useEffect, useId, useRef, useState } from "react";
 import { fetchLinks, type LauncherLink } from "../api";
 import { useAnchoredMenu } from "./useAnchoredMenu";
@@ -31,11 +32,11 @@ export function LauncherMenu({ collapsed }: { collapsed: boolean }) {
   }, [open]);
   const groups = new Map<string, LauncherLink[]>();
   for (const link of links) {
-    const group = link.group ?? "其他";
+    const group = link.group ?? t("ui.LauncherMenu.other");
     groups.set(group, [...(groups.get(group) ?? []), link]);
   }
   return <div className="launcher" ref={rootRef}>
-    <button type="button" className="launcher-button" ref={buttonRef} title="直达" aria-label="直达"
+    <button type="button" className="launcher-button" ref={buttonRef} title={t("ui.LauncherMenu.quick_links")} aria-label={t("ui.LauncherMenu.quick_links")}
       aria-haspopup="dialog" aria-expanded={open} aria-controls={open ? panelId : undefined} onClick={() => setOpen((value) => !value)}>
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
         <rect x="3.5" y="3.5" width="7" height="7" rx="2" />
@@ -43,11 +44,11 @@ export function LauncherMenu({ collapsed }: { collapsed: boolean }) {
         <rect x="13.5" y="13.5" width="7" height="7" rx="2" />
         <path d="M14 10 20 4M15 4h5v5" />
       </svg>
-      {!collapsed && <span>直达</span>}
+      {!collapsed && <span>{t("ui.LauncherMenu.quick_links")}</span>}
     </button>
-    {open && <div id={panelId} className="settings-panel launcher-panel" ref={panelRef} role="dialog" aria-label="直达链接" tabIndex={-1}>
-      {loading ? <p className="settings-hint" role="status">读取中…</p> : error ? <p className="new-error" role="alert">{error}</p>
-        : links.length === 0 ? <p className="settings-hint">在 pages/links.json 里添加链接</p>
+    {open && <div id={panelId} className="settings-panel launcher-panel" ref={panelRef} role="dialog" aria-label={t("ui.LauncherMenu.quick_links_2")} tabIndex={-1}>
+      {loading ? <p className="settings-hint" role="status">{t("ui.common.reading_2")}</p> : error ? <p className="new-error" role="alert">{error}</p>
+        : links.length === 0 ? <p className="settings-hint">{t("ui.LauncherMenu.add_links_in_pages_links_json")}</p>
         : [...groups].map(([group, items]) => <section className="settings-group" key={group}>
           <h3 className="settings-group-title">{group}</h3>
           {items.map((link, index) => <a className="launcher-link" key={index} href={link.url} target="_blank" rel="noopener noreferrer" onClick={() => close(true)}>

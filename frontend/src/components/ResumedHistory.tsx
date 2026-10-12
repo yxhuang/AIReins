@@ -1,3 +1,4 @@
+import { t } from "../i18n";
 import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
 import type { AgentKind, SessionRecord } from "../types";
 import { HistoryTimeline } from "./HistoryTimeline";
@@ -117,21 +118,16 @@ export const PagedHistory = memo(function PagedHistory({ agent, nativeSessionId,
   }, [state?.messages.length, streamRef]);
 
   return (
-    <section className="session-history" aria-label="导入前的历史对话">
-      <p className="session-history-note">
-        {agent} 原生会话 · 用户、助手与工具调用；工具可展开。
-      </p>
-      {phase === "loading" && <p className="session-history-note">正在加载历史消息…</p>}
+    <section className="session-history" aria-label={t("ui.ResumedHistory.conversation_before_import")}>
+      <p className="session-history-note">{t("ui.ResumedHistory.native_session_user_assistant_and_tool_calls_sentence", { p0: (agent) })}</p>
+      {phase === "loading" && <p className="session-history-note">{t("ui.ResumedHistory.loading_history_messages")}</p>}
       {phase === "error" && (
-        <p className="session-history-error" role="alert">
-          历史消息加载失败：{error}
-          <button type="button" className="btn" onClick={() => void loadLatest()}>
-            重试
-          </button>
+        <p className="session-history-error" role="alert">{t("ui.ResumedHistory.failed_to_load_history_messages")}{error}
+          <button type="button" className="btn" onClick={() => void loadLatest()}>{t("ui.common.retry")}</button>
         </p>
       )}
       {state && state.messages.length === 0 && phase === "ready" && (
-        <p className="session-history-note">原生会话中没有可显示的历史消息。</p>
+        <p className="session-history-note">{t("ui.ResumedHistory.no_history_messages_to_display_in_this")}</p>
       )}
       {state && (
         <>
@@ -143,11 +139,11 @@ export const PagedHistory = memo(function PagedHistory({ agent, nativeSessionId,
                 disabled={loadingMore}
                 onClick={() => void loadOlder()}
               >
-                {loadingMore ? "加载中…" : "加载更早的消息"}
+                {loadingMore ? t("ui.common.loading_2") : t("ui.ResumedHistory.load_earlier_messages")}
               </button>
             )}
             {!state.nextCursor && (
-              <span className="session-history-note">已到最早的消息</span>
+              <span className="session-history-note">{t("ui.ResumedHistory.reached_the_first_message")}</span>
             )}
             {error && phase === "ready" && (
               <span className="session-history-error" role="alert">
@@ -157,20 +153,16 @@ export const PagedHistory = memo(function PagedHistory({ agent, nativeSessionId,
                   className="btn"
                   disabled={loadingMore}
                   onClick={() => void loadOlder()}
-                >
-                  重试
-                </button>
+                >{t("ui.common.retry")}</button>
               </span>
             )}
           </div>
           {state.truncated && (
-            <p className="session-history-note">
-              部分页受单次读取窗口限制，个别消息可能不完整。
-            </p>
+            <p className="session-history-note">{t("ui.ResumedHistory.some_pages_exceed_a_single_read_window")}</p>
           )}
           <HistoryTimeline messages={state.messages} agent={agent} cwd={cwd} sessionId={sessionId} />
           <div className="session-history-divider" role="separator" ref={dividerRef}>
-            {imported ? "以上为导入前的历史对话" : "以上为原生历史记录"}
+            {imported ? t("ui.ResumedHistory.above_conversation_before_import") : t("ui.ResumedHistory.above_native_history")}
           </div>
         </>
       )}

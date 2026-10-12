@@ -1,3 +1,4 @@
+import { t } from "../i18n";
 import { useEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 
 // 输入框底栏的「胶囊按钮 + 弹出菜单」：按钮直接显示当前值（如「Opus 5.5 High」「⚡ Auto」），
@@ -111,7 +112,7 @@ function ConfigPill({
       </button>
       {open && (
         <div className={`cfg-menu cfg-menu-${align} cfg-menu-${placement}`} role="menu" ref={panelRef}>
-          {cwd && <div className="cfg-menu-cwd mono" title={cwd}>工作目录：{cwd}</div>}
+          {cwd && <div className="cfg-menu-cwd mono" title={cwd}>{t("ui.ConfigMenu.working_directory_sentence", { p0: (cwd) })}</div>}
           {groups.map((group) => (
             <div className="cfg-group" role="group" aria-label={group.title} key={group.id}>
               {groups.length > 1 && !group.slider && <div className="cfg-group-title">{group.title}</div>}
@@ -187,7 +188,7 @@ function StepSlider({ group }: { group: MenuGroup }) {
   const valueText =
     index >= 0
       ? String(steps[index]?.label ?? "")
-      : `跟随配置${followIndex >= 0 ? ` · ${String(steps[followIndex]?.label ?? "")}` : ""}`;
+      : t("ui.ConfigMenu.use_configuration", { p0: (followIndex >= 0 ? ` · ${String(steps[followIndex]?.label ?? "")}` : "") });
   const fill = shown >= 0 ? ((shown + 0.5) / steps.length) * 100 : 0;
   return (
     <div className="cfg-slider-row">
@@ -196,9 +197,7 @@ function StepSlider({ group }: { group: MenuGroup }) {
         <span className="cfg-slider-value">（{valueText}）</span>
       </span>
       {follow && !follow.inert && group.selected !== "" && (
-        <button type="button" className="cfg-slider-reset" disabled={group.disabled} onClick={() => group.onSelect("")}>
-          默认
-        </button>
+        <button type="button" className="cfg-slider-reset" disabled={group.disabled} onClick={() => group.onSelect("")}>{t("ui.common.default")}</button>
       )}
       <div
         role="slider"
@@ -292,7 +291,7 @@ export function ConfigPills({
             <>
               <span className="cfg-pill-model">{main[0]!.text}</span>
               {/* 推理强度跟随配置且无从得知实际值时不显示，免得出现「默认 默认」 */}
-              {main[1] && main[1].text !== "默认" && <span className="cfg-pill-sub">{main[1].text}</span>}
+              {main[1] && main[1].text !== t("ui.common.default") && <span className="cfg-pill-sub">{main[1].text}</span>}
             </>
           }
           groups={main.map((m) => m.group)}

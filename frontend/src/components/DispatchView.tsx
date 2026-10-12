@@ -1,3 +1,4 @@
+import { t } from "../i18n";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { fetchDispatchDetail, fetchDispatches } from "../api";
 import { dispatchName, dispatcherSessions, dispatcherModel, dispatcherLabel, dispatchForests, dispatchParent, dispatchModelName, dispatchWirePath, dispatchSeconds, dispatchStatus, dispatchTime, groupDispatches, buildDispatchTree, type DispatchTreeNode, type DispatchTool, type DispatchRun } from "../dispatch-flow";
@@ -61,19 +62,19 @@ export function DispatchView({ terminalOpen = false }: { terminalOpen?: boolean 
   if (selectedId) return <DispatchDetail key={selectedId} runId={selectedId} sessions={sessions} terminalOpen={terminalOpen} />;
 
   return (
-    <section className="dispatch-view" aria-label="派单流程图">
-      {error && <p className="dispatch-error" role="alert">派单加载失败：{error}（稍后自动重试）</p>}
-      <section className="dispatch-panel" aria-label="派单拓扑">
-        <div className="dispatch-panel-head"><strong>派单主体</strong><span>{!loaded ? "正在加载…" : running ? `${running} 单运行中 · ${forests.length} 棵树` : forests.length ? `${forests.length} 棵树 · 最近结束` : "0 单"}</span></div>
+    <section className="dispatch-view" aria-label={t("ui.DispatchView.dispatch_flow")}>
+      {error && <p className="dispatch-error" role="alert">{t("ui.DispatchView.failed_to_load_dispatches_will_retry_automatically_sentence", { p0: (error) })}</p>}
+      <section className="dispatch-panel" aria-label={t("ui.DispatchView.dispatch_topology")}>
+        <div className="dispatch-panel-head"><strong>{t("ui.DispatchView.active_dispatches")}</strong><span>{!loaded ? t("ui.common.loading") : running ? t("ui.DispatchView.dispatches_running_trees", { p0: (running), p1: (forests.length) }) : forests.length ? t("ui.DispatchView.trees_recently_ended", { p0: (forests.length) }) : t("ui.DispatchView.0_dispatches")}</span></div>
         {forests.length ? forests.map((forest) => {
           const roots = forest.runs.filter((run) => !dispatchParent(run, runs) && run.parent?.agent === forest.agent);
           return <DispatchTree key={forest.id} agent={forest.agent} groups={groupDispatches(forest.runs, now)}
             title={forest.title} dispatchers={dispatcherSessions(roots, sessions)} model={dispatcherModel(roots, sessions)}
             highlighted={highlighted} now={now} />;
         }) : null}
-        {loaded && !error && !forests.length && <p className="dispatch-empty">现在没有派单</p>}
+        {loaded && !error && !forests.length && <p className="dispatch-empty">{t("ui.DispatchView.no_dispatches_right_now")}</p>}
       </section>
-      {highlighted.size > 0 && <p className="dispatch-note dispatch-highlight-note">已标出从会话跳转的 {highlighted.size} 张派单。</p>}
+      {highlighted.size > 0 && <p className="dispatch-note dispatch-highlight-note">{t("ui.DispatchView.highlighted_dispatches_linked_from_the_session_sentence", { p0: (highlighted.size) })}</p>}
       <DispatchHistory />
     </section>
   );
@@ -134,7 +135,7 @@ export function DispatchTree({ groups, title, dispatchers = [], agent, model, hi
   });
   const sessionTitles = dispatchers.map(source => source.title).join("\n") || title;
   const sessionSummary = dispatchers.length > 1
-    ? dispatchers.map(source => `${source.title}${source.running ? ` · ${source.running} 单运行中` : ""}`).join(" · ")
+    ? dispatchers.map(source => t("ui.DispatchView.message", { p0: (source.title), p1: (source.running ? t("ui.DispatchView.dispatches_running_detail", { p0: (source.running) }) : "") })).join(" · ")
     : sessionTitles;
   const sourceTitle = [title, sessionTitles, model].filter(Boolean).join("\n");
   const sourceAgent = agent ?? (dispatchers.length && dispatchers.every((source) => source.agent === dispatchers[0]!.agent) ? dispatchers[0]!.agent : "unknown");
@@ -146,15 +147,15 @@ export function DispatchTree({ groups, title, dispatchers = [], agent, model, hi
     </svg>
     <div className={`dispatch-root-row${topology.sidebranches.length ? " has-sidebranches" : ""}`}>
     <article className="dispatch-node dispatch-source" data-dispatch-anchor="dispatcher" data-source-agent={sourceAgent} title={sourceTitle}>
-      <div className="dispatch-source-head">{["claude", "codex", "kimi"].includes(sourceAgent) && <AgentIcon agent={sourceAgent as "claude" | "codex" | "kimi"} label={dispatcherLabel(sourceAgent)} />}<span>{dispatcherLabel(sourceAgent)}</span><span className="dispatch-role">派单人</span></div>
+      <div className="dispatch-source-head">{["claude", "codex", "kimi"].includes(sourceAgent) && <AgentIcon agent={sourceAgent as "claude" | "codex" | "kimi"} label={dispatcherLabel(sourceAgent)} />}<span>{dispatcherLabel(sourceAgent)}</span><span className="dispatch-role">{t("ui.DispatchView.dispatcher")}</span></div>
       <p className="dispatch-session-title" title={sessionTitles}>{sessionSummary}</p>
       {model && <p className="dispatch-model" title={model}>{model}</p>}
     </article>
-    {topology.sidebranches.length > 0 && <div className="dispatch-sidebranches" aria-label="Claude Code 子代理侧支">
+    {topology.sidebranches.length > 0 && <div className="dispatch-sidebranches" aria-label={t("ui.DispatchView.claude_code_subagent_branch")}>
       {topology.sidebranches.map(node => <DispatchNode key={node.id} node={node} now={now} highlighted={highlighted} onToggle={toggleGroup} />)}
     </div>}
     </div>
-    {topology.levels.map((nodes, index) => <div className={`dispatch-level${index === 0 ? " dispatch-executors" : ""}`} aria-label={`执行树第 ${index + 2} 层`} style={{ "--dispatch-columns": Math.min(4, nodes.length) } as CSSProperties} key={index}>
+    {topology.levels.map((nodes, index) => <div className={`dispatch-level${index === 0 ? " dispatch-executors" : ""}`} aria-label={t("ui.DispatchView.execution_tree_level", { p0: (index + 2) })} style={{ "--dispatch-columns": Math.min(4, nodes.length) } as CSSProperties} key={index}>
       {nodes.map(node => <DispatchNode key={node.id} node={node} now={now} highlighted={highlighted} onToggle={toggleGroup} />)}
     </div>)}
   </div>;
@@ -167,7 +168,7 @@ function ExecutorIcon({ tool }: { tool: DispatchTool }) {
 }
 
 function runTitle(run: DispatchRun, now: number): string {
-  return `${dispatchName(run)}\n${run.model || "—"}${run.effort ? ` / ${run.effort}` : ""}${run.agentType ? ` · ${run.agentType}` : ""}\n${dispatchStatus(run.status).label} · ${dispatchTime(dispatchSeconds(run, now))}\n开始：${run.startedAt || "未知"}\n结束：${run.endedAt || "—"}${run.promptHead ? `\n${run.promptHead}` : ""}`;
+  return t("ui.DispatchView.started_ended", { p0: (dispatchName(run)), p1: (run.model || "—"), p2: (run.effort ? ` / ${run.effort}` : ""), p3: (run.agentType ? ` · ${run.agentType}` : ""), p4: (dispatchStatus(run.status).label), p5: (dispatchTime(dispatchSeconds(run, now))), p6: (run.startedAt || t("ui.DispatchView.unknown_detail")), p7: (run.endedAt || "—"), p8: (run.promptHead ? `\n${run.promptHead}` : "") });
 }
 
 function RunLines({ run, now, tool }: { run: DispatchRun; now: number; tool: DispatchTool }) {
@@ -192,18 +193,18 @@ function DispatchNode({ node, now, highlighted, onToggle }: {
   }
   if (node.subagent) {
     const agent = node.subagent;
-    const label = agent.status === "running" ? "运行中" : agent.status === "finished" ? "已完成" : "未知";
+    const label = agent.status === "running" ? t("ui.common.running") : agent.status === "finished" ? t("ui.DispatchView.completed") : t("ui.common.unknown");
     const start = Date.parse(agent.startedAt || ""), end = agent.status === "running" ? now : Date.parse(agent.lastActivityAt);
     const elapsed = Number.isFinite(start) && Number.isFinite(end) ? Math.max(0, Math.floor((end - start) / 1000)) : null;
     return <article {...attrs} data-thread-id={agent.threadId} data-parent-id={agent.parentThreadId}
-      title={`${agent.nickname} · ${agent.role || "—"}\n${label} · ${dispatchTime(elapsed)}\n${agent.activity || ""}\n开始：${agent.startedAt || "未知"}\n最后活动：${agent.lastActivityAt}`}>
+      title={t("ui.DispatchView.started_last_activity", { p0: (agent.nickname), p1: (agent.role || "—"), p2: (label), p3: (dispatchTime(elapsed)), p4: (agent.activity || ""), p5: (agent.startedAt || t("ui.DispatchView.unknown_detail")), p6: (agent.lastActivityAt) })}>
       <strong className="dispatch-subagent-name">{agent.nickname}{agent.role ? ` · ${agent.role}` : ""}</strong>
       <div className="dispatch-job-meta"><span className={`dispatch-status${agent.status === "finished" ? " finished" : agent.status === "running" ? " running" : " unknown"}`}>{label}</span><span className="dispatch-elapsed">{dispatchTime(elapsed)}</span></div>
-      <p className="dispatch-activity">{agent.status === "running" ? agent.activity || "执行中" : label}</p>
+      <p className="dispatch-activity">{agent.status === "running" ? agent.activity || t("ui.DispatchView.executing") : label}</p>
     </article>;
   }
   return <article {...attrs}>
-    <div className="dispatch-node-head"><ExecutorIcon tool={node.tool} /><h2 title={LABELS[node.tool]}>{LABELS[node.tool]}</h2>{node.mode === "idle" && <span className="dispatch-idle-label">空闲</span>}</div>
+    <div className="dispatch-node-head"><ExecutorIcon tool={node.tool} /><h2 title={LABELS[node.tool]}>{LABELS[node.tool]}</h2>{node.mode === "idle" && <span className="dispatch-idle-label">{t("ui.common.idle")}</span>}</div>
     {node.mode === "group" && <>
       {node.rows.map((row, index) => {
         const status = dispatchStatus(row.run.status);
@@ -213,7 +214,7 @@ function DispatchNode({ node, now, highlighted, onToggle }: {
         return row.run.native ? <div key={row.id} {...rowAttrs}>{contents}</div>
           : <button key={row.id} type="button" {...rowAttrs} onClick={() => store.navigateDispatches([row.run.runId])}>{contents}</button>;
       })}
-      {node.more > 0 && <details className="dispatch-more" open={node.expanded || undefined} onToggle={event => onToggle(node.tool, event.currentTarget.open)}><summary>+{node.more} · 查看全部</summary></details>}
+      {node.more > 0 && <details className="dispatch-more" open={node.expanded || undefined} onToggle={event => onToggle(node.tool, event.currentTarget.open)}><summary>{t("ui.DispatchView.view_all_sentence", { p0: (node.more) })}</summary></details>}
     </>}
   </article>;
 }

@@ -151,6 +151,22 @@ Tailscale 优先 PATH；WSL 保留 Windows CLI 回退，macOS 回退 `/Applicati
 {"code":0,"msg":"success","data":{},"request_id":"01M0..."}
 ```
 
+### 面向界面的文案与语言
+
+数值 `code`、HTTP 状态及接口语义保持不变。REST 信封、会话 WS、终端 WS 的服务端自产文案保留原 `msg` / `message` / `reason` 等字段，另附可选 `i18n` 元数据；旧前端可忽略新字段，继续读取原文。
+
+```json
+{"code":40401,"msg":"会话不存在：abc","data":{},"request_id":"01M0...","i18n":{"msg":{"key":"server.message167","params":{"p0":"abc"}}}}
+```
+
+`i18n` 是所在对象的字段名到 `{key, params?, localizedParams?}` 的映射。`params` 保留动态值，`localizedParams` 可给嵌套的已知服务端错误或枚举值附同样的描述符；例如自动快照失败所带的底层错误仍可翻译，路径、会话 ID 和问题原文保持原值。`protocolLimitations` 字符串数组对应描述符数组，未知项为 `null`。前端按浏览器选择的 `zh-CN` / `en` 词典翻译；未知键或 CLI 原始错误回退到原文字段。服务端不记录客户端语言，也不改写持久化事件。
+
+翻译元数据在 `server/i18n/messages.ts` 的统一输出边界生成，模板来自 `frontend/src/i18n/server.zh-CN.ts`，英文位于同目录 `server.en.ts`。历史事件补发、snapshot 与分页响应同样经过该边界，因此旧 transcript 中的已登记提示也可翻译。配置项名称、预置标签、内建命令描述、文件预览原因、页面健康提示及派单活动也采用这一约定。生成的「新会话」「无标题会话」占位标题由生成路径明确附元数据；用户标题、模型正文、问题/答案、工具输入输出、终端字节和第三方页面内容不翻译。日志保持原样。
+
+`GET /api/fs/content` 是图片/PDF/下载直接加载的字节端点，浏览器查看器不会运行前端 JSON 解码器。前端为其 URL 添加 `lang=zh-CN|en`；失败时 `lang=en` 用同一错误描述符与词典生成英文 `msg`，仍保留 `code`、HTTP 状态和 `i18n`。不带参数、中文或其他值均保留兼容原文；成功的文件字节与 Range 行为不受语言影响。该参数只控制文案，不影响授权与路径验证。
+
+新增服务端自产提示时，把模板与相同键的英文译文加入上述两套词典，动态部分使用 `{p0}` 等占位符；嵌套错误参数须同时登记在 `nestedParameterNames` 中。检查覆盖位置与保留中文原因见 `server/i18n/coverage.json`，协议验证见 `server/i18n.test.ts`。
+
 接口：
 
 - `POST /api/sessions`：创建会话，统一配置见下文

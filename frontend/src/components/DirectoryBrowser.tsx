@@ -1,3 +1,4 @@
+import { t } from "../i18n";
 import { useEffect, useId, useRef, useState, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { fetchDirectories, fetchHistory, pickWindowsDirectory, pickWindowsFile } from "../api";
@@ -68,10 +69,10 @@ export function DirectoryBrowser({ initialPath, onSelect, onClose, mode = "dir",
   return <div className="dir-overlay" onKeyDown={(event) => {
     if (event.key === "Escape") { event.stopPropagation(); onClose(); }
   }}>
-    <div className="dir-dialog" role="dialog" aria-modal="true" aria-label={fileMode ? "选择文件" : "浏览工作目录"}>
+    <div className="dir-dialog" role="dialog" aria-modal="true" aria-label={fileMode ? t("ui.DirectoryBrowser.select_file") : t("ui.DirectoryBrowser.browse_working_directory")}>
       <div className="dir-heading">
-        <h2>{fileMode ? "选择文件" : "选择工作目录"}</h2>
-        <button ref={closeButton} className="btn" type="button" title="取消并返回" onClick={onClose}>取消</button>
+        <h2>{fileMode ? t("ui.DirectoryBrowser.select_file") : t("ui.DirectoryBrowser.select_working_directory")}</h2>
+        <button ref={closeButton} className="btn" type="button" title={t("ui.DirectoryBrowser.cancel_and_return")} onClick={onClose}>{t("ui.common.cancel")}</button>
       </div>
       <DirectoryContents initialPath={initialPath} includeFiles={fileMode} allowWindowsPicker={allowWindowsPicker}
         onSelectDirectory={fileMode ? undefined : onSelect}
@@ -172,7 +173,7 @@ export function DirectoryContents({ initialPath, includeFiles, onSelectFile, onE
           setAddress(home.path);
           setAddressEditing(false);
           recordPath(home.path);
-          setError(`${path} 无法浏览（${message}），已改为打开 ${home.path}。`);
+          setError(t("ui.DirectoryBrowser.cannot_browse_opened_instead", { p0: String(path), p1: (message), p2: (home.path) }));
         } catch (homeCause) {
           if (id !== requestId.current) return;
           setError(homeCause instanceof Error ? homeCause.message : String(homeCause));
@@ -242,10 +243,10 @@ export function DirectoryContents({ initialPath, includeFiles, onSelectFile, onE
 
   return (
     <div className="dir-contents">
-        <div className="dir-location" role="group" aria-label="前往目录">
+        <div className="dir-location" role="group" aria-label={t("ui.DirectoryBrowser.go_to_directory")}>
           <div className="dir-address" ref={addressRoot} tabIndex={-1}>
-            {nativePicker && <button ref={pickerButton} className="dir-windows-picker" type="button" aria-label="Windows 浏览窗口"
-              title={pickerBusy ? "Windows 浏览窗口已打开，等待选择" : includeFiles ? "打开 Windows 浏览窗口，选择文件并预览" : "打开 Windows 浏览窗口，选择文件夹"}
+            {nativePicker && <button ref={pickerButton} className="dir-windows-picker" type="button" aria-label={t("ui.DirectoryBrowser.windows_file_picker")}
+              title={pickerBusy ? t("ui.DirectoryBrowser.windows_file_picker_opened_waiting_for_selection") : includeFiles ? t("ui.DirectoryBrowser.open_the_windows_file_picker_to_select") : t("ui.DirectoryBrowser.open_the_windows_folder_picker")}
               aria-busy={pickerBusy} disabled={busy} onClick={() => { setRecentOpen(false); void browseWindows(); }}>
               <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                 <path d="M3 8V5.5A1.5 1.5 0 0 1 4.5 4H9l2 2h8.5A1.5 1.5 0 0 1 21 7.5V9" fill="currentColor" fillOpacity=".25" />
@@ -253,8 +254,8 @@ export function DirectoryContents({ initialPath, includeFiles, onSelectFile, onE
               </svg>
             </button>}
             {listing && !addressEditing ? <div className="dir-address-path">
-              <nav ref={addressCrumbs} className="dir-address-crumbs" aria-label="地址栏目录层级"
-                title="点击目录层级跳转；横向滚动查看上级；点击空白处编辑路径"
+              <nav ref={addressCrumbs} className="dir-address-crumbs" aria-label={t("ui.DirectoryBrowser.directory_breadcrumbs")}
+                title={t("ui.DirectoryBrowser.click_a_directory_to_navigate_scroll_sideways")}
                 onClick={event => { if (!(event.target as HTMLElement).closest("button")) editAddress(); }}
                 onPaste={event => {
                   const pasted = event.clipboardData.getData("text/plain");
@@ -267,10 +268,10 @@ export function DirectoryContents({ initialPath, includeFiles, onSelectFile, onE
                     onClick={() => void load(crumb.path)}>{crumb.label}</button>
                 </span>)}
               </nav>
-              <button type="button" className="dir-address-edit" aria-label="编辑目录路径"
-                title="输入或粘贴完整路径" disabled={busy} onClick={editAddress} />
-            </div> : <input ref={addressInput} type="text" className="mono" aria-label="目录路径" value={address} disabled={busy}
-              placeholder={windowsPaths ? "粘贴 Windows 或 Linux 文件夹路径" : "粘贴文件夹路径"} title="粘贴目录路径，按 Enter 前往；右侧下拉选择最近目录" spellCheck={false} enterKeyHint="go"
+              <button type="button" className="dir-address-edit" aria-label={t("ui.DirectoryBrowser.edit_directory_path")}
+                title={t("ui.DirectoryBrowser.enter_or_paste_a_full_path")} disabled={busy} onClick={editAddress} />
+            </div> : <input ref={addressInput} type="text" className="mono" aria-label={t("ui.DirectoryBrowser.directory_path")} value={address} disabled={busy}
+              placeholder={windowsPaths ? t("ui.DirectoryBrowser.paste_a_windows_or_linux_folder_path") : t("ui.DirectoryBrowser.paste_a_folder_path")} title={t("ui.DirectoryBrowser.paste_a_directory_path_and_press_enter")} spellCheck={false} enterKeyHint="go"
               onFocus={() => setRecentOpen(false)}
               onChange={(event) => setAddress(event.target.value)}
               onKeyDown={(event) => {
@@ -286,12 +287,12 @@ export function DirectoryContents({ initialPath, includeFiles, onSelectFile, onE
                   addressRoot.current?.focus();
                 }
               }} />}
-            <button ref={recentButton} type="button" className="dir-recent-toggle" aria-label="最近目录" title="选择最近使用的目录"
+            <button ref={recentButton} type="button" className="dir-recent-toggle" aria-label={t("ui.DirectoryBrowser.recent_directories")} title={t("ui.DirectoryBrowser.select_a_recent_directory")}
               aria-haspopup="menu" aria-expanded={recentOpen} aria-controls={recentMenuId} disabled={busy || recentPaths.length === 0}
               onClick={() => setRecentOpen(value => !value)}>
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg>
             </button>
-            {recentOpen && <div ref={recentMenu} id={recentMenuId} className="dir-recent-menu" role="menu" aria-label="最近目录" onKeyDown={event => {
+            {recentOpen && <div ref={recentMenu} id={recentMenuId} className="dir-recent-menu" role="menu" aria-label={t("ui.DirectoryBrowser.recent_directories")} onKeyDown={event => {
               if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); closeRecent(true); return; }
               if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
               event.preventDefault();
@@ -301,48 +302,48 @@ export function DirectoryContents({ initialPath, includeFiles, onSelectFile, onE
                 : (index + (event.key === "ArrowDown" ? 1 : -1) + buttons.length) % buttons.length;
               buttons[next]?.focus();
             }}>
-              <div className="dir-recent-heading">最近目录</div>
+              <div className="dir-recent-heading">{t("ui.DirectoryBrowser.recent_directories")}</div>
               {recentPaths.map(path => <button type="button" className="dir-recent-option mono" role="menuitem" title={path} key={path}
                 onClick={() => { setRecentOpen(false); void load(path).then(() => addressRoot.current?.focus()); }}>{path}</button>)}
             </div>}
           </div>
           {onBrowseHistory && <button className="btn dir-history-button" type="button" disabled={busy || !listing}
-            title={listing ? `查看 ${listing.path} 及子目录的对话` : "先浏览目录"}
-            onClick={() => { if (listing) onBrowseHistory(listing.path); }}>会话</button>}
+            title={listing ? t("ui.DirectoryBrowser.view_conversations_in_and_its_subdirectories", { p0: (listing.path) }) : t("ui.DirectoryBrowser.browse_a_directory_first")}
+            onClick={() => { if (listing) onBrowseHistory(listing.path); }}>{t("ui.common.sessions")}</button>}
         </div>
         {afterLocation}
         {navTarget === undefined ? <div className="dir-nav">
-          <button className="btn" type="button" title="返回当前目录的上一级" disabled={!listing?.parent || busy} onClick={goUp}>上一级</button>
-          <button className="btn" type="button" title={windowsPaths ? "打开 WSL 主目录" : "打开主目录"} disabled={busy} onClick={() => void load()}>{windowsPaths ? "WSL" : "主目录"}</button>
-          {windowsPaths && <button className="btn" type="button" title="打开最近使用的 Windows 目录" disabled={busy} onClick={openWindows}>Windows</button>}
+          <button className="btn" type="button" title={t("ui.DirectoryBrowser.go_to_the_parent_of_the_current")} disabled={!listing?.parent || busy} onClick={goUp}>{t("ui.DirectoryBrowser.parent_directory")}</button>
+          <button className="btn" type="button" title={windowsPaths ? t("ui.DirectoryBrowser.open_the_wsl_home_directory") : t("ui.DirectoryBrowser.open_the_home_directory")} disabled={busy} onClick={() => void load()}>{windowsPaths ? "WSL" : t("ui.DirectoryBrowser.home_directory")}</button>
+          {windowsPaths && <button className="btn" type="button" title={t("ui.DirectoryBrowser.open_the_most_recent_windows_directory")} disabled={busy} onClick={openWindows}>Windows</button>}
         </div> : navTarget && createPortal(<>
-          <button className="file-nav-btn file-nav-icon" type="button" aria-label="刷新" title="重新读取当前目录（含 Git 状态）" disabled={busy} onClick={() => void load(listing?.path ?? (normalizePath(address) || undefined))}><NavIcon d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8 M21 3v5h-5" /></button>
-          <button className="file-nav-btn file-nav-icon" type="button" aria-label="上一级" title="返回当前目录的上一级" disabled={!listing?.parent || busy} onClick={goUp}><NavIcon d="M12 19V5 M5 12l7-7 7 7" /></button>
-          <button className="file-nav-btn" type="button" title={windowsPaths ? "打开 WSL 主目录" : "打开主目录"} disabled={busy} onClick={() => void load()}>{windowsPaths ? "WSL" : "主目录"}</button>
-          {windowsPaths && <button className="file-nav-btn" type="button" title="打开最近使用的 Windows 目录" disabled={busy} onClick={openWindows}>Windows</button>}
+          <button className="file-nav-btn file-nav-icon" type="button" aria-label={t("ui.DirectoryBrowser.refresh")} title={t("ui.DirectoryBrowser.reload_the_current_directory_including_git_status")} disabled={busy} onClick={() => void load(listing?.path ?? (normalizePath(address) || undefined))}><NavIcon d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8 M21 3v5h-5" /></button>
+          <button className="file-nav-btn file-nav-icon" type="button" aria-label={t("ui.DirectoryBrowser.parent_directory")} title={t("ui.DirectoryBrowser.go_to_the_parent_of_the_current")} disabled={!listing?.parent || busy} onClick={goUp}><NavIcon d="M12 19V5 M5 12l7-7 7 7" /></button>
+          <button className="file-nav-btn" type="button" title={windowsPaths ? t("ui.DirectoryBrowser.open_the_wsl_home_directory") : t("ui.DirectoryBrowser.open_the_home_directory")} disabled={busy} onClick={() => void load()}>{windowsPaths ? "WSL" : t("ui.DirectoryBrowser.home_directory")}</button>
+          {windowsPaths && <button className="file-nav-btn" type="button" title={t("ui.DirectoryBrowser.open_the_most_recent_windows_directory")} disabled={busy} onClick={openWindows}>Windows</button>}
         </>, navTarget)}
         {error && <p className="new-error" role="alert">{error}</p>}
-        {listing?.truncated && <p className="new-hint">{includeFiles ? "条目较多，文件夹和文件各最多显示 1000 个。" : "此目录下子目录超过 1000 个，仅显示前 1000 个。"}</p>}
-        <div className={`dir-list${includeFiles ? " dir-list-table" : ""}`} aria-label={includeFiles ? "目录与文件列表" : "子目录列表"}>
-          {loading ? <p className="new-hint">正在读取…</p> : includeFiles && listing ?
+        {listing?.truncated && <p className="new-hint">{includeFiles ? t("ui.DirectoryBrowser.many_entries_found_up_to_1_000") : t("ui.DirectoryBrowser.this_directory_has_over_1_000_subdirectories")}</p>}
+        <div className={`dir-list${includeFiles ? " dir-list-table" : ""}`} aria-label={includeFiles ? t("ui.common.directories_and_files") : t("ui.DirectoryBrowser.subdirectories")}>
+          {loading ? <p className="new-hint">{t("ui.common.reading")}</p> : includeFiles && listing ?
             listing.dirs.length + (listing.files?.length ?? 0) > 0 ? <DirectoryTable listing={listing} busy={busy}
               onActivate={(path, name, folder) => folder ? void load(path) : onSelectFile(path, name)}
               onMenu={onEntryMenu && ((path, name, folder, x, y) => onEntryMenu({ path, root: listing.path, name, folder }, x, y))} /> :
-              <p className="new-hint">没有可浏览的目录或文件。</p> : entries.length > 0 ? (
+              <p className="new-hint">{t("ui.DirectoryBrowser.no_directories_or_files_to_browse")}</p> : entries.length > 0 ? (
             <>
               {entries.map(entry => (
                 <button className="dir-entry dir-folder" type="button" key={entry.path}
-                  aria-label={entry.name} title={`${entry.folder ? "打开文件夹" : "打开文件"}：${entry.path}`} disabled={busy}
+                  aria-label={entry.name} title={t("ui.common.message", { p0: (entry.folder ? t("ui.DirectoryBrowser.open_folder_detail") : t("ui.DirectoryBrowser.open_file_detail")), p1: (entry.path) })} disabled={busy}
                   onClick={() => entry.folder ? void load(entry.path) : onSelectFile(entry.path, entry.name)}>
                   <span className="dir-entry-name"><DirectoryEntryIcon folder={entry.folder} /><span className="mono">{entry.name}</span></span>
                 </button>
               ))}
             </>
-          ) : <p className="new-hint">{includeFiles ? "没有可浏览的目录或文件。" : "没有可浏览的子目录。"}</p>}
+          ) : <p className="new-hint">{includeFiles ? t("ui.DirectoryBrowser.no_directories_or_files_to_browse") : t("ui.DirectoryBrowser.no_subdirectories_to_browse")}</p>}
         </div>
         {onSelectDirectory && (
           <div className="dir-actions">
-            <button className="btn btn-primary" type="button" title="使用当前目录作为工作目录" disabled={!listing || busy} onClick={() => { if (listing) onSelectDirectory(listing.path); }}>选定此目录</button>
+            <button className="btn btn-primary" type="button" title={t("ui.DirectoryBrowser.use_the_current_directory_as_the_working")} disabled={!listing || busy} onClick={() => { if (listing) onSelectDirectory(listing.path); }}>{t("ui.DirectoryBrowser.select_this_directory")}</button>
           </div>
         )}
     </div>

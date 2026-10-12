@@ -1,3 +1,4 @@
+import { t } from "./i18n";
 import { normalizeDirectoryPath } from "./directory-path";
 
 /** 普通网页保持外链；只有明确文件 URI 或会话所属 cwd 的路径才接入面板。 */
@@ -57,10 +58,10 @@ export function parseDelimited(text: string, delimiter: string, maxRows = 200, m
       pushField(); rows.push(row); row = [];
       if (char === "\r" && input[i + 1] === "\n") i++;
     } else if (char === '"' && field === "" && !closed) quoted = true;
-    else if (closed || char === '"') return { rows, truncated, error: "字段引号格式不完整，请查看原文。" };
+    else if (closed || char === '"') return { rows, truncated, error: t("core.027") };
     else field += char;
   }
-  if (quoted) return { rows, truncated, error: "字段引号未闭合，请查看原文。" };
+  if (quoted) return { rows, truncated, error: t("core.028") };
   if (field || row.length || closed) { pushField(); rows.push(row); }
   return { rows, truncated };
 }

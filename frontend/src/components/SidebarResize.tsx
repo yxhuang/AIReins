@@ -1,3 +1,4 @@
+import { t } from "../i18n";
 import { useLayoutEffect, useRef, useState, type PointerEvent } from "react";
 
 const MIN_WIDTH = 224;
@@ -147,9 +148,9 @@ export function SidebarResize({ collapsed, usageOpen, onToggle }: { collapsed: b
   };
 
   return <div ref={handleRef} className="sidebar-resize" role="separator" tabIndex={0}
-    aria-label="调整左侧栏宽度" aria-orientation="vertical"
+    aria-label={t("ui.SidebarResize.resize_the_left_sidebar")} aria-orientation="vertical"
     aria-valuemin={collapsed ? COLLAPSED_WIDTH : MIN_WIDTH} aria-valuemax={maximum} aria-valuenow={collapsed ? COLLAPSED_WIDTH : Math.round(width)}
-    title={collapsed ? "向右拖动展开左侧栏；双击恢复默认宽度" : "拖动调整宽度，越过最窄处的阻力后收起；双击恢复默认宽度"}
+    title={collapsed ? t("ui.SidebarResize.drag_right_to_expand_the_left_sidebar") : t("ui.SidebarResize.drag_to_resize_drag_past_the_minimum")}
     onPointerDown={(event) => {
       if (event.button !== 0 || !event.isPrimary || !window.matchMedia("(min-width: 721px)").matches) return;
       const element = sidebar();

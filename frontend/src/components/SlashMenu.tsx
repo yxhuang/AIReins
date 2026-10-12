@@ -1,3 +1,4 @@
+import { t } from "../i18n";
 import { useEffect, useRef, useState } from "react";
 import type { SessionRecord } from "../types";
 import { fetchClaudeCapabilities, fetchSessionInfo, manageSessionMcp, setSessionPlugin, setSessionThinking, type SessionInfoKind } from "../api";
@@ -10,20 +11,20 @@ import { useStore } from "../useStore";
 // 协议以本机 CLI 2.1.285 实测为准；Rewind 缺少文件检查点，不接破坏性操作。
 
 const INFO_LABELS: Record<SessionInfoKind, string> = {
-  mcp: "MCP 服务器",
+  mcp: t("ui.SlashMenu.mcp_servers"),
   hooks: "Hooks",
-  permissions: "权限规则",
-  context: "上下文用量",
-  plugins: "管理插件",
-  status: "状态",
-  usage: "账户与用量",
+  permissions: t("ui.SlashMenu.permission_rules"),
+  context: t("ui.SlashMenu.context_usage"),
+  plugins: t("ui.SlashMenu.manage_plugins"),
+  status: t("ui.common.status"),
+  usage: t("ui.SlashMenu.account_and_usage"),
   memory: "Memory",
   instructions: "Instructions · CLAUDE.md",
   skills: "Skills",
   sandbox: "Sandbox",
-  output: "输出样式",
-  settings: "Claude 设置",
-  export: "导出对话",
+  output: t("ui.SlashMenu.output_style"),
+  settings: t("ui.SlashMenu.claude_settings"),
+  export: t("ui.SlashMenu.export_conversation"),
 };
 
 const selectFocusView = (value: Store) => value.focusView;
@@ -88,14 +89,14 @@ export function SlashMenu({ session, commandsSupported, onBrowseCommands, onSide
 
   return (
     <span className="attach-menu-wrap" ref={rootRef}>
-      <button type="button" className="attach-btn" title="命令与设置" aria-label="命令与设置"
+      <button type="button" className="attach-btn" title={t("ui.SlashMenu.commands_and_settings")} aria-label={t("ui.SlashMenu.commands_and_settings")}
         aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
         <SlashIcon />
       </button>
       {open && (
-        <div className="attach-menu slash-menu" role="menu" aria-label="命令与设置">
+        <div className="attach-menu slash-menu" role="menu" aria-label={t("ui.SlashMenu.commands_and_settings")}>
           {session.agent === "codex" && commandsSupported && onCodexCommand && <>
-            <div className="slash-group">Codex 命令</div>
+            <div className="slash-group">{t("ui.SlashMenu.codex_commands")}</div>
             {(commands ?? []).map(command => <button key={command.name} type="button" className="attach-item" role="menuitem"
               disabled={!workerReady || (["compact", "review", "new"].includes(command.name) && session.status !== "idle")
                 || (command.name === "review" && !canInsertCommand)
@@ -106,62 +107,62 @@ export function SlashMenu({ session, commandsSupported, onBrowseCommands, onSide
           </>}
           {claude && (
             <>
-              <div className="slash-group">上下文</div>
+              <div className="slash-group">{t("ui.SlashMenu.context")}</div>
               <button type="button" className="attach-item" role="menuitem" disabled={!workerReady}
-                onClick={() => { setOpen(false); setInfo("context"); }}>上下文用量</button>
+                onClick={() => { setOpen(false); setInfo("context"); }}>{t("ui.SlashMenu.context_usage")}</button>
               <button type="button" className="attach-item" role="menuitem" disabled={!workerReady}
-                onClick={() => { setOpen(false); setInfo("export"); }}>导出对话</button>
+                onClick={() => { setOpen(false); setInfo("export"); }}>{t("ui.SlashMenu.export_conversation")}</button>
               <button type="button" className="attach-item" role="menuitem"
-                onClick={() => { setOpen(false); setPanel("tasks"); }}>/tasks · 后台任务<span className="slash-subtitle">查看运行任务并停止</span></button>
+                onClick={() => { setOpen(false); setPanel("tasks"); }}>{t("ui.SlashMenu.tasks_background_tasks")}<span className="slash-subtitle">{t("ui.SlashMenu.view_running_tasks_and_stop_them")}</span></button>
               <button type="button" className="attach-item" role="menuitem" disabled={!workerReady}
-                onClick={() => { setOpen(false); onSideQuestion(); }}>/btw · 侧问<span className="slash-subtitle">单独问答，不加入主对话</span></button>
-              <div className="slash-group">模型</div>
-              <button type="button" className="attach-item slash-toggle" role="switch" aria-label="Thinking" aria-checked={thinking}
+                onClick={() => { setOpen(false); onSideQuestion(); }}>{t("ui.SlashMenu.btw_side_question")}<span className="slash-subtitle">{t("ui.SlashMenu.ask_separately_without_adding_to_the_main")}</span></button>
+              <div className="slash-group">{t("ui.SlashMenu.model")}</div>
+              <button type="button" className="attach-item slash-toggle" role="switch" aria-label={t("ui.SlashMenu.thinking")} aria-checked={thinking}
                 disabled={!workerReady || thinkingPending || session.status === "starting"}
                 onClick={() => void toggleThinking()}>
-                <span>Thinking{thinkingPending && <span className="slash-subtitle">切换中…</span>}</span>
+                <span>{t("ui.SlashMenu.thinking")}{thinkingPending && <span className="slash-subtitle">{t("ui.SlashMenu.switching")}</span>}</span>
                 <span className={`slash-switch${thinking ? " on" : ""}`} aria-hidden="true" />
               </button>
               {thinkingError && <p className="new-error" role="alert">{thinkingError}</p>}
               {supportsFast && <button type="button" className="attach-item" role="menuitem" disabled={!workerReady || !canInsertCommand || session.status === "starting"}
-                onClick={() => { if (store.sendUserMessage(session.id, "/fast")) setOpen(false); }}>切换 Fast mode<span className="slash-subtitle">/fast · 更快的模型回复</span></button>}
+                onClick={() => { if (store.sendUserMessage(session.id, "/fast")) setOpen(false); }}>{t("ui.SlashMenu.toggle_fast_mode")}<span className="slash-subtitle">{t("ui.SlashMenu.fast_faster_model_responses")}</span></button>}
               <button type="button" className="attach-item" role="menuitem" disabled={!workerReady}
-                onClick={() => { setOpen(false); setInfo("usage"); }}>账户与用量</button>
-              <div className="slash-group">自定义</div>
+                onClick={() => { setOpen(false); setInfo("usage"); }}>{t("ui.SlashMenu.account_and_usage")}</button>
+              <div className="slash-group">{t("ui.SlashMenu.custom")}</div>
               {(["plugins", "mcp", "instructions", "memory", "skills", "hooks", "output", "permissions", "sandbox", "status"] as SessionInfoKind[]).map(kind => (
                 <button key={kind} type="button" className="attach-item" role="menuitem" disabled={!workerReady && kind !== "plugins"}
                   onClick={() => { setOpen(false); setInfo(kind); }}>{INFO_LABELS[kind]}
-                  {kind === "plugins" && <span className="slash-subtitle">启用、停用与重载</span>}
-                  {kind === "mcp" && <span className="slash-subtitle">开关、重连与连接状态</span>}
+                  {kind === "plugins" && <span className="slash-subtitle">{t("ui.SlashMenu.enable_disable_and_reload")}</span>}
+                  {kind === "mcp" && <span className="slash-subtitle">{t("ui.SlashMenu.toggle_reconnect_and_view_connection_status")}</span>}
                 </button>
               ))}
               {commandsSupported && canInsertCommand && <button type="button" className="attach-item" role="menuitem"
-                onClick={() => { setOpen(false); onBrowseCommands(); }}>浏览斜杠命令</button>}
-              <div className="slash-group">设置</div>
+                onClick={() => { setOpen(false); onBrowseCommands(); }}>{t("ui.SlashMenu.browse_slash_commands")}</button>}
+              <div className="slash-group">{t("ui.common.settings")}</div>
               <button type="button" className="attach-item" role="menuitem"
-                onClick={() => { setOpen(false); setInfo("settings"); }}>Claude 设置</button>
+                onClick={() => { setOpen(false); setInfo("settings"); }}>{t("ui.SlashMenu.claude_settings")}</button>
               <button type="button" className="attach-item slash-toggle" role="menuitemcheckbox" aria-checked={focusView}
-                title="只显示你的输入和回复，隐藏工具、思考和调试行" onClick={() => store.setFocusView(!focusView)}>
-                <span>Focus view</span><span className={`slash-switch${focusView ? " on" : ""}`} aria-hidden="true" />
+                title={t("ui.SlashMenu.show_only_your_messages_and_replies_hide")} onClick={() => store.setFocusView(!focusView)}>
+                <span>{t("ui.SlashMenu.focus_view")}</span><span className={`slash-switch${focusView ? " on" : ""}`} aria-hidden="true" />
               </button>
-              <div className="slash-group">支持</div>
+              <div className="slash-group">{t("ui.SlashMenu.support")}</div>
               <a className="attach-item" role="menuitem" href="https://code.claude.com/docs/en/vs-code" target="_blank" rel="noreferrer"
-                onClick={() => setOpen(false)}>帮助文档</a>
+                onClick={() => setOpen(false)}>{t("ui.SlashMenu.help_documentation")}</a>
             </>
           )}
           {!claude && commandsSupported && canInsertCommand && (
             <>
-              <div className="slash-group">斜杠命令</div>
+              <div className="slash-group">{t("ui.common.slash_commands")}</div>
               <button type="button" className="attach-item" role="menuitem"
-                onClick={() => { setOpen(false); onBrowseCommands(); }}>浏览斜杠命令</button>
+                onClick={() => { setOpen(false); onBrowseCommands(); }}>{t("ui.SlashMenu.browse_slash_commands")}</button>
             </>
           )}
           {!claude && <>
-          <div className="slash-group">设置</div>
+          <div className="slash-group">{t("ui.common.settings")}</div>
           {/* 开关项点了不关菜单，与扩展 keepMenuOpen 一致 */}
           <button type="button" className="attach-item slash-toggle" role="menuitemcheckbox" aria-checked={focusView}
-            title="只显示你的输入和回复，隐藏工具、思考和调试行" onClick={() => store.setFocusView(!focusView)}>
-            <span>Focus view</span>
+            title={t("ui.SlashMenu.show_only_your_messages_and_replies_hide")} onClick={() => store.setFocusView(!focusView)}>
+            <span>{t("ui.SlashMenu.focus_view")}</span>
             <span className={`slash-switch${focusView ? " on" : ""}`} aria-hidden="true" />
           </button>
           </>}
@@ -204,8 +205,8 @@ function InfoDialog({ session, kind, onClose }: { session: SessionRecord; kind: 
       const result = await setSessionPlugin(session.id, str(plugin.id), !pluginEnabled(plugin), str(plugin.scope) || undefined);
       if (!aliveRef.current) return;
       setData(result);
-      setPluginNotice(result.reloaded ? "已保存并重载当前会话的插件。" : "已保存，新会话或重新续接后生效。");
-      if (result.reloadError) setError(`设置已保存，当前会话重载失败：${result.reloadError}`);
+      setPluginNotice(result.reloaded ? t("ui.SlashMenu.plugins_saved_and_reloaded_in_this_session") : t("ui.SlashMenu.saved_takes_effect_in_a_new_session"));
+      if (result.reloadError) setError(t("ui.SlashMenu.settings_saved_but_the_current_session_could", { p0: (result.reloadError) }));
     } catch (e) {
       if (aliveRef.current) setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -242,8 +243,8 @@ function InfoDialog({ session, kind, onClose }: { session: SessionRecord; kind: 
       if (!aliveRef.current) return;
       setData(result);
       const refreshError = str(rec(result).refreshError);
-      if (refreshError) setError(`操作已成功，状态读回失败：${refreshError}。请刷新列表。`);
-      else setPluginNotice(action === "refresh" ? "已刷新服务器状态。" : "操作已完成；连接可能仍在建立，可刷新查看最新状态。");
+      if (refreshError) setError(t("ui.SlashMenu.the_action_succeeded_but_reading_its_status", { p0: (refreshError) }));
+      else setPluginNotice(action === "refresh" ? t("ui.SlashMenu.server_status_refreshed") : t("ui.SlashMenu.action_completed_the_connection_may_still_be"));
     } catch (e) {
       if (aliveRef.current) setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -258,26 +259,26 @@ function InfoDialog({ session, kind, onClose }: { session: SessionRecord; kind: 
       <div className="dir-dialog info-dialog" role="dialog" aria-modal="true" aria-label={INFO_LABELS[kind]}>
         <div className="dir-heading">
           <h2>{INFO_LABELS[kind]}</h2>
-          <button ref={closeButton} className="btn" type="button" onClick={onClose}>关闭</button>
+          <button ref={closeButton} className="btn" type="button" onClick={onClose}>{t("ui.common.close")}</button>
         </div>
         <div className="dir-list info-body">
           {error && <p className="new-error" role="alert">{error}</p>}
           {kind === "plugins" && <>
-            <p className="new-hint">有活动进程时自动重载；否则新会话或重新续接后生效。</p>
+            <p className="new-hint">{t("ui.SlashMenu.automatically_reloads_active_processes_otherwise_takes_effect")}</p>
             <button type="button" className="btn" disabled={pendingPlugin !== null || (data === undefined && !error)}
-              onClick={() => void refreshPlugins()}>刷新列表</button>
+              onClick={() => void refreshPlugins()}>{t("ui.SlashMenu.refresh_list")}</button>
           </>}
           {pluginNotice && <p className="new-hint" role="status">{pluginNotice}</p>}
           {kind === "mcp" && <>
-            <p className="new-hint">开关与重连用于当前会话，回复中也可操作；启动或审批期间请稍候。</p>
+            <p className="new-hint">{t("ui.SlashMenu.toggles_and_reconnect_apply_to_this_session")}</p>
             <button type="button" className="btn" disabled={pendingServer !== null || data === undefined}
-              onClick={() => void updateMcp("refresh")}>刷新状态</button>
+              onClick={() => void updateMcp("refresh")}>{t("ui.SlashMenu.refresh_status")}</button>
           </>}
           {data !== undefined && ["hooks", "permissions", "sandbox", "skills", "output"].includes(kind)
             && <SettingsFileLinks files={rec(data).settingsFiles} hooks={kind === "hooks"} />}
-          {data === undefined ? (!error && <p className="new-hint">正在读取…</p>)
+          {data === undefined ? (!error && <p className="new-hint">{t("ui.common.reading")}</p>)
             : <InfoBody kind={kind} data={data} onTogglePlugin={togglePlugin} pendingPlugin={pendingPlugin}
-                onMcpAction={updateMcp} pendingServer={pendingServer} mcpLockReason={session.status === "starting" ? "启动结束后可切换" : (session.pendingGateCount ?? 0) > 0 ? "审批结束后可切换" : session.status === "dead" ? "会话已结束" : ""} />}
+                onMcpAction={updateMcp} pendingServer={pendingServer} mcpLockReason={session.status === "starting" ? t("ui.SlashMenu.available_after_startup") : (session.pendingGateCount ?? 0) > 0 ? t("ui.SlashMenu.available_after_approval") : session.status === "dead" ? t("ui.SlashMenu.session_ended") : ""} />}
         </div>
       </div>
     </div>
@@ -303,7 +304,7 @@ function InfoBody({ kind, data, onTogglePlugin, pendingPlugin, onMcpAction, pend
   const d = rec(data);
   if (kind === "mcp") {
     const servers = arr(d.mcpServers);
-    if (servers.length === 0) return <p className="new-hint">没有配置 MCP 服务器。</p>;
+    if (servers.length === 0) return <p className="new-hint">{t("ui.SlashMenu.no_mcp_servers_configured")}</p>;
     return <>{servers.map((s) => {
       const config = rec(s.config);
       const tools = arr(s.tools);
@@ -314,18 +315,18 @@ function InfoBody({ kind, data, onTogglePlugin, pendingPlugin, onMcpAction, pend
             <span className={`info-status info-status-${str(s.status)}`}>{str(s.status)}</span>
           </div>
           <div className="info-meta mono">
-            {str(s.scope)} · {str(config.type)}{tools.length > 0 ? ` · ${tools.length} 个工具` : ""}
+            {str(s.scope)} · {str(config.type)}{tools.length > 0 ? t("ui.SlashMenu.tools", { p0: (tools.length) }) : ""}
           </div>
           <div className="info-meta mono">{str(config.url) || [str(config.command), ...(Array.isArray(config.args) ? config.args.map(String) : [])].join(" ")}</div>
           <div className="info-actions">
             <button type="button" className="btn slash-toggle" role="switch" aria-checked={s.status !== "disabled"}
-              aria-label={`${str(s.name)} MCP 开关`} disabled={pendingServer !== null || Boolean(mcpLockReason)}
+              aria-label={t("ui.SlashMenu.toggle_mcp", { p0: (str(s.name)) })} disabled={pendingServer !== null || Boolean(mcpLockReason)}
               onClick={() => onMcpAction("toggle", s)}>
-              <span>{pendingServer === str(s.name) ? "处理中…" : s.status === "disabled" ? "未启用" : "已启用"}</span>
+              <span>{pendingServer === str(s.name) ? t("ui.SlashMenu.processing") : s.status === "disabled" ? t("ui.SlashMenu.disabled") : t("ui.SlashMenu.enabled")}</span>
               <span className={`slash-switch${s.status !== "disabled" ? " on" : ""}`} aria-hidden="true" />
             </button>
             <button type="button" className="btn" disabled={pendingServer !== null || Boolean(mcpLockReason) || s.status === "disabled"}
-              onClick={() => onMcpAction("reconnect", s)}>重连</button>
+              onClick={() => onMcpAction("reconnect", s)}>{t("ui.SlashMenu.reconnect")}</button>
             {mcpLockReason && <span className="info-meta">{mcpLockReason}</span>}
           </div>
         </div>
@@ -335,13 +336,13 @@ function InfoBody({ kind, data, onTogglePlugin, pendingPlugin, onMcpAction, pend
   if (!["hooks", "permissions", "plugins", "context"].includes(kind)) return <ClaudeMenuPanel kind={kind} data={d} />;
   if (kind === "hooks") {
     const hooks = arr(d.hooks);
-    if (hooks.length === 0) return <p className="new-hint">没有配置 hooks。</p>;
+    if (hooks.length === 0) return <p className="new-hint">{t("ui.SlashMenu.no_hooks_configured")}</p>;
     return <>{arr(d.events).filter((e) => Number(e.hookCount) > 0).map((event) => (
       <div className="info-group" key={str(event.name)}>
         <div className="info-group-head"><span className="info-name">{str(event.name)}</span> <span className="info-meta">{str(event.summary)}</span></div>
         {hooks.filter((h) => h.event === event.name).map((h, i) => (
           <div className="info-row" key={i}>
-            <div className="info-meta">{str(h.pluginName) ? `插件 ${str(h.pluginName)}` : str(h.sourceLabel)}{str(h.matcher) ? ` · 匹配 ${str(h.matcher)}` : ""}</div>
+            <div className="info-meta">{str(h.pluginName) ? t("ui.SlashMenu.plugin", { p0: (str(h.pluginName)) }) : str(h.sourceLabel)}{str(h.matcher) ? t("ui.SlashMenu.match", { p0: (str(h.matcher)) }) : ""}</div>
             <div className="info-code mono">{str(h.commandText) || str(h.displayText)}</div>
           </div>
         ))}
@@ -350,13 +351,13 @@ function InfoBody({ kind, data, onTogglePlugin, pendingPlugin, onMcpAction, pend
   }
   if (kind === "permissions") {
     const rules = arr(rec(d.state).rules);
-    if (rules.length === 0) return <p className="new-hint">没有权限规则。</p>;
+    if (rules.length === 0) return <p className="new-hint">{t("ui.SlashMenu.no_permission_rules")}</p>;
     return <>{(["allow", "ask", "deny"] as const).map((behavior) => {
       const group = rules.filter((r) => r.behavior === behavior);
       if (group.length === 0) return null;
       return (
         <div className="info-group" key={behavior}>
-          <div className="info-group-head"><span className="info-name">{{ allow: "允许", ask: "询问", deny: "拒绝" }[behavior]}</span> <span className="info-meta">{group.length} 条</span></div>
+          <div className="info-group-head"><span className="info-name">{{ allow: t("ui.common.allow"), ask: t("ui.SlashMenu.ask"), deny: t("ui.common.deny") }[behavior]}</span> <span className="info-meta">{t("ui.SlashMenu.entries_sentence", { p0: (group.length) })}</span></div>
           {group.map((r, i) => (
             <div className="info-row" key={i}>
               <div className="info-code mono">{str(r.rule)}</div>
@@ -369,7 +370,7 @@ function InfoBody({ kind, data, onTogglePlugin, pendingPlugin, onMcpAction, pend
   }
   if (kind === "plugins") {
     const plugins = arr(d.plugins);
-    if (plugins.length === 0) return <p className="new-hint">没有安装插件。</p>;
+    if (plugins.length === 0) return <p className="new-hint">{t("ui.SlashMenu.no_plugins_installed")}</p>;
     return <>{plugins.map((p) => {
       const [name, marketplace] = str(p.id).split("@");
       const enabled = pluginEnabled(p);
@@ -380,7 +381,7 @@ function InfoBody({ kind, data, onTogglePlugin, pendingPlugin, onMcpAction, pend
             <button type="button" className="btn slash-toggle" role="switch" aria-checked={enabled}
               aria-label={`${str(p.id)}${str(p.scope) ? `（${str(p.scope)}）` : ""}`}
               disabled={pendingPlugin !== null} onClick={() => onTogglePlugin(p)}>
-              <span>{pendingPlugin === pluginKey(p) ? "切换中…" : enabled ? "已启用" : "未启用"}</span>
+              <span>{pendingPlugin === pluginKey(p) ? t("ui.SlashMenu.switching") : enabled ? t("ui.SlashMenu.enabled") : t("ui.SlashMenu.disabled")}</span>
               <span className={`slash-switch${enabled ? " on" : ""}`} aria-hidden="true" />
             </button>
           </div>

@@ -1,3 +1,4 @@
+import { t } from "../i18n";
 import React, { createContext, memo, isValidElement, useContext, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import Markdown, { defaultUrlTransform } from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -17,12 +18,12 @@ function codeText(node: ReactNode): string {
 function copyCode(button: HTMLButtonElement, text: string) {
   const flash = (label: string) => {
     button.textContent = label;
-    setTimeout(() => { button.textContent = "复制"; }, 1500);
+    setTimeout(() => { button.textContent = t("ui.common.copy"); }, 1500);
   };
   // Clipboard API 只在安全上下文可用（127.0.0.1 与 Tailscale https 都是）；不可用或被拒时给出可见反馈。
   Promise.resolve()
     .then(() => navigator.clipboard.writeText(text))
-    .then(() => flash("已复制"), () => flash("复制失败"));
+    .then(() => flash(t("ui.common.copied")), () => flash(t("ui.MarkdownMessage.copy_failed")));
 }
 
 export const MarkdownCommitContext = createContext<(() => void) | undefined>(undefined);
@@ -32,7 +33,7 @@ const FileLinkContext = createContext<{ cwd: string; sessionId?: string } | unde
 function MessageLink({ href, children }: { href?: string; children?: ReactNode }) {
   const context = useContext(FileLinkContext);
   const path = href ? resolveLocalFileLink(href, context?.cwd, store.meta?.capabilities.windowsPaths === true) : null;
-  if (context && path) return <a href={href} title={`打开文件：${path}`} onClick={event => {
+  if (context && path) return <a href={href} title={t("ui.MarkdownMessage.open_file", { p0: (path) })} onClick={event => {
     event.preventDefault();
     const root = path.startsWith(`${context.cwd.replace(/\/$/, "")}/`) ? context.cwd : path.slice(0, path.lastIndexOf("/")) || "/";
     void store.openFilePreview({ path, root, sessionId: context.sessionId });
@@ -59,7 +60,7 @@ function MarkdownCodeBlock({ children }: { children?: ReactNode }) {
   const html = !streaming && highlighted?.text === text && highlighted.language === language ? highlighted.html : null;
   return (
     <div className="markdown-code-block">
-      <button type="button" className="markdown-copy" onClick={(event) => copyCode(event.currentTarget, text)}>复制</button>
+      <button type="button" className="markdown-copy" onClick={(event) => copyCode(event.currentTarget, text)}>{t("ui.common.copy")}</button>
       <pre>{html === null ? children : <code className={className} dangerouslySetInnerHTML={{ __html: html }} />}</pre>
     </div>
   );

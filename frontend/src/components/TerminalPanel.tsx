@@ -1,3 +1,4 @@
+import { t } from "../i18n";
 import { useStore } from "../useStore";
 import { Fragment, useEffect, useRef, useState } from "react";
 import { Terminal, type ITheme } from "@xterm/xterm";
@@ -150,7 +151,7 @@ export function TerminalPanel({ open, onClose }: { open: boolean; onClose: () =>
     try {
       text = await navigator.clipboard.readText();
     } catch {
-      text = window.prompt("粘贴到终端");
+      text = window.prompt(t("ui.TerminalPanel.paste_into_terminal"));
     }
     if (text) {
       runtimeRef.current?.paste(text);
@@ -177,7 +178,7 @@ export function TerminalPanel({ open, onClose }: { open: boolean; onClose: () =>
     const copySelection = () => {
       const text = term.getSelection();
       if (!text) return false;
-      void navigator.clipboard.writeText(text).catch(() => window.prompt("手动复制：", text));
+      void navigator.clipboard.writeText(text).catch(() => window.prompt(t("ui.TerminalPanel.copy_manually"), text));
       term.clearSelection();
       return true;
     };
@@ -544,11 +545,11 @@ export function TerminalPanel({ open, onClose }: { open: boolean; onClose: () =>
 
   return (
     <>
-      {open && !maximized && <SidePanelResize label="终端" width={width} setWidth={setWidth} />}
+      {open && !maximized && <SidePanelResize label={t("ui.common.terminal")} width={width} setWidth={setWidth} />}
       <div
         className={`term-panel${open ? "" : " term-hidden"}${maximized ? " term-maximized" : ""}${titlebarHidden ? " term-titlebar-hidden" : ""}`}
         role="region"
-        aria-label="终端"
+        aria-label={t("ui.common.terminal")}
         style={{ width: maximized ? undefined : `${width}px` }}
       >
         <div className="term-titlebar">
@@ -558,7 +559,7 @@ export function TerminalPanel({ open, onClose }: { open: boolean; onClose: () =>
             buttonClassName="term-shell"
             options={shellOptions}
             value={info?.kind ?? null}
-            ariaLabel="切换 shell"
+            ariaLabel={t("ui.TerminalPanel.switch_shell")}
             disabled={confirmKill || switching || killBusy}
             onChange={(kind) => { if (info?.kind !== kind) void runtimeRef.current?.switchShell(kind); }}
           />
@@ -566,7 +567,7 @@ export function TerminalPanel({ open, onClose }: { open: boolean; onClose: () =>
             {info?.cwd ?? "…"}
           </span>
           <span className="panel-titlebar-actions">
-            {exit && <span className="term-exited">已退出（码 {exit.code ?? "未知"}）</span>}
+            {exit && <span className="term-exited">{t("ui.TerminalPanel.exited_code_sentence", { p0: (exit.code ?? t("ui.common.unknown")) })}</span>}
             {confirmKill && !exit ? (
               <span
                 className="term-confirm"
@@ -577,24 +578,22 @@ export function TerminalPanel({ open, onClose }: { open: boolean; onClose: () =>
                   }
                 }}
               >
-                <span className="term-confirm-text">结束该终端进程？</span>
+                <span className="term-confirm-text">{t("ui.TerminalPanel.end_this_terminal_process")}</span>
                 <button
                   type="button"
                   className="btn btn-danger"
                   disabled={killBusy}
                   onClick={() => void kill()}
                 >
-                  {killBusy ? "结束中…" : "确认结束"}
+                  {killBusy ? t("ui.TerminalPanel.ending") : t("ui.TerminalPanel.confirm_end")}
                 </button>
                 <button
                   type="button"
                   className="btn"
                   disabled={killBusy}
-                  title="取消（Esc）"
+                  title={t("ui.common.cancel_esc")}
                   onClick={() => setConfirmKill(false)}
-                >
-                  取消
-                </button>
+                >{t("ui.common.cancel")}</button>
               </span>
             ) : exit ? (
               <button
@@ -602,28 +601,26 @@ export function TerminalPanel({ open, onClose }: { open: boolean; onClose: () =>
                 className="btn"
                 disabled={switching || killBusy}
                 onClick={() => void runtimeRef.current?.createNew(info?.kind ?? "bash")}
-              >
-                新建终端
-              </button>
+              >{t("ui.TerminalPanel.new_terminal")}</button>
             ) : (
               <button
                 type="button"
                 className="btn chrome-icon-btn panel-icon-button panel-kill-button"
-                aria-label="结束终端进程"
-                title="结束终端进程"
+                aria-label={t("ui.TerminalPanel.end_terminal_process")}
+                title={t("ui.TerminalPanel.end_terminal_process")}
                 disabled={!info || switching || killBusy}
                 onClick={() => setConfirmKill(true)}
               >
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" aria-hidden="true"><path d="M18.36 6.64a9 9 0 1 1-12.73 0M12 2v10" /></svg>
               </button>
             )}
-            <button type="button" className="btn chrome-icon-btn panel-icon-button panel-collapse" aria-label="隐藏终端面板" title="收起面板" onClick={onClose}>
+            <button type="button" className="btn chrome-icon-btn panel-icon-button panel-collapse" aria-label={t("ui.TerminalPanel.hide_terminal_panel")} title={t("ui.common.collapse_panel")} onClick={onClose}>
               <PanelRightIcon />
             </button>
           </span>
         </div>
         <div className="term-tabs">
-          <div className="term-tab-list" role="tablist" aria-label="终端标签页"
+          <div className="term-tab-list" role="tablist" aria-label={t("ui.TerminalPanel.terminal_tabs")}
             onKeyDown={(event) => {
               const direction = event.key === "ArrowRight" ? 1 : event.key === "ArrowLeft" ? -1 : 0;
               if (!direction) return;
@@ -645,10 +642,10 @@ export function TerminalPanel({ open, onClose }: { open: boolean; onClose: () =>
                     stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                     {tab.kind === "bash" ? <path d="m4 6 6 6-6 6m9 0h7" /> : <><path d="m7 5 7 7-9 7M15 19h5" /><path d="M3 2h18l-3 20H0z" /></>}
                   </svg>
-                  <span className="term-tab-label">{tab.label}{tab.exited ? "（已退出）" : ""}</span>
+                  <span className="term-tab-label">{tab.label}{tab.exited ? t("ui.TerminalPanel.exited") : ""}</span>
                 </button>
-                <button type="button" className="term-tab-close" aria-label={`${tab.exited ? "移除" : "结束"} ${tab.label}`}
-                  title={tab.exited ? "移除已退出标签" : "结束终端（需确认）"} disabled={switching || killBusy}
+                <button type="button" className="term-tab-close" aria-label={t("ui.TerminalPanel.message", { p0: (tab.exited ? t("ui.TerminalPanel.remove_detail") : t("ui.TerminalPanel.end_detail")), p1: (tab.label) })}
+                  title={tab.exited ? t("ui.TerminalPanel.remove_exited_tab") : t("ui.TerminalPanel.end_terminal_confirmation_required")} disabled={switching || killBusy}
                   onClick={() => {
                     if (tab.exited) runtimeRef.current?.closeExited(tab.id);
                     else {
@@ -659,13 +656,13 @@ export function TerminalPanel({ open, onClose }: { open: boolean; onClose: () =>
               </div>;
             })}
           </div>
-          <button type="button" className="term-tab-new" aria-label="新建终端"
-            title={`新建 ${info?.kind === "powershell" ? "PowerShell" : "bash"} 终端`} disabled={switching || killBusy || confirmKill}
+          <button type="button" className="term-tab-new" aria-label={t("ui.TerminalPanel.new_terminal")}
+            title={t("ui.TerminalPanel.new_terminal_2", { p0: (info?.kind === "powershell" ? "PowerShell" : "bash") })} disabled={switching || killBusy || confirmKill}
             onClick={() => void runtimeRef.current?.createNew(info?.kind ?? "bash")}>
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="M12 4v16M4 12h16" /></svg>
           </button>
-          <button type="button" className="term-tab-maximize" aria-label={maximized ? "还原终端窗口" : "最大化终端窗口"}
-            title={maximized ? "还原终端窗口" : "最大化终端窗口（保留左侧栏）"} aria-pressed={maximized}
+          <button type="button" className="term-tab-maximize" aria-label={maximized ? t("ui.TerminalPanel.restore_terminal_window") : t("ui.TerminalPanel.maximize_terminal_window")}
+            title={maximized ? t("ui.TerminalPanel.restore_terminal_window") : t("ui.TerminalPanel.maximize_terminal_window_while_keeping_the_left")} aria-pressed={maximized}
             onClick={() => setMaximized((value) => !value)}>
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
               {maximized ? <><path d="M8 8V4h12v12h-4" /><rect x="4" y="8" width="12" height="12" rx="1" /></> : <path d="M9 4H4v5m11-5h5v5M4 15v5h5m11-5v5h-5" />}
@@ -673,9 +670,7 @@ export function TerminalPanel({ open, onClose }: { open: boolean; onClose: () =>
           </button>
         </div>
         {omitted > 0 && (
-          <div className="term-omitted" role="status">
-            已省略较早输出
-          </div>
+          <div className="term-omitted" role="status">{t("ui.TerminalPanel.earlier_output_omitted")}</div>
         )}
         {error && (
           <div className="term-error" role="alert">
@@ -683,11 +678,9 @@ export function TerminalPanel({ open, onClose }: { open: boolean; onClose: () =>
             <button
               type="button"
               className="toast-close"
-              aria-label="关闭终端错误提示"
+              aria-label={t("ui.TerminalPanel.dismiss_terminal_error")}
               onClick={() => setError(null)}
-            >
-              知道了
-            </button>
+            >{t("ui.TerminalPanel.got_it")}</button>
           </div>
         )}
         <div className="term-host" ref={hostRef}
@@ -697,13 +690,11 @@ export function TerminalPanel({ open, onClose }: { open: boolean; onClose: () =>
             // 右键：有选区复制，否则粘贴（同 Windows Terminal）
             if (!runtimeRef.current?.copySelection()) void pasteClipboard();
           }} />
-        <div className="term-keys" role="toolbar" aria-label="终端快捷键">
+        <div className="term-keys" role="toolbar" aria-label={t("ui.TerminalPanel.terminal_shortcuts")}>
           {TERM_SHORTCUT_KEYS.map((key, index) => (
             <Fragment key={key.id}>
               {index === 2 && (
-                <button type="button" className="term-key" aria-label="粘贴剪贴板" onClick={() => void pasteClipboard()}>
-                  粘贴
-                </button>
+                <button type="button" className="term-key" aria-label={t("ui.TerminalPanel.paste_clipboard")} onClick={() => void pasteClipboard()}>{t("ui.TerminalPanel.paste")}</button>
               )}
             <button
               type="button"

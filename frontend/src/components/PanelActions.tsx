@@ -1,3 +1,4 @@
+import { t } from "../i18n";
 import type { ReactNode } from "react";
 import { store, type Store } from "../store";
 import { shallowEqual, useStore } from "../useStore";
@@ -18,7 +19,7 @@ export function dispatchBadge(runs: readonly DispatchRun[], backgroundCount = 0)
   const color = (tool: string) => `var(--agent-${tool}, var(--busy))`;
   const fill = tools.length === 1 ? color(tools[0]!)
     : `conic-gradient(${tools.map((tool, i) => `${color(tool)} ${i / tools.length * 360}deg ${(i + 1) / tools.length * 360}deg`).join(", ")})`;
-  const label = `派单：${tools.join("、")}，共 ${runs.length} 个${backgroundCount ? `；后台 ${backgroundCount} 个任务` : ""}`;
+  const label = t("ui.PanelActions.dispatches_in_total", { p0: (tools.join("、")), p1: (runs.length), p2: (backgroundCount ? t("ui.PanelActions.background_tasks_detail", { p0: (backgroundCount) }) : "") });
   return { fill, label };
 }
 
@@ -26,15 +27,15 @@ export function dispatchBadge(runs: readonly DispatchRun[], backgroundCount = 0)
 export function PanelActions({ dispatchRuns = [] }: { dispatchRuns?: readonly DispatchRun[] }) {
   const badge = dispatchRuns.length ? dispatchBadge(dispatchRuns) : null;
   const [filesOpen, termOpen, dispatchesOpen, terminalCapable] = useStore(selectPanelState, shallowEqual);
-  return <div className="panel-actions" role="group" aria-label="右侧面板">
-    <button type="button" className="btn chrome-icon-btn" aria-label="文件" aria-pressed={filesOpen} title="浏览文件" onClick={() => store.setFilesOpen(!store.filesOpen)}>
+  return <div className="panel-actions" role="group" aria-label={t("ui.PanelActions.side_panel")}>
+    <button type="button" className="btn chrome-icon-btn" aria-label={t("ui.common.files")} aria-pressed={filesOpen} title={t("ui.PanelActions.browse_files")} onClick={() => store.setFilesOpen(!store.filesOpen)}>
       {folderIcon}
     </button>
-    {terminalCapable && <button type="button" className="btn chrome-icon-btn" aria-label="终端" aria-pressed={termOpen} title="终端（Ctrl+`）：工作区级内置终端，切会话不影响" onClick={() => store.setTerminalOpen(!store.termOpen)}>
+    {terminalCapable && <button type="button" className="btn chrome-icon-btn" aria-label={t("ui.common.terminal")} aria-pressed={termOpen} title={t("ui.PanelActions.terminal_ctrl_built_in_workspace_terminal_preserved")} onClick={() => store.setTerminalOpen(!store.termOpen)}>
       <TerminalIcon />
     </button>}
     <button type="button" className={`btn chrome-icon-btn${badge ? " has-dispatch-runs" : ""}`} style={badge ? { background: badge.fill } : undefined}
-      aria-label="派单" aria-pressed={dispatchesOpen} title={badge ? `${badge.label}；点击查看流程图，再次点击收起` : "派单：查看派单流程图；再次点击收起"} onClick={() => store.toggleDispatches()}>
+      aria-label={t("ui.common.dispatches")} aria-pressed={dispatchesOpen} title={badge ? t("ui.PanelActions.click_to_view_the_flow_click_again", { p0: (badge.label) }) : t("ui.PanelActions.dispatches_view_the_flow_click_again_to")} onClick={() => store.toggleDispatches()}>
       {dispatchIcon}
     </button>
   </div>;
@@ -48,8 +49,8 @@ export function PanelMenuItems({ onDone }: { onDone: () => void }) {
       {icon} {label}
     </button>;
   return <>
-    {item("文件", filesOpen, folderIcon, () => store.setFilesOpen(!store.filesOpen))}
-    {terminalCapable && item("终端", termOpen, <TerminalIcon />, () => store.setTerminalOpen(!store.termOpen))}
-    {item("派单", dispatchesOpen, dispatchIcon, () => store.toggleDispatches())}
+    {item(t("ui.common.files"), filesOpen, folderIcon, () => store.setFilesOpen(!store.filesOpen))}
+    {terminalCapable && item(t("ui.common.terminal"), termOpen, <TerminalIcon />, () => store.setTerminalOpen(!store.termOpen))}
+    {item(t("ui.common.dispatches"), dispatchesOpen, dispatchIcon, () => store.toggleDispatches())}
   </>;
 }

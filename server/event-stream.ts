@@ -1,3 +1,4 @@
+import { withMessageMetadata } from "./i18n/messages.js";
 import { WebSocket } from "ws";
 import type { SessionManager } from "./session-manager.js";
 import type { UnifiedEvent } from "./types.js";
@@ -20,7 +21,7 @@ export function sendEvent(client: EventClient, event: UnifiedEvent): void {
 export function sendWs(client: EventClient, value: unknown): void {
   if (client.socket.readyState !== WebSocket.OPEN) return;
   if (client.socket.bufferedAmount > 1024 * 1024) { client.socket.terminate(); return; }
-  client.socket.send(JSON.stringify(value));
+  client.socket.send(JSON.stringify(withMessageMetadata(value)));
 }
 
 /** 在全局 WS 上按会话游标补发，实时帧与补发交错由客户端去重。 */

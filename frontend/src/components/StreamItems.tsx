@@ -1,3 +1,4 @@
+import { t } from "../i18n";
 import { forwardRef, memo, useState } from "react";
 import type {
   GateView,
@@ -35,8 +36,8 @@ export function UserBlockView({ item }: { item: UserBlock }) {
       <div className="user-block-body">
         {item.steer && (
           <span className="user-attach-tag" style={{ display: "inline-block", marginBottom: 4 }}
-            title={item.queued ? "Kimi 不支持运行中插话；此消息在当前回合结束后发送" : "已插入当前回合，不中断正在执行的工具"}>
-            {item.queued ? "排队（Kimi 不支持插话，回合结束后发送）" : "插话"}
+            title={item.queued ? t("ui.StreamItems.kimi_does_not_support_steering_during_execution") : t("ui.StreamItems.added_to_the_current_turn_without_interrupting")}>
+            {item.queued ? t("ui.StreamItems.queued_kimi_does_not_support_steering_sends") : t("ui.StreamItems.steering")}
           </span>
         )}
         <UserMessageText text={item.text} />
@@ -98,8 +99,7 @@ export const ThoughtBlockView = memo(function ThoughtBlockView({ item }: { item:
   return (
     <div className="thought-block">
       <button type="button" className="thought-head" disabled={!hasContent} aria-expanded={hasContent ? open : undefined} onClick={() => setOpen((v) => !v)}>
-        {hasContent && <span className="chevron">{open ? "▾" : "▸"}</span>}
-        思考{hasContent && ` · ${item.text.length} 字`}
+        {hasContent && <span className="chevron">{open ? "▾" : "▸"}</span>}{t("ui.StreamItems.reasoning")}{hasContent && t("ui.StreamItems.characters", { p0: (item.text.length) })}
       </button>
       {hasContent && open && <div className="thought-body">{item.text}</div>}
     </div>
@@ -110,7 +110,7 @@ export const ToolCard = memo(function ToolCard({ item, agent, cwd }: { item: Too
   const [open, setOpen] = useState(false);
   const [showAll, setShowAll] = useState(false);
   const summary = summarizeTool(agent, item, cwd);
-  const statusLabel = item.status === "running" ? "进行中" : item.status === "ok" ? "成功" : item.status === "error" ? "失败" : "";
+  const statusLabel = item.status === "running" ? t("ui.StreamItems.in_progress") : item.status === "ok" ? t("ui.StreamItems.succeeded") : item.status === "error" ? t("ui.StreamItems.failed") : "";
   return (
     <div className={`tool-card tool-${item.status}`}>
       <button type="button" className="tool-head" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
@@ -191,12 +191,12 @@ function ToolBodyView({ body, status, showAll, onShowAll }: {
             </div>
           ))}
           <details>
-            <summary>原始 JS</summary>
+            <summary>{t("ui.StreamItems.raw_js")}</summary>
             <pre className="code-block">{body.input}</pre>
           </details>
           {body.result && (
             <>
-              <div className="tool-result-label">{status === "error" ? "错误输出" : "结果"}</div>
+              <div className="tool-result-label">{status === "error" ? t("ui.StreamItems.error_output") : t("ui.StreamItems.result")}</div>
               <pre className="code-block">{body.result}</pre>
             </>
           )}
@@ -211,20 +211,18 @@ function ToolBodyView({ body, status, showAll, onShowAll }: {
           {body.command && <pre className="code-block">{body.command}</pre>}
           {body.output && (
             <>
-              <div className="tool-result-label">{status === "error" ? "错误输出" : "输出"}</div>
+              <div className="tool-result-label">{status === "error" ? t("ui.StreamItems.error_output") : t("ui.StreamItems.output")}</div>
               <pre className="code-block">{visible}</pre>
               {collapsed && (
-                <button type="button" className="tool-show-all" onClick={onShowAll}>
-                  显示全部（共 {lines.length} 行）
-                </button>
+                <button type="button" className="tool-show-all" onClick={onShowAll}>{t("ui.StreamItems.show_all_lines_sentence", { p0: (lines.length) })}</button>
               )}
             </>
           )}
-          {body.truncated && <div className="tool-exit-code">输出过长，已被截断</div>}
+          {body.truncated && <div className="tool-exit-code">{t("ui.StreamItems.output_was_truncated_because_it_is_too")}</div>}
           {(body.exitCode !== null || body.signal) && (
             <div className="tool-exit-code">
-              {body.exitCode !== null && `退出码 ${body.exitCode}`}
-              {body.signal && ` · 信号 ${body.signal}`}
+              {body.exitCode !== null && t("ui.StreamItems.exit_code", { p0: (body.exitCode) })}
+              {body.signal && t("ui.StreamItems.signal", { p0: (body.signal) })}
             </div>
           )}
         </>
@@ -237,7 +235,7 @@ function ToolBodyView({ body, status, showAll, onShowAll }: {
           <DiffView chunks={body.chunks} />
           {body.error && (
             <>
-              <div className="tool-result-label">错误输出</div>
+              <div className="tool-result-label">{t("ui.StreamItems.error_output")}</div>
               <pre className="code-block">{body.error}</pre>
             </>
           )}
@@ -248,11 +246,11 @@ function ToolBodyView({ body, status, showAll, onShowAll }: {
         <>
           <div className="tool-read-summary">
             <span className="mono">{body.path}</span>
-            {body.lineCount !== null && ` · ${body.lineCount} 行`}
+            {body.lineCount !== null && t("ui.StreamItems.lines_2", { p0: (body.lineCount) })}
           </div>
           {body.error && (
             <>
-              <div className="tool-result-label">错误输出</div>
+              <div className="tool-result-label">{t("ui.StreamItems.error_output")}</div>
               <pre className="code-block">{body.error}</pre>
             </>
           )}
@@ -264,7 +262,7 @@ function ToolBodyView({ body, status, showAll, onShowAll }: {
           {body.input && <pre className="code-block">{body.input}</pre>}
           {body.result && (
             <>
-              <div className="tool-result-label">{status === "error" ? "错误输出" : "结果"}</div>
+              <div className="tool-result-label">{status === "error" ? t("ui.StreamItems.error_output") : t("ui.StreamItems.result")}</div>
               <pre className="code-block">{body.result}</pre>
             </>
           )}
@@ -289,11 +287,11 @@ export const GateBlock = forwardRef<HTMLDivElement, { item: GateView; sessionId:
     };
 
     if (item.decision) {
-      const label = item.decision === "deny" ? "已拒绝" : "已允许";
+      const label = item.decision === "deny" ? t("ui.StreamItems.denied") : t("ui.StreamItems.allowed");
       return (
         <div className="gate-block gate-resolved" ref={ref}>
           <span className="gate-resolved-label">
-            {item.agent} 要执行 <span className="mono">{item.toolName}</span> —— {label}
+            {item.agent}{t("ui.StreamItems.wants_to_run")}<span className="mono">{item.toolName}</span> —— {label}
           </span>
         </div>
       );
@@ -303,8 +301,7 @@ export const GateBlock = forwardRef<HTMLDivElement, { item: GateView; sessionId:
       return (
         <div className="gate-block gate-expired" ref={ref}>
           <span className="gate-resolved-label">
-            {item.agent} 要执行 <span className="mono">{item.toolName}</span> —— 会话已结束，此审批已失效
-          </span>
+            {item.agent}{t("ui.StreamItems.wants_to_run")}<span className="mono">{item.toolName}</span>{t("ui.StreamItems.this_session_has_ended_this_approval_is")}</span>
         </div>
       );
     }
@@ -320,8 +317,8 @@ export const GateBlock = forwardRef<HTMLDivElement, { item: GateView; sessionId:
     return (
       <div className="gate-block" ref={ref}>
         <div className="gate-title">
-          {item.agent} 要执行 <span className="mono">{item.toolName}</span>
-          {item.finalGate && <span className="gate-final-tag">最终闸门</span>}
+          {item.agent}{t("ui.StreamItems.wants_to_run")}<span className="mono">{item.toolName}</span>
+          {item.finalGate && <span className="gate-final-tag">{t("ui.StreamItems.final_approval")}</span>}
         </div>
         {item.label !== item.toolName && <div className="gate-label">{item.label}</div>}
 
@@ -332,8 +329,8 @@ export const GateBlock = forwardRef<HTMLDivElement, { item: GateView; sessionId:
             <button type="button" className="gate-fold" onClick={() => setContentOpen((v) => !v)}>
               <span className="chevron">{contentOpen ? "▾" : "▸"}</span>
               {isEdit
-                ? `改动 · +${addedCount} -${removedCount} 行`
-                : `写入内容 · +${addedCount} 行`}
+                ? t("ui.StreamItems.changes_lines", { p0: (addedCount), p1: (removedCount) })
+                : t("ui.StreamItems.content_to_write_lines", { p0: (addedCount) })}
             </button>
             {contentOpen && (
               <DiffView chunks={[{ removed: isEdit ? item.removed : "", added: addedText }]} />
@@ -343,20 +340,16 @@ export const GateBlock = forwardRef<HTMLDivElement, { item: GateView; sessionId:
         {!item.command && !item.path && !isEdit && !item.content && item.detail && (
           <div className="gate-content">
             <button type="button" className="gate-fold" onClick={() => setDetailOpen((v) => !v)}>
-              <span className="chevron">{detailOpen ? "▾" : "▸"}</span>
-              完整入参
-            </button>
+              <span className="chevron">{detailOpen ? "▾" : "▸"}</span>{t("ui.StreamItems.full_arguments")}</button>
             {detailOpen && <pre className="code-block">{item.detail}</pre>}
           </div>
         )}
 
         <div className="gate-actions">
           <button type="button" className="btn btn-gate" disabled={disabled} onClick={() => decide("allow")}>
-            {submitting ? "提交中…" : "允许"}
+            {submitting ? t("ui.StreamItems.submitting") : t("ui.common.allow")}
           </button>
-          <button type="button" className="btn btn-danger" disabled={disabled} onClick={() => decide("deny")}>
-            拒绝
-          </button>
+          <button type="button" className="btn btn-danger" disabled={disabled} onClick={() => decide("deny")}>{t("ui.common.deny")}</button>
         </div>
       </div>
     );
@@ -379,15 +372,13 @@ export const QuestionBlock = forwardRef<HTMLDivElement, { item: GateView; sessio
     if (item.decision) {
       const answers = item.questionAnswers ? Object.values(item.questionAnswers) : [];
       const label = item.decision === "deny"
-        ? "已跳过"
+        ? t("ui.common.skipped")
         : answers.length > 0
-          ? `已选择：${answers.join(" · ")}`
-          : "已回答";
+          ? t("ui.StreamItems.selected", { p0: (answers.join(" · ")) })
+          : t("ui.StreamItems.answered");
       return (
         <div className="gate-block gate-resolved" ref={ref}>
-          <span className="gate-resolved-label">
-            {item.agent} 的提问 —— {label}
-          </span>
+          <span className="gate-resolved-label">{t("ui.StreamItems.asked_sentence", { p0: (item.agent), p1: (label) })}</span>
         </div>
       );
     }
@@ -395,9 +386,7 @@ export const QuestionBlock = forwardRef<HTMLDivElement, { item: GateView; sessio
     if (dead) {
       return (
         <div className="gate-block gate-expired" ref={ref}>
-          <span className="gate-resolved-label">
-            {item.agent} 的提问 —— 会话已结束，此提问已失效
-          </span>
+          <span className="gate-resolved-label">{t("ui.StreamItems.asked_this_session_has_ended_this_question_sentence", { p0: (item.agent) })}</span>
         </div>
       );
     }
@@ -426,7 +415,7 @@ export const QuestionBlock = forwardRef<HTMLDivElement, { item: GateView; sessio
 
     return (
       <div className="gate-block question-block" ref={ref}>
-        <div className="gate-title">{item.agent} 在问你</div>
+        <div className="gate-title">{t("ui.StreamItems.is_asking_you_sentence", { p0: (item.agent) })}</div>
         {questions.map((q, qi) => {
           const picked = selectedOptions(selection, q);
           const otherActive = hasOther(other, q);
@@ -471,8 +460,8 @@ export const QuestionBlock = forwardRef<HTMLDivElement, { item: GateView; sessio
                     setOther(next.other);
                   }}
                 >
-                  <span className="question-option-label">其他…</span>
-                  <span className="question-option-desc">自己输入回答</span>
+                  <span className="question-option-label">{t("ui.StreamItems.other")}</span>
+                  <span className="question-option-desc">{t("ui.StreamItems.write_your_own_answer")}</span>
                 </button>
                 )}
               </div>
@@ -484,8 +473,8 @@ export const QuestionBlock = forwardRef<HTMLDivElement, { item: GateView; sessio
                     type="text"
                     value={other[q.question] ?? ""}
                     disabled={submitting}
-                    placeholder="输入你的回答…"
-                    aria-label={`${q.question}（其他）`}
+                    placeholder={t("ui.StreamItems.enter_your_answer")}
+                    aria-label={t("ui.StreamItems.other_2", { p0: (q.question) })}
                     style={{
                       border: "1px solid var(--border)",
                       borderRadius: 6,
@@ -500,7 +489,7 @@ export const QuestionBlock = forwardRef<HTMLDivElement, { item: GateView; sessio
                   />
                 </span>
               )}
-              {q.multiSelect && !otherActive && <div className="question-multi-hint">可多选</div>}
+              {q.multiSelect && !otherActive && <div className="question-multi-hint">{t("ui.StreamItems.select_multiple")}</div>}
             </div>
           );
         })}
@@ -509,14 +498,12 @@ export const QuestionBlock = forwardRef<HTMLDivElement, { item: GateView; sessio
             type="button"
             className="btn btn-gate"
             disabled={submitting || !ready}
-            title={ready ? undefined : "每题至少选择一项后才能提交"}
+            title={ready ? undefined : t("ui.StreamItems.select_at_least_one_option_for_each")}
             onClick={submit}
           >
-            {submitting ? "提交中…" : questions.length > 1 ? "提交全部回答" : "提交回答"}
+            {submitting ? t("ui.StreamItems.submitting") : questions.length > 1 ? t("ui.StreamItems.submit_all_answers") : t("ui.StreamItems.submit_answer")}
           </button>
-          <button type="button" className="question-skip" disabled={submitting} onClick={skip}>
-            跳过（不回答）
-          </button>
+          <button type="button" className="question-skip" disabled={submitting} onClick={skip}>{t("ui.StreamItems.skip_without_answering")}</button>
         </div>
       </div>
     );
@@ -524,7 +511,7 @@ export const QuestionBlock = forwardRef<HTMLDivElement, { item: GateView; sessio
 );
 
 export function SystemLine({ item }: { item: SystemBlock }) {
-  return <div title={item.rawCode} className={`system-line${item.tone === "error" ? " system-error" : ""}${item.text.startsWith("会话已创建") ? " system-created" : ""}`}>{item.text}</div>;
+  return <div title={item.rawCode} className={`system-line${item.tone === "error" ? " system-error" : ""}${item.text.startsWith(t("ui.StreamItems.session_created_detail")) ? " system-created" : ""}`}>{item.text}</div>;
 }
 
 export function RawLine({ item }: { item: RawBlock }) {
@@ -532,9 +519,7 @@ export function RawLine({ item }: { item: RawBlock }) {
   return (
     <div className="raw-line">
       <button type="button" className="raw-head" onClick={() => setOpen((v) => !v)}>
-        <span className="chevron">{open ? "▾" : "▸"}</span>
-        调试事件
-      </button>
+        <span className="chevron">{open ? "▾" : "▸"}</span>{t("ui.StreamItems.debug_event")}</button>
       {open && <pre className="code-block">{item.text}</pre>}
     </div>
   );

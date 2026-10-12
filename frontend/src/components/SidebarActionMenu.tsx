@@ -1,3 +1,4 @@
+import { t } from "../i18n";
 import { useEffect, useRef, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { sidebarMenuKey } from '../sidebar-menu';
@@ -57,7 +58,7 @@ export function SidebarActionMenu({ position, label, items, submenuItems, childr
   </div>);
   const content = <div ref={rootRef} className={`row-menu${submenuItems ? ' row-menu-has-subscreen' : ''}`} role="menu" aria-label={label} style={{ left: position.x, top: position.y }}>
     <div className="row-menu-main">{renderItems(items)}</div>
-    {submenuItems && <div className="row-menu-subscreen" role="menu" aria-label="移到分组">{renderItems(submenuItems)}{children}</div>}
+    {submenuItems && <div className="row-menu-subscreen" role="menu" aria-label={t("ui.common.move_to_group")}>{renderItems(submenuItems)}{children}</div>}
     {!submenuItems && children}{error && <p className="row-menu-error" role="alert">{error}</p>}
   </div>;
   return typeof document !== 'undefined' && document.body ? createPortal(content, document.body) : content;

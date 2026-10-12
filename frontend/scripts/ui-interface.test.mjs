@@ -1,3 +1,4 @@
+import coreZh from "../src/i18n/core.zh-CN.ts";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
@@ -38,7 +39,8 @@ test("D3：侧栏让宽、时间和计数等宽数字", () => {
 });
 test("D4：空状态只有标题、行动说明和按钮", () => {
   const app = source("../src/App.tsx");
-  assert.match(app, /选一个会话，或新建一个/);
+  assert.ok(app.includes('t("core.001")'));
+  assert.equal(coreZh["core.001"], "选一个会话，或新建一个");
   assert.doesNotMatch(app, /暖色只出现在/);
   assert.match(rule(".empty-state"), /max-width:\s*360px/);
   assert.match(rule(".empty-state h1"), /font-size:\s*16px/);

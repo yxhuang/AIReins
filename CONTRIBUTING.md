@@ -6,7 +6,7 @@ Thanks for your interest. Workbench is a small, personal tool maintained by one 
 
 - **Bug fixes**, with steps to reproduce.
 - **Platform support**: WSL2 is the daily platform; native Linux has required Ubuntu CI checks, and macOS is experimental with CI-only coverage (no maintainer hardware). macOS issue reports and focused platform fixes are welcome.
-- **Translations** and wording fixes.
+- **Translations** and wording fixes: edit the paired dictionaries in [`frontend/src/i18n/`](frontend/src/i18n/), follow [TERMS.md](frontend/src/i18n/TERMS.md), and run `npm run check:i18n` ([check script](frontend/scripts/check-i18n.mjs)).
 
 For a larger feature, open an issue first so we can agree on the approach before you write code.
 

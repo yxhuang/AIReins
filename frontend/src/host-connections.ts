@@ -1,3 +1,4 @@
+import { t } from "./i18n.js";
 import type { TailscalePeersResult } from "../../server/tailscale-peers.js";
 
 export interface HostConnections {
@@ -38,12 +39,12 @@ function lookupKey(value: string): string {
 /** null 表示需要发现结果；提供结果后无匹配或有歧义则抛出可读错误。 */
 export function resolveRemoteHostInput(input: string, discovery?: TailscalePeersResult): string | null {
   const value = input.trim();
-  if (!value || value.length > 512) throw new Error("请输入 Tailscale IP、机器名或完整地址（最多 512 个字符）。");
+  if (!value || value.length > 512) throw new Error(t("core.042"));
   const complete = normalizeRemoteOrigin(value);
   if (complete) return complete;
   const dns = value.toLowerCase().replace(/[/.]$/, "");
   if (MAGIC_DNS.test(dns)) return `https://${dns}`;
-  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(value)) throw new Error("请输入完整的 HTTPS Tailscale 地址，不带路径、账号密码或自定义端口。");
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(value)) throw new Error(t("core.043"));
   if (!discovery) return null;
   const key = lookupKey(value);
   const origins = new Set<string>();
@@ -53,8 +54,8 @@ export function resolveRemoteHostInput(input: string, discovery?: TailscalePeers
       origins.add(origin);
     }
   }
-  if (origins.size > 1) throw new Error(`在 Tailscale 中找到多个匹配 ${value} 的电脑，请使用 Tailscale IP 或完整地址。`);
-  if (origins.size === 0) throw new Error(`在 Tailscale 中找不到 ${value} 对应的电脑。${discovery.reason ? ` ${discovery.reason}` : ""}`);
+  if (origins.size > 1) throw new Error(t("core.044", { p0: value }));
+  if (origins.size === 0) throw new Error(t("core.045", { p0: value, p1: discovery.reason ? ` ${discovery.reason}` : "" }));
   return [...origins][0]!;
 }
 
@@ -77,9 +78,9 @@ export function normalizeConnections(value: unknown): HostConnections {
 
 export function connectionsWithRemote(connections: HostConnections, address: string): HostConnections {
   const origin = normalizeRemoteOrigin(address);
-  if (!origin) throw new Error("请输入完整的 https://机器名.tail…ts.net Tailscale 地址，不带路径或账号密码。");
+  if (!origin) throw new Error(t("core.046"));
   if (connections.remotes.includes(origin)) return connections;
-  if (connections.remotes.length >= MAX_REMOTE_HOSTS) throw new Error(`最多保存 ${MAX_REMOTE_HOSTS} 台远程主机。`);
+  if (connections.remotes.length >= MAX_REMOTE_HOSTS) throw new Error(t("core.047", { p0: MAX_REMOTE_HOSTS }));
   return { ...connections, remotes: [...connections.remotes, origin] };
 }
 
@@ -100,7 +101,7 @@ export function connectionsForPage(href: string, saved: unknown, transfer?: unkn
 
 export function connectionLabel(href: string): string {
   const url = new URL(href);
-  if (normalizeLocalOrigin(url.origin)) return "本机";
+  if (normalizeLocalOrigin(url.origin)) return t("core.048");
   return normalizeRemoteOrigin(url.origin) ? (url.hostname.split(".")[0] ?? url.hostname) : url.hostname;
 }
 
@@ -113,7 +114,7 @@ export function hostShortName(name: string): string {
 
 export function workbenchWindowTitle(href: string, pending: number): string {
   const prefix = pending > 0 ? `(${pending}) 个闸门待处理 · ` : "";
-  const label = connectionLabel(href);
+  const label = normalizeLocalOrigin(new URL(href).origin) ? "本机" : connectionLabel(href);
   return `${prefix}Workbench · ${normalizeLocalOrigin(new URL(href).origin) ? label : `远程 ${label}`}`;
 }
 
@@ -127,7 +128,7 @@ export function parseHostTransfer(href: string): HostConnections | null {
 export function hostNavigationUrl(target: string, value: HostConnections): string {
   const state = normalizeConnections(value);
   const remote = normalizeRemoteOrigin(target), local = normalizeLocalOrigin(target);
-  if (!remote && (!local || local !== state.localOrigin)) throw new Error("目标不是已记录的本机入口或有效 Tailscale 地址。");
+  if (!remote && (!local || local !== state.localOrigin)) throw new Error(t("core.051"));
   return `${remote ?? local}/${TRANSFER_PREFIX}${encodeURIComponent(JSON.stringify(state))}`;
 }
 
@@ -184,7 +185,7 @@ export function initializeHostConnections(): void {
     window.history.replaceState(window.history.state, "", url.href);
   }
   if (transfer?.remotes.some(origin => !snapshot!.remotes.includes(origin))) {
-    window.alert("主机列表已满，部分传入地址没有保存。原有地址已保留；可在主机与连接中移除不需要的地址后重新添加。");
+    window.alert(t("core.052"));
   }
 }
 

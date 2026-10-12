@@ -1,3 +1,4 @@
+import { PRODUCT_NAME, t } from "./i18n";
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { isTerminalToggleKey } from "./terminal";
 import { Sidebar } from "./components/Sidebar";
@@ -114,7 +115,7 @@ export function App() {
             <HistoryPreviewPane item={historySelection} onBack={() => store.backToHistoryList()} />
           ) : current ? (
             <SessionView key={current.id} session={current} mobileTail={pendingTotal > 0 ? (
-              <span className="gate-badge" title={`${pendingTotal} 个闸门等待处理`}>{pendingTotal}</span>
+              <span className="gate-badge" title={t("core.000", { p0: pendingTotal })}>{pendingTotal}</span>
             ) : undefined} usage={usagePage && { icon: usagePage.icon, open: () => {
               setReturnToSession(true);
               setCollapsed(false);
@@ -124,12 +125,12 @@ export function App() {
             <section className="welcome-view">
             <div className="view-panel-actions"><PanelActions /></div>
             <div className="empty-state">
-              <h1 className="empty-logo" aria-label="workbench">
+              <h1 className="empty-logo" aria-label={PRODUCT_NAME.toLowerCase()}>
                 <span className="empty-logo-mark" aria-hidden="true">wb</span>
                 <span className="empty-logo-line" aria-hidden="true" />
-                <span className="empty-logo-name" aria-hidden="true">workbench</span>
+                <span className="empty-logo-name" aria-hidden="true">{PRODUCT_NAME.toLowerCase()}</span>
               </h1>
-              <p>选一个会话，或新建一个</p>
+              <p>{t("core.001")}</p>
               <button
                 type="button"
                 className="btn btn-primary"
@@ -138,9 +139,7 @@ export function App() {
                   setCollapsed(false);
                   setNewOpen(true);
                 }}
-              >
-                新建会话
-              </button>
+              >{t("core.002")}</button>
             </div>
             </section>
           )}
@@ -160,7 +159,7 @@ export function App() {
             <button
               type="button"
               className="toast-jump"
-              title="点击跳转到出错的会话"
+              title={t("core.003")}
               onClick={() => {
                 store.navigate(lastError.sessionId!);
                 store.dismissError();
@@ -171,9 +170,7 @@ export function App() {
           ) : (
             <span>{lastError.message}</span>
           )}
-          <button type="button" className="toast-close" onClick={() => store.dismissError()}>
-            知道了
-          </button>
+          <button type="button" className="toast-close" onClick={() => store.dismissError()}>{t("core.004")}</button>
         </div>
       )}
       {/* 按移除/彻底删除显示真实结果；保留的原生路径有则附上 */}
@@ -187,9 +184,7 @@ export function App() {
             type="button"
             className="toast-close"
             onClick={() => store.dismissRemovalNotice()}
-          >
-            知道了
-          </button>
+          >{t("core.004")}</button>
         </div>
       )}
     </div>

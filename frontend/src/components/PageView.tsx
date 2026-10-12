@@ -1,3 +1,4 @@
+import { t } from "../i18n";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { PageHealth, PageManifest } from "../types";
 import { fetchPageHealth } from "../api";
@@ -128,7 +129,7 @@ export function PageView({ page, sidebar = false, onCollapse }: {
             <PageIcon icon={page.icon} />
             {page.name}
           </h2>
-          <p className="page-fallback-info">这个页面指向电脑本机地址（{page.url}），只能在电脑上打开。</p>
+          <p className="page-fallback-info">{t("ui.PageView.this_page_points_to_a_local_computer_sentence", { p0: (page.url) })}</p>
         </div>
       </div>
     );
@@ -148,27 +149,19 @@ export function PageView({ page, sidebar = false, onCollapse }: {
             </h2>
             {page.description && <p className="page-fallback-desc">{page.description}</p>}
             {/* 不是错误：服务正常（中性文字，不用 --danger），只是目标站点拒绝被嵌入 */}
-            <p className="page-fallback-info">
-              目标服务本身正常（{health.reason}，耗时 {health.durationMs} ms），但它不允许被嵌入到其他页面里。
-            </p>
+            <p className="page-fallback-info">{t("ui.PageView.the_target_service_is_working_took_ms_sentence", { p0: (health.reason), p1: (health.durationMs) })}</p>
             {health.embedReason && (
-              <p className="page-fallback-info">原因：{health.embedReason}</p>
+              <p className="page-fallback-info">{t("ui.PageView.reason_sentence", { p0: (health.embedReason) })}</p>
             )}
-            <p className="page-fallback-info">
-              这是目标站点自己的安全策略——workbench 与目标服务都没有故障，请在新标签页中使用它。
-            </p>
+            <p className="page-fallback-info">{t("ui.PageView.the_target_site_s_security_policy_prevents")}</p>
             <div className="page-fallback-actions">
-              <a className="btn btn-primary" href={src} target="_blank" rel="noopener noreferrer">
-                在新标签页打开
-              </a>
+              <a className="btn btn-primary" href={src} target="_blank" rel="noopener noreferrer">{t("ui.common.open_in_a_new_tab")}</a>
               <button
                 type="button"
                 className="btn"
                 disabled={checking}
                 onClick={() => void check()}
-              >
-                重新检查
-              </button>
+              >{t("ui.PageView.check_again")}</button>
             </div>
           </div>
         </div>
@@ -186,13 +179,9 @@ export function PageView({ page, sidebar = false, onCollapse }: {
               {page.name}
             </span>
             {mode === "uncertain" && (
-              <span className="page-toolbar-hint">
-                若下方空白，说明目标站点拒绝被嵌入，请用新标签页打开
-              </span>
+              <span className="page-toolbar-hint">{t("ui.PageView.if_the_area_below_is_blank_the")}</span>
             )}
-            <a className="page-open-blank" href={src} target="_blank" rel="noreferrer">
-              在新标签页打开
-            </a>
+            <a className="page-open-blank" href={src} target="_blank" rel="noreferrer">{t("ui.common.open_in_a_new_tab")}</a>
           </div>
           {/* 有意不加 sandbox：pages/ 里的页面（如 ai-usage）可能需要脚本/同源等完整能力，记录此决策 */}
           <iframe ref={frameRef} className="page-frame" src={src} title={page.name} loading="lazy" />
@@ -212,17 +201,13 @@ export function PageView({ page, sidebar = false, onCollapse }: {
         </h2>
         {page.description && <p className="page-fallback-desc">{page.description}</p>}
         {state.phase === "checking" && (
-          <p className="page-fallback-reason">正在检查目标服务…</p>
+          <p className="page-fallback-reason">{t("ui.PageView.checking_the_target_service")}</p>
         )}
         {state.phase === "done" && (
-          <p className="page-fallback-reason" role="alert">
-            目标服务当前不可达：{state.health.reason}（耗时 {state.health.durationMs} ms）
-          </p>
+          <p className="page-fallback-reason" role="alert">{t("ui.PageView.the_target_service_is_currently_unreachable_took_sentence", { p0: (state.health.reason), p1: (state.health.durationMs) })}</p>
         )}
         {state.phase === "error" && (
-          <p className="page-fallback-reason" role="alert">
-            健康检查请求失败：{state.message}
-          </p>
+          <p className="page-fallback-reason" role="alert">{t("ui.PageView.health_check_failed_sentence", { p0: (state.message) })}</p>
         )}
         <div className="page-fallback-actions">
           <button
@@ -231,11 +216,9 @@ export function PageView({ page, sidebar = false, onCollapse }: {
             disabled={state.phase === "checking"}
             onClick={() => void check()}
           >
-            {state.phase === "checking" ? "检查中…" : "重试"}
+            {state.phase === "checking" ? t("ui.PageView.checking") : t("ui.common.retry")}
           </button>
-          <a className="page-open-blank" href={src} target="_blank" rel="noreferrer">
-            在新标签页打开
-          </a>
+          <a className="page-open-blank" href={src} target="_blank" rel="noreferrer">{t("ui.common.open_in_a_new_tab")}</a>
         </div>
       </div>
     </div>

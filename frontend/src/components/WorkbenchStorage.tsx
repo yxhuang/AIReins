@@ -1,3 +1,4 @@
+import { t, formatNumber } from "../i18n";
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { cleanStorage, fetchStorage } from "../api";
@@ -6,9 +7,9 @@ import { modalKeyDown } from "./useAnchoredMenu";
 import type { StorageStats } from "../types";
 
 function formatBytes(bytes: number): string {
-  if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toFixed(1)} GB`;
-  if (bytes >= 1024 ** 2) return `${(bytes / 1024 ** 2).toFixed(1)} MB`;
-  return `${(bytes / 1024).toFixed(1)} KB`;
+  if (bytes >= 1024 ** 3) return `${formatNumber(bytes / 1024 ** 3, { minimumFractionDigits: 1, maximumFractionDigits: 1 })} GB`;
+  if (bytes >= 1024 ** 2) return `${formatNumber(bytes / 1024 ** 2, { minimumFractionDigits: 1, maximumFractionDigits: 1 })} MB`;
+  return `${formatNumber(bytes / 1024, { minimumFractionDigits: 1, maximumFractionDigits: 1 })} KB`;
 }
 
 function errorMessage(error: unknown): string {
@@ -66,7 +67,7 @@ export function WorkbenchStorage({ dialogOpen, onDialogOpenChange }: {
     try {
       const cleaned = await cleanStorage(includeEnded);
       setStorage(cleaned.storage);
-      setResult(cleaned.freedBytes > 0 ? `已释放 ${formatBytes(cleaned.freedBytes)}` : "没有可清理的内容");
+      setResult(cleaned.freedBytes > 0 ? t("ui.WorkbenchStorage.freed", { p0: (formatBytes(cleaned.freedBytes)) }) : t("ui.WorkbenchStorage.nothing_to_clean_up"));
       await store.refreshSessions();
       closeDialog();
     } catch (reason) {
@@ -83,10 +84,10 @@ export function WorkbenchStorage({ dialogOpen, onDialogOpenChange }: {
 
   return <>
     <div className="settings-item settings-storage">
-      <span className="settings-item-label">存储占用 {storage ? formatBytes(storage.totalBytes) : loading ? "读取中…" : "读取失败"}</span>
+      <span className="settings-item-label">{t("ui.WorkbenchStorage.storage_usage_sentence", { p0: (storage ? formatBytes(storage.totalBytes) : loading ? t("ui.common.reading_2") : t("ui.common.read_failed")) })}</span>
       <span className="settings-hint settings-storage-breakdown" aria-busy={loading}>
-        {storage ? <>会话记录 {formatBytes(storage.categories.transcripts.bytes)} · 附件 {formatBytes(storage.categories.uploads.bytes)} · 日志 {formatBytes(storage.categories.logs.bytes)} · 其他 {formatBytes(storage.categories.other.bytes)}</>
-          : "会话记录 — · 附件 — · 日志 — · 其他 —"}
+        {storage ? <>{t("ui.WorkbenchStorage.session_records")}{formatBytes(storage.categories.transcripts.bytes)}{t("ui.WorkbenchStorage.attachments")}{formatBytes(storage.categories.uploads.bytes)}{t("ui.WorkbenchStorage.logs")}{formatBytes(storage.categories.logs.bytes)}{t("ui.WorkbenchStorage.other")}{formatBytes(storage.categories.other.bytes)}</>
+          : t("ui.WorkbenchStorage.session_records_attachments_logs_other")}
       </span>
       {error && !dialogOpen && <span className="new-error" role="alert">{error}</span>}
       {result && <span className="settings-hint" role="status">{result}</span>}
@@ -95,34 +96,34 @@ export function WorkbenchStorage({ dialogOpen, onDialogOpenChange }: {
           setIncludeEnded(false);
           setError("");
           onDialogOpenChange(true);
-        }}>清理…</button>
+        }}>{t("ui.WorkbenchStorage.clean_up")}</button>
     </div>
     {dialogOpen && createPortal(
       <div className="dir-overlay storage-overlay" onKeyDown={(event) => modalKeyDown(event, dialog.current, closeDialog)}>
         <div className="dir-dialog storage-dialog" ref={dialog} tabIndex={-1} role="dialog"
           aria-modal="true" aria-labelledby="storage-clean-title" aria-describedby="storage-clean-description">
           <div className="dir-heading">
-            <h2 id="storage-clean-title">清理 Workbench 存储</h2>
-            <button type="button" className="btn" onClick={closeDialog} aria-label="关闭清理弹层">关闭</button>
+            <h2 id="storage-clean-title">{t("ui.WorkbenchStorage.clean_up_storage")}</h2>
+            <button type="button" className="btn" onClick={closeDialog} aria-label={t("ui.WorkbenchStorage.close_cleanup_dialog")}>{t("ui.common.close")}</button>
           </div>
           {storage ? <>
             <div className="storage-clean-items">
-              <p>日志轮转副本：{storage.cleanable.rotatedLogs.files} 个，{formatBytes(storage.cleanable.rotatedLogs.bytes)}</p>
-              <p>孤儿文件：{storage.cleanable.orphans.files} 个，{formatBytes(storage.cleanable.orphans.bytes)}</p>
+              <p>{t("ui.WorkbenchStorage.rotated_log_copies_sentence", { p0: (storage.cleanable.rotatedLogs.files), p1: (formatBytes(storage.cleanable.rotatedLogs.bytes)) })}</p>
+              <p>{t("ui.WorkbenchStorage.orphaned_files_sentence", { p0: (storage.cleanable.orphans.files), p1: (formatBytes(storage.cleanable.orphans.bytes)) })}</p>
             </div>
             <label className="storage-ended-option">
               <input type="checkbox" checked={includeEnded} disabled={cleaning}
                 onChange={(event) => setIncludeEnded(event.target.checked)} />
-              <span>同时移除 {storage.cleanable.ended.sessions} 个已结束会话（{formatBytes(storage.cleanable.ended.bytes)}）</span>
+              <span>{t("ui.WorkbenchStorage.also_remove_ended_sessions_sentence", { p0: (storage.cleanable.ended.sessions), p1: (formatBytes(storage.cleanable.ended.bytes)) })}</span>
             </label>
-            {noCleanableItems && <p className="settings-hint">当前无可清理项。占用来自左栏仍在的 {storage.categories.transcripts.sessions} 个会话的记录和附件，在左栏移除会话才会释放。</p>}
-          </> : <p className="settings-hint">{loading ? "正在读取存储统计…" : "存储统计读取失败，请重试。"}</p>}
-          <p className="settings-hint" id="storage-clean-description">只删工作台里的副本，CLI 原生记录保留，可在『历史会话』里续接。</p>
+            {noCleanableItems && <p className="settings-hint">{t("ui.WorkbenchStorage.nothing_to_clean_up_storage_belongs_to_sentence", { p0: (storage.categories.transcripts.sessions) })}</p>}
+          </> : <p className="settings-hint">{loading ? t("ui.WorkbenchStorage.reading_storage_statistics") : t("ui.WorkbenchStorage.could_not_read_storage_statistics_please_retry")}</p>}
+          <p className="settings-hint" id="storage-clean-description">{t("ui.WorkbenchStorage.only_workspace_copies_will_be_deleted_native")}</p>
           {error && <p className="new-error" role="alert">{error}</p>}
           <div className="dir-actions">
-            {!storage && <button type="button" className="btn" disabled={loading} onClick={() => void retry()}>重新读取</button>}
+            {!storage && <button type="button" className="btn" disabled={loading} onClick={() => void retry()}>{t("ui.WorkbenchStorage.reload")}</button>}
             <button type="button" className="btn" disabled={!storage || cleaning || Boolean(noCleanableItems)} onClick={() => void clean()}>
-              {cleaning ? "清理中…" : "确认清理"}
+              {cleaning ? t("ui.WorkbenchStorage.cleaning_up") : t("ui.WorkbenchStorage.confirm_cleanup")}
             </button>
           </div>
         </div>

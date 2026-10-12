@@ -1,3 +1,4 @@
+import { t, readLanguagePreference, setLanguagePreference, type LanguagePreference } from "../i18n";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { modalKeyDown, useAnchoredMenu } from "./useAnchoredMenu";
@@ -42,35 +43,44 @@ interface SettingGroup {
 /* 分组 + 条目结构，后续加条目只动这两张表；渲染顺序见 SettingsMenu 的面板 */
 const APPEARANCE_GROUP: SettingGroup = {
   id: "appearance",
-  label: "外观",
+  label: t("ui.SettingsMenu.appearance"),
   items: [
     {
-      id: "theme",
-      label: "主题",
+      id: "language",
+      label: t("ui.SettingsMenu.language"),
       options: [
-        { value: "system", label: "跟随系统" },
-        { value: "light", label: "浅色" },
-        { value: "dark", label: "深色" },
+        { value: "system", label: t("ui.SettingsMenu.system") },
+        { value: "zh-CN", label: t("ui.SettingsMenu.chinese") },
+        { value: "en", label: "English" },
+      ],
+    },
+    {
+      id: "theme",
+      label: t("ui.SettingsMenu.theme"),
+      options: [
+        { value: "system", label: t("ui.SettingsMenu.system") },
+        { value: "light", label: t("ui.SettingsMenu.light") },
+        { value: "dark", label: t("ui.SettingsMenu.dark") },
       ],
     },
     {
       id: "font-scale",
-      label: "字号",
+      label: t("ui.SettingsMenu.interface_size"),
       options: [
-        { value: "small", label: "小" },
-        { value: "default", label: "默认" },
-        { value: "large", label: "大" },
-        { value: "xlarge", label: "特大" },
+        { value: "small", label: t("ui.SettingsMenu.small") },
+        { value: "default", label: t("ui.common.default") },
+        { value: "large", label: t("ui.SettingsMenu.large") },
+        { value: "xlarge", label: t("ui.SettingsMenu.extra_large") },
       ],
     },
     {
       id: "body-font",
-      label: "正文字号",
+      label: t("ui.SettingsMenu.body_font_size"),
       options: [],
     },
     {
       id: "term-font",
-      label: "终端字号",
+      label: t("ui.SettingsMenu.terminal_font_size"),
       options: [],
     },
   ],
@@ -78,18 +88,18 @@ const APPEARANCE_GROUP: SettingGroup = {
 
 const SESSIONS_GROUP: SettingGroup = {
   id: "sessions",
-  label: "会话",
+  label: t("ui.common.sessions"),
   items: [
     {
       id: "remote-control-startup",
-      label: "Remote Control 默认开启",
+      label: t("ui.SettingsMenu.remote_control_on_by_default"),
       options: [],
     },
     {
       id: "idle-release",
-      label: "空闲自动释放（分钟）",
+      label: t("ui.SettingsMenu.release_idle_workers_after_minutes"),
       options: [
-        { value: "0", label: "关闭" },
+        { value: "0", label: t("ui.SettingsMenu.off") },
         { value: "15", label: "15" },
         { value: "30", label: "30" },
         { value: "60", label: "60" },
@@ -124,6 +134,7 @@ export function SettingsMenu() {
   const [open, setOpen] = useState(false);
   const [storageDialogOpen, setStorageDialogOpen] = useState(false);
   const [theme, setTheme] = useState<ThemeChoice>(() => readTheme());
+  const [language, setLanguage] = useState<LanguagePreference>(readLanguagePreference);
   const [scaleChoice, setScaleChoice] = useState<FontScaleChoice>(readFontScaleChoice);
   const [bodySize, setBodySize] = useState(readBodyFontSize);
   const [termSize, setTermSize] = useState(() => Math.round(readTermFontSize()));
@@ -362,7 +373,13 @@ export function SettingsMenu() {
   };
 
   const choose = (id: string, value: string) => {
-    if (id === "theme") chooseTheme(value);
+    if (id === "language") {
+      const next = value === "zh-CN" || value === "en" ? value : "system";
+      if (!setLanguagePreference(next)) return;
+      setLanguage(next);
+      window.location.reload();
+    }
+    else if (id === "theme") chooseTheme(value);
     else if (id === "font-scale") chooseFontScale(value);
     else if (id === "body-font") {
       const next = bodyFontSize(value);
@@ -383,6 +400,7 @@ export function SettingsMenu() {
   };
 
   const selectedValue = (id: string): string => {
+    if (id === "language") return language;
     if (id === "theme") return theme;
     if (id === "font-scale") return scaleChoice;
     if (id === "body-font") return String(bodySize);
@@ -407,12 +425,12 @@ export function SettingsMenu() {
               <button type="button" role="switch" aria-checked={rcStartup === true}
                 aria-labelledby={`settings-item-${item.id}`} aria-describedby="settings-rc-hint"
                 className="settings-switch" disabled={rcStartup === null || rcSaving}
-                title={rcSaving ? "保存中…" : rcStartup === null ? (rcError ? "读取失败" : "读取中…") : rcStartup ? "已开启" : "已关闭"}
+                title={rcSaving ? t("ui.common.saving") : rcStartup === null ? (rcError ? t("ui.common.read_failed") : t("ui.common.reading_2")) : rcStartup ? t("ui.SettingsMenu.on") : t("ui.SettingsMenu.off")}
                 onClick={() => void toggleRcStartup()}>
                 <span className={`slash-switch${rcStartup ? " on" : ""}`} aria-hidden="true" />
               </button>
             </div>
-            <span className="settings-hint" id="settings-rc-hint">仅对新建、续接或释放后再发送的会话生效。</span>
+            <span className="settings-hint" id="settings-rc-hint">{t("ui.SettingsMenu.applies_to_new_sessions_resumed_sessions_or")}</span>
             {rcError && <span className="new-error" role="alert">{rcError}</span>}
           </div>
         ) : item.id === "body-font" ? (
@@ -434,7 +452,7 @@ export function SettingsMenu() {
             <input id="settings-term-font" className="settings-range" type="range"
               min={TERM_FONT_MIN} max={TERM_FONT_MAX} step={1} value={termSize}
               onChange={(e) => choose(item.id, e.target.value)} />
-            <span className="settings-hint">只对这台设备生效。</span>
+            <span className="settings-hint">{t("ui.SettingsMenu.applies_only_to_this_device")}</span>
           </div>
         ) : (
           <div className="settings-item" key={item.id}>
@@ -457,28 +475,26 @@ export function SettingsMenu() {
   return (
     <div className="settings" ref={rootRef}>
       {open && (
-        <div className="settings-panel" ref={panelRef} role="dialog" aria-label="设置" inert={dialogOpen}>
+        <div className="settings-panel" ref={panelRef} role="dialog" aria-label={t("ui.common.settings")} inert={dialogOpen}>
           <div className="settings-col">
             {renderGroup(SESSIONS_GROUP, <WorkbenchStorage dialogOpen={storageDialogOpen} onDialogOpenChange={setStorageDialogOpen} />)}
             <section className="settings-group">
               <button type="button" className="settings-action" ref={restartButton} disabled={restartState !== "idle"}
                 aria-haspopup="dialog" onClick={() => void restart()}>
-                <span aria-hidden="true">↻</span>{restartState === "checking" ? "检查会话中…" : "重启 Workbench"}
+                <span aria-hidden="true">↻</span>{restartState === "checking" ? t("ui.SettingsMenu.checking_sessions") : t("ui.SettingsMenu.restart")}
               </button>
             </section>
           </div>
           <div className="settings-col">
             {renderGroup(APPEARANCE_GROUP)}
             <section className="settings-group">
-              <h3 className="settings-group-title">主机</h3>
-              <button type="button" className="settings-action settings-hosts" onClick={openHostMenu} aria-haspopup="menu">
-                主机与连接（Tailscale）
-              </button>
+              <h3 className="settings-group-title">{t("ui.SettingsMenu.host")}</h3>
+              <button type="button" className="settings-action settings-hosts" onClick={openHostMenu} aria-haspopup="menu">{t("ui.SettingsMenu.hosts_and_connections_tailscale")}</button>
               {powerSupported && <button type="button" className={`settings-action settings-power${powerActive ? " is-pending" : ""}`} ref={powerButton}
                 aria-haspopup={powerActive ? undefined : "dialog"} onClick={() => void togglePowerOff()}>
                 {powerActive ? <span aria-hidden="true">✕</span> : <span aria-hidden="true">⏻</span>}
-                {power?.state === "waiting" ? `取消关机（等 ${power.busy} 个会话完成）`
-                  : power?.state === "scheduled" ? (powerSeconds === null ? "取消关机" : `取消关机（${powerSeconds} 秒后关机）`) : "关机"}
+                {power?.state === "waiting" ? t("ui.SettingsMenu.cancel_shutdown_waiting_for_sessions", { p0: (power.busy) })
+                  : power?.state === "scheduled" ? (powerSeconds === null ? t("ui.SettingsMenu.cancel_shutdown") : t("ui.SettingsMenu.cancel_shutdown_shutting_down_in_seconds", { p0: (powerSeconds) })) : t("ui.SettingsMenu.shut_down")}
               </button>}
               {powerSupported && (power?.error || powerError) && <span className="new-error" role="alert">{power?.error || powerError}</span>}
             </section>
@@ -489,8 +505,8 @@ export function SettingsMenu() {
         type="button"
         ref={gearRef}
         className="settings-gear"
-        title="设置"
-        aria-label="设置"
+        title={t("ui.common.settings")}
+        aria-label={t("ui.common.settings")}
         aria-haspopup="dialog"
         aria-expanded={open}
         onClick={() => (open ? close(true) : setOpen(true))}
@@ -502,16 +518,16 @@ export function SettingsMenu() {
           <div className="dir-dialog storage-dialog" ref={powerDialog} tabIndex={-1} role="dialog"
             aria-modal="true" aria-labelledby="power-off-title" aria-describedby="power-off-description">
             <div className="dir-heading">
-              <h2 id="power-off-title">关闭这台电脑</h2>
+              <h2 id="power-off-title">{t("ui.SettingsMenu.shut_down_this_computer")}</h2>
             </div>
             <p id="power-off-description">{powerConfirm > 0
-              ? `有 ${powerConfirm} 个会话正在运行或带有后台任务。确认后先等它们全部完成，再自动关机，不再询问。`
-              : "当前没有会话在运行，确认后约 60 秒关机。"}</p>
-            <p className="settings-hint">关机前可在设置里点同一按钮取消。Windows 会强制关闭程序，未保存的内容会丢失。</p>
+              ? t("ui.SettingsMenu.sessions_are_running_or_have_background_tasks", { p0: (powerConfirm) })
+              : t("ui.SettingsMenu.no_sessions_are_running_this_computer_will")}</p>
+            <p className="settings-hint">{t("ui.SettingsMenu.cancel_using_the_same_button_in_settings")}</p>
             <div className="dir-actions">
-              <button type="button" className="btn" onClick={closePowerConfirm}>取消</button>
+              <button type="button" className="btn" onClick={closePowerConfirm}>{t("ui.common.cancel")}</button>
               <button type="button" className="btn btn-danger" onClick={() => void confirmPowerOff()}>
-                {powerConfirm > 0 ? "等完成后关机" : "确认关机"}
+                {powerConfirm > 0 ? t("ui.SettingsMenu.shut_down_when_finished") : t("ui.SettingsMenu.confirm_shutdown")}
               </button>
             </div>
           </div>
@@ -522,13 +538,13 @@ export function SettingsMenu() {
           <div className="dir-dialog storage-dialog" ref={restartConfirmDialog} tabIndex={-1} role="dialog"
             aria-modal="true" aria-labelledby="restart-confirm-title" aria-describedby="restart-confirm-description">
             <div className="dir-heading">
-              <h2 id="restart-confirm-title">重启 Workbench</h2>
+              <h2 id="restart-confirm-title">{t("ui.SettingsMenu.restart")}</h2>
             </div>
-            <p id="restart-confirm-description">有 {restartConfirm} 个会话正在运行或带有后台任务，重启会中断它们。</p>
-            <p className="settings-hint">确认后关闭设置并重启，页面会自动重连。</p>
+            <p id="restart-confirm-description">{t("ui.SettingsMenu.sessions_are_running_or_have_background_tasks_sentence", { p0: (restartConfirm) })}</p>
+            <p className="settings-hint">{t("ui.SettingsMenu.after_confirmation_settings_closes_and_the_server")}</p>
             <div className="dir-actions">
-              <button type="button" className="btn" onClick={closeRestartConfirm}>取消</button>
-              <button type="button" className="btn btn-danger" onClick={() => { setRestartConfirm(null); void restart(true); }}>仍要重启</button>
+              <button type="button" className="btn" onClick={closeRestartConfirm}>{t("ui.common.cancel")}</button>
+              <button type="button" className="btn btn-danger" onClick={() => { setRestartConfirm(null); void restart(true); }}>{t("ui.SettingsMenu.restart_anyway")}</button>
             </div>
           </div>
         </div>, document.body,
@@ -544,15 +560,15 @@ export function SettingsMenu() {
           <div className="dir-dialog storage-dialog" ref={restartDialog} tabIndex={-1} role="dialog" aria-modal="true"
             aria-labelledby="restart-title" aria-describedby="restart-description">
             <div className="dir-heading">
-              <h2 id="restart-title">{restartState === "restarting" ? "重启中…" : "重启未确认成功"}</h2>
+              <h2 id="restart-title">{restartState === "restarting" ? t("ui.SettingsMenu.restarting") : t("ui.SettingsMenu.restart_not_confirmed")}</h2>
             </div>
             <p id="restart-description" role={restartState === "failed" ? "alert" : "status"}>
-              {restartState === "restarting" ? "正在等待 Workbench 恢复连接，请稍候。" : `${restartError}。请在电脑终端按当前实例的端口和 WORKBENCH_HOME 执行 wb restart，再刷新页面；手机用户请到电脑操作。`}
+              {restartState === "restarting" ? t("ui.SettingsMenu.waiting_for_to_reconnect_please_wait") : t("ui.SettingsMenu.run_wb_restart_in_a_terminal_on", { p0: (restartError) })}
             </p>
             {restartState === "failed" && <div className="dir-actions"><button type="button" className="btn" onClick={() => {
               setRestartState("idle");
               gearRef.current?.focus();
-            }}>关闭提示</button></div>}
+            }}>{t("ui.SettingsMenu.dismiss")}</button></div>}
           </div>
         </div>, document.body,
       )}

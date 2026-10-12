@@ -1,3 +1,4 @@
+import { fallbackTitleMetadata } from "./i18n/messages.js";
 import { platform, vscodeFileUri, type Platform } from "./platform.js";
 import { sessionTitle } from "../shared/session-title.js";
 import { configOptionsForModel } from "../shared/model-config.js";
@@ -195,6 +196,7 @@ export class SessionManager {
     return [...this.sessions.values()]
       .map((session) => ({ ...cloneSession(session),
         title: sessionTitle({ ...session, title: this.titles.get(session.id) ?? "新会话" }, undefined),
+        ...fallbackTitleMetadata(session, this.titles.get(session.id)),
         pendingGateCount: session.status === "dead" ? 0 : this.pendingGates.get(session.id)?.size ?? 0,
       }))
       .sort((left, right) => right.lastActivityAt.localeCompare(left.lastActivityAt));
@@ -202,7 +204,7 @@ export class SessionManager {
 
   get(id: string): SessionRecord | undefined {
     const session = this.sessions.get(id);
-    return session ? { ...cloneSession(session), title: sessionTitle({ ...session, title: this.titles.get(id) ?? "新会话" }, undefined) } : undefined;
+    return session ? { ...cloneSession(session), ...fallbackTitleMetadata(session, this.titles.get(id)), title: sessionTitle({ ...session, title: this.titles.get(id) ?? "新会话" }, undefined) } : undefined;
   }
 
   listGroups(): SessionGroup[] { return [...this.groups.values()].map((group) => ({ ...group })); }
@@ -283,9 +285,9 @@ export class SessionManager {
     if (!session) return undefined;
     if (!tail) return { session: this.get(id)!, seq: session.seq, events: readTranscript(session.transcriptPath) };
     setTranscriptCacheIdle(session.transcriptPath, session.released === true || session.status === "idle");
-    const { state, title, ...page } = readTranscriptTail(session.transcriptPath);
+    const { state, title, titleIsFallback, ...page } = readTranscriptTail(session.transcriptPath);
     return {
-      session: { ...cloneSession(session), title: sessionTitle({ ...session, title: this.titles.get(id) ?? title }, undefined), snapshotState: state },
+      session: { ...cloneSession(session), ...fallbackTitleMetadata(session, this.titles.get(id) ?? (titleIsFallback ? undefined : title)), title: sessionTitle({ ...session, title: this.titles.get(id) ?? title }, undefined), snapshotState: state },
       seq: session.seq,
       ...page,
     };

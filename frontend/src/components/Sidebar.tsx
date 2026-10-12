@@ -1,3 +1,4 @@
+import { t, dictionaries } from "../i18n";
 import { useCallback, useEffect, useRef, useState, type Dispatch, type MouseEvent, type ReactNode, type SetStateAction } from "react";
 import type { AgentKind, ConfigOptionId, DriverConfigOption, SessionGroup, SessionRecord } from "../types";
 import { relativeTime, relativeTimeShort, sessionTitle } from "../format";
@@ -29,20 +30,20 @@ const AGENT_LABELS: Record<AgentKind, string> = {
 };
 
 const STATUS_LABELS: Record<string, string> = {
-  starting: "启动中",
-  idle: "空闲",
-  running: "忙",
-  dead: "已结束",
-  error: "出错",
+  starting: t("ui.Sidebar.starting"),
+  idle: t("ui.common.idle"),
+  running: t("ui.Sidebar.busy"),
+  dead: t("ui.Sidebar.ended"),
+  error: t("ui.Sidebar.error"),
 };
 
 /** 五状态一句「你现在可以……」说明：左栏状态文字的 hover title 用。 */
 const STATUS_HINTS: Record<string, string> = {
-  starting: "启动中：会话正在拉起 agent 进程。你现在可以等它就绪，或切去别的会话。",
-  idle: "空闲：agent 就绪。你现在可以发消息、用 / 命令或 @ 引用文件。",
-  running: "忙：agent 正在执行。你现在可以继续发消息，或点「中断」停掉当前执行。",
-  error: "出错：会话遇到错误。你现在可以看错误条里的原因，或「新建会话并续接」恢复上下文。",
-  dead: "已结束：进程已退出。你现在可以「新建会话并续接」，或右键 / 长按这一行从工作台移除（原生记录保留）。",
+  starting: t("ui.Sidebar.starting_the_agent_process_is_launching_wait"),
+  idle: t("ui.Sidebar.idle_the_agent_is_ready_send_a"),
+  running: t("ui.Sidebar.busy_the_agent_is_executing_send_another"),
+  error: t("ui.Sidebar.error_the_session_encountered_an_error_read"),
+  dead: t("ui.Sidebar.ended_the_process_has_exited_create_a"),
 };
 
 const CWD_STORAGE_KEY = "workbench-last-cwd";
@@ -91,7 +92,7 @@ export function Sidebar({ collapsed, onToggle, newOpen, onNewOpenChange, returnT
   const sessionGroups = useStore((value) => value.sessionGroups);
   const [collapsedGroups, toggleGroup] = usePersistedSet("workbench-collapsed-session-groups", []);
   // 时间分区默认只折叠「更早」（用户 10-03）
-  const [collapsedSections, toggleSection] = usePersistedSet("workbench-collapsed-time-sections", ["更早"]);
+  const [collapsedSections, toggleSection] = usePersistedSet("workbench-collapsed-time-sections", [dictionaries["zh-CN"]["ui.Sidebar.earlier"]!]);
   const now = useStore(selectNow);
   const currentId = useStore(selectCurrentId);
   const panelOpen = useStore((value) => value.historyOpen || value.currentPageId !== null);
@@ -182,8 +183,8 @@ export function Sidebar({ collapsed, onToggle, newOpen, onNewOpenChange, returnT
         <button
           type="button"
           className="icon-btn chrome-icon-btn sidebar-reload"
-          title="刷新页面"
-          aria-label="刷新页面"
+          title={t("ui.Sidebar.refresh_page")}
+          aria-label={t("ui.Sidebar.refresh_page")}
           onClick={() => location.reload()}
         >
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M20 7v5h-5M20 12a8 8 0 1 0-2 5M20 12a8 8 0 0 0-2-5" /></svg>
@@ -192,7 +193,7 @@ export function Sidebar({ collapsed, onToggle, newOpen, onNewOpenChange, returnT
           <button
             type="button"
             className="gate-badge gate-badge-btn"
-            title={`${totalPending} 个闸门等待处理，点击展开会话列表`}
+            title={t("ui.Sidebar.approvals_pending_click_to_expand_the_session", { p0: (totalPending) })}
             onClick={onToggle}
           >
             {totalPending}
@@ -201,7 +202,7 @@ export function Sidebar({ collapsed, onToggle, newOpen, onNewOpenChange, returnT
         <button
           type="button"
           className="icon-btn chrome-icon-btn sidebar-toggle"
-          title={collapsed ? "展开会话列表" : "收起会话列表"}
+          title={collapsed ? t("ui.Sidebar.expand_session_list") : t("ui.Sidebar.collapse_session_list")}
           onClick={onToggle}
         >
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{collapsed ? <path d="m5 7 5 5-5 5m8-10 5 5-5 5" /> : <path d="m11 7-5 5 5 5m8-10-5 5 5 5" />}</svg>
@@ -214,7 +215,7 @@ export function Sidebar({ collapsed, onToggle, newOpen, onNewOpenChange, returnT
               type="button"
               className="btn btn-new btn-new-session"
               aria-expanded={newOpen}
-              aria-label={newOpen ? "取消新建" : "新建会话"}
+              aria-label={newOpen ? t("ui.Sidebar.cancel_creation") : t("ui.common.new_session")}
               onClick={() => {
                 if (!newOpen && historyCwd) { newSessionIn(historyCwd); return; }
                 if (panelOpen) store.closeSidebarPanel(window.matchMedia("(max-width: 720px)").matches);
@@ -224,11 +225,11 @@ export function Sidebar({ collapsed, onToggle, newOpen, onNewOpenChange, returnT
             >
               {/* 收起即卸载表单、丢掉未提交的输入，所以叫「取消」而不是「收起」 */}
               <svg className="new-session-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
-              <span className="new-session-label">{newOpen ? "取消新建" : "新建会话"}</span>
-              <span className="new-session-label-compact" aria-hidden="true">{newOpen ? "取消" : "新建"}</span>
+              <span className="new-session-label">{newOpen ? t("ui.Sidebar.cancel_creation") : t("ui.common.new_session")}</span>
+              <span className="new-session-label-compact" aria-hidden="true">{newOpen ? t("ui.common.cancel") : t("ui.Sidebar.new")}</span>
             </button>
             {/* chatgpt.com 禁止 iframe（X-Frame-Options: SAMEORIGIN），只能开独立窗口；已开就切过去，不重载丢页面 */}
-            <button type="button" className="btn btn-new sidebar-chatgpt" aria-label="打开 ChatGPT 网页版" title="打开 ChatGPT 网页版（独立窗口，再点切回该窗口）" onClick={openChatGPT}>
+            <button type="button" className="btn btn-new sidebar-chatgpt" aria-label={t("ui.Sidebar.open_chatgpt_on_the_web")} title={t("ui.Sidebar.open_chatgpt_on_the_web_in_a")} onClick={openChatGPT}>
               ChatGPT <span className="sidebar-chatgpt-arrow" aria-hidden="true">↗</span>
             </button>
           </div>
@@ -243,22 +244,23 @@ export function Sidebar({ collapsed, onToggle, newOpen, onNewOpenChange, returnT
             <ul className="session-list">
               {waiting.length > 0 && (
                 // 分区标题复用 .page-nav-title 的中性小字语言；暖色仍只出现在行内闸门徽标上
-                <li className="page-nav-title" role="presentation">
-                  等待处理（{waiting.length}）
-                </li>
+                <li className="page-nav-title" role="presentation">{t("ui.Sidebar.pending_sentence", { p0: (waiting.length) })}</li>
               )}
               {waiting.map(renderRow)}
-              {pinned.length > 0 && <li className="sidebar-section-label" role="presentation"><span>置顶</span></li>}
+              {pinned.length > 0 && <li className="sidebar-section-label" role="presentation"><span>{t("ui.Sidebar.pinned")}</span></li>}
               {pinned.map(renderRow)}
               {groups.map(group => <li key={group.id} className="sidebar-session-group">
                 <SessionGroupHeader group={group} collapsed={collapsedGroups.has(group.id)} onToggle={() => toggleGroup(group.id)} />
                 {!collapsedGroups.has(group.id) && <ul className="session-list session-group-list" id={`session-group-${group.id}`}>{group.sessions.map(renderRow)}</ul>}
               </li>)}
               {sections.map(section => {
-                const folded = collapsedSections.has(section.label);
+                // Keep the legacy stored labels stable when the interface language changes.
+                const key = ["core.084", "core.085", "core.086"].find(key => t(key) === section.label);
+                const storageKey = key ? dictionaries["zh-CN"][key]! : section.label;
+                const folded = collapsedSections.has(storageKey);
                 return <li className="sidebar-time-section" key={section.label}>
                   <button type="button" className="sidebar-section-toggle" aria-expanded={!folded}
-                    aria-controls={`time-section-${section.label}`} onClick={() => toggleSection(section.label)}>
+                    aria-controls={`time-section-${section.label}`} onClick={() => toggleSection(storageKey)}>
                     <span>{section.label}</span>
                     <svg className={`sidebar-section-chevron${folded ? " collapsed" : ""}`} width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.25" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg>
                   </button>
@@ -266,16 +268,16 @@ export function Sidebar({ collapsed, onToggle, newOpen, onNewOpenChange, returnT
                 </li>;
               })}
               {waiting.length === 0 && pinned.length === 0 && groups.every(group => group.sessions.length === 0) && sections.length === 0 && (
-                <li className="session-list-empty">{totalSessions === 0 ? "还没有会话" : "最近 3 天没有会话"}</li>
+                <li className="session-list-empty">{totalSessions === 0 ? t("ui.Sidebar.no_sessions_yet") : t("ui.Sidebar.no_sessions_in_the_last_3_days")}</li>
               )}
             </ul>
           </div>
         )}
         {panelOpen && !collapsed && (
-          <section className="sidebar-panel-expanded" aria-label={historyOpen ? "历史会话内容" : currentPage?.name || "页面不存在"}>
+          <section className="sidebar-panel-expanded" aria-label={historyOpen ? t("ui.Sidebar.session_history_content") : currentPage?.name || t("ui.Sidebar.page_not_found")}>
             {historyOpen ? <div id="sidebar-history-panel" className="sidebar-panel-content"><HistoryView /></div>
               : currentPage ? <div id={`sidebar-page-${currentPage.id}`} className="sidebar-panel-content"><PageView page={currentPage} sidebar onCollapse={closePanel} /></div>
-              : <div className="sidebar-panel-content sidebar-panel-missing">该页面可能已从 pages/ 移除或 manifest 失效。页面列表在启动时扫描，改动需重启后生效。</div>}
+              : <div className="sidebar-panel-content sidebar-panel-missing">{t("ui.Sidebar.this_page_may_have_been_removed_from")}</div>}
           </section>
         )}
         <div className="sidebar-foot">
@@ -298,12 +300,12 @@ export function Sidebar({ collapsed, onToggle, newOpen, onNewOpenChange, returnT
 function HistoryNav({ collapsed, onPrepare, onClose }: PanelNavProps) {
   const historyOpen = useStore(selectHistoryOpen);
   return (
-    <SidebarPanel name="历史会话" open={historyOpen} collapsed={collapsed} onClose={onClose} header={
+    <SidebarPanel name={t("ui.common.session_history")} open={historyOpen} collapsed={collapsed} onClose={onClose} header={
       <button
         type="button"
         className={`page-nav-item${historyOpen ? " active" : ""}`}
-        title={historyOpen ? "收起历史会话" : "历史会话：浏览三家 CLI 自己保存的历史会话并导入续接"}
-        aria-label={historyOpen ? "后退：收起历史会话" : "历史会话"}
+        title={historyOpen ? t("ui.Sidebar.collapse_session_history") : t("ui.Sidebar.session_history_browse_native_histories_saved_by")}
+        aria-label={historyOpen ? t("ui.Sidebar.back_collapse_session_history") : t("ui.common.session_history")}
         aria-expanded={historyOpen}
         aria-controls="sidebar-history-panel"
         onClick={() => {
@@ -331,7 +333,7 @@ function HistoryNav({ collapsed, onPrepare, onClose }: PanelNavProps) {
           </svg>
         </span>
         {/* 打开后入口变「‹ 后退」，再点收起回到会话列表（用户 10-02） */}
-        {!collapsed && <span className="page-nav-name">{historyOpen ? "后退" : "历史"}</span>}
+        {!collapsed && <span className="page-nav-name">{historyOpen ? t("ui.Sidebar.back") : t("ui.Sidebar.history")}</span>}
       </button>
     } />
   );
@@ -371,8 +373,8 @@ function PageNav({ collapsed, onPrepare, onClose }: PanelNavProps) {
         <button
           type="button"
           className={`page-nav-item${page.id === "ai-usage" ? " sidebar-foot-usage" : ""}${currentPageId === page.id ? " active" : ""}`}
-          title={currentPageId === page.id ? `后退：收起${page.name}` : collapsed || (desktop && page.id === "ai-usage") ? page.name : page.description || page.name}
-          aria-label={currentPageId === page.id ? `后退：收起${page.name}` : page.name}
+          title={currentPageId === page.id ? t("ui.Sidebar.back_collapse", { p0: (page.name) }) : collapsed || (desktop && page.id === "ai-usage") ? page.name : page.description || page.name}
+          aria-label={currentPageId === page.id ? t("ui.Sidebar.back_collapse", { p0: (page.name) }) : page.name}
           aria-expanded={currentPageId === page.id}
           aria-controls={`sidebar-page-${page.id}`}
           onClick={() => {
@@ -384,20 +386,17 @@ function PageNav({ collapsed, onPrepare, onClose }: PanelNavProps) {
           {currentPageId === page.id ? <span className="page-icon" aria-hidden="true">
             <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 5l-7 7 7 7" /></svg>
           </span> : <PageIcon icon={page.icon} />}
-          {!collapsed && <span className="page-nav-name">{currentPageId === page.id ? "后退" : page.id === "ai-usage" ? "额度" : page.name}</span>}
+          {!collapsed && <span className="page-nav-name">{currentPageId === page.id ? t("ui.Sidebar.back") : page.id === "ai-usage" ? t("ui.Sidebar.allowance") : page.name}</span>}
         </button>
         } />
       ))}
       {currentPageId && !pages.some((page) => page.id === currentPageId) && !collapsed && (
-        <SidebarPanel name="页面不存在" open collapsed={false} onClose={onClose} header={
-          <button type="button" className="page-nav-item active" aria-expanded="true" onClick={onClose}>页面不存在</button>
+        <SidebarPanel name={t("ui.Sidebar.page_not_found")} open collapsed={false} onClose={onClose} header={
+          <button type="button" className="page-nav-item active" aria-expanded="true" onClick={onClose}>{t("ui.Sidebar.page_not_found")}</button>
         } />
       )}
       {!collapsed && skippedPages.length > 0 && (
-        <p className="page-nav-skipped">
-          已跳过 {skippedPages.length} 个暂不支持的页面类型（
-          {[...new Set(skippedPages.map((p) => p.type))].join("、")}）
-        </p>
+        <p className="page-nav-skipped">{t("ui.Sidebar.skipped_unsupported_page_types_sentence", { p0: (skippedPages.length), p1: ([...new Set(skippedPages.map((p) => p.type))].join("、")) })}</p>
       )}
     </>
   );
@@ -421,7 +420,7 @@ function SidebarPanel({ name, open, collapsed, onClose, header }: {
     <section className={`page-nav sidebar-panel-slot${open && !collapsed ? " sidebar-panel-open" : ""}`} aria-label={name}>
       <div className="sidebar-panel-head">
         {header}
-        {open && !collapsed && <button type="button" className="icon-btn" aria-label={`收起${name}`} title={`收起${name}`} onClick={onClose}>⌄</button>}
+        {open && !collapsed && <button type="button" className="icon-btn" aria-label={t("ui.Sidebar.collapse", { p0: (name) })} title={t("ui.Sidebar.collapse", { p0: (name) })} onClick={onClose}>⌄</button>}
       </div>
     </section>
   );
@@ -651,27 +650,27 @@ function SessionRow({
   };
 
   const mainItems: SidebarMenuItem[] = [
-    { id: "pin", label: session.pinned ? "取消置顶" : "置顶", icon: "pin", shortcut: "P",
+    { id: "pin", label: session.pinned ? t("ui.Sidebar.unpin") : t("ui.Sidebar.pin"), icon: "pin", shortcut: "P",
       onSelect: () => void runMenuAction(() => store.patchSession(session.id, { pinned: !session.pinned })) },
-    { id: "rename", label: "重命名", icon: "rename", shortcut: "R", onSelect: startRename },
-    { id: "move", label: "移到分组", icon: "folder", trailing: "›", onSelect: () => setMenuScreen("group") },
-    { id: "delete", label: "移除", icon: "delete", shortcut: "D", divider: true, onSelect: () => beginConfirm() },
-    ...(session.agent === "claude" ? [] : [{ id: "permanent-delete", label: "彻底删除", icon: "delete" as const, danger: true, onSelect: () => beginConfirm(true) }]),
+    { id: "rename", label: t("ui.Sidebar.rename"), icon: "rename", shortcut: "R", onSelect: startRename },
+    { id: "move", label: t("ui.common.move_to_group"), icon: "folder", trailing: "›", onSelect: () => setMenuScreen("group") },
+    { id: "delete", label: t("ui.common.remove"), icon: "delete", shortcut: "D", divider: true, onSelect: () => beginConfirm() },
+    ...(session.agent === "claude" ? [] : [{ id: "permanent-delete", label: t("ui.common.permanently_delete"), icon: "delete" as const, danger: true, onSelect: () => beginConfirm(true) }]),
   ];
   const groupItems: SidebarMenuItem[] = [
-    { id: "back", label: "返回", icon: "back", onSelect: () => setMenuScreen("main") },
+    { id: "back", label: t("ui.common.back"), icon: "back", onSelect: () => setMenuScreen("main") },
     ...groups.map((group) => ({
       id: `group:${group.id}`, label: group.name, icon: "folder" as const,
       onSelect: () => void runMenuAction(() => store.patchSession(session.id, { groupId: group.id })),
     })),
-    { id: "new-group", label: "新建分组…", icon: "plus", divider: groups.length > 0, onSelect: () => setMenuScreen("new-group") },
+    { id: "new-group", label: t("ui.Sidebar.new_group"), icon: "plus", divider: groups.length > 0, onSelect: () => setMenuScreen("new-group") },
     ...(session.groupId ? [{
-      id: "leave-group", label: "移出分组", icon: "ungroup" as const, divider: true,
+      id: "leave-group", label: t("ui.Sidebar.remove_from_group"), icon: "ungroup" as const, divider: true,
       onSelect: () => void runMenuAction(() => store.patchSession(session.id, { groupId: null })),
     }] : []),
   ];
   const newGroupItems: SidebarMenuItem[] = [
-    { id: "back", label: "返回", icon: "back", onSelect: () => setMenuScreen("group") },
+    { id: "back", label: t("ui.common.back"), icon: "back", onSelect: () => setMenuScreen("group") },
   ];
 
   if (confirming) {
@@ -689,9 +688,7 @@ function SessionRow({
           }
         }}
       >
-        <p className="session-confirm-text">
-          从工作台移除此会话？{AGENT_LABELS[session.agent]} 自己的对话记录不会被删除（CLI / VS Code 仍可续接），工作台里的这份记录与附件会一并删除。
-          {running && "该会话仍在运行，移除会停止它。"}
+        <p className="session-confirm-text">{t("ui.Sidebar.remove_this_session_from_the_workspace")}{AGENT_LABELS[session.agent]}{t("ui.Sidebar.the_native_conversation_history_will_be_preserved")}{running && t("ui.Sidebar.this_session_is_still_running_removing_it")}
         </p>
         {error && <p className="session-confirm-error">{error}</p>}
         <div className="session-confirm-actions">
@@ -701,18 +698,16 @@ function SessionRow({
             disabled={busy}
             onClick={() => void confirm()}
           >
-            {busy ? "移除中…" : "确认移除"}
+            {busy ? t("ui.Sidebar.removing") : t("ui.Sidebar.confirm_removal")}
           </button>
           <button
             type="button"
             className="btn"
             ref={cancelBtnRef}
             disabled={busy}
-            title="取消（Esc）"
+            title={t("ui.common.cancel_esc")}
             onClick={cancelConfirm}
-          >
-            取消
-          </button>
+          >{t("ui.common.cancel")}</button>
         </div>
       </div>
     );
@@ -727,7 +722,7 @@ function SessionRow({
             ref={renameRef}
             className="session-title-input"
             defaultValue={session.customTitle ?? title}
-            aria-label={`重命名会话 ${shortTitle}`}
+            aria-label={t("ui.Sidebar.rename_session", { p0: (shortTitle) })}
             disabled={renameBusy}
             onKeyDown={(e) => {
               e.stopPropagation();
@@ -752,7 +747,7 @@ function SessionRow({
         className="session-swipe-more"
         tabIndex={swipeOpen ? 0 : -1}
         aria-hidden={!swipeOpen}
-        aria-label={`会话 ${shortTitle} 的操作`}
+        aria-label={t("ui.Sidebar.actions_for_session", { p0: (shortTitle) })}
         onClick={(e) => {
           const rect = e.currentTarget.getBoundingClientRect();
           openMenu(rect.left, rect.bottom + 4);
@@ -811,12 +806,12 @@ function SessionRow({
         <SidebarSessionTitle text={title} />
         <span className="row-meta">
           {pending > 0 && (
-            <span className="gate-badge" title={`${pending} 个闸门等待处理`}>
+            <span className="gate-badge" title={t("ui.Sidebar.approvals_pending", { p0: (pending) })}>
               {pending}
             </span>
           )}
           {session.riskyMode && (
-            <span className="risky-mark" title="该会话使用免审批或不询问模式">
+            <span className="risky-mark" title={t("ui.Sidebar.this_session_uses_a_mode_with_no")}>
               !
             </span>
           )}
@@ -824,9 +819,9 @@ function SessionRow({
             <span
               className={`status-dot status-${dot}`}
               role="img"
-              aria-label={backgroundBusy ? `后台 ${session.backgroundTasks!.length} 个任务` : STATUS_LABELS[session.status] ?? session.status}
+              aria-label={backgroundBusy ? t("ui.Sidebar.background_tasks", { p0: (session.backgroundTasks!.length) }) : STATUS_LABELS[session.status] ?? session.status}
               title={backgroundBusy
-                ? `后台 ${session.backgroundTasks!.length} 个任务：${session.backgroundTasks!.map((task) => task.description || task.type).join("；")}`
+                ? t("ui.Sidebar.background_tasks_2", { p0: (session.backgroundTasks!.length), p1: (session.backgroundTasks!.map((task) => task.description || task.type).join("；")) })
                 : STATUS_HINTS[session.status] ?? session.status}
             />
           )}
@@ -838,7 +833,7 @@ function SessionRow({
       <button
         type="button"
         className="session-row-more"
-        aria-label={`会话 ${shortTitle} 的操作`}
+        aria-label={t("ui.Sidebar.actions_for_session", { p0: (shortTitle) })}
         aria-haspopup="menu"
         aria-expanded={menuAt !== null}
         onClick={toggleMenuAt}
@@ -848,7 +843,7 @@ function SessionRow({
       {menuAt && (
         <SidebarActionMenu
           position={menuAt}
-          label={`会话 ${shortTitle} 的操作`}
+          label={t("ui.Sidebar.actions_for_session", { p0: (shortTitle) })}
           items={mainItems}
           submenuItems={menuScreen === "group" ? groupItems : menuScreen === "new-group" ? newGroupItems : undefined}
           error={menuError}
@@ -865,8 +860,8 @@ function SessionRow({
               <input
                 className="row-menu-input"
                 value={newGroupName}
-                placeholder="分组名称，回车创建并移入"
-                aria-label="新分组名称"
+                placeholder={t("ui.Sidebar.group_name_press_enter_to_create_and")}
+                aria-label={t("ui.Sidebar.new_group_name")}
                 onChange={(e) => setNewGroupName(e.target.value)}
                 onKeyDown={(e) => e.stopPropagation()}
               />
@@ -963,8 +958,8 @@ function SessionGroupHeader({
     }
   };
   const items: SidebarMenuItem[] = [
-    { id: "rename-group", label: "重命名分组", icon: "rename", onSelect: () => { closeMenu(); setError(null); setRenaming(true); } },
-    { id: "delete-group", label: "删除分组", icon: "delete", danger: true, divider: true, onSelect: () => void removeGroup() },
+    { id: "rename-group", label: t("ui.Sidebar.rename_group"), icon: "rename", onSelect: () => { closeMenu(); setError(null); setRenaming(true); } },
+    { id: "delete-group", label: t("ui.Sidebar.delete_group"), icon: "delete", danger: true, divider: true, onSelect: () => void removeGroup() },
   ];
 
   return (
@@ -974,7 +969,7 @@ function SessionGroupHeader({
           ref={renameRef}
           className="session-title-input session-group-title-input"
           defaultValue={group.name}
-          aria-label={`重命名分组 ${group.name}`}
+          aria-label={t("ui.Sidebar.rename_group_2", { p0: (group.name) })}
           disabled={busy}
           onKeyDown={(e) => {
             e.stopPropagation();
@@ -1002,7 +997,7 @@ function SessionGroupHeader({
         type="button"
         ref={moreRef}
         className="session-group-more"
-        aria-label={`${group.name} 的分组操作`}
+        aria-label={t("ui.Sidebar.group_actions_for", { p0: (group.name) })}
         aria-haspopup="menu"
         aria-expanded={menuAt !== null}
         onClick={toggleMenu}
@@ -1012,7 +1007,7 @@ function SessionGroupHeader({
       {menuAt && (
         <SidebarActionMenu
           position={menuAt}
-          label={`${group.name} 的分组操作`}
+          label={t("ui.Sidebar.group_actions_for", { p0: (group.name) })}
           items={items}
           error={menuError}
           onClose={(returnFocus) => closeMenu(returnFocus === true)}
@@ -1104,7 +1099,7 @@ function NewSessionForm({ onDone, initialCwd }: { onDone: () => void; initialCwd
         void submit();
       }}
     >
-      <div className="new-agents" role="radiogroup" aria-label="选择 agent">
+      <div className="new-agents" role="radiogroup" aria-label={t("ui.Sidebar.select_agent")}>
         {(Object.keys(AGENT_LABELS) as AgentKind[]).map((kind) => (
           <button
             key={kind}
@@ -1121,19 +1116,19 @@ function NewSessionForm({ onDone, initialCwd }: { onDone: () => void; initialCwd
         ))}
       </div>
       <div className="new-field">
-        <label htmlFor="new-session-cwd">{meta?.capabilities.windowsPaths ? "工作目录（Windows / Linux 路径）" : "工作目录"}</label>
-        <p className="new-hint">{meta?.capabilities.windowsPaths ? "可直接粘贴 Windows 文件夹路径，自动转换；点“浏览…”选择目录，地址栏左侧文件夹按钮可调用 Windows 选择窗口。" : "粘贴本机文件夹路径，或点“浏览…”选择目录。"}</p>
+        <label htmlFor="new-session-cwd">{meta?.capabilities.windowsPaths ? t("ui.Sidebar.working_directory_windows_linux_path") : t("ui.Sidebar.working_directory")}</label>
+        <p className="new-hint">{meta?.capabilities.windowsPaths ? t("ui.Sidebar.paste_a_windows_folder_path_to_convert") : t("ui.Sidebar.paste_a_local_folder_path_or_choose")}</p>
         <div className="cwd-input-row">
           <input
             id="new-session-cwd"
             type="text"
             value={cwd}
             onChange={(e) => setCwd(e.target.value)}
-            placeholder={"C:\\Users\\… 或 /home/you/project"}
+            placeholder={t("ui.Sidebar.c_users_or_home_you_project")}
             className="mono"
             required
           />
-          <button ref={browseButtonRef} type="button" className="btn" onClick={() => setBrowseOpen(true)}>浏览…</button>
+          <button ref={browseButtonRef} type="button" className="btn" onClick={() => setBrowseOpen(true)}>{t("ui.Sidebar.browse")}</button>
         </div>
       </div>
       {/* 首条消息 + 配置胶囊：与会话输入框同一形态（胶囊直接显示当前值，点开选） */}
@@ -1142,8 +1137,8 @@ function NewSessionForm({ onDone, initialCwd }: { onDone: () => void; initialCwd
           value={message}
           onChange={(e) => setMessage(e.target.value)}
           rows={2}
-          aria-label="首条消息（可选）"
-          placeholder="首条消息（可选，创建后立即发给 agent）"
+          aria-label={t("ui.Sidebar.first_message_optional")}
+          placeholder={t("ui.Sidebar.first_message_optional_sent_to_the_agent")}
         />
         <div className="cfg-bar">
           <NewConfigPills options={options} selected={configSel} onChange={setConfigSel} />
@@ -1155,12 +1150,12 @@ function NewSessionForm({ onDone, initialCwd }: { onDone: () => void; initialCwd
         className="btn btn-primary"
         ref={submitBtnRef}
         disabled={busy || !cwd.trim()}
-        title={!cwd.trim() ? "请先填写工作目录" : undefined}
+        title={!cwd.trim() ? t("ui.Sidebar.enter_a_working_directory_first") : undefined}
       >
-        {busy ? "创建中…" : "创建并进入"}
+        {busy ? t("ui.Sidebar.creating") : t("ui.Sidebar.create_and_open")}
       </button>
       {/* 禁用原因不只靠 title tooltip：直接写在按钮下方 */}
-      {!cwd.trim() && <p className="new-hint">请先填写工作目录</p>}
+      {!cwd.trim() && <p className="new-hint">{t("ui.Sidebar.enter_a_working_directory_first")}</p>}
       {browseOpen && (
         <DirectoryBrowser
           initialPath={cwd}
@@ -1186,7 +1181,7 @@ function NewConfigPills({
   const modelOptions = configOptionsForModel(options, selected.model);
   const build = (option: DriverConfigOption) => {
     // default 为 null 的那条 values 项带后端给的「跟随 … 配置」标签，优先用它
-    const followLabel = option.values.find((v) => v.value === null)?.label ?? "跟随配置";
+    const followLabel = option.values.find((v) => v.value === null)?.label ?? t("ui.common.use_configuration");
     const group: MenuGroup = {
       id: option.id,
       title: option.name,

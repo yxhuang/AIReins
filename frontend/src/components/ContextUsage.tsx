@@ -1,3 +1,4 @@
+import { t } from "../i18n";
 import { useCallback, useEffect, useState } from "react";
 import { fetchSessionInfo } from "../api";
 import { contextPercent } from "../context-usage";
@@ -29,7 +30,7 @@ export function ContextUsage({ session }: { session: SessionRecord }) {
     ? claudeContext?.id === session.id && claudeContext.model === model ? claudeContext.payload : undefined
     : latestUsage;
   const percent = contextPercent(session.agent, payload);
-  const label = percent === null ? "上下文用量暂不可用" : `上下文已用约 ${Math.round(percent)}%`;
+  const label = percent === null ? t("ui.ContextUsage.context_usage_is_unavailable") : t("ui.ContextUsage.about_of_context_used", { p0: (Math.round(percent)) });
   return (
     <span className={`context-usage${percent === null ? " unknown" : ""}`} tabIndex={0}
       role="img" aria-label={label} data-tooltip={label}>

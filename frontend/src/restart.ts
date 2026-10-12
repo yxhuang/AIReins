@@ -1,3 +1,4 @@
+import { t } from "./i18n";
 import type { SessionRecord } from "./types";
 
 /** 与托盘 Exit-Workbench 相同：同一会话同时 running / 有后台任务只计一次。 */
@@ -34,9 +35,9 @@ export function restartAndReconnect(
       if (source.wsState !== "open") disconnected = true;
       if (accepted && disconnected && source.wsState === "open") finish();
     };
-    const abort = () => finish(new Error("重启等待已取消"));
+    const abort = () => finish(new Error(t("core.082")));
     const unsubscribe = source.subscribe(check);
-    const timer = setTimeout(() => finish(new Error("60 秒内未恢复连接")), timeoutMs);
+    const timer = setTimeout(() => finish(new Error(t("core.083"))), timeoutMs);
     signal.addEventListener("abort", abort, { once: true });
     if (signal.aborted) { abort(); return; }
     request().then(() => {

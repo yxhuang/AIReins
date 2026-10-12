@@ -1,3 +1,4 @@
+import { localizeServerData, t } from "./i18n";
 import type {
   CommandInfo,
   ConfigOptionId,
@@ -769,7 +770,7 @@ export class Store {
 
   private canReplaceFile(): boolean {
     if (this.filePreview?.saving) return false;
-    return !unsavedFile(this.filePreview) || window.confirm("文件有未保存修改。放弃修改并离开此文件？");
+    return !unsavedFile(this.filePreview) || window.confirm(t("core.090"));
   }
 
   async openFilePreview(target: WorkFileTarget): Promise<void> {
@@ -848,7 +849,7 @@ export class Store {
       this.showFileTab(next);
       return;
     }
-    if (unsavedFile(this.fileTabs[index]!.preview) && !window.confirm("该标签页的文件有未保存修改。放弃修改并关闭？")) return;
+    if (unsavedFile(this.fileTabs[index]!.preview) && !window.confirm(t("core.091"))) return;
     this.fileTabs = this.fileTabs.filter(tab => tab.id !== id); this.notify();
   }
 
@@ -1071,7 +1072,7 @@ export class Store {
         // 服务端响应必须严格推进历史游标；异常保留旧窗口并提供重试。
         if (page.events.some((event) => event.seq >= beforeSeq)
           || (page.hasMore && (page.firstSeq <= 0 || page.firstSeq >= beforeSeq))
-          || page.firstSeq !== (page.events[0]?.seq ?? 0)) throw new Error("更早消息的分页游标无效");
+          || page.firstSeq !== (page.events[0]?.seq ?? 0)) throw new Error(t("core.092"));
         const seen = new Set(current.events.filter((event) => !event.ephemeral).map((event) => event.seq));
         const earlier = page.events.filter((event) => {
           if (seen.has(event.seq)) return false;
@@ -1111,7 +1112,7 @@ export class Store {
   /** 定位条发现未决闸门不在当前 DOM 时：明确提示并用权威快照恢复。 */
   recoverMissingPendingGate(id: string): Promise<void> {
     this.lastError = {
-      message: "待处理闸门不在当前事件窗口，正在重新载入会话快照，请稍后再试。",
+      message: t("core.093"),
       sessionId: id,
     };
     this.notify();
@@ -1220,7 +1221,7 @@ export class Store {
     socket.addEventListener("message", (messageEvent) => {
       if (this.socket !== socket) return; // 已被 reconnectNow 换掉的旧连接
       try {
-        this.handleFrame(JSON.parse(String(messageEvent.data)) as Record<string, unknown>);
+        this.handleFrame(localizeServerData(JSON.parse(String(messageEvent.data))) as Record<string, unknown>);
       } catch {
         // 无法解析的帧直接忽略。
       }
@@ -1290,7 +1291,7 @@ export class Store {
       return;
     }
     if (type === "error") {
-      const msg = String(frame.msg ?? "未知错误");
+      const msg = String(frame.msg ?? t("core.094"));
       const sid = typeof frame.sessionId === "string" ? frame.sessionId : "";
       // 带 clientRequestId 的发送拒绝：按 id 归因（不进 configPending 的配置错误路径），
       // 暂存丢弃、错误照告；仅当草稿仍为空（发送间隙没有新输入）才把文本写回草稿并请 Composer 还回文本与引用。
@@ -1386,7 +1387,7 @@ export class Store {
             this.configPending.delete(event.sessionId);
             this.configErrors.set(
               event.sessionId,
-              String(event.payload.message ?? "切换失败"),
+              String(event.payload.message ?? t("core.095")),
             );
           }
         }
@@ -1483,7 +1484,7 @@ export class Store {
     this.configSwitching.delete(event.sessionId);
     this.configErrors.delete(event.sessionId);
     if (payload.effectiveFrom === "next_turn") {
-      this.configHints.set(event.sessionId, "下一轮生效");
+      this.configHints.set(event.sessionId, t("core.096"));
       const timer = this.configHintTimers.get(event.sessionId);
       if (timer) clearTimeout(timer);
       this.configHintTimers.set(
@@ -1514,7 +1515,7 @@ export class Store {
     // 帧里带 sessionId 时一并记入错误，toast 可跳转到对应会话
     const sessionId = typeof frame.sessionId === "string" ? frame.sessionId : undefined;
     this.lastError = {
-      message: "连接已断开，正在重连…",
+      message: t("core.097"),
       ...(sessionId ? { sessionId } : {}),
     };
     this.notify();
@@ -1550,9 +1551,9 @@ export class Store {
   private sendBlockReason(sessionId: string): string | null {
     const pending = this.pendingCount(sessionId);
     const reason = pending > 0
-      ? `有 ${pending} 个待处理的审批闸门，处理后才能发送或插话`
+      ? t("core.098", { p0: pending })
       : this.configSwitching.has(sessionId)
-        ? "正在切换配置，请稍候再发送"
+        ? t("core.099")
         : null;
     if (reason) {
       this.sendNotices.set(sessionId, reason);
@@ -1782,7 +1783,7 @@ export class Store {
 
   setRemoteControl(sessionId: string, enabled: boolean): void {
     if (!this.send({ type: "set_remote_control", sessionId, enabled })) {
-      this.lastError = { message: "连接已断开，无法切换 Remote Control", sessionId };
+      this.lastError = { message: t("core.100"), sessionId };
       this.notify();
     }
   }
@@ -1801,7 +1802,7 @@ export class Store {
     this.configHints.delete(sessionId);
     if (!this.send({ type: "set_config", sessionId, config })) {
       this.configPending.delete(sessionId);
-      this.configErrors.set(sessionId, "连接已断开，正在重连…");
+      this.configErrors.set(sessionId, t("core.097"));
     }
     this.notify();
   }
@@ -1882,9 +1883,9 @@ export class Store {
   async remove(id: string, permanently = false): Promise<void> {
     const session = this.session(id);
     const agent = session?.agent ?? "";
-    if (permanently && !session?.nativeSessionId) throw new Error("没有原生会话 ID，无法彻底删除。");
+    if (permanently && !session?.nativeSessionId) throw new Error(t("core.101"));
     const result = await deleteSession(id, permanently ? session?.nativeSessionId : undefined);
-    if (permanently && result.nativeTranscriptPreserved !== false) throw new Error("服务端未确认原生历史已删除，请刷新后核查会话状态。");
+    if (permanently && result.nativeTranscriptPreserved !== false) throw new Error(t("core.102"));
     if (permanently) {
       this.historyRevision++;
       if (this.historySelection?.agent === agent && this.historySelection.nativeSessionId === session?.nativeSessionId) {
@@ -1931,8 +1932,8 @@ export class Store {
       this.navigate(next?.id ?? null);
     }
     // 删除只动注册表：明示原生对话记录仍在，可凭原生 id 续接
-    this.removalNotice = permanently ? { message: "已彻底删除此会话的 Workbench 记录及原生本地历史。" } : {
-      message: `已从工作台移除。${agent} 的原生对话记录仍在，可新建会话时填入原生 id 续接。`,
+    this.removalNotice = permanently ? { message: t("core.103") } : {
+      message: t("core.104", { p0: agent }),
       ...(result.nativeTranscriptPath ? { path: result.nativeTranscriptPath } : {}),
     };
     this.notify();
@@ -2027,7 +2028,7 @@ function writeSavedDraft(sessionId: string, text: string | null): void {
 /** config_update_started 的过渡文案：后端给什么显示什么；缺省兜底。 */
 function switchMessageFromPayload(payload: Record<string, unknown>): string {
   const message = payload.message;
-  return typeof message === "string" && message ? message : "正在切换配置…";
+  return typeof message === "string" && message ? message : t("core.105");
 }
 
 // 从事件推断会话状态（权威值靠定期 GET /api/sessions 对齐）。

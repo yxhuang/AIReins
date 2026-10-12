@@ -1,3 +1,4 @@
+import { t } from "../i18n";
 import { Fragment, type ReactNode, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import type { CommandInfo, DriverConfigOption, Mention, SessionRecord } from "../types";
 import { sessionTitle, truncateDisplayWidth } from "../format";
@@ -231,7 +232,7 @@ export function SessionView({ session, mobileTail, usage }: { session: SessionRe
   return (
     <div className={`session agent-${session.agent}`}>
       <header className="session-head">
-        <button type="button" className="btn mobile-round mobile-back" aria-label="返回会话列表" title="会话列表" onClick={() => store.backFromSession()}>
+        <button type="button" className="btn mobile-round mobile-back" aria-label={t("ui.SessionView.back_to_session_list")} title={t("ui.SessionView.session_list")} onClick={() => store.backFromSession()}>
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7" /></svg>
         </button>
         <div className="session-head-main">
@@ -251,16 +252,14 @@ export function SessionView({ session, mobileTail, usage }: { session: SessionRe
             <SessionDispatchBadge runs={dispatchRuns} backgroundCount={backgroundCount} />
             <SessionMoreMenu session={session} usage={usage} />
           </div>
-          {wsState !== "open" && <span className="ws-note" role="status">{wsState === "connecting" ? "正在重连…" : "连接已断开"}</span>}
+          {wsState !== "open" && <span className="ws-note" role="status">{wsState === "connecting" ? t("ui.SessionView.reconnecting") : t("ui.SessionView.disconnected")}</span>}
         </div>
       </header>
 
       <SessionDispatchLink runs={dispatchRuns} backgroundCount={backgroundCount} />
 
       {session.riskyMode && (
-        <div className="risky-banner" role="alert">
-          工具审批遵循输入窗所选权限模式
-        </div>
+        <div className="risky-banner" role="alert">{t("ui.SessionView.tool_approvals_follow_the_permission_mode_selected")}</div>
       )}
 
       <div className="stream-region">
@@ -270,13 +269,13 @@ export function SessionView({ session, mobileTail, usage }: { session: SessionRe
         {data?.hasMore && (
           <div className="earlier-messages" ref={earlierRef} role="status">
             {data.olderError
-              ? <button type="button" onClick={loadEarlier} title={data.olderError}>加载更早的消息失败，点击重试</button>
-              : "加载更早的消息…"}
+              ? <button type="button" onClick={loadEarlier} title={data.olderError}>{t("ui.SessionView.failed_to_load_earlier_messages_click_to")}</button>
+              : t("ui.SessionView.loading_earlier_messages")}
           </div>
         )}
-        {!data && <p className="system-line">载入会话…</p>}
+        {!data && <p className="system-line">{t("ui.SessionView.loading_session")}</p>}
         {data && data.dropped > 0 && (
-          <p className="system-line">有 {data.dropped} 条较早事件已省略（内存上限）；快照仍保留全量。</p>
+          <p className="system-line">{t("ui.SessionView.earlier_events_omitted_due_to_the_memory_sentence", { p0: (data.dropped) })}</p>
         )}
         <MarkdownCommitContext value={onMarkdownCommit}>{rows}</MarkdownCommitContext>
       </div>
@@ -288,13 +287,11 @@ export function SessionView({ session, mobileTail, usage }: { session: SessionRe
         container.scrollTop = container.scrollHeight;
         setShowLatest(false);
         updateHiddenPending();
-      }}>回到最新 ↓</button>}
+      }}>{t("ui.SessionView.back_to_latest")}</button>}
       </div>
 
       {pendingGateIds.length > 0 && hiddenPending > 0 && (
-        <button type="button" className="pending-bar" onClick={scrollToFirstPending}>
-          {pendingGateIds.length} 个闸门等待处理 ↑
-        </button>
+        <button type="button" className="pending-bar" onClick={scrollToFirstPending}>{t("ui.SessionView.approvals_pending_sentence", { p0: (pendingGateIds.length) })}</button>
       )}
 
       <Composer session={session} dead={dead} errored={session.status === "error"} />
@@ -354,16 +351,16 @@ function SessionMoreMenu({ session, usage }: { session: SessionRecord; usage?: U
   };
 
   const disabledReason = busy
-    ? "正在释放 worker，请稍候"
+    ? t("ui.SessionView.releasing_worker_please_wait")
     : session.released
-      ? "worker 已释放；下次发送时自动从磁盘续接"
+      ? t("ui.SessionView.worker_released_the_next_message_will_resume")
       : !session.nativeSessionId
-        ? "首轮完成前没有原生会话 id，无法释放"
+        ? t("ui.SessionView.no_native_session_id_before_the_first")
         : session.status !== "idle"
-          ? "会话空闲时才能释放"
+          ? t("ui.SessionView.the_session_must_be_idle_to_release")
           : null;
   const canRelease = disabledReason === null;
-  const title = disabledReason ?? "VSCode 继续：释放 worker、复制续接命令，桌面端尝试打开 VSCode";
+  const title = disabledReason ?? t("ui.SessionView.continue_in_vs_code_release_the_worker");
 
   const onClick = async () => {
     if (!canRelease) return;
@@ -377,12 +374,12 @@ function SessionMoreMenu({ session, usage }: { session: SessionRecord; usage?: U
         copied = true;
       } catch {
         // 剪贴板不可用（权限/非安全上下文）：弹窗让用户手动复制
-        window.prompt("已释放。手动复制续接命令：", command);
+        window.prompt(t("ui.SessionView.released_copy_the_resume_command_manually"), command);
       }
       const openVSCode = Boolean(vscodeUri) && !window.matchMedia("(max-width: 720px), (pointer: coarse)").matches;
       showNotice(copied
-        ? openVSCode ? "已释放，命令已复制，正在打开 VSCode" : "已释放，命令已复制"
-        : openVSCode ? "已释放，正在打开 VSCode；请手动复制命令" : "已释放；请手动复制命令", false);
+        ? openVSCode ? t("ui.SessionView.released_command_copied_opening_vs_code") : t("ui.SessionView.released_command_copied")
+        : openVSCode ? t("ui.SessionView.released_opening_vs_code_copy_the_command") : t("ui.SessionView.released_copy_the_command_manually"), false);
       if (openVSCode) window.location.href = vscodeUri!;
     } catch (error) {
       showNotice(error instanceof Error ? error.message : String(error), true);
@@ -397,13 +394,13 @@ function SessionMoreMenu({ session, usage }: { session: SessionRecord; usage?: U
     closeMenu();
     try {
       await navigator.clipboard.writeText(id);
-      showNotice("会话 ID 已复制", false);
+      showNotice(t("ui.SessionView.session_id_copied"), false);
     } catch {
-      window.prompt("手动复制会话 ID：", id);
+      window.prompt(t("ui.SessionView.copy_the_session_id_manually"), id);
     }
   };
 
-  const feedback = busy ? { text: "释放中…", error: false } : notice;
+  const feedback = busy ? { text: t("ui.SessionView.releasing"), error: false } : notice;
 
   return (
     <>
@@ -413,14 +410,14 @@ function SessionMoreMenu({ session, usage }: { session: SessionRecord; usage?: U
         </span>
       )}
       <span className="session-more" ref={rootRef}>
-        <button ref={triggerRef} type="button" className="btn chrome-icon-btn session-more-trigger" aria-label="更多" title="更多" aria-haspopup="menu" aria-expanded={open} aria-controls={menuId}
+        <button ref={triggerRef} type="button" className="btn chrome-icon-btn session-more-trigger" aria-label={t("ui.common.more")} title={t("ui.common.more")} aria-haspopup="menu" aria-expanded={open} aria-controls={menuId}
           onClick={() => open ? closeMenu() : setOpen(true)}
           onKeyDown={(event) => {
             if (event.key === "ArrowDown" || event.key === "ArrowUp") { event.preventDefault(); setOpen(true); }
           }}>
           <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="1.5" /><circle cx="12" cy="12" r="1.5" /><circle cx="19" cy="12" r="1.5" /></svg>
         </button>
-        <div id={menuId} className="session-more-menu" role="menu" aria-label="会话更多操作" ref={menuRef} tabIndex={-1} hidden={!open} onKeyDown={(event) => {
+        <div id={menuId} className="session-more-menu" role="menu" aria-label={t("ui.SessionView.more_session_actions")} ref={menuRef} tabIndex={-1} hidden={!open} onKeyDown={(event) => {
           if (["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) {
             event.preventDefault();
             [...menuRef.current?.querySelectorAll<HTMLButtonElement>("button:not(:disabled)") ?? []].find((button) => button.offsetParent)?.focus();
@@ -428,17 +425,14 @@ function SessionMoreMenu({ session, usage }: { session: SessionRecord; usage?: U
         }}>
           <PanelMenuItems onDone={closeMenu} />
           {usage && <button type="button" className="btn session-more-item session-more-mobile" role="menuitem" onClick={() => { closeMenu(); usage.open(); }}>
-            <PageIcon icon={usage.icon} /> AI 用量
-          </button>}
+            <PageIcon icon={usage.icon} />{t("ui.SessionView.ai_usage")}</button>}
           <hr className="session-more-mobile session-more-sep" />
           <button type="button" className="btn session-more-item" role="menuitem" disabled={!session.nativeSessionId} aria-disabled={!session.nativeSessionId}
-            title={session.nativeSessionId ? `复制原生会话 id：${session.nativeSessionId}` : "首轮完成前没有原生会话 id"} onClick={() => void copyId()}>
-            <CopyIcon /> 复制会话 ID
-          </button>
-          <button type="button" className="btn session-more-item" role="menuitem" aria-label="VSCode 继续" disabled={!canRelease} aria-disabled={!canRelease}
+            title={session.nativeSessionId ? t("ui.SessionView.copy_native_session_id", { p0: (session.nativeSessionId) }) : t("ui.SessionView.no_native_session_id_until_the_first")} onClick={() => void copyId()}>
+            <CopyIcon />{t("ui.SessionView.copy_session_id")}</button>
+          <button type="button" className="btn session-more-item" role="menuitem" aria-label={t("ui.SessionView.continue_in_vs_code")} disabled={!canRelease} aria-disabled={!canRelease}
             aria-describedby={disabledReason ? `${menuId}-reason` : undefined} title={title} onClick={() => void onClick()}>
-            <VSCodeIcon /> VSCode 继续
-          </button>
+            <VSCodeIcon />{t("ui.SessionView.continue_in_vs_code")}</button>
           {disabledReason && <p id={`${menuId}-reason`} className="session-more-reason">{disabledReason}</p>}
         </div>
       </span>
@@ -458,9 +452,9 @@ function ConfigSummary({ session }: { session: SessionRecord }) {
     // claude 跟随配置时并入实际生效值（首轮前是设置别名，init 后是精确 id；精度差异见控件旁标注）
     const effective = effectiveFor(session, option.id);
     if (effective) return option.id === "model" ? modelShortName(effective.value) : effective.value;
-    return "跟随配置";
+    return t("ui.common.use_configuration");
   });
-  return <span title="当前配置摘要；可更改的项在输入框上方">{parts.join(" · ")}</span>;
+  return <span title={t("ui.SessionView.current_configuration_summary_editable_options_are_above")}>{parts.join(" · ")}</span>;
 }
 
 // 模型/推理强度/审批模式控件：选项全部来自 /api/meta 的 options，
@@ -497,7 +491,7 @@ function ConfigControls({ session }: { session: SessionRecord }) {
     const currentKey = current ?? "";
     // default 为 null 的那条 values 项带后端给的「跟随 … 配置」标签，优先用它。
     const followLabel =
-      option.values.find((v) => v.value === null)?.label ?? "跟随配置";
+      option.values.find((v) => v.value === null)?.label ?? t("ui.common.use_configuration");
     const known = new Set(option.values.map((v) => v.value));
     const disabled =
       !option.mutable || !live || Boolean(switching) || Boolean(pending?.has(option.id));
@@ -510,9 +504,9 @@ function ConfigControls({ session }: { session: SessionRecord }) {
     const reason = switching
       ? undefined
       : !option.mutable
-        ? "此项需新建会话才能更改"
+        ? t("ui.SessionView.start_a_new_session_to_change_this")
         : !live
-          ? "会话已结束，无法更改"
+          ? t("ui.SessionView.this_session_has_ended_and_cannot_be")
           : undefined;
     const items: MenuItem[] = [];
     if (currentKey === "") {
@@ -529,10 +523,10 @@ function ConfigControls({ session }: { session: SessionRecord }) {
                 className="config-effective-src"
                 title={
                   effective.source === "init"
-                    ? "Claude 运行时回报的精确值"
+                    ? t("ui.SessionView.exact_value_reported_by_the_claude_runtime")
                     : effective.source === "settings" && option.id === "model"
                       ? ALIAS_NOTE
-                      : "来自 Claude 分层设置合并"
+                      : t("ui.SessionView.from_merged_claude_settings")
                 }
               >
                 {EFFECTIVE_SOURCE_LABELS[effective.source]}
@@ -568,7 +562,7 @@ function ConfigControls({ session }: { session: SessionRecord }) {
         </>
       ),
     };
-    return { group, text: pillText(option, current ?? undefined, effective?.value), fullText: current || effective?.value || option.default || "跟随配置", reason };
+    return { group, text: pillText(option, current ?? undefined, effective?.value), fullText: current || effective?.value || option.default || t("ui.common.use_configuration"), reason };
   };
 
   const byId = (id: string) => options.find((o) => o.id === id);
@@ -597,7 +591,7 @@ function CacheTimer({ session, className = "" }: { session: SessionRecord; class
   if (session.status === "running" || session.status === "starting") return null;
   if (expiry === null) {
     return (
-      <span className={`cache-timer expired ${className}`} title="Prompt 缓存剩余时间：这个会话还没有完成过回合，第一轮结束后开始倒计时">
+      <span className={`cache-timer expired ${className}`} title={t("ui.SessionView.prompt_cache_time_remaining_this_session_has")}>
         <ClockIcon />—
       </span>
     );
@@ -607,10 +601,10 @@ function CacheTimer({ session, className = "" }: { session: SessionRecord; class
   return (
     <span
       className={`cache-timer${left <= 0 ? " expired" : ""} ${className}`}
-      title={`Prompt 缓存${left > 0 ? `约剩 ${minutes} 分钟` : "已过期"}（自上个回合结束起算）；过期后下一条消息要重建缓存，更慢也更贵`}
+      title={t("ui.SessionView.prompt_cache_since_the_last_turn_ended", { p0: (left > 0 ? t("ui.SessionView.about_minutes_left_detail", { p0: (minutes) }) : t("ui.SessionView.expired_detail")) })}
     >
       <ClockIcon />
-      {left > 0 ? `${minutes}m` : "已过期"}
+      {left > 0 ? `${minutes}m` : t("ui.SessionView.expired")}
     </span>
   );
 }
@@ -621,12 +615,12 @@ function RemoteControlPill({ session }: { session: SessionRecord }) {
   const state = session.remoteControl ?? { status: "disconnected" as const };
   const busy = state.status === "connecting" || state.status === "reconnecting" || state.status === "disconnecting";
   const connected = state.status === "connected";
-  const label = state.status === "connecting" ? "连接中" : state.status === "reconnecting" ? "重连中"
-    : state.status === "disconnecting" ? "关闭中" : state.status === "error" ? "连接失败" : "Remote Control";
-  const title = connected ? `Remote Control 已连接：${state.sessionUrl ?? "会话链接暂不可用"}`
-    : state.status === "error" ? `Remote Control 失败：${state.reason ?? "未知原因"}`
+  const label = state.status === "connecting" ? t("ui.SessionView.connecting") : state.status === "reconnecting" ? t("ui.SessionView.reconnecting_2")
+    : state.status === "disconnecting" ? t("ui.SessionView.closing") : state.status === "error" ? t("ui.SessionView.connection_failed") : "Remote Control";
+  const title = connected ? t("ui.SessionView.remote_control_connected", { p0: (state.sessionUrl ?? t("ui.SessionView.session_link_unavailable_detail")) })
+    : state.status === "error" ? t("ui.SessionView.remote_control_failed", { p0: (state.reason ?? t("ui.SessionView.unknown_reason_detail")) })
     : busy ? `Remote Control ${label}${state.reason ? `：${state.reason}` : ""}`
-    : "Remote Control 未开启";
+    : t("ui.SessionView.remote_control_is_off");
   const link = connected ? state.sessionUrl : undefined;
 
   // Esc 或点外部关闭（与「+」菜单同一纪律）
@@ -659,14 +653,14 @@ function RemoteControlPill({ session }: { session: SessionRecord }) {
         <div className="attach-menu rc-menu" role="menu" aria-label="Remote Control">
           <button type="button" className="attach-item" role="menuitem" disabled={busy}
             onClick={() => { setOpen(false); store.setRemoteControl(session.id, !connected); }}>
-            {connected ? "关闭 Remote Control" : state.status === "error" ? "重试开启 Remote Control" : "开启 Remote Control"}
+            {connected ? t("ui.SessionView.turn_off_remote_control") : state.status === "error" ? t("ui.SessionView.retry_enabling_remote_control") : t("ui.SessionView.turn_on_remote_control")}
           </button>
           {link ? (
             <a className="attach-item" role="menuitem" href={link} target="_blank" rel="noopener noreferrer"
-              title={link} onClick={() => setOpen(false)}>在 claude.ai 打开此会话</a>
+              title={link} onClick={() => setOpen(false)}>{t("ui.SessionView.open_this_session_on_claude_ai")}</a>
           ) : (
             <button type="button" className="attach-item" role="menuitem" disabled
-              title="Remote Control 连接后才有会话链接">在 claude.ai 打开此会话</button>
+              title={t("ui.SessionView.the_session_link_becomes_available_after_remote")}>{t("ui.SessionView.open_this_session_on_claude_ai")}</button>
           )}
         </div>
       )}
@@ -711,7 +705,7 @@ export function restoreComposerInput(currentText: string, attachments: Attachmen
     paths.add(mention.path);
     added.push({
       id: `restore-${restored.version}-${index}`, source: "local", status: "ready", path: mention.path,
-      name: mention.name ?? mention.path.split(/[\\/]/).filter(Boolean).pop() ?? "附件",
+      name: mention.name ?? mention.path.split(/[\\/]/).filter(Boolean).pop() ?? t("ui.SessionView.attachments"),
       ...(mention.type === "image" ? { mimeType: mention.mimeType } : {}),
     });
   }
@@ -874,7 +868,7 @@ function Composer({ session, dead, errored }: { session: SessionRecord; dead: bo
     fetchCodexSkills(session.id, controller.signal).then(result => {
       if (controller.signal.aborted) return;
       setSkills(result.skills);
-      if (result.errors.length) setSkillError("部分 skill 读取失败；详情可通过 /skills 查看");
+      if (result.errors.length) setSkillError(t("ui.SessionView.some_skills_could_not_be_read_see"));
     }).catch(error => {
       if (!controller.signal.aborted) { setSkills([]); setSkillError(error instanceof Error ? error.message : String(error)); }
     }).finally(() => { if (!controller.signal.aborted) setSkillsLoading(false); });
@@ -1046,7 +1040,7 @@ function Composer({ session, dead, errored }: { session: SessionRecord; dead: bo
       const id = `att-${++attachSeq.current}`;
       setAttachments((list) => [
         ...list,
-        { id, source: "upload", name: file.name || "附件", status: "uploading", size: file.size },
+        { id, source: "upload", name: file.name || t("ui.SessionView.attachments"), status: "uploading", size: file.size },
       ]);
       void (async () => {
         try {
@@ -1168,7 +1162,7 @@ function Composer({ session, dead, errored }: { session: SessionRecord; dead: bo
     }
     if (session.agent === "codex" && trimmed.startsWith("/")) {
       if (!willBeCommand || !cmdMatch || readyMentions.length) {
-        setCodexResult({ name: "status", error: "未知 Codex 命令或命令带有附件。请从 / 面板选择可用项。" });
+        setCodexResult({ name: "status", error: t("ui.SessionView.unknown_codex_command_or_command_with_attachments") });
         return;
       }
       if (codexBusy.current) return;
@@ -1326,23 +1320,23 @@ function Composer({ session, dead, errored }: { session: SessionRecord; dead: bo
       {(dead || errored) && (
         <div className="composer-dead">
           {/* error 与 dead 共用续接出口（同 agent/cwd/nativeSessionId），文案区分 */}
-          <span>{dead ? "会话已结束。" : "会话出错了。"}</span>
+          <span>{dead ? t("ui.SessionView.this_session_has_ended") : t("ui.SessionView.this_session_encountered_an_error")}</span>
           <button
             type="button"
             className="btn btn-primary"
             disabled={resumeBusy || !session.nativeSessionId}
             title={
               session.nativeSessionId
-                ? "用同一 agent、同一工作目录新建会话并续接原生会话"
-                : "该会话没有可续接的原生会话 id"
+                ? t("ui.SessionView.create_a_session_with_the_same_agent")
+                : t("ui.SessionView.this_session_has_no_native_session_id")
             }
             onClick={() => void resume()}
           >
-            {resumeBusy ? "新建中…" : "新建会话并续接"}
+            {resumeBusy ? t("ui.SessionView.creating") : t("ui.SessionView.create_a_session_and_resume")}
           </button>
           {/* 没有原生会话 id（如没跑起来就死了）时写明禁用原因，不只靠 title */}
           {!session.nativeSessionId && (
-            <span>该会话没有可续接的原生会话 id</span>
+            <span>{t("ui.SessionView.this_session_has_no_native_session_id")}</span>
           )}
           {resumeError && (
             <span className="config-error" role="alert">
@@ -1352,19 +1346,15 @@ function Composer({ session, dead, errored }: { session: SessionRecord; dead: bo
         </div>
       )}
       {slashOpen && (
-        <div className="cmd-panel" role="listbox" aria-label="斜杠命令" ref={listRef}>
-          {filtered.length === 0 && <div className="cmd-empty">没有匹配的命令</div>}
+        <div className="cmd-panel" role="listbox" aria-label={t("ui.common.slash_commands")} ref={listRef}>
+          {filtered.length === 0 && <div className="cmd-empty">{t("ui.SessionView.no_matching_commands")}</div>}
           {filtered.map((cmd, i) => (
             <Fragment key={cmd.name}>
               {recentCount > 0 && i === 0 && (
-                <div className="cmd-section" aria-hidden="true">
-                  最近使用
-                </div>
+                <div className="cmd-section" aria-hidden="true">{t("ui.SessionView.recently_used")}</div>
               )}
               {recentCount > 0 && i === recentCount && (
-                <div className="cmd-section" aria-hidden="true">
-                  全部命令
-                </div>
+                <div className="cmd-section" aria-hidden="true">{t("ui.SessionView.all_commands")}</div>
               )}
               <div
                 role="option"
@@ -1384,11 +1374,11 @@ function Composer({ session, dead, errored }: { session: SessionRecord; dead: bo
         </div>
       )}
       {mentionOpen && (
-        <div className="cmd-panel file-mention-panel" role="listbox" aria-label="文件引用" ref={listRef}>
-          <div className="cmd-section" title={session.cwd}>文件 · {session.cwd}</div>
-          {filesLoading && <div className="cmd-empty" role="status">正在检索文件…</div>}
-          {filesError && <div className="cmd-empty config-error" role="alert">文件检索失败：{filesError}</div>}
-          {!filesLoading && !filesError && files.length === 0 && <div className="cmd-empty">没有匹配的文件</div>}
+        <div className="cmd-panel file-mention-panel" role="listbox" aria-label={t("ui.SessionView.file_references")} ref={listRef}>
+          <div className="cmd-section" title={session.cwd}>{t("ui.SessionView.files_sentence", { p0: (session.cwd) })}</div>
+          {filesLoading && <div className="cmd-empty" role="status">{t("ui.SessionView.searching_files")}</div>}
+          {filesError && <div className="cmd-empty config-error" role="alert">{t("ui.SessionView.file_search_failed_sentence", { p0: (filesError) })}</div>}
+          {!filesLoading && !filesError && files.length === 0 && <div className="cmd-empty">{t("ui.SessionView.no_matching_files")}</div>}
           {files.map((file, i) => (
             <div
               key={file}
@@ -1407,11 +1397,11 @@ function Composer({ session, dead, errored }: { session: SessionRecord; dead: bo
           ))}
         </div>
       )}
-      {skillOpen && <div className="cmd-panel" role="listbox" aria-label="Codex skills" ref={listRef}>
-        <div className="cmd-section">Skills · 选择后插入 $名称</div>
-        {skillsLoading && <div className="cmd-empty">正在读取 skills…</div>}
+      {skillOpen && <div className="cmd-panel" role="listbox" aria-label={t("ui.SessionView.codex_skills")} ref={listRef}>
+        <div className="cmd-section">{t("ui.SessionView.skills_select_to_insert_name")}</div>
+        {skillsLoading && <div className="cmd-empty">{t("ui.SessionView.reading_skills")}</div>}
         {skillError && <div className="cmd-empty config-error" role="alert">{skillError}</div>}
-        {!skillsLoading && filteredSkills.length === 0 && <div className="cmd-empty">没有匹配的 skill</div>}
+        {!skillsLoading && filteredSkills.length === 0 && <div className="cmd-empty">{t("ui.SessionView.no_matching_skills")}</div>}
         {filteredSkills.map((skill, i) => <div key={skill.path} role="option" aria-selected={i === selSkill}
           className={`cmd-item${i === selSkill ? " selected" : ""}`} title={skill.description}
           onMouseDown={e => { e.preventDefault(); confirmSkill(skill); }} onMouseEnter={() => setSelected(i)}>
@@ -1421,36 +1411,30 @@ function Composer({ session, dead, errored }: { session: SessionRecord; dead: bo
       {tokens.length > 0 && (
         <div className="mention-preview">
           {attachable.length > 0 && (
-            <span>
-              将附加 {attachable.length} 个文件：{attachable.join(" · ")}
-            </span>
+            <span>{t("ui.SessionView.will_attach_files_sentence", { p0: (attachable.length), p1: (attachable.join(" · ")) })}</span>
           )}
           {missing.map((token) => (
-            <span key={token} className="mention-missing">
-              @{token} 未找到，不会附加
-            </span>
+            <span key={token} className="mention-missing">{t("ui.SessionView.not_found_will_not_attach_sentence", { p0: (token) })}</span>
           ))}
-          {checking > 0 && <span>{checking} 个引用检查中…</span>}
+          {checking > 0 && <span>{t("ui.SessionView.references_being_checked_sentence", { p0: (checking) })}</span>}
           {tokens.length > MAX_MENTIONS && (
-            <span className="mention-missing">
-              超过 {MAX_MENTIONS} 个引用，超出的不会附加
-            </span>
+            <span className="mention-missing">{t("ui.SessionView.over_references_extra_references_will_not_attach_sentence", { p0: (MAX_MENTIONS) })}</span>
           )}
         </div>
       )}
       {!slashOpen && activeCmd?.argHint && (
         <div className="composer-hint">
-          <span className="mono">/{activeCmd.name}</span> 参数：{activeCmd.argHint}
+          <span className="mono">/{activeCmd.name}</span>{t("ui.SessionView.arguments")}{activeCmd.argHint}
         </div>
       )}
       {codexResult && <CodexCommandPanel result={codexResult} onClose={closeCodexResult} />}
       {sideQuestion && <SideQuestionDialog sessionId={session.id} agent={session.agent} initialQuestion={sideQuestion.question}
         onClose={() => { setSideQuestion(null); textareaRef.current?.focus(); }} />}
       {session.agent === "kimi" && session.status === "running" && (
-        <div className="composer-hint" role="status">Kimi 不支持运行中插话；发送将排队到当前回合结束，停止执行会取消队列。</div>
+        <div className="composer-hint" role="status">{t("ui.SessionView.kimi_does_not_support_steering_during_execution")}</div>
       )}
       {attachments.length > 0 && (
-        <div className="attach-bar" aria-label="待发送附件">
+        <div className="attach-bar" aria-label={t("ui.SessionView.pending_attachments")}>
           {attachments.map((att) => (
             <div key={att.id} className={`attach-card${att.status === "error" ? " is-error" : ""}`}>
               {att.previewUrl ? (
@@ -1458,15 +1442,15 @@ function Composer({ session, dead, errored }: { session: SessionRecord; dead: bo
               ) : (
                 <span className="attach-name mono" title={att.path ?? att.name}>{att.name}</span>
               )}
-              {att.status === "uploading" && <span className="attach-status">上传中…</span>}
+              {att.status === "uploading" && <span className="attach-status">{t("ui.SessionView.uploading")}</span>}
               {att.status === "error" && (
-                <span className="attach-err" role="alert" title={att.error}>{att.error ?? "上传失败"}</span>
+                <span className="attach-err" role="alert" title={att.error}>{att.error ?? t("ui.SessionView.upload_failed")}</span>
               )}
               <button
                 type="button"
                 className="attach-remove"
-                aria-label={`移除附件 ${att.name}`}
-                title="移除附件"
+                aria-label={t("ui.SessionView.remove_attachment", { p0: (att.name) })}
+                title={t("ui.SessionView.remove_attachment_2")}
                 onClick={() => removeAttachment(att.id)}
               >
                 ×
@@ -1474,9 +1458,7 @@ function Composer({ session, dead, errored }: { session: SessionRecord; dead: bo
             </div>
           ))}
           {readyMentions.length + tokens.length > MAX_MENTIONS && (
-            <span className="mention-missing">
-              附件与 @ 引用合计超过 {MAX_MENTIONS} 个，超出的不会附加
-            </span>
+            <span className="mention-missing">{t("ui.SessionView.attachments_and_references_total_over_extra_items_sentence", { p0: (MAX_MENTIONS) })}</span>
           )}
         </div>
       )}
@@ -1496,17 +1478,17 @@ function Composer({ session, dead, errored }: { session: SessionRecord; dead: bo
         {/* 手机：缓存时间不是按钮，挪到发送键上方的空位，底栏留给按钮 */}
         <div className="composer-input">
           <textarea
-            aria-label="消息"
+            aria-label={t("ui.SessionView.message")}
             ref={textareaRef}
             value={text}
             rows={1}
             disabled={dead}
             placeholder={
               dead
-                ? "会话已结束，新建会话可续接"
+                ? t("ui.SessionView.this_session_has_ended_create_a_new")
                 : TOUCH
-                  ? "发消息给这个 agent…"
-                  : "发消息给这个 agent…（Enter 发送，Shift+Enter 换行）"
+                  ? t("ui.SessionView.message_this_agent")
+                  : t("ui.SessionView.message_this_agent_enter_to_send_shift")
             }
             onChange={(e) => {
               setText(e.target.value);
@@ -1530,7 +1512,7 @@ function Composer({ session, dead, errored }: { session: SessionRecord; dead: bo
             }}
             onKeyDown={onKeyDown}
           />
-          {showRefine ? <button type="button" className="refine-btn" title={`追加 ${refineCommand}`} aria-label={`追加 ${refineCommand}`}
+          {showRefine ? <button type="button" className="refine-btn" title={t("ui.SessionView.append", { p0: String(refineCommand) })} aria-label={t("ui.SessionView.append", { p0: String(refineCommand) })}
             onPointerDown={(event) => event.preventDefault()} onClick={appendRefine}>R</button>
             : session.agent === "claude" && <CacheTimer session={session} className="cache-timer-top" />}
         </div>
@@ -1540,8 +1522,8 @@ function Composer({ session, dead, errored }: { session: SessionRecord; dead: bo
               type="button"
               className="attach-btn"
               disabled={!attachEnabled}
-              title={attachEnabled ? "添加附件（照片、截图或电脑上的文件）" : "该会话不支持附件"}
-              aria-label="添加附件"
+              title={attachEnabled ? t("ui.SessionView.add_attachments_photos_screenshots_or_files_on") : t("ui.SessionView.this_session_does_not_support_attachments")}
+              aria-label={t("ui.SessionView.add_attachment")}
               aria-haspopup="menu"
               aria-expanded={attachMenuOpen}
               onClick={() => setAttachMenuOpen((v) => !v)}
@@ -1549,7 +1531,7 @@ function Composer({ session, dead, errored }: { session: SessionRecord; dead: bo
               <PlusIcon />
             </button>
             {attachMenuOpen && (
-              <div className="attach-menu" role="menu" aria-label="添加附件">
+              <div className="attach-menu" role="menu" aria-label={t("ui.SessionView.add_attachment")}>
                 {/* 不设 accept：iOS 才会给 照片图库/拍照/选取文件 三选项 */}
                 <button
                   type="button"
@@ -1559,9 +1541,7 @@ function Composer({ session, dead, errored }: { session: SessionRecord; dead: bo
                     setAttachMenuOpen(false);
                     fileInputRef.current?.click();
                   }}
-                >
-                  照片 / 文件
-                </button>
+                >{t("ui.SessionView.photos_files")}</button>
                 <button
                   type="button"
                   className="attach-item"
@@ -1570,9 +1550,7 @@ function Composer({ session, dead, errored }: { session: SessionRecord; dead: bo
                     setAttachMenuOpen(false);
                     setFileBrowseOpen(true);
                   }}
-                >
-                  电脑上的文件
-                </button>
+                >{t("ui.SessionView.files_on_computer")}</button>
               </div>
             )}
           </span>
@@ -1593,7 +1571,7 @@ function Composer({ session, dead, errored }: { session: SessionRecord; dead: bo
           <ConfigControls session={session} />
           {session.agent === "claude" && <CacheTimer session={session} className="cache-timer-bar" />}
           {showComposerInterrupt(session.status, caps?.interrupt, session.processId, text) && (
-            <button type="button" className="composer-interrupt" aria-label="中断" title="打断当前执行"
+            <button type="button" className="composer-interrupt" aria-label={t("ui.SessionView.interrupt")} title={t("ui.SessionView.interrupt_current_execution")}
               onClick={() => store.interrupt(session.id)}><StopIcon /></button>
           )}
           {/* 运行中且输入框为空：发送键变中断键；有内容时插话，Kimi 降级为排队 */}
@@ -1602,8 +1580,8 @@ function Composer({ session, dead, errored }: { session: SessionRecord; dead: bo
             <button
               type="button"
               className="send-btn"
-              aria-label="中断"
-              title="打断当前执行"
+              aria-label={t("ui.SessionView.interrupt")}
+              title={t("ui.SessionView.interrupt_current_execution")}
               onClick={() => store.interrupt(session.id)}
             >
               <StopIcon />
@@ -1612,8 +1590,8 @@ function Composer({ session, dead, errored }: { session: SessionRecord; dead: bo
             <button
               type="button"
               className="send-btn"
-              aria-label="发送"
-              title={session.status === "running" ? "插话（不中断）" : "发送"}
+              aria-label={t("ui.common.send")}
+              title={session.status === "running" ? t("ui.SessionView.steer_without_interrupting") : t("ui.common.send")}
               disabled={dead || (!text.trim() && readyMentions.length === 0)}
               onClick={send}
             >

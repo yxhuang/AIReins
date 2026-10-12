@@ -1,3 +1,4 @@
+import { t } from "./i18n";
 import { modelShortName } from "./config-view";
 
 /** 列表接口的显示字段；不引入服务端模块或详情/日志数据。 */
@@ -245,17 +246,17 @@ export function dispatchTime(seconds: number | null): string {
 }
 
 export function dispatchStatus(status: string): { label: string; className: string } {
-  if (status === "running") return { label: "运行中", className: "" };
-  if (status === "OK") return { label: "刚完成 ✓", className: "finished" };
-  if (["TOOL_FAIL", "ACCEPT_FAIL", "TIMEOUT"].includes(status)) return { label: "失败 ✗", className: "failed" };
+  if (status === "running") return { label: t("core.021"), className: "" };
+  if (status === "OK") return { label: t("core.022"), className: "finished" };
+  if (["TOOL_FAIL", "ACCEPT_FAIL", "TIMEOUT"].includes(status)) return { label: t("core.023"), className: "failed" };
   if (status === "lost") return { label: "lost", className: "failed" };
-  return { label: "未知", className: "unknown" };
+  return { label: t("core.024"), className: "unknown" };
 }
 
 export interface DispatchSessionTitle { id: string; agent?: string; nativeSessionId?: string; title: string; model?: string | null }
 
 export function dispatcherLabel(agent: string): string {
-  return ({ claude: "Claude Code", codex: "Codex", kimi: "Kimi", copilot: "Copilot" } as Record<string, string>)[agent] ?? "未关联父会话";
+  return ({ claude: "Claude Code", codex: "Codex", kimi: "Kimi", copilot: "Copilot" } as Record<string, string>)[agent] ?? t("core.025");
 }
 
 /** Resolve by explicit run ID or matching runtime + native ID, never by task name/cwd/model. */
@@ -311,7 +312,7 @@ export function dispatcherSessions(runs: readonly DispatchRun[], sessions: reado
     const session = sessions.find((item) => (!item.agent || item.agent === agent) && (item.id === id || item.nativeSessionId === id));
     const key = JSON.stringify([agent, session?.id ?? id]);
     const source = sources.get(key) ?? { id: session?.id ?? id, agent,
-      title: session?.title || run.parent?.title || `${dispatcherLabel(agent)} 会话 · ${id.slice(0, 8)}`, running: 0 };
+      title: session?.title || run.parent?.title || t("core.026", { p0: dispatcherLabel(agent), p1: id.slice(0, 8) }), running: 0 };
     if (run.status === "running") source.running++;
     sources.set(key, source);
   }
@@ -319,5 +320,5 @@ export function dispatcherSessions(runs: readonly DispatchRun[], sessions: reado
 }
 
 export function dispatcherTitle(runs: readonly DispatchRun[], sessions: readonly DispatchSessionTitle[]): string {
-  return dispatcherSessions(runs, sessions).map((source) => source.title).join("\n") || "未关联父会话";
+  return dispatcherSessions(runs, sessions).map((source) => source.title).join("\n") || t("core.025");
 }

@@ -1,3 +1,4 @@
+import { t, getLocale } from "../i18n";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { AgentKind, HistorySession } from "../types";
 import { fetchHistory, pickWindowsDirectory } from "../api";
@@ -26,7 +27,7 @@ const PAGE_SIZE = 150;
 const SEARCH_DEBOUNCE_MS = 250;
 
 // 代价说明在桌面完整展示；手机折叠两行，但详情里必须保留全文。
-const IMPORT_NOTE = "这是就地续接，不是分叉：导入后，工作台里跑的新回合会追写进这个原生会话文件；工作台里跑的 Claude 回合以 VSCode 扩展身份落盘；工作台新建的 Claude 会话可在 VSCode/CLI 的 resume 列表里找到。";
+const IMPORT_NOTE = t("ui.HistoryView.this_resumes_the_original_session_without_branching");
 
 /** 历史行无需跟随别处 running 会话的秒级 tick；30 秒粒度足够表达相对时间。 */
 const selectHistoryNow = (value: Store) => Math.floor(value.now / 30_000) * 30_000;
@@ -182,17 +183,15 @@ export function HistoryView() {
 
   return (
     <div className="history-view history-sidebar-list">
-      <section className="history-list-pane" aria-label="历史会话">
+      <section className="history-list-pane" aria-label={t("ui.common.session_history")}>
         <div className="history-filters">
-          <div className="history-filter-group" role="group" aria-label="按 agent 筛选">
+          <div className="history-filter-group" role="group" aria-label={t("ui.HistoryView.filter_by_agent")}>
             <button
               type="button"
               className={`history-chip${agentFilter === "" ? " selected" : ""}`}
               aria-pressed={agentFilter === ""}
               onClick={() => setAgentFilter("")}
-            >
-              全部
-            </button>
+            >{t("ui.HistoryView.all")}</button>
             {AGENTS.map((agent) => (
               <button
                 key={agent}
@@ -205,7 +204,7 @@ export function HistoryView() {
               </button>
             ))}
           </div>
-          <div className="history-filter-group" role="group" aria-label="按来源筛选">
+          <div className="history-filter-group" role="group" aria-label={t("ui.HistoryView.filter_by_source")}>
             {(["all", "interactive", "workbench"] as SourceFilter[]).map((source) => (
               <button
                 key={source}
@@ -214,7 +213,7 @@ export function HistoryView() {
                 aria-pressed={sourceFilter === source}
                 onClick={() => setSourceFilter(source)}
               >
-                {source === "all" ? "全部来源" : SOURCE_FILTER_LABELS[source]}
+                {source === "all" ? t("ui.HistoryView.all_sources") : SOURCE_FILTER_LABELS[source]}
               </button>
             ))}
           </div>
@@ -224,16 +223,16 @@ export function HistoryView() {
             <button
               type="button"
               className="btn history-load-more"
-              aria-label={loadingMore ? "加载中" : "加载更多"}
+              aria-label={loadingMore ? t("ui.HistoryView.loading") : t("ui.common.load_more")}
               disabled={loadingMore}
               onClick={() => void load(list.nextCursor)}
             >
-              {loadingMore ? <>加载<br />中…</> : <>加载<br />更多</>}
+              {loadingMore ? <>{t("ui.HistoryView.load")}<br />{t("ui.HistoryView.message")}</> : <>{t("ui.HistoryView.load")}<br />{t("ui.common.more")}</>}
             </button>
           )}
           <div className="history-search">
-            <button type="button" className="dir-windows-picker history-directory-picker" aria-label="选择目录筛选"
-              title={pickerBusy ? "等待 Windows 选择目录" : "选择工作目录筛选"}
+            <button type="button" className="dir-windows-picker history-directory-picker" aria-label={t("ui.HistoryView.select_a_directory_filter")}
+              title={pickerBusy ? t("ui.HistoryView.waiting_for_a_windows_directory_selection") : t("ui.HistoryView.select_a_working_directory_filter")}
               disabled={pickerBusy} aria-busy={pickerBusy} onClick={browseDirectory}>
               {/* 与文件面板地址栏的 Windows 浏览按钮同一图标 */}
               <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -243,7 +242,7 @@ export function HistoryView() {
             </button>
             {cwdFilter && <span className="history-chip history-cwd-chip" title={cwdFilter}>
               <span className="history-cwd-name">{cwdFilter.split("/").filter(Boolean).at(-1) || "/"}</span>
-              <button type="button" className="icon-btn" aria-label="清除目录筛选" onClick={() => store.setHistoryCwdFilter("")}>×</button>
+              <button type="button" className="icon-btn" aria-label={t("ui.HistoryView.clear_directory_filter")} onClick={() => store.setHistoryCwdFilter("")}>×</button>
             </span>}
             <input ref={inputRef} type="search" value={qInput}
               onChange={(e) => setQInput(e.target.value)}
@@ -257,28 +256,23 @@ export function HistoryView() {
                   store.setHistoryCwdFilter("");
                 }
               }}
-              placeholder="搜索关键词，或输入/选择目录…" aria-label="搜索历史会话" />
+              placeholder={t("ui.HistoryView.search_keywords_or_enter_or_select_a")} aria-label={t("ui.HistoryView.search_session_history")} />
           </div>
         </div>
         {directoryError && <p className="history-meta history-error" role="alert">{directoryError}</p>}
         {phase === "ready" && list.truncated && (
-          <p className="history-meta" style={{ fontSize: "var(--detail-font-size)" }}>
-            扫描未完成，可<button
+          <p className="history-meta" style={{ fontSize: "var(--detail-font-size)" }}>{t("ui.HistoryView.scan_incomplete_you_can")}<button
               type="button"
               style={{ font: "inherit", color: "inherit", border: 0, padding: 0, background: "none", textDecoration: "underline", cursor: "pointer" }}
               disabled={loadingMore}
               onClick={() => void load(list.nextCursor)}
-            >重试</button>
+            >{t("ui.common.retry")}</button>
           </p>
         )}
         {phase === "error" ? (
           <div className="history-list-status">
-            <p className="history-error" role="alert">
-              加载失败：{listError}
-            </p>
-            <button type="button" className="btn" onClick={() => void load()}>
-              重试
-            </button>
+            <p className="history-error" role="alert">{t("ui.HistoryView.failed_to_load_sentence", { p0: (listError ?? "") })}</p>
+            <button type="button" className="btn" onClick={() => void load()}>{t("ui.common.retry")}</button>
           </div>
         ) : (
           <>
@@ -296,13 +290,13 @@ export function HistoryView() {
               ))}
               {phase === "ready" && !list.truncated && visible.length === 0 && (
                 <li className="history-list-empty">
-                  {list.items.length === 0 ? "没有匹配的历史会话" : "已加载条目里没有该来源的会话"}
+                  {list.items.length === 0 ? t("ui.HistoryView.no_matching_sessions") : t("ui.HistoryView.no_sessions_from_this_source_among_loaded")}
                 </li>
               )}
-              {phase === "loading" && <li className="history-list-empty">加载中…</li>}
+              {phase === "loading" && <li className="history-list-empty">{t("ui.common.loading_2")}</li>}
             </ul>
             <div className="history-more">
-              {!list.nextCursor && !list.truncated && phase === "ready" && list.items.length > 0 && <span className="history-meta">没有更多了</span>}
+              {!list.nextCursor && !list.truncated && phase === "ready" && list.items.length > 0 && <span className="history-meta">{t("ui.HistoryView.no_more_results")}</span>}
               {listError && phase === "ready" && (
                 <span className="history-error" role="alert">
                   {listError}
@@ -344,11 +338,11 @@ export const HistoryRow = memo(function HistoryRow({
         <span className="history-row-title" title={item.title}>
           {item.title}
         </span>
-        {item.dispatch && <span className="dispatch-badge" title={`${item.dispatch.name} · ${item.dispatch.runId}`}>工单</span>}
+        {item.dispatch && <span className="dispatch-badge" title={`${item.dispatch.name} · ${item.dispatch.runId}`}>{t("ui.HistoryView.work_order")}</span>}
         <span className={`source-badge source-${item.source}`}>
           {SOURCE_LABELS[item.source]}
         </span>
-        <span className="history-row-time" title={new Date(item.lastActivityAt).toLocaleString()}>
+        <span className="history-row-time" title={new Date(item.lastActivityAt).toLocaleString(getLocale())}>
           {relativeTimeShort(item.lastActivityAt, now)}
         </span>
       </span>
@@ -356,7 +350,7 @@ export const HistoryRow = memo(function HistoryRow({
         <span className="history-row-cwd mono" title={item.cwd}>
           {item.cwd}
         </span>
-        {imported && <span className="imported-badge">已在工作台中</span>}
+        {imported && <span className="imported-badge">{t("ui.HistoryView.already_in_the_workspace")}</span>}
       </span>
     </button>
   );
@@ -379,15 +373,15 @@ export function HistoryPreviewPane({ item, onBack }: { item: HistorySession | un
   }, [item]);
 
   const toolbar = <div className="view-panel-actions">
-    {item && <button type="button" className="btn history-back" onClick={onBack}>‹ 历史会话</button>}
+    {item && <button type="button" className="btn history-back" onClick={onBack}>{t("ui.HistoryView.session_history")}</button>}
     <PanelActions />
   </div>;
 
   if (!item) {
     return (
-      <aside className="history-preview-pane" aria-label="会话预览" aria-live="polite">
+      <aside className="history-preview-pane" aria-label={t("ui.HistoryView.session_preview")} aria-live="polite">
         {toolbar}
-        <div className="history-preview-empty">从左侧选一个会话查看预览</div>
+        <div className="history-preview-empty">{t("ui.HistoryView.select_a_session_on_the_left_to")}</div>
       </aside>
     );
   }
@@ -410,7 +404,7 @@ export function HistoryPreviewPane({ item, onBack }: { item: HistorySession | un
   };
 
   return (
-    <aside className="history-preview-pane" aria-label="会话预览" aria-live="polite">
+    <aside className="history-preview-pane" aria-label={t("ui.HistoryView.session_preview")} aria-live="polite">
       {toolbar}
       <div className="history-preview-head">
         <h2 className="history-preview-title" title={`${item.title} · ${item.nativeSessionId}`}>{item.title}</h2>
@@ -432,14 +426,12 @@ export function HistoryPreviewPane({ item, onBack }: { item: HistorySession | un
       <div className="history-actions">
         {importedId ? (
           <>
-            <p className="history-note">已在工作台中</p>
+            <p className="history-note">{t("ui.HistoryView.already_in_the_workspace")}</p>
             <button
               type="button"
               className="btn btn-primary"
               onClick={() => store.navigate(importedId)}
-            >
-              打开会话
-            </button>
+            >{t("ui.HistoryView.open_session")}</button>
           </>
         ) : (
           <>
@@ -448,14 +440,12 @@ export function HistoryPreviewPane({ item, onBack }: { item: HistorySession | un
             <details className="history-import-details" key={`${item.agent}:${item.nativeSessionId}`}>
               <summary>
                 <span className="history-note">{IMPORT_NOTE}</span>
-                <span className="history-details-show">详情</span>
-                <span className="history-details-hide">收起</span>
+                <span className="history-details-show">{t("ui.HistoryView.details")}</span>
+                <span className="history-details-hide">{t("ui.common.collapse")}</span>
               </summary>
             </details>
             {importError && (
-              <p className="history-error" role="alert">
-                导入失败：{importError}
-              </p>
+              <p className="history-error" role="alert">{t("ui.HistoryView.import_failed_sentence", { p0: (importError) })}</p>
             )}
             <button
               type="button"
@@ -463,7 +453,7 @@ export function HistoryPreviewPane({ item, onBack }: { item: HistorySession | un
               disabled={importing}
               onClick={() => void doImport()}
             >
-              {importing ? "导入中…" : "导入并续接"}
+              {importing ? t("ui.HistoryView.importing") : t("ui.HistoryView.import_and_resume")}
             </button>
           </>
         )}

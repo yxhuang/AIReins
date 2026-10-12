@@ -1,3 +1,4 @@
+import { t } from "../i18n";
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import { sendTaildrop, workFileContentUrl } from "../api";
 import { mentionQueryAt } from "../mentions";
@@ -10,8 +11,8 @@ import { FilePreview } from "./FilePreview";
 import { Segmented } from "./Segmented";
 import { TaildropMenu } from "./TaildropMenu";
 
-const PREVIEW_OPTIONS = [{ value: "preview", label: "预览", title: "查看渲染后的文档" }, { value: "source", label: "源码", title: "查看或编辑文档源码" }] as const;
-const TABLE_OPTIONS = [{ value: "preview", label: "表格", title: "按表格查看数据" }, { value: "source", label: "源码", title: "查看或编辑原始数据" }] as const;
+const PREVIEW_OPTIONS = [{ value: "preview", label: t("ui.FilePanel.preview"), title: t("ui.FilePanel.view_the_rendered_document") }, { value: "source", label: t("ui.FilePanel.source"), title: t("ui.FilePanel.view_or_edit_the_document_source") }] as const;
+const TABLE_OPTIONS = [{ value: "preview", label: t("ui.FilePanel.table"), title: t("ui.FilePanel.view_data_as_a_table") }, { value: "source", label: t("ui.FilePanel.source"), title: t("ui.FilePanel.view_or_edit_raw_data") }] as const;
 const ACTION_PATHS = {
   back: "m15 18-6-6 6-6",
   mention: "M16 8v5a3 3 0 0 0 6 0v-1a10 10 0 1 0-4 8 M16 12a4 4 0 1 1-8 0 4 4 0 0 1 8 0",
@@ -39,17 +40,17 @@ function absolutePath(path: string): string | null {
 /** 纯判定：只产生 cwd 内可作为完整 @ token 的相对路径。 */
 export function planFileMention(session: Pick<SessionRecord, "cwd" | "status"> | undefined, mentionsSupported: boolean, path: string):
   { path: string; reason: null } | { path: null; reason: string } {
-  if (!session) return { path: null, reason: "没有当前会话，无法引用。可用“复制路径”。" };
-  if (session.status === "dead") return { path: null, reason: "会话已结束，无法引用。可用“复制路径”。" };
-  if (!mentionsSupported) return { path: null, reason: "当前 driver 不支持 @ 引用。可用“复制路径”。" };
+  if (!session) return { path: null, reason: t("ui.FilePanel.no_current_session_to_reference_this_file") };
+  if (session.status === "dead") return { path: null, reason: t("ui.FilePanel.this_session_has_ended_use_copy_path") };
+  if (!mentionsSupported) return { path: null, reason: t("ui.FilePanel.the_current_driver_does_not_support_references") };
   const root = absolutePath(session.cwd);
   const file = absolutePath(path);
   const prefix = root === "/" ? "/" : `${root}/`;
   if (!root || !file || !file.startsWith(prefix) || file === root) {
-    return { path: null, reason: "文件不在会话 cwd 之下，无法引用。可用“复制路径”。" };
+    return { path: null, reason: t("ui.FilePanel.this_file_is_outside_the_session_working") };
   }
   const relative = file.slice(prefix.length);
-  if (/\s/u.test(relative)) return { path: null, reason: "相对路径含空白字符，@ 引用会被截断。请用“复制路径”。" };
+  if (/\s/u.test(relative)) return { path: null, reason: t("ui.FilePanel.the_relative_path_contains_whitespace_which_truncates") };
   return { path: relative, reason: null };
 }
 
@@ -101,7 +102,7 @@ export function FilePanel({ onClose }: { onClose: () => void }) {
   const downloadOnly = preview?.file && ["text", "markdown", "csv", "tsv"].includes(preview.file.kind);
   const dirty = preview?.file?.editable && preview.draft !== preview.file.text;
   const confirmDownload = (event: MouseEvent<HTMLAnchorElement>) => {
-    if (!window.confirm("下载当前文件？取消后留在文件预览。")) event.preventDefault();
+    if (!window.confirm(t("ui.FilePanel.download_this_file_cancel_to_stay_in"))) event.preventDefault();
   };
 
   const referenceFile = (path: string) => {
@@ -112,7 +113,7 @@ export function FilePanel({ onClose }: { onClose: () => void }) {
     const plan = planFileMention(current, supported, path);
     if (current && plan.path !== null) {
       store.requestFileMention(current.id, path);
-      setNotice({ path, copied: null, reason: "已引用到当前会话。" });
+      setNotice({ path, copied: null, reason: t("ui.FilePanel.referenced_in_the_current_session") });
     } else setNotice({ path, copied: null, reason: plan.reason });
   };
   const [sendMenu, setSendMenu] = useState<{ target: WorkFileTarget; name: string; folder: boolean; row: boolean; x: number; y: number } | null>(null);
@@ -122,15 +123,15 @@ export function FilePanel({ onClose }: { onClose: () => void }) {
   const sendFile = (target: WorkFileTarget, name: string, folder: boolean, ip: string, device: string) => {
     setSendMenu(null);
     copyId.current += 1;
-    setNotice({ path: target.path, copied: null, reason: `正在${folder ? "打包并" : ""}发送 ${name} 到 ${device}…` });
+    setNotice({ path: target.path, copied: null, reason: t("ui.FilePanel.sending_to", { p0: (folder ? t("ui.FilePanel.zip_and_detail") : ""), p1: (name), p2: (device) }) });
     // 发送结果总要显示，不受后续复制/引用提示的序号约束。
     sendTaildrop(target, ip).then(
-      result => setNotice({ path: target.path, copied: null, reason: `已发送 ${result.name} 到 ${device}，在该设备的 Tailscale 或下载目录查看。` }),
+      result => setNotice({ path: target.path, copied: null, reason: t("ui.FilePanel.sent_to_check_tailscale_or_the_downloads", { p0: (result.name), p1: (device) }) }),
       (error: Error) => setNotice({ path: target.path, copied: null, reason: error.message }));
   };
   const copyFile = (path: string) => {
     const id = ++copyId.current;
-    setNotice({ path, copied: null, reason: "正在复制路径…" });
+    setNotice({ path, copied: null, reason: t("ui.FilePanel.copying_path") });
     void (async () => {
       let copied = false;
       try { await navigator.clipboard.writeText(path); copied = true; } catch { /* 保留完整路径供手动复制。 */ }
@@ -139,7 +140,7 @@ export function FilePanel({ onClose }: { onClose: () => void }) {
   };
 
   const tabRow = <div className="term-tabs file-tabs">
-    <div className="term-tab-list" role="tablist" aria-label="文件标签页" onKeyDown={event => {
+    <div className="term-tab-list" role="tablist" aria-label={t("ui.FilePanel.file_tabs")} onKeyDown={event => {
       const direction = event.key === "ArrowRight" ? 1 : event.key === "ArrowLeft" ? -1 : 0;
       const items = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>("[role=tab]"));
       const index = items.indexOf(event.target as HTMLButtonElement);
@@ -161,49 +162,49 @@ export function FilePanel({ onClose }: { onClose: () => void }) {
             </svg>
             <span className="term-tab-label">{name}</span>
           </button>
-          {tabs.length > 1 && <button type="button" className="term-tab-close" aria-label={`关闭 ${name}`} title="关闭标签页" onClick={() => store.closeFileTab(tab.id)}>×</button>}
+          {tabs.length > 1 && <button type="button" className="term-tab-close" aria-label={t("ui.FilePanel.close", { p0: (name) })} title={t("ui.FilePanel.close_tab")} onClick={() => store.closeFileTab(tab.id)}>×</button>}
         </div>;
       })}
     </div>
-    <button type="button" className="term-tab-new" aria-label="新建标签页" title="新建标签页（会话目录）" onClick={() => { setNotice(null); store.openFileTab(); }}>
+    <button type="button" className="term-tab-new" aria-label={t("ui.FilePanel.new_tab")} title={t("ui.FilePanel.new_tab_in_the_session_directory")} onClick={() => { setNotice(null); store.openFileTab(); }}>
       <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="M12 4v16M4 12h16" /></svg>
     </button>
   </div>;
 
   return <>
-    <SidePanelResize label="文件" width={width} setWidth={setWidth} minWidth={FILE_WIDTH_OPTIONS.minWidth} defaultWidth={FILE_WIDTH_OPTIONS.defaultWidth} />
-    <div id="file-panel" className="term-panel file-side-panel" role="region" aria-label="文件面板" style={{ width: `${width}px` }} onKeyDown={(event) => {
+    <SidePanelResize label={t("ui.common.files")} width={width} setWidth={setWidth} minWidth={FILE_WIDTH_OPTIONS.minWidth} defaultWidth={FILE_WIDTH_OPTIONS.defaultWidth} />
+    <div id="file-panel" className="term-panel file-side-panel" role="region" aria-label={t("ui.FilePanel.file_panel")} style={{ width: `${width}px` }} onKeyDown={(event) => {
       if (event.key === "Escape") { event.stopPropagation(); onClose(); }
     }}>
       <div className="term-titlebar file-titlebar">
         {!preview && <PanelBackButton onClick={onClose} />}
-        <strong className="file-side-title">文件</strong>
-        {!preview && <div ref={setNavSlot} className="file-nav" role="toolbar" aria-label="目录导航" />}
-        {preview && <div className="file-actions" role="toolbar" aria-label="文件操作">
-          <button className="file-action" type="button" aria-label="返回" title="返回目录" disabled={preview.saving} onClick={() => {
+        <strong className="file-side-title">{t("ui.common.files")}</strong>
+        {!preview && <div ref={setNavSlot} className="file-nav" role="toolbar" aria-label={t("ui.FilePanel.directory_navigation")} />}
+        {preview && <div className="file-actions" role="toolbar" aria-label={t("ui.common.file_actions")}>
+          <button className="file-action" type="button" aria-label={t("ui.common.back")} title={t("ui.FilePanel.back_to_directory")} disabled={preview.saving} onClick={() => {
             if (store.clearFilePreview()) { setNotice(null); setSourcePath(null); }
-          }}><FileActionIcon kind="back" /><span className="file-action-label">返回</span></button>
-          <button className="file-action" type="button" aria-label="引用" title="引用到会话" onClick={() => referenceFile(preview.target.path)}><FileActionIcon kind="mention" /><span className="file-action-label">引用</span></button>
-          <button className="file-action" type="button" aria-label="复制路径" title="复制路径" onClick={() => copyFile(preview.target.path)}><FileActionIcon kind="copy" /><span className="file-action-label">复制路径</span></button>
-          {taildrop && <button className="file-action" type="button" aria-label="发送到设备" title="用 Taildrop 发送到 tailnet 内的设备" aria-haspopup="menu" aria-expanded={sendMenu !== null} onClick={event => {
+          }}><FileActionIcon kind="back" /><span className="file-action-label">{t("ui.common.back")}</span></button>
+          <button className="file-action" type="button" aria-label={t("ui.FilePanel.reference")} title={t("ui.FilePanel.reference_in_session")} onClick={() => referenceFile(preview.target.path)}><FileActionIcon kind="mention" /><span className="file-action-label">{t("ui.FilePanel.reference")}</span></button>
+          <button className="file-action" type="button" aria-label={t("ui.FilePanel.copy_path")} title={t("ui.FilePanel.copy_path")} onClick={() => copyFile(preview.target.path)}><FileActionIcon kind="copy" /><span className="file-action-label">{t("ui.FilePanel.copy_path")}</span></button>
+          {taildrop && <button className="file-action" type="button" aria-label={t("ui.FilePanel.send_to_device")} title={t("ui.FilePanel.send_to_a_device_on_your_tailnet")} aria-haspopup="menu" aria-expanded={sendMenu !== null} onClick={event => {
             const rect = event.currentTarget.getBoundingClientRect();
             openSendMenu(preview.target, preview.file?.name ?? preview.target.path.split("/").pop()!, false, rect.left, rect.bottom + 4);
-          }}><FileActionIcon kind="send" /><span className="file-action-label">发送</span></button>}
-          {preview.file && preview.file.kind !== "unsupported" && <a className="file-action" aria-label={downloadOnly ? "下载" : "外部打开"} title={downloadOnly ? "下载" : "外部打开"}
+          }}><FileActionIcon kind="send" /><span className="file-action-label">{t("ui.common.send")}</span></button>}
+          {preview.file && preview.file.kind !== "unsupported" && <a className="file-action" aria-label={downloadOnly ? t("ui.FilePanel.download") : t("ui.FilePanel.open_externally")} title={downloadOnly ? t("ui.FilePanel.download") : t("ui.FilePanel.open_externally")}
             href={downloadOnly ? workFileContentUrl(preview.target, true) : `${workFileContentUrl(preview.target)}&v=${preview.loadId}`}
             download={downloadOnly ? preview.file.name : undefined} target={downloadOnly ? undefined : "_blank"} rel={downloadOnly ? undefined : "noopener noreferrer"} onClick={downloadOnly ? confirmDownload : undefined}>
-            <FileActionIcon kind={downloadOnly ? "download" : "open"} /><span className="file-action-label">{downloadOnly ? "下载" : "外部打开"}</span></a>}
-          {rich && <Segmented className="file-view-toggle" buttonClassName="file-view-option" ariaLabel="文件显示方式"
+            <FileActionIcon kind={downloadOnly ? "download" : "open"} /><span className="file-action-label">{downloadOnly ? t("ui.FilePanel.download") : t("ui.FilePanel.open_externally")}</span></a>}
+          {rich && <Segmented className="file-view-toggle" buttonClassName="file-view-option" ariaLabel={t("ui.FilePanel.file_display_mode")}
             options={["csv", "tsv"].includes(preview.file?.kind ?? "") ? TABLE_OPTIONS : PREVIEW_OPTIONS}
             value={source ? "source" : "preview"} onChange={value => setSourcePath(value === "source" ? preview.target.path : null)} />}
-          {preview.file?.editable && <button className="file-action file-action-save" type="button" aria-label={preview.saving ? "保存中…" : "保存"} title={preview.saving ? "保存中…" : "保存"} disabled={!dirty || preview.saving} onClick={() => void store.saveFilePreview()}><FileActionIcon kind="save" /><span className="file-action-label">{preview.saving ? "保存中…" : "保存"}</span></button>}
-          {preview.file?.kind === "html" && <a className="file-action" aria-label="下载" title="下载" href={workFileContentUrl(preview.target, true)} download={preview.file.name} onClick={confirmDownload}><FileActionIcon kind="download" /><span className="file-action-label">下载</span></a>}
+          {preview.file?.editable && <button className="file-action file-action-save" type="button" aria-label={preview.saving ? t("ui.common.saving") : t("ui.FilePanel.save")} title={preview.saving ? t("ui.common.saving") : t("ui.FilePanel.save")} disabled={!dirty || preview.saving} onClick={() => void store.saveFilePreview()}><FileActionIcon kind="save" /><span className="file-action-label">{preview.saving ? t("ui.common.saving") : t("ui.FilePanel.save")}</span></button>}
+          {preview.file?.kind === "html" && <a className="file-action" aria-label={t("ui.FilePanel.download")} title={t("ui.FilePanel.download")} href={workFileContentUrl(preview.target, true)} download={preview.file.name} onClick={confirmDownload}><FileActionIcon kind="download" /><span className="file-action-label">{t("ui.FilePanel.download")}</span></a>}
         </div>}
-        <button type="button" className="btn chrome-icon-btn panel-icon-button panel-collapse" aria-label="收起文件面板" title="收起面板" onClick={onClose}><PanelRightIcon /></button>
+        <button type="button" className="btn chrome-icon-btn panel-icon-button panel-collapse" aria-label={t("ui.FilePanel.collapse_file_panel")} title={t("ui.common.collapse_panel")} onClick={onClose}><PanelRightIcon /></button>
       </div>
       {notice && <div className="file-notice" role="status">
         {notice.reason && <p>{notice.reason}</p>}
-        {notice.copied !== null && <p className="dir-copy-status">{notice.copied ? "路径已复制。" : <>无法自动复制，请手动复制：<span className="mono">{notice.path}</span></>}</p>}
+        {notice.copied !== null && <p className="dir-copy-status">{notice.copied ? t("ui.FilePanel.path_copied") : <>{t("ui.FilePanel.cannot_copy_automatically_copy_manually")}<span className="mono">{notice.path}</span></>}</p>}
       </div>}
       {preview && tabRow}
       {preview ? <FilePreview key={preview.target.path} preview={preview} source={source} /> : <DirectoryContents key={tabId} initialPath={directoryInitialPath} includeFiles allowWindowsPicker
@@ -213,7 +214,7 @@ export function FilePanel({ onClose }: { onClose: () => void }) {
         onSelectFile={path => { setNotice(null); void store.openFilePreview({ path, root: sessionDirectory() ?? session?.cwd ?? "/", sessionId: session?.id }); }}
         onEntryMenu={(entry, x, y) => openSendMenu({ path: entry.path, root: entry.root, sessionId: session?.id }, entry.name, entry.folder, x, y, true)} />}
       {sendMenu && <TaildropMenu enabled={sendMenu.folder ? folderTaildrop : taildrop} position={sendMenu} folder={sendMenu.folder} onClose={() => setSendMenu(null)}
-        leadingItems={sendMenu.row ? [{ id: "new-tab", icon: "plus", label: "在新标签页内打开", onSelect: () => {
+        leadingItems={sendMenu.row ? [{ id: "new-tab", icon: "plus", label: t("ui.FilePanel.open_in_a_new_tab"), onSelect: () => {
           setSendMenu(null); setNotice(null);
           store.openFileTab({ path: sendMenu.target.path, root: sendMenu.target.root, folder: sendMenu.folder });
         } }] : undefined}

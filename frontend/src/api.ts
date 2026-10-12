@@ -1,10 +1,11 @@
+import { getLocale, localizeServerData, t } from "./i18n";
 import type { ApiEnvelope, CommandInfo, DirectoryListing, HistoryListData, HistoryMessagesPage, MetaInfo, PageHealth, PageManifest, SessionConfig, SessionRecord, ShellKind, Snapshot, SnapshotPreflight, StorageCleanResult, StorageStats, TerminalInfo, WorkbenchPrefs } from "./types";
 import type { AgentKind, SessionGroup, SessionOrganizationPatch } from "./types";
 import { buildHistoryQuery, type HistoryQueryInput } from "./history";
 import type { DispatchRun } from "./dispatch-flow";
 import type { TaildropTargetsResult, TailscalePeersResult } from "../../server/tailscale-peers";
 
-// REST 信封统一为 {code,msg,data,request_id}；code 非 0 时 msg 是中文错误消息。
+// REST 信封统一为 {code,msg,data,request_id}；code 非 0 时按可选 i18n 元数据翻译 msg，旧响应保留原文。
 async function call<T>(path: string, init?: RequestInit): Promise<T> {
   let response: Response;
   try {
@@ -12,23 +13,23 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
     response = await fetch(path, { ...init, signal: init?.signal ?? AbortSignal.timeout(10_000) });
   } catch (error) {
     if (error instanceof DOMException && error.name === "TimeoutError") {
-      throw new Error(init?.signal ? "请求超时" : "请求超时（10 秒）");
+      throw new Error(init?.signal ? t("core.005") : t("core.006"));
     }
     throw error;
   }
   let envelope: ApiEnvelope<T> | undefined;
   try {
-    envelope = (await response.json()) as ApiEnvelope<T>;
+    envelope = localizeServerData(await response.json()) as ApiEnvelope<T>;
   } catch (error) {
     // 超时信号同样作用于读响应体：大响应没读完就被掐断，不是格式错误
     if (error instanceof DOMException && (error.name === "TimeoutError" || error.name === "AbortError")) {
-      throw new Error(init?.signal ? "请求超时（响应未传完）" : "请求超时（10 秒内响应未传完）");
+      throw new Error(init?.signal ? t("core.007") : t("core.008"));
     }
-    throw new Error("服务返回了无法解析的响应");
+    throw new Error(t("core.009"));
   }
-  if (typeof envelope?.code !== "number") throw new Error("服务返回了无法解析的响应");
+  if (typeof envelope?.code !== "number") throw new Error(t("core.009"));
   if (envelope.code !== 0) {
-    const err = new Error(envelope.msg || `请求失败（${envelope.code}）`);
+    const err = new Error(envelope.msg || t("core.010", { p0: envelope.code }));
     err.cause = envelope.request_id;
     throw err;
   }
@@ -113,7 +114,7 @@ export function saveWorkFile(target: import("./types").WorkFileTarget, version: 
   return call("/api/fs/file", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...target, version, text }) });
 }
 export function workFileContentUrl(target: import("./types").WorkFileTarget, download = false): string {
-  return `/api/fs/content?${workFileQuery(target)}${download ? "&download=1" : ""}`;
+  return `/api/fs/content?${workFileQuery(target)}&lang=${getLocale()}${download ? "&download=1" : ""}`;
 }
 
 /**
