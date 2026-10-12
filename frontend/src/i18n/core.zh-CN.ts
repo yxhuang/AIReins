@@ -127,5 +127,8 @@ export default {
   "core.127": "委派",
   "core.128": "删除",
   "core.129": "移动",
-  "core.130": "调用"
+  "core.130": "调用",
+  "core.131": "({p0}) 个闸门待处理 · ",
+  "core.132": "{product} · 本机",
+  "core.133": "{product} · 远程 {p0}"
 } as Record<string, string>;

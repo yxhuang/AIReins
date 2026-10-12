@@ -63,10 +63,11 @@ public static class WbNative {
     [DllImport("user32.dll", CharSet=CharSet.Unicode)]
     private static extern IntPtr SendMessageTimeout(IntPtr h, uint msg, IntPtr w, IntPtr l,
         uint flags, uint timeout, out IntPtr result);
-    // 页面标题见 frontend/src/host-connections.ts 的 workbenchWindowTitle；旧格式留给未刷新的页面。
+    // 页面标题见 frontend/src/host-connections.ts 的 workbenchWindowTitle，按界面语言输出中文或英文；
+    // 旧格式（workbench 整标题、以「 · workbench」结尾）留给未刷新的页面。
     // 整串匹配：普通 Chrome 标签页的窗口标题带「 - Google Chrome」后缀，不会被认成工作台。
     private static readonly System.Text.RegularExpressions.Regex WbTitle = new System.Text.RegularExpressions.Regex(
-        @"^(?:\(\d+\) 个闸门待处理 · )?Workbench · (?:本机|远程 \S+)$|^workbench$| · workbench$");
+        @"^(?:\(\d+\) (?:个闸门待处理|pending approvals?) · )?Workbench · (?:本机|Local|(?:远程|Remote) \S+)$|^workbench$| · workbench$");
     public static bool IsWbTitle(string t) { return WbTitle.IsMatch(t); }
     public static IntPtr[] Windows() {
         var hits = new List<IntPtr>();
@@ -141,6 +142,11 @@ $script:LastShowSucceeded = $false
 $script:LastShowEndTick = $script:LastClickTick
 $script:ShowListener = $null
 
+# 用户可见文案按界面语言输出；日志保持原文，不走 T。
+$script:IsZh = [System.Globalization.CultureInfo]::CurrentUICulture.Name -like 'zh*'
+function T([string]$Zh, [string]$En) { if ($script:IsZh) { $Zh } else { $En } }
+$script:AppTitle = T 'Workbench 工作台' 'Workbench'
+
 function Resolve-Chrome {
     $candidates = @(
         "$env:ProgramFiles\Google\Chrome\Application\chrome.exe",
@@ -152,7 +158,7 @@ function Resolve-Chrome {
     }
     $command = Get-Command chrome.exe -ErrorAction SilentlyContinue
     if ($command) { return $command.Source }
-    throw '没有找到 Google Chrome，请先安装 Chrome。'
+    throw (T '没有找到 Google Chrome，请先安装 Chrome。' 'Google Chrome was not found. Install Chrome first.')
 }
 
 function New-FallbackIcon {
@@ -203,10 +209,10 @@ function Write-TrayLog([string]$Message) {
 function Show-Failure([string]$Message) {
     Write-TrayLog "failure: $Message"
     if ($script:Tray) {
-        $script:Tray.ShowBalloonTip(8000, 'Workbench 工作台', $Message,
+        $script:Tray.ShowBalloonTip(8000, $script:AppTitle, $Message,
             [System.Windows.Forms.ToolTipIcon]::Error)
     } else {
-        [void][System.Windows.Forms.MessageBox]::Show($Message, 'Workbench 工作台')
+        [void][System.Windows.Forms.MessageBox]::Show($Message, $script:AppTitle)
     }
 }
 
@@ -220,21 +226,21 @@ function Invoke-Wsl([string]$Command, [int]$TimeoutSeconds = 30) {
     $process = New-Object System.Diagnostics.Process
     $process.StartInfo = $info
     try {
-        if (-not $process.Start()) { throw '无法启动 WSL。' }
+        if (-not $process.Start()) { throw (T '无法启动 WSL。' 'Failed to start WSL.') }
         if (-not $process.WaitForExit($TimeoutSeconds * 1000)) {
             # 只终止本次启动的 wsl.exe；wb 服务由 setsid 独立运行。
             $process.Kill()
             [void]$process.WaitForExit(2000)
-            throw "WSL 命令超过 $TimeoutSeconds 秒未结束。"
+            throw (T "WSL 命令超过 $TimeoutSeconds 秒未结束。" "The WSL command did not finish within $TimeoutSeconds seconds.")
         }
-        if ($process.ExitCode -ne 0) { throw "WSL 命令失败，退出码 $($process.ExitCode)。" }
+        if ($process.ExitCode -ne 0) { throw (T "WSL 命令失败，退出码 $($process.ExitCode)。" "The WSL command failed with exit code $($process.ExitCode).") }
     } finally { $process.Dispose() }
 }
 
 function Get-WbApi([string]$Path, [int]$TimeoutSeconds = 2) {
     # 无 Origin；loopback Host 符合 server/access.ts 的本机策略。
     $response = Invoke-RestMethod -Uri "$script:BaseUrl$Path" -Method Get -TimeoutSec $TimeoutSeconds
-    if ($null -eq $response.code -or $response.code -ne 0) { throw "工作台接口返回错误：$($response.msg)" }
+    if ($null -eq $response.code -or $response.code -ne 0) { throw (T "工作台接口返回错误：$($response.msg)" "The Workbench API returned an error: $($response.msg)") }
     return $response
 }
 
@@ -258,7 +264,8 @@ function Ensure-Service {
         Write-TrayLog "ensure service: portReady=$portReady trayVisible=$($script:Tray.Visible)"
         if (-not $portReady) {
             Write-TrayLog 'ensure service: cold start, balloon'
-            $script:Tray.ShowBalloonTip(5000, 'Workbench 工作台', '正在启动工作台，几秒后自动打开窗口，无需重复点击。',
+            $script:Tray.ShowBalloonTip(5000, $script:AppTitle,
+                (T '正在启动工作台，几秒后自动打开窗口，无需重复点击。' 'Starting Workbench. The window will open in a few seconds; no need to click again.'),
                 [System.Windows.Forms.ToolTipIcon]::Info)
         }
     }
@@ -268,7 +275,7 @@ function Ensure-Service {
         try { $null = Get-WbApi '/api/meta' 1; return } catch { $lastError = $_.Exception.Message }
         if ($clock.Elapsed.TotalSeconds -lt 15) { Start-Sleep -Milliseconds 250 }
     } while ($clock.Elapsed.TotalSeconds -lt 15)
-    throw "15 秒内工作台未就绪：$lastError"
+    throw (T "15 秒内工作台未就绪：$lastError" "Workbench was not ready within 15 seconds: $lastError")
 }
 
 # 以下判据只用参数，不调 Win32；测试从 AST 提取源函数运行。
@@ -458,7 +465,7 @@ function Open-Workbench([switch]$ServiceReady, [switch]$RetryService) {
     try {
         try { $locked = $script:OpenMutex.WaitOne(60000) }
         catch [System.Threading.AbandonedMutexException] { $locked = $true }
-        if (-not $locked) { throw '另一个实例仍在打开工作台，请稍后重试。' }
+        if (-not $locked) { throw (T '另一个实例仍在打开工作台，请稍后重试。' 'Another instance is still opening Workbench. Try again later.') }
         $windows = @([WbNative]::Windows())
         Write-TrayLog "open: windows=$($windows.Length) serviceReady=$ServiceReady retry=$RetryService"
         # 窗口还在但服务已停（wsl --shutdown 后页面一直断线）时不能只抬窗口，要先拉起服务，页面会自己重连。
@@ -519,7 +526,7 @@ function Open-Workbench([switch]$ServiceReady, [switch]$RetryService) {
             }
             Start-Sleep -Milliseconds 200
         } while ($clock.Elapsed.TotalSeconds -lt 15)
-        throw '15 秒内未找到工作台窗口，请检查 Chrome 是否正常启动。'
+        throw (T '15 秒内未找到工作台窗口，请检查 Chrome 是否正常启动。' 'The Workbench window was not found within 15 seconds. Check whether Chrome started normally.')
     } catch { $script:LastActionFailed = $true; Show-Failure $_.Exception.Message }
     finally {
         if ($locked) { $script:OpenMutex.ReleaseMutex() }
@@ -533,7 +540,7 @@ function Open-Workbench([switch]$ServiceReady, [switch]$RetryService) {
 }
 
 function Show-ExitPrompt([string]$Message) {
-    return [System.Windows.Forms.MessageBox]::Show($Message, 'Workbench 工作台',
+    return [System.Windows.Forms.MessageBox]::Show($Message, $script:AppTitle,
         [System.Windows.Forms.MessageBoxButtons]::YesNo,
         [System.Windows.Forms.MessageBoxIcon]::Warning,
         [System.Windows.Forms.MessageBoxDefaultButton]::Button2) -eq [System.Windows.Forms.DialogResult]::Yes
@@ -545,12 +552,14 @@ function Exit-Workbench {
     if ($script:Exiting) { return }
     if ($script:Busy) {
         # 打开流程（启动 WSL 时可达几十秒）阻塞期间菜单仍可能弹出；不能静默吞掉退出。气泡可能被系统通知设置屏蔽，用对话框。
-        [void][System.Windows.Forms.MessageBox]::Show('正在打开工作台（WSL 冷启动可能要几十秒），完成后再点退出。', 'Workbench 工作台')
+        [void][System.Windows.Forms.MessageBox]::Show(
+            (T '正在打开工作台（WSL 冷启动可能要几十秒），完成后再点退出。' 'Workbench is being opened (a WSL cold start can take tens of seconds). Click Exit again after it finishes.'),
+            $script:AppTitle)
         return
     }
     # 打开流程同步阻塞时，菜单点击可能被积压到打开结束后才处理，表现为窗口刚出现就被退出关掉；这种迟到的退出要再确认。
     if ((Get-TickElapsed $sent $script:LastActionEndTick) -le 0 -and
-            -not (Show-ExitPrompt '这次「退出」是在打开工作台的过程中点的，刚才被延后处理了。仍要退出？')) { return }
+            -not (Show-ExitPrompt (T '这次「退出」是在打开工作台的过程中点的，刚才被延后处理了。仍要退出？' 'This Exit was clicked while Workbench was opening and was deferred until now. Exit anyway?'))) { return }
     $script:Busy = $true
     $locked = $false
     try {
@@ -558,7 +567,9 @@ function Exit-Workbench {
         try { $locked = $script:OpenMutex.WaitOne(0) }
         catch [System.Threading.AbandonedMutexException] { $locked = $true }
         if (-not $locked) {
-            [void][System.Windows.Forms.MessageBox]::Show('另一个入口正在打开工作台，完成后再点退出。', 'Workbench 工作台')
+            [void][System.Windows.Forms.MessageBox]::Show(
+                (T '另一个入口正在打开工作台，完成后再点退出。' 'Another entry point is opening Workbench. Click Exit again after it finishes.'),
+                $script:AppTitle)
             return
         }
         $servicePresent = $true
@@ -567,9 +578,9 @@ function Exit-Workbench {
             # 契约没有会话列表中的未决闸门字段；统计 running，以及主回合已结束但仍有后台任务（委派中的 codex 等）的会话。
             $sessions = $response.data
             if ($sessions -isnot [System.Array]) { $sessions = $response.data.sessions }
-            if ($sessions -isnot [System.Array]) { throw '会话列表格式无法识别，暂不停止服务。' }
+            if ($sessions -isnot [System.Array]) { throw (T '会话列表格式无法识别，暂不停止服务。' 'Unrecognized session list format; the service was not stopped.') }
             foreach ($session in $sessions) {
-                if ($null -eq $session.status) { throw '会话状态字段缺失，暂不停止服务。' }
+                if ($null -eq $session.status) { throw (T '会话状态字段缺失，暂不停止服务。' 'The session status field is missing; the service was not stopped.') }
             }
             # 先判非空：PowerShell 5.1 里 @($null).Count 是 1，缺字段（旧服务）会被误算成有后台任务
             $running = @($sessions | Where-Object { $_.status -eq 'running' -or ($_.backgroundTasks -and @($_.backgroundTasks).Count -gt 0) }).Count
@@ -583,13 +594,13 @@ function Exit-Workbench {
             } else {
                 # 超时、HTTP/格式错误：不猜没有活会话，但交给用户决定，不能让托盘退不掉。
                 Write-TrayLog "exit: session check failed: $($_.Exception.Message)"
-                if (-not (Show-ExitPrompt "无法确认是否有会话在运行（$($_.Exception.Message)）。`n仍要退出？会尝试停止服务，可能中断正在运行的会话。")) { return }
+                if (-not (Show-ExitPrompt (T "无法确认是否有会话在运行（$($_.Exception.Message)）。`n仍要退出？会尝试停止服务，可能中断正在运行的会话。" "Could not confirm whether sessions are running ($($_.Exception.Message)).`nExit anyway? The service will be stopped, which may interrupt running sessions."))) { return }
                 $running = 0
             }
         }
         Write-TrayLog "exit: servicePresent=$servicePresent running=$running"
         if ($running -gt 0) {
-            if (-not (Show-ExitPrompt "有 $running 个会话正在运行，退出会中断它们。仍要退出？")) { return }
+            if (-not (Show-ExitPrompt (T "有 $running 个会话正在运行，退出会中断它们。仍要退出？" "$running session(s) are running and exiting will interrupt them. Exit anyway?"))) { return }
         }
         $script:Exiting = $true
         foreach ($window in [WbNative]::Windows()) {
@@ -608,7 +619,8 @@ function Exit-Workbench {
             # 弹框前先放开 OpenMutex，用户没及时关框时备用入口不至于干等超时。
             if ($locked) { $script:OpenMutex.ReleaseMutex(); $locked = $false }
             [void][System.Windows.Forms.MessageBox]::Show(
-                "托盘已退出，但停止服务失败：$stopError`n可在 WSL 里运行 wb stop。", 'Workbench 工作台')
+                (T "托盘已退出，但停止服务失败：$stopError`n可在 WSL 里运行 wb stop。" "The tray has exited, but stopping the service failed: $stopError`nYou can run wb stop inside WSL."),
+                $script:AppTitle)
         }
         $script:Context.ExitThread()
     } catch {
@@ -651,7 +663,7 @@ try {
         Write-TrayLog "start: takeover owner=$ownsInstance"
         if (-not $ownsInstance) {
             Write-TrayLog "start: takeover timed out (35s), forwarded=$forwarded; owner lock still held"
-            if (-not $forwarded) { Show-Failure '未能转交显示请求或接管托盘，请稍后再点快捷方式。' }
+            if (-not $forwarded) { Show-Failure (T '未能转交显示请求或接管托盘，请稍后再点快捷方式。' 'Could not forward the show request or take over the tray. Click the shortcut again later.') }
             return
         }
     }
@@ -673,12 +685,12 @@ try {
     $script:Context = New-Object System.Windows.Forms.ApplicationContext
     $script:Tray = New-Object System.Windows.Forms.NotifyIcon
     $script:Tray.Icon = $script:Icon
-    $script:Tray.Text = 'Workbench 工作台'
+    $script:Tray.Text = $script:AppTitle
     $script:Tray.add_BalloonTipShown({ Write-TrayLog 'balloon: shown' })
     $script:Tray.add_BalloonTipClosed({ Write-TrayLog 'balloon: closed' })
     $menu = New-Object System.Windows.Forms.ContextMenuStrip
-    $openItem = $menu.Items.Add('打开工作台')
-    $exitItem = $menu.Items.Add('退出')
+    $openItem = $menu.Items.Add((T '打开工作台' 'Open Workbench'))
+    $exitItem = $menu.Items.Add((T '退出' 'Exit'))
     $openItem.add_Click({ Open-Workbench -RetryService })
     $exitItem.add_Click({ Exit-Workbench })
     $script:Tray.ContextMenuStrip = $menu
@@ -721,8 +733,8 @@ try {
         $hasWindow = $windows.Length -gt 0
         if ($script:HadWindow -and -not $hasWindow -and -not $script:NotifiedClose) {
             $script:NotifiedClose = $true
-            $script:Tray.ShowBalloonTip(8000, 'Workbench 工作台',
-                '工作台已收到托盘，会话照常运行。右键图标选「退出」可彻底退出',
+            $script:Tray.ShowBalloonTip(8000, $script:AppTitle,
+                (T '工作台已收到托盘，会话照常运行。右键图标选「退出」可彻底退出' 'Workbench is now in the tray; sessions keep running. Right-click the icon and choose Exit to quit completely'),
                 [System.Windows.Forms.ToolTipIcon]::Info)
         }
         $script:HadWindow = $hasWindow

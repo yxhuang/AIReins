@@ -16,6 +16,9 @@ param(
     [string]$AppId = 'Chrome.127.0.0.1_/'
 )
 $ErrorActionPreference = 'Stop'
+# 用户可见文案按界面语言输出；快捷方式文件名等稳定标识符保持中文不变。
+$script:IsZh = [System.Globalization.CultureInfo]::CurrentUICulture.Name -like 'zh*'
+function T([string]$Zh, [string]$En) { if ($script:IsZh) { $Zh } else { $En } }
 # 经 WSL 调用时输出走管道，系统代码页（GBK）中文会在 UTF-8 终端里乱码。
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 Add-Type -TypeDefinition @'
@@ -78,7 +81,7 @@ foreach ($candidate in @(
     if (Test-Path -LiteralPath $candidate -PathType Leaf) { $chromeFound = $true; break }
 }
 if (-not $chromeFound) { $chromeFound = $null -ne (Get-Command chrome.exe -ErrorAction SilentlyContinue) }
-if (-not $chromeFound) { Write-Warning '没有找到 Google Chrome，请安装 Google Chrome（工作台窗口用 chrome --app 打开）。' }
+if (-not $chromeFound) { Write-Warning (T '没有找到 Google Chrome，请安装 Google Chrome（工作台窗口用 chrome --app 打开）。' 'Google Chrome was not found. Install Google Chrome (the Workbench window opens with chrome --app).') }
 
 # 默认仓库布局：脚本在 windows/，图标在它的上一层 deploy/。
 # -SourceDir 可指 windows/、deploy/，或把脚本与图标放一起的本地目录。
@@ -94,18 +97,18 @@ if (-not (Test-Path -LiteralPath $iconSource -PathType Leaf)) {
     $iconSource = Join-Path (Split-Path -Parent $sourceRoot) 'workbench.ico'
 }
 foreach ($source in @($scriptSource, $iconSource)) {
-    if (-not (Test-Path -LiteralPath $source -PathType Leaf)) { throw "缺少源文件：$source（用 -SourceDir 指定）" }
+    if (-not (Test-Path -LiteralPath $source -PathType Leaf)) { throw (T "缺少源文件：$source（用 -SourceDir 指定）" "Missing source file: $source (specify it with -SourceDir)") }
 }
 # 预先确认运行脚本编码，防止复制了会让 5.1 乱码的副本。
 $bytes = [System.IO.File]::ReadAllBytes($scriptSource)
 if ($bytes.Length -lt 3 -or $bytes[0] -ne 239 -or $bytes[1] -ne 187 -or $bytes[2] -ne 191) {
-    throw 'wb-tray.ps1 必须是 UTF-8 带 BOM。'
+    throw (T 'wb-tray.ps1 必须是 UTF-8 带 BOM。' 'wb-tray.ps1 must be UTF-8 with BOM.')
 }
 
 function Find-Shortcut {
     if ($ShortcutPath) {
         if (-not (Test-Path -LiteralPath $ShortcutPath -PathType Leaf) -or
-            [System.IO.Path]::GetExtension($ShortcutPath) -ne '.lnk') { throw "找不到 .lnk 快捷方式：$ShortcutPath" }
+            [System.IO.Path]::GetExtension($ShortcutPath) -ne '.lnk') { throw (T "找不到 .lnk 快捷方式：$ShortcutPath" "Cannot find .lnk shortcut: $ShortcutPath") }
         return (Resolve-Path -LiteralPath $ShortcutPath).ProviderPath
     }
     $roots = @(
@@ -176,44 +179,44 @@ New-Item -ItemType Directory -Path $backupDir -Force | Out-Null
 
 foreach ($target in $targets) {
     $shortcut = $shell.CreateShortcut($target)
-    Write-Host "快捷方式：$target"
+    Write-Host (T "快捷方式：$target" "Shortcut: $target")
     if ($newShortcuts -contains $target) {
-        Write-Host '  新建'
+        Write-Host (T '  新建' '  created')
     } else {
-        Write-Host "  原目标：$($shortcut.TargetPath)"
-        Write-Host "  原参数：$($shortcut.Arguments)"
-        Write-Host "  原图标：$($shortcut.IconLocation)"
-        Write-Host "  原工作目录：$($shortcut.WorkingDirectory)"
+        Write-Host (T "  原目标：$($shortcut.TargetPath)" "  original target: $($shortcut.TargetPath)")
+        Write-Host (T "  原参数：$($shortcut.Arguments)" "  original arguments: $($shortcut.Arguments)")
+        Write-Host (T "  原图标：$($shortcut.IconLocation)" "  original icon: $($shortcut.IconLocation)")
+        Write-Host (T "  原工作目录：$($shortcut.WorkingDirectory)" "  original working directory: $($shortcut.WorkingDirectory)")
         # 按完整路径区分开始菜单 / 固定项；重跑时保留首次安装前的备份。
         $hash = [System.Security.Cryptography.SHA256]::Create()
         try { $key = [BitConverter]::ToString($hash.ComputeHash([Text.Encoding]::UTF8.GetBytes($target))).Replace('-', '') }
         finally { $hash.Dispose() }
         $backup = Join-Path $backupDir "$key.lnk"
         if (-not (Test-Path -LiteralPath $backup)) { Copy-Item -LiteralPath $target -Destination $backup }
-        Write-Host "  还原备份：$backup（复制回上面的快捷方式路径）"
+        Write-Host (T "  还原备份：$backup（复制回上面的快捷方式路径）" "  restore backup: $backup (copy it back to the shortcut path above)")
     }
     $shortcut.TargetPath = "$env:SystemRoot\System32\wscript.exe"
     $shortcut.Arguments = "`"$launcher`""
     $shortcut.WorkingDirectory = $installDir
     $shortcut.IconLocation = "$(Join-Path $installDir 'workbench.ico'),0"
-    $shortcut.Description = 'Workbench 工作台'
+    $shortcut.Description = (T 'Workbench 工作台' 'Workbench')
     try { $shortcut.Save() }
     catch {
-        throw "无法修改 $target ：$($_.Exception.Message)。若位于所有用户开始菜单，请用管理员 PowerShell 重跑。已完成的其他项和备份保留。"
+        throw (T "无法修改 $target ：$($_.Exception.Message)。若位于所有用户开始菜单，请用管理员 PowerShell 重跑。已完成的其他项和备份保留。" "Cannot modify ${target}: $($_.Exception.Message). If it is in the all-users Start Menu, rerun in an elevated PowerShell. Completed items and backups are kept.")
     }
     # 重新创建 COM 对象读回持久化结果。
     $saved = $shell.CreateShortcut($target)
     if ($saved.TargetPath -ne $shortcut.TargetPath -or $saved.Arguments -ne $shortcut.Arguments -or
         $saved.IconLocation -ne $shortcut.IconLocation -or $saved.WorkingDirectory -ne $shortcut.WorkingDirectory) {
-        throw "快捷方式读回不一致：$target"
+        throw (T "快捷方式读回不一致：$target" "Shortcut read-back mismatch: $target")
     }
     [WbLink]::SetAppId($target, $AppId)
-    if ([WbLink]::GetAppId($target) -ne $AppId) { throw "任务栏 ID 读回不一致：$target" }
-    Write-Host "  已改为：$($saved.TargetPath) $($saved.Arguments)"
-    Write-Host "  任务栏 ID：$AppId"
-    Write-Host "  新图标：$($saved.IconLocation)"
+    if ([WbLink]::GetAppId($target) -ne $AppId) { throw (T "任务栏 ID 读回不一致：$target" "Taskbar ID read-back mismatch: $target") }
+    Write-Host (T "  已改为：$($saved.TargetPath) $($saved.Arguments)" "  changed to: $($saved.TargetPath) $($saved.Arguments)")
+    Write-Host (T "  任务栏 ID：$AppId" "  taskbar ID: $AppId")
+    Write-Host (T "  新图标：$($saved.IconLocation)" "  new icon: $($saved.IconLocation)")
 }
-if ($pinned.Count -eq 0) { Write-Host '未找到同名任务栏固定项：请从安装后的快捷方式固定到任务栏。' }
-else { Write-Host '已有任务栏固定项已更新，无需重新固定。' }
-Write-Host "已安装到 $installDir。请点「Workbench 工作台」启动。"
-Write-Host '仓库修改不会自动更新安装副本；以后需重跑此安装器，再退出旧托盘实例并重新启动。'
+if ($pinned.Count -eq 0) { Write-Host (T '未找到同名任务栏固定项：请从安装后的快捷方式固定到任务栏。' 'No matching pinned taskbar shortcut found; pin the installed shortcut to the taskbar yourself.') }
+else { Write-Host (T '已有任务栏固定项已更新，无需重新固定。' 'Existing pinned taskbar shortcuts were updated; no need to re-pin.') }
+Write-Host (T "已安装到 $installDir。请点「Workbench 工作台」启动。" "Installed to $installDir. Launch it from the Workbench shortcut.")
+Write-Host (T '仓库修改不会自动更新安装副本；以后需重跑此安装器，再退出旧托盘实例并重新启动。' 'Repository changes do not update the installed copy; rerun this installer, then exit the old tray instance and start it again.')

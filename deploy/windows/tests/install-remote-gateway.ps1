@@ -7,11 +7,13 @@ $tokens = $null; $errors = $null
 if ($errors.Count) { throw ($errors | Out-String) }
 $source = Get-Content -LiteralPath $installer -Raw -Encoding UTF8
 $start = $source.IndexOf('$serveBefore = & $tailscale serve status --json')
-$end = $source.IndexOf('Write-Host "Install loopback gateway', $start)
+$end = $source.IndexOf('Write-Host (T "安装 loopback 网关', $start)
 $preflight = [scriptblock]::Create($source.Substring($start, $end - $start))
 $start = $source.IndexOf('$serveBefore | Set-Content')
 $end = $source.IndexOf('foreach ($name in $sources)', $start)
 $snapshot = [scriptblock]::Create($source.Substring($start, $end - $start))
+# The extracted blocks call the installer's T helper; English keeps rejection paths on the real throws.
+function T([string]$Zh, [string]$En) { $En }
 $temp = Join-Path ([IO.Path]::GetTempPath()) ('wb-remote-install-test-' + [Guid]::NewGuid())
 New-Item -ItemType Directory -Path $temp | Out-Null
 

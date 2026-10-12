@@ -28,7 +28,7 @@
     "test:server": "n=0; for f in server/*.test.ts; do node --import tsx \"$f\" > /dev/null || { echo \"\u274c $f\"; exit 1; }; n=$((n+1)); done; echo \"\u2705 server \u6d4b\u8bd5\u5168\u8fc7\uff08$n \u4e2a\u6587\u4ef6\uff09\"",
     "test:markdown": "node --import ./frontend/scripts/i18n-zh.mjs --import tsx frontend/scripts/markdown.test.mjs",
     "test:tool-summary": "node --import ./frontend/scripts/i18n-zh.mjs --import tsx frontend/scripts/tool-summary.test.mjs",
-    "test:platforms": "node --import ./frontend/scripts/i18n-zh.mjs --import tsx frontend/scripts/platform-capabilities.test.mjs && node deploy/tests/posix-platform.test.mjs",
+    "test:platforms": "node --import ./frontend/scripts/i18n-zh.mjs --import tsx frontend/scripts/platform-capabilities.test.mjs && node deploy/tests/posix-platform.test.mjs && node deploy/windows/tests/tray-title.test.mjs",
     "test": "npm run test:platforms && npm run test:mentions && npm run test:file-panel && npm run test:store && npm run test:attach && npm run test:pages && npm run test:resume && npm run test:effective-ask && npm run test:history && npm run test:sidebar-panels && npm run test:dispatch-flow && npm run test:render-items && npm run test:snapshot && npm run test:reconnect && npm run test:terminal && npm run test:font-scale && npm run test:server && npm run test:markdown && npm run test:tool-summary && npm run test:restart && npm run test:perf-round2 && npm run test:long-session && npm run test:i18n",
     "test:sidebar-panels": "node --import ./frontend/scripts/i18n-zh.mjs --import tsx frontend/scripts/sidebar-panels-flow.test.mjs && node --import ./frontend/scripts/i18n-zh.mjs --import tsx frontend/scripts/panel-back.test.mjs",
     "test:restart": "node --import ./frontend/scripts/i18n-zh.mjs --import tsx frontend/scripts/restart-flow.test.mjs",
@@ -36,8 +36,8 @@
     "test:dispatch-flow": "node --import ./frontend/scripts/i18n-zh.mjs --import tsx frontend/scripts/dispatch-flow.test.mjs",
     "test:perf-round2": "node --import ./frontend/scripts/i18n-zh.mjs --import tsx frontend/scripts/performance-round2.test.mjs",
     "test:long-session": "node --import ./frontend/scripts/i18n-zh.mjs --import tsx frontend/scripts/long-session-render.test.mjs && node --import tsx server/long-session.test.ts && node --import tsx server/long-session-review.test.ts && node --import ./frontend/scripts/i18n-zh.mjs --import tsx frontend/scripts/long-session-scroll.test.mjs",
-    "check:i18n": "node --import tsx frontend/scripts/check-i18n.mjs",
-    "test:i18n": "node --import tsx frontend/scripts/i18n.test.mjs"
+    "check:i18n": "node --import tsx frontend/scripts/check-i18n.mjs && node frontend/scripts/check-server-i18n.mjs",
+    "test:i18n": "node --import tsx frontend/scripts/i18n.test.mjs && node frontend/scripts/check-server-i18n.test.mjs"
   },
   "devDependencies": {
     "@types/node": "^26.2.0",

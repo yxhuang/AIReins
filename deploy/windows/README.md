@@ -30,6 +30,8 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File "C:\wb-tray\install-tray
 
 **仓库修改后必须重跑安装器才生效**，并退出旧托盘实例、重新启动。Windows 可能缓存任务栏图标；更新后仍显示旧图标时，取消固定再从新快捷方式固定。Chrome 的标题栏和任务栏图标行为需在 Windows 侧验收。
 
+窗口标题由 `frontend/src/host-connections.ts` 的 `workbenchWindowTitle` 按界面语言输出：中文为 `Workbench · 本机` / `Workbench · 远程 <机器名>`（可带 `(n) 个闸门待处理 · ` 前缀），英文为 `Workbench · Local` / `Workbench · Remote <机器名>`（可带 `(n) pending approval(s) · ` 前缀）。托盘按 `Chrome_WidgetWin_1` 类名加整标题正则认窗口，同时识别中文、英文新格式与旧格式（`workbench` 整标题、`… · workbench` 结尾）；普通 Chrome 标签页带「 - Google Chrome」后缀，不会被误认。托盘的菜单、气泡和对话框按 Windows 界面语言（`CurrentUICulture`）显示中文或英文，日志内容不随语言变化。
+
 窗口图标仅在首次发现该窗口句柄时处理：先用 `WM_GETICON` 比较大小图标，句柄不同才发 `WM_SETICON`；两项成功后记住该窗口，定时器不再每秒重设。窗口消失后清除记录，新窗口重新检查；读取或设置超时会保留重试。此改动减少 Chrome 非客户区重绘，Ctrl+` 打开终端时的黑屏是否改善需在 Windows 实测。
 
 纯逻辑测试不启动托盘、不调用 Win32，可在 Windows PowerShell 5.1 或 Linux `pwsh` 运行：
@@ -39,3 +41,11 @@ powershell -ExecutionPolicy Bypass -File .\deploy\windows\tests\tray-click-filte
 ```
 
 测试用 AST 提取托盘源函数，覆盖显隐真值表、显示方式、单击裁决（双击去重、忙中挂起、忙段补切换、退出中丢弃）、计时回绕、冷启动补显示、失败后挂起处理、消费挂起后同忙段只补一次及 Show 覆盖判据；也提取真实 `Complete-Action` 检查挂起消费与接线，开窗边界用测试函数替换。原有 56 项用例语义保持不变。遮挡判断沿用 ai-usage 的三个采样点：任一点命中 wb 就认为可见；三个点均被常驻置顶窗口覆盖时会持续走显示路径，实际显隐与任务栏行为仍需真机验收。
+
+窗口标题识别正则另有 Node 测试（WSL 内运行，不依赖 Windows）：
+
+```bash
+node deploy/windows/tests/tray-title.test.mjs
+```
+
+它从 `wb-tray.ps1` 源码提取 `WbTitle` 正则，断言中文、英文新标题及旧格式样例的匹配与拒绝。

@@ -9,12 +9,15 @@ const han = /\p{Script=Han}/u;
 // Exact source literals only. These are compatibility/data/logging boundaries, not untranslated UI.
 export const exceptions = [
   { file: 'components/TerminalPanel.tsx', text: '"M汉\\uE0B0"', reason: 'Hidden font calibration probe must include a CJK glyph and a powerline glyph.' },
-  { file: 'host-connections.ts', text: '`(${pending}) 个闸门待处理 · `', reason: 'Window title must keep matching the Windows tray contract in both languages.' },
-  { file: 'host-connections.ts', text: '"本机"', reason: 'Fixed local identity inside workbenchWindowTitle; tray contract.' },
-  { file: 'host-connections.ts', text: '`远程 ${label}`', reason: 'Fixed remote identity inside workbenchWindowTitle; tray contract.' },
   { file: 'dispatch-flow.ts', text: '/^工单[:：]\\s*/', reason: 'Recognizes a dispatch heading in input data; it is not displayed copy.' },
   { file: 'snapshot.ts', text: '`快照预检失败（${error instanceof Error ? error.message : String(error)}），跳过快照检查直接建会话`', reason: 'Diagnostic callback sent to console.warn; logs stay in their original language.' },
 ];
+// A count placeholder followed by one of these nouns must use {p, plural, one {…} other {…}} (see TERMS.md).
+const countableNouns = ['file', 'time', 'minute', 'line', 'location', 'item', 'gate', 'approval', 'host', 'error',
+  'message', 'task', 'byte', 'dispatch', 'tree', 'session', 'second', 'tool', 'character', 'reference', 'event', 'entry', 'type'];
+const nounForms = new Set(countableNouns.flatMap(noun => [noun, `${noun}s`]));
+// p0 of core.026 is a dispatcher label, not a count.
+const pluralExceptions = [{ key: 'core.026', reason: 'p0 is a dispatcher name, not a count.' }];
 // Archived Chromium template: not in the production import graph. Its exact hash is registered so new copy cannot hide in vendor.
 import { createHash } from 'node:crypto';
 const vendorHash = "643d8b00614aba4d7f715340061f5d5e9f647ae7ce626f9c4ea5051ac7f94196";
@@ -71,8 +74,27 @@ for (const group of ['core', 'ui', 'server']) {
   for (const key of Object.keys(zh)) {
     assert.ok(!merged.has(key), `Duplicate dictionary key: ${key}`); merged.add(key);
     for (const [locale, dictionary] of [['zh-CN', zh], ['en', en]]) assert.ok(typeof dictionary[key] === 'string' && dictionary[key].trim(), `${locale}: empty translation ${key}`);
-    assert.deepEqual([...zh[key].matchAll(/\{(\w+)\}/g)].map(match => match[1]).filter(name => name !== "product").sort(), [...en[key].matchAll(/\{(\w+)\}/g)].map(match => match[1]).filter(name => name !== "product").sort(), `${key}: placeholders differ`);
+    // Placeholders: bare {name} plus {name, plural, …} blocks (a block's one/other texts contain no braces).
+    const names = text => {
+      const blockNames = [...text.matchAll(/\{(\w+),\s*plural,\s*one\s*\{[^{}]*\}\s*other\s*\{[^{}]*\}\}/g)].map(match => match[1]);
+      const bare = text.replace(/\{\w+,\s*plural,\s*one\s*\{[^{}]*\}\s*other\s*\{[^{}]*\}\}/g, '');
+      return [...new Set([...blockNames, ...[...bare.matchAll(/\{(\w+)\}/g)].map(match => match[1])].filter(name => name !== 'product'))].sort();
+    };
+    assert.deepEqual(names(zh[key]), names(en[key]), `${key}: placeholders differ`);
     assert.ok(!han.test(en[key]), `${key}: English translation contains Chinese`);
+    // Well-formed plural blocks: every "plural" marker must parse as a full {name, plural, one {…} other {…}}.
+    for (const [locale, value] of [['zh-CN', zh[key]], ['en', en[key]]]) {
+      const blocks = value.match(/\{\w+,\s*plural,/g)?.length ?? 0;
+      assert.equal(value.match(/\{\w+,\s*plural,\s*one\s*\{[^{}]*\}\s*other\s*\{[^{}]*\}\}/g)?.length ?? 0, blocks,
+        `${key}: malformed plural block in ${locale}`);
+    }
+    // English: a count placeholder directly followed by a countable noun needs the plural syntax.
+    const stripped = en[key].replace(/\{\w+,\s*plural,\s*one\s*\{[^{}]*\}\s*other\s*\{[^{}]*\}\}/g, '');
+    for (const match of stripped.matchAll(/\{p\d+\}\s+([A-Za-z][A-Za-z-]*)/g)) {
+      if (!nounForms.has(match[1].toLowerCase())) continue;
+      assert.ok(pluralExceptions.some(item => item.key === key),
+        `${key}: "${match[0]}" puts a countable noun after a count placeholder; use {pN, plural, one {# …} other {# …s}} or register a pluralExceptions entry`);
+    }
   }
   keys += Object.keys(zh).length;
 }

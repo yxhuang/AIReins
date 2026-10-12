@@ -1,6 +1,6 @@
 # 本机与远程 Workbench
 
-每台电脑独立运行 Workbench 和所在 WSL/原生 Linux/macOS 的 Agent。点击左上角 **wb｜本机/远程机器名** 整体按钮（文字沿用 Workbench 字体样式），菜单收窄为300px，选择「机器名（本机）」或已保存的 Tailscale 机器；按钮保留 wb 标志，使用描边、高光、轻投影和按压反馈，去掉小箭头。窗口标题显示 `Workbench · 本机` 或 `Workbench · 远程 <机器名>`，待处理闸门计数仍保留。通过 Tailscale 地址访问，即使是这台机器自身，也按远程入口显示。
+每台电脑独立运行 Workbench 和所在 WSL/原生 Linux/macOS 的 Agent。点击左上角 **wb｜本机/远程机器名** 整体按钮（文字沿用 Workbench 字体样式），菜单收窄为300px，选择「机器名（本机）」或已保存的 Tailscale 机器；按钮保留 wb 标志，使用描边、高光、轻投影和按压反馈，去掉小箭头。窗口标题按界面语言输出：中文 `Workbench · 本机` / `Workbench · 远程 <机器名>`，英文 `Workbench · Local` / `Workbench · Remote <机器名>`，待处理闸门计数前缀（中文 `(n) 个闸门待处理 · `、英文 `(n) pending approval(s) · `）仍保留。Windows 托盘按标题认窗口时同时识别中文、英文新格式与旧格式（`workbench` 整标题、`… · workbench` 结尾）。通过 Tailscale 地址访问，即使是这台机器自身，也按远程入口显示。
 
 ## 另一台电脑安装
 

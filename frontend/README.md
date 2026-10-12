@@ -186,8 +186,8 @@ macOS 实验性 `fileEdit:false`：文件 metadata 的 `editable` 同时为 fals
 
 ## 中英双语界面
 
-轻量入口 [i18n.ts](src/i18n.ts) 合并 `src/i18n/` 内的 `core`、`ui`、`server` 三组 `zh-CN` / `en` 词典，无新增依赖。默认按 `navigator.language` 选择：`zh*` 使用简体中文，其他使用英文。设置「外观 → 语言」可选跟随系统、中文、English，偏好以 `workbench-language` 保存到浏览器 localStorage，沿用字号/字体的本机偏好机制；切换后整页刷新生效。各浏览器独立保存；无法读取存储时跟随系统。页面 `lang`、数量、日期和相对时间使用所选语言，窗口标题保留原值以兼容 Windows 托盘。
+轻量入口 [i18n.ts](src/i18n.ts) 合并 `src/i18n/` 内的 `core`、`ui`、`server` 三组 `zh-CN` / `en` 词典，无新增依赖。默认按 `navigator.language` 选择：`zh*` 使用简体中文，其他使用英文。设置「外观 → 语言」可选跟随系统、中文、English，偏好以 `workbench-language` 保存到浏览器 localStorage，沿用字号/字体的本机偏好机制；切换后整页刷新生效。各浏览器独立保存；无法读取存储时跟随系统。页面 `lang`、数量、日期和相对时间使用所选语言。窗口标题随语言输出（`core.131`–`core.133`）；Windows 托盘的 `IsWbTitle` 同时识别中英文标题与升级前的旧格式。
 
-新增文案时在对应两份词典中添加相同键，组件调用 `t(key, {name: value})`。动态值使用 `{name}` 占位符，不在调用处拼接汉字；`{product}` 由入口统一替换为 `PRODUCT_NAME`（定义在 `shared/product-name.ts`）。数字参数自动按语言格式化，日期/相对时间使用 `formatDate` / `formatRelativeTime`；原始 ID 和版本号作为字符串传入。术语以 [TERMS.md](src/i18n/TERMS.md) 为准。服务端自产文案的 `i18n` 元数据在 API / WS / 终端接收入口译成显示字段，旧信封和未知键保留原文，用户/模型正文不翻译；接口详见 server README。
+新增文案时在对应两份词典中添加相同键，组件调用 `t(key, {name: value})`。动态值使用 `{name}` 占位符，不在调用处拼接汉字；`{product}` 由入口统一替换为 `PRODUCT_NAME`（定义在 `shared/product-name.ts`）。数字参数自动按语言格式化，日期/相对时间使用 `formatDate` / `formatRelativeTime`；原始 ID 和版本号作为字符串传入。英文数量文案用复数语法 `{name, plural, one {…#…} other {…#…}}`（`#` 为格式化后的数量，规则见 TERMS.md）；中文不需要复数。术语以 [TERMS.md](src/i18n/TERMS.md) 为准。服务端自产文案的 `i18n` 元数据在 API / WS / 终端接收入口译成显示字段，旧信封和未知键保留原文，用户/模型正文不翻译；接口详见 server README。
 
-提交前运行 `npm run check:i18n`：使用现有构建工具的 TS/TSX parser 查中文字面量（不检查注释和 console 输出），检查两份词典键集、空译文、参数占位符和英文中文残留。兼容性/数据识别/校准例外逐条登记在 [check-i18n.mjs](scripts/check-i18n.mjs)，历史 vendor 模板以精确 hash 固定。已有文案测试通过 `i18n-zh.mjs` 在模块加载前固定中文；`npm run test:i18n` 覆盖语言选择、插值、回退、服务端元数据与英文视图渲染。
+提交前运行 `npm run check:i18n`：使用现有构建工具的 TS/TSX parser 查中文字面量（不检查注释和 console 输出），检查两份词典键集、空译文、参数占位符（含复数块）、英文中文残留，以及英文「数字占位符 + 可数名词」必须走复数语法（误报在 `pluralExceptions` 登记）。兼容性/数据识别/校准例外逐条登记在 [check-i18n.mjs](scripts/check-i18n.mjs)，历史 vendor 模板以精确 hash 固定。同一命令还运行服务端覆盖守卫 [check-server-i18n.mjs](scripts/check-server-i18n.mjs)：`server/` 非测试源码里每处中文字面量必须匹配 `server/i18n/coverage.json` 已登记模板或带原因的例外；新增未登记文案、模板已删或行号漂移都会失败并给出修复提示。已有文案测试通过 `i18n-zh.mjs` 在模块加载前固定中文；`npm run test:i18n` 覆盖语言选择、插值、复数、回退、服务端元数据、覆盖守卫与英文视图渲染。

@@ -17,6 +17,16 @@ assert.equal(readLanguagePreference(), 'en');
 assert.equal(interpolate('{name} {name} {missing}', { name: '$&' }), '$& $& {missing}');
 assert.equal(interpolate('{count}', { count: 1200 }), '1,200');
 assert.equal(interpolate('{product}'), 'Workbench');
+// Plural blocks: {name, plural, one {…#…} other {…#…}} with Intl.PluralRules.
+assert.equal(interpolate('{n, plural, one {# file} other {# files}}', { n: 1 }), '1 file');
+assert.equal(interpolate('{n, plural, one {# file} other {# files}}', { n: 0 }), '0 files');
+assert.equal(interpolate('{n, plural, one {# file} other {# files}}', { n: 2 }), '2 files');
+assert.equal(interpolate('{n, plural, one {# file} other {# files}}', { n: 1200 }), '1,200 files');
+assert.equal(interpolate('{n, plural, one {# file} other {# files}}', { n: '3' }), '3 files');
+assert.equal(interpolate('{n, plural, one {# file} other {# files}}', { n: 'many' }), '{n, plural, one {# file} other {# files}}');
+assert.equal(interpolate('{n, plural, one {# file} other {# files}}'), '{n, plural, one {# file} other {# files}}');
+assert.equal(t('core.115', { p0: 1 }), '1 file');
+assert.equal(t('core.115', { p0: 5 }), '5 files');
 assert.equal(t('missing.key'), 'missing.key');
 dictionaries['zh-CN']['test.fallback'] = 'Fallback';
 assert.equal(t('test.fallback'), 'Fallback');
@@ -58,6 +68,11 @@ for (const html of [
 ]) assert.doesNotMatch(html, /\p{Script=Han}/u);
 const { workbenchWindowTitle } = await import('../src/host-connections.ts');
 const title = workbenchWindowTitle('http://127.0.0.1:18000/', 2);
+assert.equal(title, '(2) pending approvals · Workbench · Local');
+assert.equal(workbenchWindowTitle('http://127.0.0.1:18000/', 1), '(1) pending approval · Workbench · Local');
+assert.equal(workbenchWindowTitle('http://127.0.0.1:18000/', 0), 'Workbench · Local');
+assert.equal(workbenchWindowTitle('https://alice-desktop.tail123.ts.net/', 0), 'Workbench · Remote alice-desktop');
+assert.equal(workbenchWindowTitle('https://alice-desktop.tail123.ts.net/', 1), '(1) pending approval · Workbench · Remote alice-desktop');
 setLanguagePreference('zh-CN');
 assert.equal(workbenchWindowTitle('http://127.0.0.1:18000/', 2), title);
 assert.equal(readLanguagePreference(), 'zh-CN');

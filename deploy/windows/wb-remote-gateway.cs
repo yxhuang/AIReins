@@ -160,16 +160,27 @@ public sealed class WbRemoteGateway
         return !mutating || (headers.TryGetValue("Origin", out requestOrigin) && requestOrigin == origin);
     }
 
-    static async Task Reply(NetworkStream stream, int status, bool waiting)
+    // The 503 page is served to the remote browser; follow its Accept-Language, defaulting to Chinese.
+    static bool PrefersChinese(byte[] bytes)
+    {
+        string head = Encoding.ASCII.GetString(bytes);
+        foreach (string line in head.Split(new[] { "\r\n" }, StringSplitOptions.None))
+            if (line.StartsWith("Accept-Language:", StringComparison.OrdinalIgnoreCase))
+                return line.IndexOf("zh", StringComparison.OrdinalIgnoreCase) >= 0;
+        return true;
+    }
+
+    static async Task Reply(NetworkStream stream, int status, bool waiting, bool zh)
     {
         string body = status == 403 ? "Forbidden: use your authorized Tailscale device." :
-            "<!doctype html><html lang=\"zh-CN\"><meta charset=\"utf-8\">" +
+            "<!doctype html><html lang=\"" + (zh ? "zh-CN" : "en") + "\"><meta charset=\"utf-8\">" +
             "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">" +
             (waiting ? "<meta http-equiv=\"refresh\" content=\"5\">" : "") +
             "<title>Workbench</title><body style=\"font:18px system-ui;padding:32px\">" +
-            (waiting ? "正在启动 Workbench，请稍候。页面会自动重试。" :
-                "Workbench 启动失败。请稍后刷新；持续失败时检查电脑上的 remote-gateway.log。") +
-            "<p><a href=\"\">刷新页面</a></p></body></html>";
+            (waiting ? (zh ? "正在启动 Workbench，请稍候。页面会自动重试。" : "Workbench is starting; this page retries automatically.") :
+                (zh ? "Workbench 启动失败。请稍后刷新；持续失败时检查电脑上的 remote-gateway.log。" :
+                    "Workbench failed to start. Refresh in a moment; if it keeps failing, check remote-gateway.log on the computer.")) +
+            "<p><a href=\"\">" + (zh ? "刷新页面" : "Refresh") + "</a></p></body></html>";
         byte[] content = Encoding.UTF8.GetBytes(body);
         string header = "HTTP/1.1 " + status + (status == 403 ? " Forbidden" : " Service Unavailable") +
             "\r\nContent-Type: text/html; charset=utf-8\r\nCache-Control: no-store\r\n" +
@@ -204,7 +215,7 @@ public sealed class WbRemoteGateway
                     return;
                 }
                 byte[] initial = await reading.ConfigureAwait(false);
-                if (!Authorized(initial)) { await Reply(stream, 403, false).ConfigureAwait(false); return; }
+                if (!Authorized(initial)) { await Reply(stream, 403, false, PrefersChinese(initial)).ConfigureAwait(false); return; }
                 TcpClient up = await Connect().ConfigureAwait(false);
                 if (up == null)
                 {
@@ -212,7 +223,7 @@ public sealed class WbRemoteGateway
                     await Task.WhenAny(boot, Task.Delay(responseWaitMs)).ConfigureAwait(false);
                     up = await Connect().ConfigureAwait(false);
                     if (up == null)
-                    { await Reply(stream, 503, !boot.IsCompleted).ConfigureAwait(false); return; }
+                    { await Reply(stream, 503, !boot.IsCompleted, PrefersChinese(initial)).ConfigureAwait(false); return; }
                 }
                 using (up)
                 using (stop.Register(() => up.Close()))

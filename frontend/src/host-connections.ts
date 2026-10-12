@@ -113,9 +113,10 @@ export function hostShortName(name: string): string {
 }
 
 export function workbenchWindowTitle(href: string, pending: number): string {
-  const prefix = pending > 0 ? `(${pending}) 个闸门待处理 · ` : "";
-  const label = normalizeLocalOrigin(new URL(href).origin) ? "本机" : connectionLabel(href);
-  return `${prefix}Workbench · ${normalizeLocalOrigin(new URL(href).origin) ? label : `远程 ${label}`}`;
+  // 窗口标题同时是 Windows 托盘的识别协议：wb-tray.ps1 的 IsWbTitle 正则须匹配这里的所有输出形态。
+  const local = normalizeLocalOrigin(new URL(href).origin);
+  const prefix = pending > 0 ? t("core.131", { p0: pending }) : "";
+  return prefix + (local ? t("core.132") : t("core.133", { p0: connectionLabel(href) }));
 }
 
 export function parseHostTransfer(href: string): HostConnections | null {

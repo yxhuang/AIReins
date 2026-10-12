@@ -3547,9 +3547,226 @@
     },
     {
       "file": "server/windows-directory-picker.ts",
-      "line": 23,
+      "line": 33,
       "text": "(embedded Windows picker script comments)",
-      "reason": "内嵌 PowerShell 脚本中的注释；窗口标题已是英文，本工单禁止启动或更改 Windows 安装/托盘提示"
+      "reason": "内嵌 PowerShell 的中文仅位于 # 注释；精确模板摘要防止后续用户文案混入，修改脚本后须核查所有中文字面量再更新摘要。",
+      "sha256": "cb741f451bfb7cbf4fcc7c85e324ac306fb696ad27f3a8150bdf3d8ab4bee177"
+    },
+    {
+      "file": "server/i18n/messages.ts",
+      "line": 105,
+      "text": "(?:Workbench|workbench|工作台|WB)",
+      "reason": "匹配历史产品名的兼容正则片段，仅用于识别描述符，不直接显示给用户。"
+    },
+    {
+      "file": "server/scripts/cache-audit.mjs",
+      "line": 9,
+      "text": "用法：node server/scripts/cache-audit.mjs <jsonl路径 | 会话ID前缀> [--ttl 3600] [--json]\n      node server/scripts/cache-audit.mjs --since Nd|Nh [--ttl 3600]",
+      "reason": "独立缓存审计 CLI 的用法、诊断或结果输出，不在服务端运行时导入，不发送给前端。"
+    },
+    {
+      "file": "server/scripts/cache-audit.mjs",
+      "line": 20,
+      "text": "{p0} 缺少参数",
+      "reason": "独立缓存审计 CLI 的用法、诊断或结果输出，不在服务端运行时导入，不发送给前端。"
+    },
+    {
+      "file": "server/scripts/cache-audit.mjs",
+      "line": 22,
+      "text": "TTL 必须是非负秒数",
+      "reason": "独立缓存审计 CLI 的用法、诊断或结果输出，不在服务端运行时导入，不发送给前端。"
+    },
+    {
+      "file": "server/scripts/cache-audit.mjs",
+      "line": 26,
+      "text": "--since 必须是正整数 Nd 或 Nh",
+      "reason": "独立缓存审计 CLI 的用法、诊断或结果输出，不在服务端运行时导入，不发送给前端。"
+    },
+    {
+      "file": "server/scripts/cache-audit.mjs",
+      "line": 28,
+      "text": "--since 超出范围",
+      "reason": "独立缓存审计 CLI 的用法、诊断或结果输出，不在服务端运行时导入，不发送给前端。"
+    },
+    {
+      "file": "server/scripts/cache-audit.mjs",
+      "line": 30,
+      "text": "无效参数：{p0}",
+      "reason": "独立缓存审计 CLI 的用法、诊断或结果输出，不在服务端运行时导入，不发送给前端。"
+    },
+    {
+      "file": "server/scripts/cache-audit.mjs",
+      "line": 66,
+      "text": "跳过无效 JSON 行 {p0}；中断相邻轮比较",
+      "reason": "独立缓存审计 CLI 的用法、诊断或结果输出，不在服务端运行时导入，不发送给前端。"
+    },
+    {
+      "file": "server/scripts/cache-audit.mjs",
+      "line": 76,
+      "text": "压缩边界",
+      "reason": "独立缓存审计 CLI 的用法、诊断或结果输出，不在服务端运行时导入，不发送给前端。"
+    },
+    {
+      "file": "server/scripts/cache-audit.mjs",
+      "line": 103,
+      "text": "{p0} -> {p1} (宿主切换线索)",
+      "reason": "独立缓存审计 CLI 的用法、诊断或结果输出，不在服务端运行时导入，不发送给前端。"
+    },
+    {
+      "file": "server/scripts/cache-audit.mjs",
+      "line": 129,
+      "text": "{p0}(总计，未细分)",
+      "reason": "独立缓存审计 CLI 的用法、诊断或结果输出，不在服务端运行时导入，不发送给前端。"
+    },
+    {
+      "file": "server/scripts/cache-audit.mjs",
+      "line": 134,
+      "text": "会话 {p0}\n文件 {p1}",
+      "reason": "独立缓存审计 CLI 的用法、诊断或结果输出，不在服务端运行时导入，不发送给前端。"
+    },
+    {
+      "file": "server/scripts/cache-audit.mjs",
+      "line": 143,
+      "text": "--- 边界 #{p0} 前: {p1} {p2} ---",
+      "reason": "独立缓存审计 CLI 的用法、诊断或结果输出，不在服务端运行时导入，不发送给前端。"
+    },
+    {
+      "file": "server/scripts/cache-audit.mjs",
+      "line": 146,
+      "text": "汇总：{p0} 轮，意外失效 {p1} 条",
+      "reason": "独立缓存审计 CLI 的用法、诊断或结果输出，不在服务端运行时导入，不发送给前端。"
+    },
+    {
+      "file": "server/scripts/cache-audit.mjs",
+      "line": 163,
+      "text": "{p0}\t{p1}\t轮数={p2}\t意外失效={p3}{p4}",
+      "reason": "独立缓存审计 CLI 的用法、诊断或结果输出，不在服务端运行时导入，不发送给前端。"
+    },
+    {
+      "file": "server/scripts/cache-audit.mjs",
+      "line": 163,
+      "text": "\t跳过坏行={p0}",
+      "reason": "独立缓存审计 CLI 的用法、诊断或结果输出，不在服务端运行时导入，不发送给前端。"
+    },
+    {
+      "file": "server/scripts/cache-audit.mjs",
+      "line": 168,
+      "text": "失效明细：{p0} ({p1})",
+      "reason": "独立缓存审计 CLI 的用法、诊断或结果输出，不在服务端运行时导入，不发送给前端。"
+    },
+    {
+      "file": "server/scripts/cache-audit.mjs",
+      "line": 171,
+      "text": "总计：会话 {p0}，轮数 {p1}，意外失效 {p2} 条，读取错误 {p3}，跳过坏行 {p4}",
+      "reason": "独立缓存审计 CLI 的用法、诊断或结果输出，不在服务端运行时导入，不发送给前端。"
+    },
+    {
+      "file": "server/scripts/cache-audit.mjs",
+      "line": 179,
+      "text": "路径必须位于历史根目录的 <项目>/*.jsonl 层",
+      "reason": "独立缓存审计 CLI 的用法、诊断或结果输出，不在服务端运行时导入，不发送给前端。"
+    },
+    {
+      "file": "server/scripts/cache-audit.mjs",
+      "line": 182,
+      "text": "会话前缀有多个匹配：\n{p0}",
+      "reason": "独立缓存审计 CLI 的用法、诊断或结果输出，不在服务端运行时导入，不发送给前端。"
+    },
+    {
+      "file": "server/scripts/cache-audit.mjs",
+      "line": 182,
+      "text": "未找到会话：{p0}",
+      "reason": "独立缓存审计 CLI 的用法、诊断或结果输出，不在服务端运行时导入，不发送给前端。"
+    },
+    {
+      "file": "server/scripts/external-resume-smoke.mjs",
+      "line": 35,
+      "text": "记住单词 APPLE，只回复 OK",
+      "reason": "独立续接 smoke 测试发送给 CLI 的固定测试输入，不属于 Workbench 界面或服务端自产报错。"
+    },
+    {
+      "file": "server/scripts/external-resume-smoke.mjs",
+      "line": 39,
+      "text": "记住单词 CHERRY，只回复 OK",
+      "reason": "独立续接 smoke 测试发送给 CLI 的固定测试输入，不属于 Workbench 界面或服务端自产报错。"
+    },
+    {
+      "file": "server/scripts/external-resume-smoke.mjs",
+      "line": 48,
+      "text": "按顺序列出我让你记住的所有单词，只列单词，用空格分隔",
+      "reason": "独立续接 smoke 测试发送给 CLI 的固定测试输入，不属于 Workbench 界面或服务端自产报错。"
+    },
+    {
+      "file": "server/scripts/external-resume-smoke.mjs",
+      "line": 53,
+      "text": "再列一次，只列单词",
+      "reason": "独立续接 smoke 测试发送给 CLI 的固定测试输入，不属于 Workbench 界面或服务端自产报错。"
+    },
+    {
+      "file": "server/scripts/verify-snapshot.mjs",
+      "line": 14,
+      "text": "用法：node server/scripts/verify-snapshot.mjs <sessionId> [--probe-message 文本]",
+      "reason": "独立 snapshot 协议验证 CLI 的用法和断言诊断，不在服务端运行时导入，不发送给前端。"
+    },
+    {
+      "file": "server/scripts/verify-snapshot.mjs",
+      "line": 20,
+      "text": "snapshot 请求失败",
+      "reason": "独立 snapshot 协议验证 CLI 的用法和断言诊断，不在服务端运行时导入，不发送给前端。"
+    },
+    {
+      "file": "server/scripts/verify-snapshot.mjs",
+      "line": 29,
+      "text": "seq 在事件 {p0} 处不连续",
+      "reason": "独立 snapshot 协议验证 CLI 的用法和断言诊断，不在服务端运行时导入，不发送给前端。"
+    },
+    {
+      "file": "server/scripts/verify-snapshot.mjs",
+      "line": 30,
+      "text": "seq={p0} 串入其他 sessionId",
+      "reason": "独立 snapshot 协议验证 CLI 的用法和断言诊断，不在服务端运行时导入，不发送给前端。"
+    },
+    {
+      "file": "server/scripts/verify-snapshot.mjs",
+      "line": 31,
+      "text": "seq={p0} agentId 不一致",
+      "reason": "独立 snapshot 协议验证 CLI 的用法和断言诊断，不在服务端运行时导入，不发送给前端。"
+    },
+    {
+      "file": "server/scripts/verify-snapshot.mjs",
+      "line": 33,
+      "text": "snapshot 与 NDJSON 在 seq={p0} 不一致",
+      "reason": "独立 snapshot 协议验证 CLI 的用法和断言诊断，不在服务端运行时导入，不发送给前端。"
+    },
+    {
+      "file": "server/scripts/verify-snapshot.mjs",
+      "line": 36,
+      "text": "snapshot 顶层 seq、session.seq 与末事件不一致",
+      "reason": "独立 snapshot 协议验证 CLI 的用法和断言诊断，不在服务端运行时导入，不发送给前端。"
+    },
+    {
+      "file": "server/scripts/verify-snapshot.mjs",
+      "line": 48,
+      "text": "增量续传验证 240 秒超时",
+      "reason": "独立 snapshot 协议验证 CLI 的用法和断言诊断，不在服务端运行时导入，不发送给前端。"
+    },
+    {
+      "file": "server/scripts/verify-snapshot.mjs",
+      "line": 59,
+      "text": "收到非增量事件 seq={p0} <= {p1}",
+      "reason": "独立 snapshot 协议验证 CLI 的用法和断言诊断，不在服务端运行时导入，不发送给前端。"
+    },
+    {
+      "file": "server/scripts/verify-snapshot.mjs",
+      "line": 65,
+      "text": "增量首 seq={p0}，预期 {p1}",
+      "reason": "独立 snapshot 协议验证 CLI 的用法和断言诊断，不在服务端运行时导入，不发送给前端。"
+    },
+    {
+      "file": "server/scripts/ws-demo.mjs",
+      "line": 16,
+      "text": "用法：node server/scripts/ws-demo.mjs <sessionId> [--message 文本] [--auto-allow] [--until-complete] [--after seq]",
+      "reason": "独立 WebSocket 演示 CLI 的用法提示，不在服务端运行时导入，不发送给前端。"
     }
   ]
 }

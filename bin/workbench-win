@@ -7,6 +7,9 @@
 #   2. 用本脚本同目录的 workbench，不依赖用户名或 ~/.local/bin 的 PATH。
 set -uo pipefail
 
+# 输出语言：依次看 LC_ALL → LC_MESSAGES → LANG，zh 开头（大小写不敏感）用中文，否则英文。
+wb_is_zh() { case "${LC_ALL:-${LC_MESSAGES:-${LANG:-}}}" in [zZ][hH]*) return 0;; *) return 1;; esac; }
+
 URL="http://127.0.0.1:${WORKBENCH_PORT:-8790}/"
 
 # 用 Chrome 应用窗口（--app，同 ai-usage 面板）打开，不开普通标签页；
@@ -17,10 +20,18 @@ if WORKBENCH_NO_OPEN=1 "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/workbenc
     || cmd.exe /c start "" "$URL" >/dev/null 2>&1   # 没装 Chrome 时退回默认浏览器
 else
   echo
-  echo "工作台启动失败，上面是原因。"
-  echo "常见情形：端口被别的程序占用 —— 可改端口重试："
-  echo "  WORKBENCH_PORT=8791 wb"
-  echo
-  echo "按回车键关闭此窗口。"
+  if wb_is_zh; then
+    echo "工作台启动失败，上面是原因。"
+    echo "常见情形：端口被别的程序占用 —— 可改端口重试："
+    echo "  WORKBENCH_PORT=8791 wb"
+    echo
+    echo "按回车键关闭此窗口。"
+  else
+    echo "Workbench failed to start; the reason is shown above."
+    echo "Common cause: the port is used by another program — retry with a different port:"
+    echo "  WORKBENCH_PORT=8791 wb"
+    echo
+    echo "Press Enter to close this window."
+  fi
   read -r
 fi

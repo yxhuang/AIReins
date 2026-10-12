@@ -4,6 +4,13 @@
 # 启动后打开本平台默认浏览器；置 WORKBENCH_NO_OPEN=1 可跳过。
 set -uo pipefail
 
+# 输出语言：依次看 LC_ALL → LC_MESSAGES → LANG，zh 开头（大小写不敏感）用中文，否则英文。
+wb_is_zh() { case "${LC_ALL:-${LC_MESSAGES:-${LANG:-}}}" in [zZ][hH]*) return 0;; *) return 1;; esac; }
+say() { # say '中文 printf 格式' 'English printf format' [参数…]
+  local format="$2"; wb_is_zh && format="$1"; shift 2
+  if (( $# )); then printf "$format\n" "$@"; else printf '%s\n' "$format"; fi
+}
+
 # BSD readlink 没有 -f；逐层解析安装器建立的软链接。
 script="${BASH_SOURCE[0]}"
 while [[ -L "$script" ]]; do
@@ -64,21 +71,21 @@ start() {
   local pid; pid="$(port_pid)"
   if [[ -n "$pid" ]]; then
     if is_ours "$pid"; then
-      echo "工作台已在运行（PID $pid） → $URL"; open_browser; return 0
+      say "工作台已在运行（PID %s） → %s" "Already running (PID %s) → %s" "$pid" "$URL"; open_browser; return 0
     fi
-    echo "❌ 端口 $PORT 被别的程序占用（PID $pid）：" >&2
+    say "❌ 端口 %s 被别的程序占用（PID %s）：" "❌ Port %s is used by another program (PID %s):" "$PORT" "$pid" >&2
     process_command "$pid" | cut -c1-120 >&2
-    echo "   换端口：WORKBENCH_PORT=8791 workbench" >&2
+    say "   换端口：WORKBENCH_PORT=8791 workbench" "   Use another port: WORKBENCH_PORT=8791 workbench" >&2
     return 1
   fi
   if [[ ! -f "$REPO/frontend/dist/index.html" ]]; then
-    echo "前端尚未构建，执行 npm run build…"
+    say "前端尚未构建，执行 npm run build…" "Frontend is not built yet; running npm run build…"
     if ! (cd "$REPO" && npm run build); then
-      echo "❌ 前端构建失败，工作台未启动；请修复构建错误后重试。" >&2
+      say "❌ 前端构建失败，工作台未启动；请修复构建错误后重试。" "❌ Frontend build failed; workbench not started. Fix the build errors and retry." >&2
       return 1
     fi
     if [[ ! -f "$REPO/frontend/dist/index.html" ]]; then
-      echo "❌ 构建后仍缺少 frontend/dist/index.html，工作台未启动。" >&2
+      say "❌ 构建后仍缺少 frontend/dist/index.html，工作台未启动。" "❌ frontend/dist/index.html is still missing after the build; workbench not started." >&2
       return 1
     fi
   fi
@@ -94,45 +101,45 @@ start() {
     ( cd "$REPO" && exec setsid env WORKBENCH_PORT="$PORT" node --import tsx "$REPO/server/index.ts" >>"$LOG" 2>&1 < /dev/null & )
   fi
   for (( attempt=0; attempt<40; attempt++ )); do
-    pid="$(port_pid)"; [[ -n "$pid" ]] && { echo "已启动（PID $pid） → $URL"; open_browser; return 0; }
+    pid="$(port_pid)"; [[ -n "$pid" ]] && { say "已启动（PID %s） → %s" "Started (PID %s) → %s" "$pid" "$URL"; open_browser; return 0; }
     sleep 0.25
   done
-  echo "❌ 15 秒内没起来，看日志：$LOG" >&2; tail -5 "$LOG" >&2; return 1
+  say "❌ 15 秒内没起来，看日志：%s" "❌ Not up within 15s; check the log: %s" "$LOG" >&2; tail -5 "$LOG" >&2; return 1
 }
 
 stop() {
   local pid; pid="$(port_pid)"
-  [[ -z "$pid" ]] && { echo "没有在运行"; return 0; }
-  if ! is_ours "$pid"; then echo "❌ 端口 $PORT 上不是本工作台，拒绝停它（PID $pid）" >&2; return 1; fi
+  [[ -z "$pid" ]] && { say "没有在运行" "Not running"; return 0; }
+  if ! is_ours "$pid"; then say "❌ 端口 %s 上不是本工作台，拒绝停它（PID %s）" "❌ Port %s is not this workbench; refusing to stop it (PID %s)" "$PORT" "$pid" >&2; return 1; fi
   kill "$pid"
-  for (( attempt=0; attempt<20; attempt++ )); do [[ -z "$(port_pid)" ]] && { echo "已停止"; return 0; }; sleep 0.25; done
-  echo "⚠ 仍未退出，可手动：kill -9 $pid" >&2; return 1
+  for (( attempt=0; attempt<20; attempt++ )); do [[ -z "$(port_pid)" ]] && { say "已停止" "Stopped"; return 0; }; sleep 0.25; done
+  say "⚠ 仍未退出，可手动：kill -9 %s" "⚠ Still not exited; you can run it manually: kill -9 %s" "$pid" >&2; return 1
 }
 
 remote_status() {
   local cfg="${WORKBENCH_HOME:-$HOME/.workbench}/remote.json" port="" origin="" rpid=""
-  [[ -f "$cfg" ]] || { echo "  远程：未配置（见 server/README.md「远程入口配置」）"; return 0; }
+  [[ -f "$cfg" ]] || { say "  远程：未配置（见 server/README.md「远程入口配置」）" "  Remote: not configured (see server/README.md「远程入口配置」)"; return 0; }
   read -r port origin < <(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(d["port"], d["origin"])' "$cfg" 2>/dev/null)
-  if [[ -z "$port" ]]; then echo "  远程：$cfg 解析失败"; return 0; fi
+  if [[ -z "$port" ]]; then say "  远程：%s 解析失败" "  Remote: failed to parse %s" "$cfg"; return 0; fi
   rpid="$(port_pid "$port")"
   if [[ "$rpid" == "${1:-}" ]]; then
-    echo "  远程：$origin → 127.0.0.1:$port 监听中"
+    say "  远程：%s → 127.0.0.1:%s 监听中" "  Remote: %s → 127.0.0.1:%s listening" "$origin" "$port"
   elif [[ -n "$rpid" ]]; then
-    echo "  远程：127.0.0.1:$port 被别的程序占用（PID $rpid），远程入口没起来"
+    say "  远程：127.0.0.1:%s 被别的程序占用（PID %s），远程入口没起来" "  Remote: 127.0.0.1:%s is used by another program (PID %s); the remote entry is not up" "$port" "$rpid"
   else
-    echo "  远程：$origin → 127.0.0.1:$port 未监听（wb logs 里搜 remote 看原因）"
+    say "  远程：%s → 127.0.0.1:%s 未监听（wb logs 里搜 remote 看原因）" "  Remote: %s → 127.0.0.1:%s not listening (search remote in wb logs for the reason)" "$origin" "$port"
   fi
 }
 
 status() {
   local pid; pid="$(port_pid)"
-  if [[ -z "$pid" ]]; then echo "未运行（端口 $PORT 空闲）"; return 1; fi
+  if [[ -z "$pid" ]]; then say "未运行（端口 %s 空闲）" "Not running (port %s free)" "$PORT"; return 1; fi
   if is_ours "$pid"; then
-    echo "运行中（PID $pid） → $URL"
+    say "运行中（PID %s） → %s" "Running (PID %s) → %s" "$pid" "$URL"
     curl -s --noproxy "*" --max-time 2 "$URL/api/meta" | python3 -c 'import json,sys,re; d=json.load(sys.stdin)["data"]; g=lambda v: (re.search(r"[0-9][0-9.]*", v) or [None]) and (re.search(r"[0-9][0-9.]*", v).group(0) if re.search(r"[0-9][0-9.]*", v) else "?"); print("  CLI: " + ", ".join(k + "=" + g(v) for k, v in d["cliVersions"].items()))' 2>/dev/null
     remote_status "$pid"
   else
-    echo "端口 $PORT 被别的程序占用（PID $pid）"; return 1
+    say "端口 %s 被别的程序占用（PID %s）" "Port %s is used by another program (PID %s)" "$PORT" "$pid"; return 1
   fi
 }
 
@@ -144,5 +151,5 @@ case "${1:-start}" in
   restart) stop; start ;;
   status)  status ;;
   logs)    tail -f "$LOG" ;;
-  *) echo "用法：wb [start|stop|restart|status|logs]" >&2; exit 2 ;;
+  *) say "用法：wb [start|stop|restart|status|logs]" "Usage: wb [start|stop|restart|status|logs]" >&2; exit 2 ;;
 esac

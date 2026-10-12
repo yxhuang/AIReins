@@ -69,15 +69,17 @@ for (const name of ['ss', 'lsof', 'rg', 'npm', 'python3', 'curl', 'claude', 'cod
   writeFileSync(join(commands, name), '#!/usr/bin/env bash\nexit 0\n', { mode: 0o755 });
 }
 writeFileSync(join(commands, 'node'), '#!/usr/bin/env bash\nif [[ "$1" == --version ]]; then echo v22.23.1; else echo "remote probe stubbed: $1"; fi\n', { mode: 0o755 });
-const checkInstaller = (path, os, release, distro = '') => {
+const checkInstaller = (path, os, release, distro = '', locale = { LC_ALL: 'zh_CN.UTF-8' }) => {
   writeFileSync(join(commands, 'uname'), `#!/usr/bin/env bash\nif [[ "$1" == -s ]]; then echo ${os}; else echo ${release}; fi\n`, { mode: 0o755 });
-  const checked = spawnSync('bash', [path, '--check'], { encoding: 'utf8', env: {
-    ...process.env, HOME: fixture, WORKBENCH_HOME: join(fixture, '.workbench'),
-    PATH: `${commands}:${process.env.PATH}`, WSL_DISTRO_NAME: distro,
-  } });
+  const env = { ...process.env, HOME: fixture, WORKBENCH_HOME: join(fixture, '.workbench'),
+    PATH: `${commands}:${process.env.PATH}`, WSL_DISTRO_NAME: distro };
+  delete env.LC_ALL; delete env.LC_MESSAGES; delete env.LANG;
+  Object.assign(env, locale);
+  const checked = spawnSync('bash', [path, '--check'], { encoding: 'utf8', env });
   assert.equal(checked.status, 0, checked.stderr + checked.stdout);
   return checked.stdout.replace(/remote probe stubbed: .*\n/, 'remote probe stubbed\n');
 };
+// 中文 locale 下，新版 --check 输出必须与 HEAD 的纯中文旧版逐字节一致（验证“中文未动”）。
 assert.equal(checkInstaller(afterInstaller, 'Linux', '6.6-microsoft-standard', 'ubuntu'),
   checkInstaller(beforeInstaller, 'Linux', '6.6-microsoft-standard', 'ubuntu'));
 const macCheck = checkInstaller(afterInstaller, 'Darwin', '24.0');
@@ -86,4 +88,15 @@ assert(macCheck.includes('✅ lsof 已安装'));
 assert(!macCheck.includes('✅ ss 已安装'));
 const linuxCheck = checkInstaller(afterInstaller, 'Linux', '6.6-generic');
 if (interop !== 'yes') assert(linuxCheck.includes('非 WSL 环境'));
+// 英文 locale：同一 fixture 下输出英文，退出码为 0，且 stdout 不含任何汉字。
+const enCheck = checkInstaller(afterInstaller, 'Linux', '6.6-generic', '', { LC_ALL: 'en_US.UTF-8' });
+for (const marker of ['Workbench install dependency check', '✅ Linux', 'Node v22.23.1 (≥ 22.12)',
+  'At least one Agent CLI is installed; make sure you are logged in.',
+  '~/.local/bin is not in PATH', 'Remote entry check (read-only)']) assert(enCheck.includes(marker), marker);
+if (interop !== 'yes') assert(enCheck.includes('Not a WSL environment: skipping Windows tray and shortcut install.'));
+assert(!/\p{Script=Han}/u.test(enCheck), enCheck);
+// 只有 LANG（无 LC_ALL/LC_MESSAGES）为 zh 时仍输出中文，且与 LC_ALL 中文输出一致。
+const langZhCheck = checkInstaller(afterInstaller, 'Linux', '6.6-generic', '', { LANG: 'zh_CN.UTF-8' });
+assert(langZhCheck.includes('Workbench 安装依赖体检'));
+assert.equal(langZhCheck, linuxCheck);
 console.log('POSIX platform OK: detection, port/process branches, remote setup preserves existing config and never invokes Serve');

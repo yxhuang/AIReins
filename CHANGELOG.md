@@ -11,6 +11,6 @@ First public release.
 - File panel: browse any directory with Git status and tabs; preview and edit supported files in your home folder, Windows drives and session folders; multi-tab terminal; Taildrop sending.
 - Dispatch view for sub-agents and delegated runs.
 - Phone layout; remote access through Tailscale Serve with a login allowlist; switching between computers on the tailnet.
-- Windows + WSL2 installer with tray icon, Start-menu shortcut and remote gateway.
+- Windows + WSL2 installer with tray icon, Start-menu shortcut and remote gateway; the installer, launcher, tray and gateway prompts follow the system language (Simplified Chinese / English), as does the window title the tray recognizes.
 - Native Linux support and experimental macOS installation/startup, platform capabilities that hide unavailable actions, and Ubuntu/macOS CI with isolated startup checks. macOS file editing and folder Taildrop remain disabled pending secure directory-fd support.
 - Released under the MIT License; [NOTICE](NOTICE) lists what it does not cover.

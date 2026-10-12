@@ -4,9 +4,14 @@ import zh from "../frontend/src/i18n/server.zh-CN.js";
 import en from "../frontend/src/i18n/server.en.js";
 
 assert.deepEqual(Object.keys(zh).sort(), Object.keys(en).sort());
+// Placeholders: bare {pN} plus {pN, plural, one {…} other {…}} blocks; compared as unique sets.
+const placeholderNames = (text: string) => {
+  const blocks = [...text.matchAll(/\{(p\d+),\s*plural,\s*one\s*\{[^{}]*\}\s*other\s*\{[^{}]*\}\}/g)].map(match => match[1]);
+  const bare = text.replace(/\{p\d+,\s*plural,\s*one\s*\{[^{}]*\}\s*other\s*\{[^{}]*\}\}/g, "");
+  return [...new Set([...blocks, ...[...bare.matchAll(/\{(p\d+)\}/g)].map(match => match[1])])].sort();
+};
 for (const [key, message] of Object.entries(zh)) {
-  const params = [...message.matchAll(/\{(p\d+)\}/g)].map(match => match[1]);
-  assert.deepEqual([...en[key].matchAll(/\{(p\d+)\}/g)].map(match => match[1]).sort(), params.sort(), key);
+  assert.deepEqual(placeholderNames(en[key]), placeholderNames(message), key);
   const sample = message.replaceAll("{product}", "Workbench").replace(/\{p\d+\}/g, "parameter");
   assert.ok(describeServerMessage(sample), key);
   assert.ok(en[key].trim());

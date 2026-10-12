@@ -31,8 +31,19 @@ export function setLanguagePreference(value: LanguagePreference): boolean {
   try { localStorage.setItem(LANGUAGE_STORAGE_KEY, languagePreference(value)); return true; }
   catch { return false; }
 }
+// 最简 ICU 复数：{name, plural, one {…#…} other {…#…}}，# 替换为按语言格式化的数量。
+// 只有数量参数为有限数字（或纯数字字符串）时才展开，否则保留原文。
+const pluralBlock = /\{(\w+),\s*plural,\s*one\s*\{([^{}]*)\}\s*other\s*\{([^{}]*)\}\}/g;
 export function interpolate(template: string, params: Record<string, string | number> = {}): string {
-  return template.replace(/\{(\w+)\}/g, (match, name: string) => name === "product" ? PRODUCT_NAME
+  const rules = new Intl.PluralRules(getLocale());
+  const resolved = template.replace(pluralBlock, (block, name: string, one: string, other: string) => {
+    const value = params[name];
+    const count = typeof value === "number" ? value
+      : typeof value === "string" && /^\s*-?\d+(?:\.\d+)?\s*$/.test(value) ? Number(value) : NaN;
+    if (!Number.isFinite(count)) return block;
+    return (rules.select(count) === "one" ? one : other).replaceAll("#", formatNumber(count));
+  });
+  return resolved.replace(/\{(\w+)\}/g, (match, name: string) => name === "product" ? PRODUCT_NAME
     : Object.hasOwn(params, name) ? (typeof params[name] === "number" ? formatNumber(params[name] as number) : String(params[name])) : match);
 }
 export function t(key: string, params?: Record<string, string | number>): string {

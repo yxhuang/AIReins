@@ -7,6 +7,10 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { configFromStatus, validateConfig, setupRemote } from '../install-remote.mjs';
 
+// install-remote.mjs resolves user-facing copy from LC_ALL/LC_MESSAGES/LANG at call time;
+// pin Chinese so the assertions below do not drift with the host locale.
+process.env.LC_ALL = 'zh_CN.UTF-8';
+
 const origin = 'https://new-pc.tail123.ts.net';
 const status = () => ({ BackendState: 'Running', Self: { DNSName: 'new-pc.tail123.ts.net.', UserID: 42 }, User: { '42': { LoginName: 'owner@example.com' } } });
 const expected = { port: 8793, origin, allowedLogins: ['owner@example.com'], terminal: false };
@@ -131,6 +135,19 @@ test('Serve health verifies configured HTTPS root and refuses Funnel', () => {
     assert.ok(f.messages.some(s => s.startsWith(good ? '✅ Serve' : '⚠ Serve')));
   }
 });
+test('English locale prints English copy without Han characters', () => {
+  const previous = process.env.LC_ALL;
+  process.env.LC_ALL = 'en_US.UTF-8';
+  try {
+    const f = fixture({ uacCode: 1 });
+    assert.equal(setupRemote(f.options).created, true);
+    assert.ok(f.messages.some(s => s.includes('off by default') && s.includes('wb restart')));
+    assert.ok(f.messages.some(s => s.includes('UAC was declined or installation failed')));
+    for (const message of f.messages) assert.ok(!/[\u3400-\u9fff]/.test(message), message);
+  } finally {
+    process.env.LC_ALL = previous;
+  }
+});
 
 // Run the real install.sh with shell/Windows/service commands replaced in a temp repo.
 function installerFixture(running = true, extraEnv = {}) {
@@ -140,7 +157,9 @@ function installerFixture(running = true, extraEnv = {}) {
   mkdirSync(join(repo, 'bin')); mkdirSync(mocks);
   copyFileSync(fileURLToPath(new URL('../../../install.sh', import.meta.url)), join(repo, 'install.sh'));
   const trace = join(home, 'calls');
-  const executable = (path, text) => writeFileSync(path, '#!/bin/bash\n' + text + '\n', { mode: 0o755 });
+  // Stubs run with LC_ALL=C so an uninstalled zh locale cannot leak bash setlocale
+  // warnings into the captured stub output that install.sh pattern-matches on.
+  const executable = (path, text) => writeFileSync(path, '#!/usr/bin/env -S LC_ALL=C bash\n' + text + '\n', { mode: 0o755 });
   executable(join(repo, 'bin/workbench'), `if [[ "\${BASH_SOURCE[0]}" != "$0" ]]; then PLATFORM=wsl; return 0; fi
 echo "wb $*" >> "$TEST_TRACE"
 case "$1" in
@@ -175,14 +194,18 @@ run(file, args) {
 }});
 if (result.created) process.exitCode = 10;
 `);
-  executable(join(mocks, 'node'), `if [[ "$1" == */deploy/windows/install-remote.mjs ]]; then
+  // The node mock must forward the pinned locale to the child Node process, so it keeps
+  // the plain bash shebang; its own setlocale warning goes to stderr, which install.sh
+  // never captures for the remote-installer call.
+  writeFileSync(join(mocks, 'node'), `#!/bin/bash
+if [[ "$1" == */deploy/windows/install-remote.mjs ]]; then
   shift; "$TEST_NODE" "$TEST_RUNNER" "$@"; rc=$?
   cat "$TEST_REMOTE_LOG"; exit "$rc"
 fi
-exec "$TEST_NODE" "$@"`);
+exec "$TEST_NODE" "$@"`, { mode: 0o755 });
   const run = check => spawnSync('bash', [join(repo, 'install.sh'), ...(check ? ['--check'] : [])], {
     encoding: 'utf8', timeout: 10000,
-    env: { ...process.env, HOME: home, USER: 'test', WSL_DISTRO_NAME: 'Ubuntu', WORKBENCH_PORT: '8790', PATH: `${mocks}:${home}/.local/bin:/usr/bin:/bin`, TEST_NODE: process.execPath, TEST_RUNNER: runner, TEST_TRACE: trace, TEST_HOME: home, TEST_REPO: repo, TEST_REMOTE_LOG: join(home, 'remote-output'), ...extraEnv },
+    env: { ...process.env, LC_ALL: 'zh_CN.UTF-8', HOME: home, USER: 'test', WSL_DISTRO_NAME: 'Ubuntu', WORKBENCH_PORT: '8790', PATH: `${mocks}:${home}/.local/bin:/usr/bin:/bin`, TEST_NODE: process.execPath, TEST_RUNNER: runner, TEST_TRACE: trace, TEST_HOME: home, TEST_REPO: repo, TEST_REMOTE_LOG: join(home, 'remote-output'), ...extraEnv },
   });
   return { home, trace, run };
 }

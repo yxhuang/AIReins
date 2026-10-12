@@ -46,6 +46,8 @@
 | 快照 | Snapshot | 工作目录创建前的备份 |
 | 驱动 | Driver | CLI 协议适配层；仅必要技术提示使用 |
 
-产品名集中在 仓库 `shared/product-name.ts` 的 `PRODUCT_NAME`（前端 `../i18n.ts` 重导出）。词典通过 `{product}` 引用，禁止在译文重复写 `Workbench`。`wb` 图标字标和窗口标题遵循既有品牌／托盘契约；窗口标题保持原值，不随语言切换。
+产品名集中在 仓库 `shared/product-name.ts` 的 `PRODUCT_NAME`（前端 `../i18n.ts` 重导出）。词典通过 `{product}` 引用，禁止在译文重复写 `Workbench`。`wb` 图标字标遵循既有品牌；窗口标题随界面语言输出（`core.131`–`core.133`），Windows 托盘的 `IsWbTitle` 同时识别中英文标题与旧格式。
+
+英文数量文案使用最简 ICU 复数语法：`{name, plural, one {…#…} other {…#…}}`，`#` 替换为按当前语言格式化的数量；同一参数可出现多个复数块（如单复数不同的动词）。`Intl.PluralRules` 按当前语言选择 `one`/`other`；中文无需复数，保持 `{p0} 个文件` 写法。参数不是有限数字时该块原样保留。`check:i18n` 要求英文里「数字占位符 + 可数名词」必须走复数语法，个别占位符不是数量的（如 `core.026` 的派单人名）在 `check-i18n.mjs` 的 `pluralExceptions` 逐条登记。
 
 新增文案时同时补充两套词典；参数使用 `{name}` 占位符并在 `t(key, { name })` 传入。完整句子应作为一个键，不把数量、日期或消息拆成零碎文案拼接。数量参数交给 `t()` 自动按当前语言格式化；独立日期、数量和相对时间使用 `formatDate`、`formatNumber`、`formatRelativeTime`。不要翻译用户内容、模型输出、文件路径、代码、日志或 CLI 协议标识。提交前运行 `npm run check:i18n`。

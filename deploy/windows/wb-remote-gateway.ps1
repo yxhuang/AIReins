@@ -2,13 +2,16 @@
 [CmdletBinding()]
 param([string]$ConfigPath)
 $ErrorActionPreference = 'Stop'
+# User-facing errors follow the UI culture.
+$script:IsZh = [System.Globalization.CultureInfo]::CurrentUICulture.Name -like 'zh*'
+function T([string]$Zh, [string]$En) { if ($script:IsZh) { $Zh } else { $En } }
 # 5.1 leaves $PSScriptRoot empty inside param defaults under -File, so resolve it here.
 if (-not $ConfigPath) { $ConfigPath = Join-Path $PSScriptRoot 'remote-gateway.json' }
 $config = Get-Content -LiteralPath $ConfigPath -Raw -Encoding UTF8 | ConvertFrom-Json
 foreach ($value in @($config.distro, $config.linuxUser)) {
-    if ($value -notmatch '^[a-zA-Z0-9_.-]+$') { throw 'Invalid distro or Linux user.' }
+    if ($value -notmatch '^[a-zA-Z0-9_.-]+$') { throw (T '发行版或 Linux 用户名无效。' 'Invalid distro or Linux user.') }
 }
-if ($config.linuxHome -notmatch '^/[a-zA-Z0-9_./=-]+$') { throw 'Invalid Linux home.' }
+if ($config.linuxHome -notmatch '^/[a-zA-Z0-9_./=-]+$') { throw (T 'Linux HOME 路径无效。' 'Invalid Linux home.') }
 Add-Type -Path (Join-Path $PSScriptRoot 'wb-remote-gateway.cs')
 $log = [WbRemoteGateway]::FileLogger((Join-Path $PSScriptRoot 'remote-gateway.log'))
 # Same lock/scope as the existing Linux socket entry; only this request launches WSL.

@@ -165,7 +165,7 @@ Tailscale 优先 PATH；WSL 保留 Windows CLI 回退，macOS 回退 `/Applicati
 
 `GET /api/fs/content` 是图片/PDF/下载直接加载的字节端点，浏览器查看器不会运行前端 JSON 解码器。前端为其 URL 添加 `lang=zh-CN|en`；失败时 `lang=en` 用同一错误描述符与词典生成英文 `msg`，仍保留 `code`、HTTP 状态和 `i18n`。不带参数、中文或其他值均保留兼容原文；成功的文件字节与 Range 行为不受语言影响。该参数只控制文案，不影响授权与路径验证。
 
-新增服务端自产提示时，把模板与相同键的英文译文加入上述两套词典，动态部分使用 `{p0}` 等占位符；嵌套错误参数须同时登记在 `nestedParameterNames` 中。检查覆盖位置与保留中文原因见 `server/i18n/coverage.json`，协议验证见 `server/i18n.test.ts`。
+新增服务端自产提示时，把模板与相同键的英文译文加入上述两套词典，动态部分使用 `{p0}` 等占位符；嵌套错误参数须同时登记在 `nestedParameterNames` 中。检查覆盖位置与保留中文原因见 `server/i18n/coverage.json`，协议验证见 `server/i18n.test.ts`。`npm run check:i18n` 包含覆盖守卫（`frontend/scripts/check-server-i18n.mjs`）：扫描 `server/` 非测试源码的中文字面量，每处必须命中 coverage.json 的已登记模板或带原因的例外；新增未登记文案、模板已删、行号漂移都会失败并提示如何修复。
 
 接口：
 
