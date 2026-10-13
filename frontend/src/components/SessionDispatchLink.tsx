@@ -31,15 +31,15 @@ export function SessionDispatchBadge({ runs, backgroundCount }: { runs: Dispatch
   // 手机上标题下那行有派单时隐藏，后台任务数并进这里。
   const { fill, label } = dispatchBadge(runs, backgroundCount);
   return <button type="button" className="btn mobile-round session-dispatch-badge" style={{ background: fill }} aria-label={label} title={label}
-    onClick={() => store.navigateDispatches(runs.map((run) => run.runId))}>{dispatchIcon}</button>;
+    onClick={() => store.navigateDispatches(runs.map((run) => run.runId), false)}>{dispatchIcon}</button>;
 }
 
 export function SessionDispatchLink({ runs, backgroundCount, desktop = false }: { runs: DispatchRun[]; backgroundCount: number; desktop?: boolean }) {
   if (!backgroundCount && !runs.length) return null;
-  if (desktop) return <button type="button" className="session-dispatch-link" onClick={() => store.navigateDispatches(runs.length ? runs.map((run) => run.runId) : undefined)}>
+  if (desktop) return <button type="button" className="session-dispatch-link" onClick={() => store.navigateDispatches(runs.length ? runs.map((run) => run.runId) : undefined, false)}>
     {backgroundCount > 0 && t("ui.SessionDispatchLink.background_tasks", { p0: (backgroundCount) })}{t("ui.SessionDispatchLink.view_dispatches")}{runs.length > 1 ? `（${runs.length}）` : ""}
   </button>;
   return <div className={`session-dispatch-link${runs.length ? " has-runs" : ""}`}>{backgroundCount > 0 && <span>{t("ui.SessionDispatchLink.background_tasks_sentence", { p0: (backgroundCount) })}</span>}
-    {runs.length > 0 && <button className="btn" onClick={() => store.navigateDispatches(runs.map((run) => run.runId))}>{t("ui.SessionDispatchLink.view_dispatches_sentence", { p0: (runs.length > 1 ? `（${runs.length}）` : "") })}</button>}
+    {runs.length > 0 && <button className="btn" onClick={() => store.navigateDispatches(runs.map((run) => run.runId), false)}>{t("ui.SessionDispatchLink.view_dispatches_sentence", { p0: (runs.length > 1 ? `（${runs.length}）` : "") })}</button>}
   </div>;
 }

@@ -36,6 +36,8 @@ assert.equal(window.location.hash, '#/session/parent', 'detail -> list -> close 
 s.navigateDispatches(['run-one', 'run-two']);
 assert.equal(window.location.hash, '#/dispatches?runs=run-one,run-two');
 assert.equal(s.dispatchesOpen, true);
+s.navigateDispatches(['run-one'], false);
+assert.equal(window.location.hash, '#/dispatches?runs=run-one', 'session entry with one run highlights it on the flow, not its detail');
 s.navigateDispatches(['run-two']);
 assert.equal(s.dispatchesOpen, true);
 s.navigate('another');

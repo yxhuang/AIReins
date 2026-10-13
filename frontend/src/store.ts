@@ -686,8 +686,9 @@ export class Store {
     }
   }
 
-  navigateDispatches(runIds: string[] = []): void {
-    const hash = runIds.length === 1 ? `#/dispatches/${encodeURIComponent(runIds[0]!)}`
+  /** 单张派单默认进详情；会话入口传 detail=false，只在流程图上高亮。 */
+  navigateDispatches(runIds: string[] = [], detail = runIds.length === 1): void {
+    const hash = detail && runIds.length === 1 ? `#/dispatches/${encodeURIComponent(runIds[0]!)}`
       : runIds.length ? `#/dispatches?runs=${runIds.map(encodeURIComponent).join(",")}` : "#/dispatches";
     if (this.isMobileNavigation()) {
       if (!runIds.length && this.dispatchesOpen && window.location.hash !== hash) this.returnMobileRoute(hash);
