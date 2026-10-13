@@ -1,5 +1,5 @@
 import { t } from "../i18n";
-import { useEffect, useId, useRef, useState, type ReactNode, type RefObject } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { fetchDirectories, fetchHistory, pickWindowsDirectory, pickWindowsFile } from "../api";
 import { store } from "../store";
@@ -82,7 +82,7 @@ export function DirectoryBrowser({ initialPath, onSelect, onClose, mode = "dir",
 }
 
 /** 弹窗与右侧面板共用导航、请求和列表；宿主决定点击文件后的行为。 */
-export function DirectoryContents({ initialPath, includeFiles, onSelectFile, onEntryMenu, onSelectDirectory, allowWindowsPicker = false, onPathChange, onBrowseHistory, navigationHistory, registerBrowserBack, navTarget, afterLocation }: {
+export function DirectoryContents({ initialPath, includeFiles, onSelectFile, onEntryMenu, onSelectDirectory, allowWindowsPicker = false, onPathChange, onBrowseHistory, navigationHistory, registerBrowserBack, navTarget, afterLocation, showHidden = true }: {
   initialPath: string;
   includeFiles: boolean;
   onSelectFile: (path: string, name: string) => void;
@@ -98,8 +98,13 @@ export function DirectoryContents({ initialPath, includeFiles, onSelectFile, onE
   navTarget?: HTMLElement | null;
   /** 地址栏下方的宿主内容（文件面板标签行）。 */
   afterLocation?: ReactNode;
+  /** 文件表格是否列出 . 开头的条目（服务端 files=1 时总会返回）。 */
+  showHidden?: boolean;
 }) {
   const [listing, setListing] = useState<DirectoryListing | null>(null);
+  const tableListing = useMemo(() => !listing || showHidden ? listing : {
+    ...listing, dirs: listing.dirs.filter(entry => !entry.name.startsWith(".")), files: listing.files?.filter(entry => !entry.name.startsWith(".")),
+  }, [listing, showHidden]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const windowsPaths = useStore(value => value.meta?.capabilities?.windowsPaths === true);
@@ -325,8 +330,8 @@ export function DirectoryContents({ initialPath, includeFiles, onSelectFile, onE
         {error && <p className="new-error" role="alert">{error}</p>}
         {listing?.truncated && <p className="new-hint">{includeFiles ? t("ui.DirectoryBrowser.many_entries_found_up_to_1_000") : t("ui.DirectoryBrowser.this_directory_has_over_1_000_subdirectories")}</p>}
         <div className={`dir-list${includeFiles ? " dir-list-table" : ""}`} aria-label={includeFiles ? t("ui.common.directories_and_files") : t("ui.DirectoryBrowser.subdirectories")}>
-          {loading ? <p className="new-hint">{t("ui.common.reading")}</p> : includeFiles && listing ?
-            listing.dirs.length + (listing.files?.length ?? 0) > 0 ? <DirectoryTable listing={listing} busy={busy}
+          {loading ? <p className="new-hint">{t("ui.common.reading")}</p> : includeFiles && listing && tableListing ?
+            tableListing.dirs.length + (tableListing.files?.length ?? 0) > 0 ? <DirectoryTable listing={tableListing} busy={busy}
               onActivate={(path, name, folder) => folder ? void load(path) : onSelectFile(path, name)}
               onMenu={onEntryMenu && ((path, name, folder, x, y) => onEntryMenu({ path, root: listing.path, name, folder }, x, y))} /> :
               <p className="new-hint">{t("ui.DirectoryBrowser.no_directories_or_files_to_browse")}</p> : entries.length > 0 ? (

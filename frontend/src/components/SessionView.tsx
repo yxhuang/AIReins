@@ -181,7 +181,7 @@ export function SessionView({ session, mobileTail, usage }: { session: SessionRe
       const dot = item.kind === "tool" ? ` timeline-${item.status}` : "";
       const view = item.kind === "text"
         ? <TextBlockView item={item} streaming={isLast && running} cwd={session.cwd} sessionId={session.id} />
-        : item.kind === "thought" ? <ThoughtBlockView item={item} /> : <ToolCard item={item} agent={session.agent} cwd={session.cwd} />;
+        : item.kind === "thought" ? <ThoughtBlockView item={item} /> : <ToolCard item={item} agent={session.agent} cwd={session.cwd} sessionId={session.id} />;
       return <div key={item.key} className={`timeline-item${continues ? " timeline-continues" : ""}${dot}`}>{view}</div>;
     }
     switch (item.kind) {

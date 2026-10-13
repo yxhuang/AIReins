@@ -326,11 +326,13 @@ export interface DirectoryListing {
   git?: Record<string, string>;
 }
 
-export interface WorkFileTarget { path: string; root: string; sessionId?: string }
+export interface WorkFileTarget { path: string; root: string; sessionId?: string; large?: boolean }
 export interface WorkFile {
   path: string; name: string; size: number;
   kind: "text" | "markdown" | "csv" | "tsv" | "html" | "image" | "pdf" | "unsupported";
   mimeType: string; text?: string; version?: string; editable: boolean; reason?: string;
+  /** 大文本未确认，未返回 text；带 large 重新读取。 */
+  large?: boolean;
 }
 export interface FilePreviewState {
   target: WorkFileTarget; file: WorkFile | null; draft: string;

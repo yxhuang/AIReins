@@ -792,7 +792,7 @@ export class Store {
     this.setFilesOpen(true);
     this.notify();
     try {
-      const file = await fetchWorkFile(target, AbortSignal.any([abort.signal, AbortSignal.timeout(10_000)]));
+      const file = await fetchWorkFile(target, AbortSignal.any([abort.signal, AbortSignal.timeout(target.large ? 120_000 : 10_000)]));
       if (this.filePreview !== preview) return;
       this.filePreview = { ...preview, file, draft: file.text ?? "", loading: false };
     } catch (error) {

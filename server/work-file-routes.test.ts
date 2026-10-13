@@ -6,7 +6,7 @@ import { Agent, createServer, request } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { MEDIA_LIMIT, TEXT_LIMIT } from "./work-files.js";
+import { FILE_LIMIT, TEXT_CONFIRM_LIMIT } from "./work-files.js";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const home = await mkdtemp(join(tmpdir(), "workbench-work-file-routes-"));
@@ -24,7 +24,8 @@ await writeFile(join(cwd, "a.html"), "<script>fetch('/api/sessions')</script><p>
 await writeFile(join(cwd, "中文 空格.pdf"), "%PDF-1.7\n0123456789");
 await writeFile(join(cwd, "a.txt"), "original");
 await writeFile(join(cwd, "office.docx"), "office bytes");
-await writeFile(join(cwd, "large.pdf"), Buffer.alloc(MEDIA_LIMIT + 1));
+await writeFile(join(cwd, "large.pdf"), Buffer.alloc(FILE_LIMIT + 1));
+await writeFile(join(cwd, "large.txt"), Buffer.alloc(TEXT_CONFIRM_LIMIT + 1, 97));
 const listener = createServer();
 await new Promise<void>(done => listener.listen(0, "127.0.0.1", done));
 const port = (listener.address() as { port: number }).port;
@@ -91,6 +92,9 @@ try {
   const unknown = query("a.txt"); unknown.set("sessionId", "unknown");
   assert.equal((await fetch(`${base}/api/fs/file?${unknown}`)).status, 404);
   const original = await (await fetch(`${base}/api/fs/file?${query("a.txt")}`)).json();
+  const large = (await (await fetch(`${base}/api/fs/file?${query("large.txt")}`)).json()).data;
+  assert.deepEqual([large.large, large.text], [true, undefined], "大文本未确认不返回内容");
+  assert.equal((await (await fetch(`${base}/api/fs/file?${query("large.txt")}&large=1`)).json()).data.text.length, TEXT_CONFIRM_LIMIT + 1);
   assert.equal(original.code, 0);
   assert.equal(original.data.text, "original");
   const saveBody = { path: join(cwd, "a.txt"), root: cwd, sessionId, version: original.data.version, text: "changed" };
@@ -100,9 +104,9 @@ try {
   assert.equal(savedData.text, "changed");
   assert.equal(await readFile(saveBody.path, "utf8"), "changed");
   assert.equal((await post(saveBody)).status, 409);
-  assert.equal((await post({ ...saveBody, version: savedData.version, text: "\n".repeat(TEXT_LIMIT) })).status, 200, "1 MiB文本即使 JSON 转义也可保存");
-  assert.equal((await post({ ...saveBody, version: savedData.version, text: "x".repeat(TEXT_LIMIT + 1) })).status, 413);
-  await oversizedThenPdf({ ...saveBody, text: "x".repeat(TEXT_LIMIT * 7) });
+  assert.equal((await post({ ...saveBody, version: savedData.version, text: "\n".repeat(FILE_LIMIT) })).status, 200, "32 MiB文本即使 JSON 转义也可保存");
+  assert.equal((await post({ ...saveBody, version: savedData.version, text: "x".repeat(FILE_LIMIT + 1) })).status, 413);
+  await oversizedThenPdf({ ...saveBody, text: "x".repeat(FILE_LIMIT * 2 + 128 * 1024) });
   const html = await fetch(`${base}/api/fs/content?${query("a.html")}`);
   assert.equal(html.status, 200);
   assert.equal(html.headers.get("content-type"), "text/html; charset=utf-8");

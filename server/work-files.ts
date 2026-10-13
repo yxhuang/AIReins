@@ -1,5 +1,5 @@
 import { constants, type Stats } from "node:fs";
-import { access, mkdtemp, open, readdir, realpath, rename, rm, stat, unlink, type FileHandle } from "node:fs/promises";
+import { access, lstat, mkdtemp, open, readdir, realpath, rename, rm, stat, unlink, type FileHandle } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { homedir, tmpdir } from "node:os";
@@ -8,13 +8,14 @@ import { promisify } from "node:util";
 import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { platform, type Platform } from "./platform.js";
 
-export const TEXT_LIMIT = 1024 * 1024;
-export const MEDIA_LIMIT = 32 * 1024 * 1024;
+/** 文本超过它时预览需前端确认（`large`）后才读取：Markdown/文本框渲染数 MiB 会明显卡顿。 */
+export const TEXT_CONFIRM_LIMIT = 4 * 1024 * 1024;
+export const FILE_LIMIT = 32 * 1024 * 1024;
 export class WorkFileError extends Error {
   constructor(public readonly status: number, message: string) { super(message); }
 }
 export interface WorkFileInput { path: string; root: string; }
-export interface WorkFileOptions { sessionCwd?: string; platform?: Platform; }
+export interface WorkFileOptions { sessionCwd?: string; platform?: Platform; large?: boolean; }
 export interface WorkFile {
   path: string;
   name: string;
@@ -25,6 +26,8 @@ export interface WorkFile {
   version?: string;
   editable: boolean;
   reason?: string;
+  /** 超过 TEXT_CONFIRM_LIMIT 且未带 large：不含 text，等用户确认。 */
+  large?: boolean;
 }
 const imageTypes: Record<string, string> = {
   ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif",
@@ -70,6 +73,17 @@ async function resolveFile(input: WorkFileInput, options: WorkFileOptions) {
   const root = normalizeWorkPath(input.root, os);
   if (!within(root, path)) throw new WorkFileError(403, "文件不在当前目录内");
   const roots = [normalizeWorkPath(process.env.HOME || homedir())];
+  // Claude Code 的会话临时目录（scratchpad）：SendUserFile 发给用户的文件常在这里。macOS 上 Claude 默认用 /tmp（真实路径 /private/tmp）。
+  // 临时父目录人人可写，只认本用户所有、不是软链、组和其他人无权限的目录，防止他人预先放置的软链扩大授权。
+  if (process.getuid) {
+    const name = `claude-${process.getuid()}`;
+    const bases = process.env.CLAUDE_CODE_TMPDIR ? [process.env.CLAUDE_CODE_TMPDIR] : os === "darwin" ? ["/tmp", "/private/tmp"] : [tmpdir()];
+    for (const base of bases) {
+      const scratch = join(base, name);
+      const info = await lstat(scratch).catch(() => null);
+      if (info?.isDirectory() && info.uid === process.getuid() && !(info.mode & 0o077)) roots.push(scratch);
+    }
+  }
   try {
     for (const item of os === "wsl" ? await readdir("/mnt", { withFileTypes: true }) : []) {
       if (/^[a-z]$/i.test(item.name) && item.isDirectory()) roots.push(join("/mnt", item.name));
@@ -122,7 +136,7 @@ async function readBounded(handle: FileHandle, limit: number): Promise<Buffer> {
     chunks.push(chunk.subarray(0, bytesRead));
     length += bytesRead;
   }
-  throw new WorkFileError(413, `文件超过 ${limit === TEXT_LIMIT ? "1" : "32"} MiB`);
+  throw new WorkFileError(413, `文件超过 ${limit / 1024 / 1024} MiB`);
 }
 function decodeText(bytes: Buffer): string {
   let text: string;
@@ -147,10 +161,10 @@ export async function getWorkFile(input: WorkFileInput, options: WorkFileOptions
   const file = await openFile(input, options);
   try {
     const result = metadata(file.path, file.info.size);
-    const limit = result.kind === "image" || result.kind === "pdf" ? MEDIA_LIMIT : TEXT_LIMIT;
-    if (result.size > limit) return { ...result, kind: "unsupported", reason: `文件超过 ${limit === TEXT_LIMIT ? "1" : "32"} MiB，无法预览或编辑` };
+    if (result.size > FILE_LIMIT) return { ...result, kind: "unsupported", reason: `文件超过 ${FILE_LIMIT / 1024 / 1024} MiB，无法预览或编辑` };
     if (["image", "pdf", "unsupported"].includes(result.kind)) return result;
-    const bytes = await readBounded(file.handle, TEXT_LIMIT);
+    if (result.size > TEXT_CONFIRM_LIMIT && !options.large) return { ...result, large: true };
+    const bytes = await readBounded(file.handle, FILE_LIMIT);
     if (!sameState(file.info, await file.handle.stat())) throw new WorkFileError(409, "读取时文件已变化，请重新打开");
     try { result.text = decodeText(bytes); }
     catch (error) {
@@ -171,8 +185,8 @@ export async function getWorkFile(input: WorkFileInput, options: WorkFileOptions
 export async function getWorkContent(input: WorkFileInput, options: WorkFileOptions = {}): Promise<{ file: WorkFile; bytes: Buffer }> {
   const target = await openFile(input, options);
   try {
-    if (target.info.size > MEDIA_LIMIT) throw new WorkFileError(413, "文件超过 32 MiB，无法通过工作台下载或查看");
-    const bytes = await readBounded(target.handle, MEDIA_LIMIT);
+    if (target.info.size > FILE_LIMIT) throw new WorkFileError(413, "文件超过 32 MiB，无法通过工作台下载或查看");
+    const bytes = await readBounded(target.handle, FILE_LIMIT);
     if (!sameState(target.info, await target.handle.stat())) throw new WorkFileError(409, "读取时文件已变化，请重试");
     return { file: metadata(target.path, bytes.length), bytes };
   } catch (error) { fsError(error); }
@@ -220,7 +234,7 @@ export async function saveWorkFile(input: WorkFileInput & { version: string; tex
   if (typeof input.version !== "string" || !/^[a-f0-9]{64}$/.test(input.version) || typeof input.text !== "string") {
     throw new WorkFileError(400, "保存必须提供有效 version 和 text");
   }
-  if (Buffer.byteLength(input.text, "utf8") > TEXT_LIMIT) throw new WorkFileError(413, "保存文本超过 1 MiB");
+  if (Buffer.byteLength(input.text, "utf8") > FILE_LIMIT) throw new WorkFileError(413, "保存文本超过 32 MiB");
   const bytes = Buffer.from(input.text, "utf8");
   if (bytes.toString("utf8") !== input.text) throw new WorkFileError(415, "文本含无效 Unicode，不能保存为 UTF-8");
   decodeText(bytes);
@@ -242,8 +256,8 @@ async function saveLocked(input: WorkFileInput & { version: string; text: string
   try {
     const meta = metadata(file.path, file.info.size);
     if (["image", "pdf", "unsupported"].includes(meta.kind)) throw new WorkFileError(415, "此格式不支持编辑");
-    if (file.info.size > TEXT_LIMIT) throw new WorkFileError(413, "原文件超过 1 MiB，不能编辑");
-    const original = await readBounded(file.handle, TEXT_LIMIT);
+    if (file.info.size > FILE_LIMIT) throw new WorkFileError(413, "原文件超过 32 MiB，不能编辑");
+    const original = await readBounded(file.handle, FILE_LIMIT);
     decodeText(original);
     if (!sameState(file.info, await file.handle.stat()) || fileVersion(original, file.info) !== input.version) throw new WorkFileError(409, "磁盘文件已修改，请重新加载后再保存");
     await access(file.real, constants.W_OK);
@@ -257,7 +271,7 @@ async function saveLocked(input: WorkFileInput & { version: string; text: string
     try { await temp.writeFile(bytes); await temp.chmod(file.info.mode & 0o7777); await temp.sync(); }
     finally { await temp.close(); }
     const checked = await resolveFile(input, options);
-    const latest = await readBounded(file.handle, TEXT_LIMIT);
+    const latest = await readBounded(file.handle, FILE_LIMIT);
     if (checked.real !== file.real || checked.realRoot !== file.realRoot || await realpath(anchor) !== parent ||
         !sameState(file.info, await stat(join(anchor, basename(file.real)))) ||
         !sameState(file.info, await file.handle.stat()) || fileVersion(latest, file.info) !== input.version) {

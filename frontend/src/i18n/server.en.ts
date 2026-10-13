@@ -473,10 +473,10 @@ const messages: Record<string, string> = {
   "server.message491": "Folder packaging failed: {p0}",
   "server.message492": "Experimental macOS support does not yet provide file editing",
   "server.message493": "Saving requires valid version and text",
-  "server.message494": "Text to save exceeds 1 MiB",
+  "server.message494": "Text to save exceeds 32 MiB",
   "server.message495": "Text contains invalid Unicode and cannot be saved as UTF-8",
   "server.message496": "This format does not support editing",
-  "server.message497": "Original file exceeds 1 MiB and cannot be edited",
+  "server.message497": "Original file exceeds 32 MiB and cannot be edited",
   "server.message498": "File on disk was modified. Reload before saving",
   "server.message499": "Save directory changed",
   "server.message500": "File or path changed before saving. Reload the file"

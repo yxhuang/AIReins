@@ -324,6 +324,10 @@ for (const value of [longTool.tool.input, longTool.tool.result, longTool.tool.ra
   assert.ok(JSON.stringify(value).length <= 4010);
   assert.match(JSON.stringify(value), /truncated/);
 }
+const sentFiles = { files: Array.from({ length: 60 }, (_, i) => `/tmp/claude-1000/project/session/scratchpad/file-${i}.html`), caption: "c" };
+const sentTool = parse("claude", [{ ...use, message: { role: "assistant", content: [{ type: "tool_use", id: "s", name: "SendUserFile", input: sentFiles }] } }])[0]!;
+assert.ok(sentTool.role === "tool");
+assert.deepEqual(sentTool.tool.input, sentFiles, "SendUserFile 入参保持对象，前端才能显示文件卡片");
 const codexTools = parse("codex", [
   { type: "event_msg", payload: { type: "user_message", message: "run" } },
   { type: "response_item", payload: { type: "function_call", call_id: "c", name: "functions.exec_command", arguments: '{"cmd":"pwd"}' } },

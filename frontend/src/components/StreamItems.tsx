@@ -26,6 +26,8 @@ import { store } from "../store";
 import { uploadsFileUrl } from "../api";
 import type { AgentKind, ImageMention } from "../types";
 import { summarizeTool, type ToolSummary } from "../tool-summary";
+import { asRecord } from "../format";
+import { fileRoot } from "../file-preview";
 import { DiffView, lineDiff } from "./DiffView";
 import { MarkdownMessage, UserMessageText } from "./MarkdownMessage";
 
@@ -106,9 +108,33 @@ export const ThoughtBlockView = memo(function ThoughtBlockView({ item }: { item:
   );
 }, (previous, next) => previous.item.text === next.item.text);
 
-export const ToolCard = memo(function ToolCard({ item, agent, cwd }: { item: ToolView; agent: AgentKind; cwd: string }) {
+/** Claude SendUserFile 发给用户的文件：常显，点开在右侧文件面板预览。 */
+function SentFilesCard({ files, caption, cwd, sessionId }: { files: string[]; caption: string; cwd: string; sessionId?: string }) {
+  return (
+    <div className="tool-card sent-files">
+      <div className="sent-files-head"><span className="tool-name">{t("ui.StreamItems.sent_files")}</span>{caption && <span className="sent-files-caption">{caption}</span>}</div>
+      {files.map((path) => (
+        <button key={path} type="button" className="sent-file" title={t("ui.MarkdownMessage.open_file", { p0: path })}
+          onClick={() => void store.openFilePreview({ path, root: fileRoot(path, cwd), sessionId })}>
+          <span className="sent-file-name">{path.slice(path.lastIndexOf("/") + 1)}</span>
+          <span className="sent-file-dir mono">{path.slice(0, path.lastIndexOf("/") + 1)}</span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+export const ToolCard = memo(function ToolCard({ item, agent, cwd, sessionId }: { item: ToolView; agent: AgentKind; cwd: string; sessionId?: string }) {
   const [open, setOpen] = useState(false);
   const [showAll, setShowAll] = useState(false);
+  if (item.baseToolName === "SendUserFile" && item.status !== "error") {
+    const input = asRecord(item.rawInput);
+    // files 是原始路径而非链接：不剥 #、?、:行号，也不做百分号解码。
+    const files = (Array.isArray(input.files) ? input.files : [])
+      .filter((file): file is string => typeof file === "string" && file !== "")
+      .map((file) => file.startsWith("/") ? file : `${cwd.replace(/\/$/, "")}/${file}`);
+    if (files.length) return <SentFilesCard files={files} caption={typeof input.caption === "string" ? input.caption : ""} cwd={cwd} sessionId={sessionId} />;
+  }
   const summary = summarizeTool(agent, item, cwd);
   const statusLabel = item.status === "running" ? t("ui.StreamItems.in_progress") : item.status === "ok" ? t("ui.StreamItems.succeeded") : item.status === "error" ? t("ui.StreamItems.failed") : "";
   return (
@@ -130,6 +156,7 @@ export const ToolCard = memo(function ToolCard({ item, agent, cwd }: { item: Too
 }, (previous, next) =>
   previous.agent === next.agent &&
   previous.cwd === next.cwd &&
+  previous.sessionId === next.sessionId &&
   previous.item.status === next.item.status &&
   previous.item.toolName === next.item.toolName &&
   previous.item.baseToolName === next.item.baseToolName &&

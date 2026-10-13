@@ -12,6 +12,7 @@ await mkdir(join(fixture, "zeta"));
 await mkdir(join(fixture, "alpha"));
 await mkdir(join(fixture, ".hidden"));
 await writeFile(join(fixture, "file.txt"), "file");
+await writeFile(join(fixture, ".env"), "file");
 await symlink(join(fixture, "alpha"), join(fixture, "link-to-alpha"));
 await symlink(join(fixture, "missing"), join(fixture, "broken-link"));
 
@@ -28,13 +29,15 @@ assert.equal((await listDirectories(join(fixture, "link-to-alpha"))).path, join(
 
 const modified = new Date("2026-10-04T12:00:00Z");
 await utimes(join(fixture, "file.txt"), modified, modified);
+await utimes(join(fixture, ".env"), modified, modified);
 await symlink(join(fixture, "file.txt"), join(fixture, "linked-file.txt"));
 const details = await listDirectories(fixture, { files: true });
 for (const file of details.files ?? []) {
   assert.equal(file.size, 4, "普通文件及内部链接的大小来自 stat");
   assert.equal(file.modifiedAt, modified.getTime(), "修改时间使用 Unix 毫秒");
 }
-assert.equal(details.files?.length, 2);
+assert.deepEqual(details.files?.map(file => file.name), [".env", "file.txt", "linked-file.txt"], "文件面板列出隐藏文件");
+assert.deepEqual(details.dirs.map(dir => dir.name), [".hidden", "alpha", "link-to-alpha", "zeta"], "文件面板列出隐藏目录");
 for (const dir of details.dirs) {
   assert.equal(dir.size, null, "不把目录 inode 大小当成目录内容大小");
   assert.equal(dir.modifiedAt, (await stat(dir.path)).mtimeMs);

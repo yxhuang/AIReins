@@ -473,10 +473,10 @@ const messages: Record<string, string> = {
   "server.message491": "打包文件夹失败：{p0}",
   "server.message492": "macOS 实验性支持暂不提供文件编辑",
   "server.message493": "保存必须提供有效 version 和 text",
-  "server.message494": "保存文本超过 1 MiB",
+  "server.message494": "保存文本超过 32 MiB",
   "server.message495": "文本含无效 Unicode，不能保存为 UTF-8",
   "server.message496": "此格式不支持编辑",
-  "server.message497": "原文件超过 1 MiB，不能编辑",
+  "server.message497": "原文件超过 32 MiB，不能编辑",
   "server.message498": "磁盘文件已修改，请重新加载后再保存",
   "server.message499": "保存目录已变化",
   "server.message500": "保存前磁盘文件或路径已修改，请重新加载"

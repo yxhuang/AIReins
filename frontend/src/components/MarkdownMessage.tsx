@@ -4,7 +4,7 @@ import Markdown, { defaultUrlTransform } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { mentionSegments } from "../mentions";
 import { highlightCode, highlightLanguage } from "../code-highlight";
-import { resolveLocalFileLink } from "../file-preview";
+import { fileRoot, resolveLocalFileLink } from "../file-preview";
 import { createStreamingTextThrottle } from "../streaming-text";
 import { store } from "../store";
 
@@ -35,8 +35,7 @@ function MessageLink({ href, children }: { href?: string; children?: ReactNode }
   const path = href ? resolveLocalFileLink(href, context?.cwd, store.meta?.capabilities.windowsPaths === true) : null;
   if (context && path) return <a href={href} title={t("ui.MarkdownMessage.open_file", { p0: (path) })} onClick={event => {
     event.preventDefault();
-    const root = path.startsWith(`${context.cwd.replace(/\/$/, "")}/`) ? context.cwd : path.slice(0, path.lastIndexOf("/")) || "/";
-    void store.openFilePreview({ path, root, sessionId: context.sessionId });
+    void store.openFilePreview({ path, root: fileRoot(path, context.cwd), sessionId: context.sessionId });
   }}>{children}</a>;
   return <a href={href} target="_blank" rel="noopener noreferrer">{children}</a>;
 }

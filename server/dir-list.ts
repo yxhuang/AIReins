@@ -60,7 +60,8 @@ export async function listDirectories(rawPath?: string, options: { files?: boole
   const files: NonNullable<DirectoryListing["files"]> = [];
   let truncated = false;
   for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
-    if (entry.name.startsWith(".")) continue;
+    // 目录选择器不列 . 开头的条目；文件面板（files=1）列出，由前端用暗图标区分。
+    if (options.files !== true && entry.name.startsWith(".")) continue;
     const child = join(path, entry.name);
     let isDir = entry.isDirectory();
     let isFile = entry.isFile();

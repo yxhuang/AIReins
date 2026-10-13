@@ -33,6 +33,11 @@ export function resolveLocalFileLink(href: string, cwd?: string, windowsPaths = 
   return `/${parts.join("/")}`;
 }
 
+/** 预览的 root：cwd 内的文件用 cwd，其余用文件所在目录（后端仍按授权根独立校验）。 */
+export function fileRoot(path: string, cwd: string): string {
+  return path.startsWith(`${cwd.replace(/\/$/, "")}/`) ? cwd : path.slice(0, path.lastIndexOf("/")) || "/";
+}
+
 /** 有限 RFC4180 风格预览；字段内分隔符/换行及双引号转义不丢失。 */
 export function parseDelimited(text: string, delimiter: string, maxRows = 200, maxColumns = 100): {
   rows: string[][]; truncated: boolean; error?: string;

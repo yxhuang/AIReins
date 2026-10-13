@@ -36,7 +36,7 @@ export function DirectoryTable({ listing, busy, onActivate, onMenu }: {
         row.title = t("ui.common.message", { p0: (folder ? t("ui.DirectoryBrowser.open_folder_detail") : t("ui.DirectoryBrowser.open_file_detail")), p1: (entry.path) });
         const name = document.createElement("button");
         name.type = "button";
-        name.className = `dir-table-name${folder ? " dir-table-folder" : ""}`;
+        name.className = `dir-table-name${folder ? " dir-table-folder" : ""}${entry.name.startsWith(".") ? " dir-table-hidden" : ""}`;
         name.textContent = entry.name;
         const mark = listing.git?.[entry.name];
         if (mark) {

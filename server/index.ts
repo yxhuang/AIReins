@@ -15,7 +15,7 @@ import { log } from "./logger.js";
 import { DirListError, listDirectories } from "./dir-list.js";
 import { pickWindowsDirectory, pickWindowsFile, WindowsPickerError, windowsPickerEnabled } from "./windows-directory-picker.js";
 import { normalizeFileQuery, searchFiles } from "./file-search.js";
-import { getWorkFile, getWorkContent, openWorkSendSource, saveWorkFile, WorkFileError, TEXT_LIMIT } from "./work-files.js";
+import { getWorkFile, getWorkContent, openWorkSendSource, saveWorkFile, WorkFileError, FILE_LIMIT } from "./work-files.js";
 import { HistoryIndex, HistoryQueryError } from "./history.js";
 import { NativeDeleteError } from "./native-session-delete.js";
 import { getMeta, getServerHostName, SERVER_VERSION } from "./meta.js";
@@ -536,7 +536,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       }
     } else if (((method === "GET" || method === "POST") && url.pathname === "/api/fs/file") || (method === "GET" && url.pathname === "/api/fs/content")) {
       try {
-        const body = method === "POST" ? await readJson(request, TEXT_LIMIT * 6 + 64 * 1024, true) : {
+        const body = method === "POST" ? await readJson(request, FILE_LIMIT * 2 + 64 * 1024, true) : {
           path: url.searchParams.get("path"), root: url.searchParams.get("root"), sessionId: url.searchParams.get("sessionId") ?? undefined,
         };
         if (!body || typeof body !== "object" || Array.isArray(body)) throw new WorkFileError(400, "请求必须包含 path 和 root");
@@ -544,7 +544,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
         if (input.sessionId !== undefined && (typeof input.sessionId !== "string" || !input.sessionId)) throw new WorkFileError(400, "sessionId 必须是非空字符串");
         const session = input.sessionId === undefined ? undefined : manager.get(input.sessionId);
         if (input.sessionId !== undefined && !session) throw new WorkFileError(404, "会话不存在");
-        const options = { sessionCwd: session?.cwd };
+        const options = { sessionCwd: session?.cwd, large: url.searchParams.get("large") === "1" };
         if (url.pathname === "/api/fs/file") {
           const file = method === "POST" ? await saveWorkFile(input, options) : await getWorkFile(input, options);
           await respond(response, 200, 0, "success", file, requestId);

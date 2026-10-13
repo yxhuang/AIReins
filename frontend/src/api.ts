@@ -105,6 +105,7 @@ export function fetchDirectories(path?: string, files?: boolean): Promise<Direct
 function workFileQuery(target: import("./types").WorkFileTarget): string {
   const query = new URLSearchParams({ path: target.path, root: target.root });
   if (target.sessionId) query.set("sessionId", target.sessionId);
+  if (target.large) query.set("large", "1");
   return query.toString();
 }
 export function fetchWorkFile(target: import("./types").WorkFileTarget, signal?: AbortSignal): Promise<import("./types").WorkFile> {

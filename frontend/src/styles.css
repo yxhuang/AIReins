@@ -54,6 +54,10 @@
   /* 文件夹图标使用 Windows 黄（2026-10-05 用户定），独立于闸门色。 */
   --folder-fill: light-dark(#F2C230, #EFC74B);
   --folder-edge: light-dark(#B78717, #C59B32);
+  --file-icon:   light-dark(#5C5A54, #C2BFB7);   /* 文件面板的文件图标；深色比 --text-muted 略亮 */
+  --file-icon-hidden:   color-mix(in srgb, var(--file-icon) 45%, transparent);
+  --folder-fill-hidden: color-mix(in srgb, var(--folder-fill) 45%, transparent);
+  --folder-edge-hidden: color-mix(in srgb, var(--folder-edge) 45%, transparent);
   --danger:  light-dark(#B3234A, #EE7093);
   --dot-working: light-dark(#C9A000, #F0C419);   /* 仅会话列表「正在工作」状态点，见顶部裁决 */
   /* diff 行：新增用 --ok 同色相，删除用冷调红；都不是暖色，也不复用 --danger */
@@ -413,7 +417,7 @@ body.resizing {
   box-shadow: inset 0 -1px color-mix(in srgb, var(--term-fg) 20%, transparent);
 }
 .term-tab-list {
-  flex: 1 1 auto;
+  flex: 0 1 auto;
   min-width: 0;
   display: flex;
   align-items: flex-end;
@@ -424,7 +428,9 @@ body.resizing {
 .term-tab-list::-webkit-scrollbar { display: none; }
 .term-tab {
   position: relative;
-  flex: 0 1 128px;
+  /* 用 width 而非 flex-basis：标签列表按内容定宽（让「＋」紧跟），flex-basis 不计入内容宽度。 */
+  flex: 0 1 auto;
+  width: 128px;
   min-width: 72px;
   display: flex;
   align-items: center;
@@ -467,7 +473,7 @@ body.resizing {
 .term-tab-icon { flex: 0 0 auto; }
 .term-tab-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .term-tab.exited { color: color-mix(in srgb, var(--term-fg) 65%, transparent); }
-.term-tab-close, .term-tab-new, .term-tab-maximize {
+.term-tab-close, .term-tab-new, .term-tab-maximize, .term-tab-toggle {
   flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
@@ -485,9 +491,14 @@ body.resizing {
 }
 .term-tab-close { margin-right: 3px; opacity: 0; }
 .term-tab.active .term-tab-close, .term-tab:hover .term-tab-close, .term-tab:focus-within .term-tab-close { opacity: 1; }
-.term-tab-new, .term-tab-maximize { align-self: center; margin-left: 4px; color: var(--term-fg); }
-.term-tab-close:hover, .term-tab-new:hover, .term-tab-maximize:hover { background: color-mix(in srgb, var(--term-fg) 12%, transparent); }
-.term-tab-select:focus-visible, .term-tab-close:focus-visible, .term-tab-new:focus-visible, .term-tab-maximize:focus-visible { outline: 2px solid var(--busy); outline-offset: -2px; }
+/* 「＋」像 Chrome 一样紧跟最后一个标签；其后的按钮靠右。 */
+.term-tab-new, .term-tab-maximize, .term-tab-toggle { align-self: center; color: var(--term-fg); }
+.term-tab-new { margin-left: -4px; }
+.term-tab-maximize, .term-tab-toggle { margin-left: auto; }
+.term-tab-toggle { padding: 0 8px; font-size: 13px; color: color-mix(in srgb, var(--term-fg) 60%, transparent); }
+.term-tab-toggle[aria-pressed="true"] { color: var(--busy); background: color-mix(in srgb, var(--busy) 16%, transparent); }
+.term-tab-close:hover, .term-tab-new:hover, .term-tab-maximize:hover, .term-tab-toggle:hover { background: color-mix(in srgb, var(--term-fg) 12%, transparent); }
+.term-tab-select:focus-visible, .term-tab-close:focus-visible, .term-tab-new:focus-visible, .term-tab-maximize:focus-visible, .term-tab-toggle:focus-visible { outline: 2px solid var(--busy); outline-offset: -2px; }
 .term-tab-select:disabled, .term-tab-close:disabled, .term-tab-new:disabled { cursor: default; opacity: 0.6; }
 @media (pointer: coarse) { .term-tab.active .term-tab-close { opacity: 1; } }
 /* 手机横屏也不显示最大化；触控设备沿用自己的面板布局。 */
@@ -843,8 +854,11 @@ body.resizing {
 .dir-table-size, .dir-table-date { text-align: right; font-size: 14px; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .dir-table tbody tr { cursor: pointer; }
 .dir-table tbody tr:hover { background: var(--surface-sunk); }
-.dir-table-name { display: block; width: 100%; min-height: 21px; padding: 0 0 0 22px; border: 0; background: linear-gradient(var(--text-muted), var(--text-muted)) 2px 3px / 11px 15px no-repeat; color: var(--busy); font: inherit; text-align: left; overflow-wrap: anywhere; cursor: pointer; }
+.dir-table-name { display: block; width: 100%; min-height: 21px; padding: 0 0 0 22px; border: 0; background: linear-gradient(var(--file-icon), var(--file-icon)) 2px 3px / 11px 15px no-repeat; color: var(--busy); font: inherit; text-align: left; overflow-wrap: anywhere; cursor: pointer; }
 .dir-table-folder { background: linear-gradient(var(--folder-fill), var(--folder-fill)) 1px 4px / 15px 11px no-repeat, linear-gradient(var(--folder-edge), var(--folder-edge)) 1px 1px / 7px 4px no-repeat; }
+/* . 开头的隐藏项：只换暗图标，名称不变；只改颜色，位置沿用上面（含 git 徽标时的偏移）。 */
+.dir-table-hidden { background-image: linear-gradient(var(--file-icon-hidden), var(--file-icon-hidden)); }
+.dir-table-folder.dir-table-hidden { background-image: linear-gradient(var(--folder-fill-hidden), var(--folder-fill-hidden)), linear-gradient(var(--folder-edge-hidden), var(--folder-edge-hidden)); }
 .dir-table-name:focus-visible, .dir-table-sort:focus-visible { outline-offset: -2px; }
 /* 长按弹发送菜单，不要 iOS 的系统预览/选字。 */
 .dir-table tbody { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
@@ -1707,6 +1721,13 @@ body.resizing {
 .tool-status-error { color: var(--danger); }
 
 .tool-card.tool-error { border-color: var(--msg-dot-failure); }
+.sent-files { display: flex; flex-direction: column; gap: 6px; padding: 8px 10px; }
+.sent-files-head { display: flex; align-items: baseline; gap: 8px; min-width: 0; font-size: var(--detail-font-size); }
+.sent-files-caption { color: var(--text-muted); overflow-wrap: anywhere; }
+.sent-file { display: flex; align-items: baseline; gap: 8px; min-width: 0; padding: 6px 10px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); color: var(--text); text-align: left; cursor: pointer; }
+.sent-file:hover { border-color: var(--border-strong); }
+.sent-file-name { flex: 0 1 auto; min-width: 0; overflow-wrap: anywhere; }
+.sent-file-dir { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-faint); font-size: var(--detail-font-size); }
 
 .tool-body { padding: 0 10px 10px; font-size: var(--detail-font-size); }
 
@@ -4071,6 +4092,8 @@ body.resizing {
 .file-notice .dir-copy-status { margin-top: 4px; }
 .file-preview { display: flex; flex: 1; flex-direction: column; gap: 8px; min-width: 0; min-height: 0; overflow: hidden; }
 .file-preview > p { margin: 0; overflow-wrap: anywhere; }
+.file-large { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; padding: 6px 8px; }
+.file-large > p { margin: 0; }
 .file-preview > .new-hint, .file-preview > .new-error { padding: 6px 8px; }
 .file-preview-body { flex: 1; min-width: 0; min-height: 0; overflow: auto; }
 .file-source { display: block; resize: none; width: 100%; height: 100%; min-height: 140px; box-sizing: border-box; border: 1px solid var(--border); background: var(--bg); color: var(--text); padding: 8px; font-size: 13px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; tab-size: 2; }

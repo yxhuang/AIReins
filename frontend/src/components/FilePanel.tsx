@@ -62,7 +62,15 @@ export function insertFileMention(text: string, cursor: number, path: string): {
   return { text: text.slice(0, at) + token + text.slice(at), cursor: at + token.length };
 }
 
+const SHOW_HIDDEN_STORAGE_KEY = "workbench-file-show-hidden";
+
 export function FilePanel({ onClose }: { onClose: () => void }) {
+  // 默认显示隐藏项；按浏览器记住。
+  const [showHidden, setShowHidden] = useState(() => { try { return localStorage.getItem(SHOW_HIDDEN_STORAGE_KEY) !== "0"; } catch { return true; } });
+  const toggleHidden = () => setShowHidden(value => {
+    try { localStorage.setItem(SHOW_HIDDEN_STORAGE_KEY, value ? "0" : "1"); } catch { /* 仅本页生效 */ }
+    return !value;
+  });
   const session = useStore((value) => value.currentId ? value.session(value.currentId) : undefined);
   const preview = useStore(value => value.filePreview);
   const tabs = useStore(value => value.fileTabs);
@@ -169,6 +177,8 @@ export function FilePanel({ onClose }: { onClose: () => void }) {
     <button type="button" className="term-tab-new" aria-label={t("ui.FilePanel.new_tab")} title={t("ui.FilePanel.new_tab_in_the_session_directory")} onClick={() => { setNotice(null); store.openFileTab(); }}>
       <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="M12 4v16M4 12h16" /></svg>
     </button>
+    {!preview && <button type="button" className="term-tab-toggle" aria-pressed={showHidden} onClick={toggleHidden}
+      title={showHidden ? t("ui.FilePanel.hidden_files_shown") : t("ui.FilePanel.hidden_files_not_shown")}>{t("ui.FilePanel.hidden_files")}</button>}
   </div>;
 
   return <>
@@ -208,7 +218,7 @@ export function FilePanel({ onClose }: { onClose: () => void }) {
       </div>}
       {preview && tabRow}
       {preview ? <FilePreview key={preview.target.path} preview={preview} source={source} /> : <DirectoryContents key={tabId} initialPath={directoryInitialPath} includeFiles allowWindowsPicker
-        navigationHistory={directoryHistory} registerBrowserBack={registerBrowserBack} navTarget={navSlot} afterLocation={tabRow}
+        navigationHistory={directoryHistory} registerBrowserBack={registerBrowserBack} navTarget={navSlot} afterLocation={tabRow} showHidden={showHidden}
         onPathChange={path => store.setFileDirectory(path)}
         onBrowseHistory={path => store.navigateHistory(path)}
         onSelectFile={path => { setNotice(null); void store.openFilePreview({ path, root: sessionDirectory() ?? session?.cwd ?? "/", sessionId: session?.id }); }}

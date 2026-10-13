@@ -111,6 +111,8 @@ export interface GateView {
 
 /** Focus view 隐藏的项：工具、思考、调试行与中性系统行；闸门/提问、出错行照常显示。 */
 export function focusVisible(item: StreamRenderItem): boolean {
+  // SendUserFile 是发给用户的交付物，专注视图也保留。
+  if (item.kind === "tool" && item.baseToolName === "SendUserFile") return true;
   if (item.kind === "tool" || item.kind === "tool-group" || item.kind === "thought" || item.kind === "raw") return false;
   return item.kind !== "system" || item.tone === "error";
 }
