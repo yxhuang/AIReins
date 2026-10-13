@@ -102,10 +102,10 @@ const patterns = Object.entries(messages)
   .map(([key, text]) => {
     const names = [...text.matchAll(/\{(p\d+)\}/g)].map(match => match[1]);
     const escaped = text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/\\\{p\d+\\\}/g, "([\\s\\S]*?)");
-    return { key, names, pattern: new RegExp(`^${escaped.replace(/\\\{product\\\}/g, "(?:Workbench|workbench|工作台|WB)")}$`) };
+    return { key, names, pattern: new RegExp(`^${escaped.replace(/\\\{product\\\}/g, "(?:AIReins|Workbench|workbench|工作台|WB)")}$`) };
   });
 
-/** Match only registered Workbench templates; unknown CLI errors remain verbatim. */
+/** Match only registered AIReins templates; unknown CLI errors remain verbatim. */
 export function describeServerMessage(message: string, depth = 0): MessageDescriptor | undefined {
   const key = exact.get(message);
   if (key) return { key };

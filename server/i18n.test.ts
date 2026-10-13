@@ -12,13 +12,18 @@ const placeholderNames = (text: string) => {
 };
 for (const [key, message] of Object.entries(zh)) {
   assert.deepEqual(placeholderNames(en[key]), placeholderNames(message), key);
-  const sample = message.replaceAll("{product}", "Workbench").replace(/\{p\d+\}/g, "parameter");
+  const sample = message.replaceAll("{product}", "AIReins").replace(/\{p\d+\}/g, "parameter");
   assert.ok(describeServerMessage(sample), key);
   assert.ok(en[key].trim());
   assert.equal(/[\u3400-\u9fff]/.test(en[key]), false, key);
 }
 assert.deepEqual(describeServerMessage("会话不存在：/tmp/中文目录"), { key: "server.message167", params: { p0: "/tmp/中文目录" } });
 assert.equal(describeServerMessage("Unknown CLI failure"), undefined);
+assert.deepEqual(describeServerMessage("Tailscale 账号 owner@example.com 未授权：把它加进 ~/.workbench/remote.json 的 allowedLogins，然后 aireins restart"), {
+  key: "server.message006", params: { p0: "owner@example.com" },
+});
+assert.ok(en["server.message006"].includes("aireins restart"));
+
 assert.deepEqual(describeServerMessage("Kimi 的 2 条排队消息已取消：worker 已停止"), {
   key: "server.message146", params: { p0: "2", p1: "worker 已停止" }, localizedParams: { p1: { key: "server.message155" } },
 });

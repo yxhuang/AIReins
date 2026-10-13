@@ -47,16 +47,16 @@ function launchChrome(file: string, args: string[]): Promise<void> {
 
 export async function openAppWindow(policy: AccessPolicy, port: number, input: unknown,
   chrome: string | null, launch = launchChrome): Promise<void> {
-  if (policy.kind !== "local") throw new AppWindowError(403, "仅本机入口可打开 WB 窗口");
+  if (policy.kind !== "local") throw new AppWindowError(403, "仅本机入口可打开 AIReins 窗口");
   const target = input && typeof input === "object" && !Array.isArray(input) ? (input as Record<string, unknown>).target : undefined;
   let url: URL;
   try {
     if (typeof target !== "string" || target.length > 4096 || /[\u0000-\u0020\u007f\\]/.test(target)) throw Error();
     url = new URL(target);
     if (url.username || url.password || !policy.origins.has(url.origin)) throw Error();
-  } catch { throw new AppWindowError(400, "target 必须是本机 WB 页面地址"); }
-  if (!chrome) throw new AppWindowError(503, "此主机无法打开 Windows Chrome WB 窗口");
+  } catch { throw new AppWindowError(400, "target 必须是本机 AIReins 页面地址"); }
+  if (!chrome) throw new AppWindowError(503, "此主机无法打开 Windows Chrome AIReins 窗口");
   try {
     await launch(chrome, [`--app=http://127.0.0.1:${port}/#wb-goto=${encodeURIComponent(url.href)}`]);
-  } catch { throw new AppWindowError(503, "无法启动 Windows Chrome WB 窗口，请保留标签页并重试"); }
+  } catch { throw new AppWindowError(503, "无法启动 Windows Chrome AIReins 窗口，请保留标签页并重试"); }
 }

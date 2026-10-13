@@ -65,7 +65,7 @@ function readDictionary(root) {
 
 function templateMatches(template, text) {
   const escaped = template.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-    .replace(/\\\{product\\\}/g, '(?:Workbench|workbench|工作台|WB)');
+    .replace(/\\\{product\\\}/g, '(?:AIReins|Workbench|workbench|工作台|WB)');
   return new RegExp(`^${escaped}$`).test(text);
 }
 

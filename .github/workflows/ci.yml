@@ -33,5 +33,5 @@ jobs:
       - run: npm run test:hosts
       - run: node deploy/windows/tests/install-remote.test.mjs
       - run: npm run typecheck && npm run typecheck:frontend && npm run check:theme && npm run check:i18n
-      - run: bash -n bin/workbench install.sh
+      - run: bash -n bin/aireins install.sh
       - run: node scripts/ci-smoke.mjs

@@ -88,17 +88,17 @@ public sealed class WbRemoteGateway
                 return startup;
             startup = Task.Run(async () =>
             {
-                log("starting WSL and Workbench");
+                log("starting WSL and AIReins");
                 try
                 {
                     await startBackend().ConfigureAwait(false);
                     for (int i = 0; i < 80; i++)
                     {
                         using (var probe = await Connect().ConfigureAwait(false))
-                            if (probe != null) { log("Workbench ready"); return; }
+                            if (probe != null) { log("AIReins ready"); return; }
                         await Task.Delay(250).ConfigureAwait(false);
                     }
-                    throw new IOException("Workbench remote port did not become ready");
+                    throw new IOException("AIReins remote port did not become ready");
                 }
                 catch (Exception error)
                 {
@@ -176,10 +176,10 @@ public sealed class WbRemoteGateway
             "<!doctype html><html lang=\"" + (zh ? "zh-CN" : "en") + "\"><meta charset=\"utf-8\">" +
             "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">" +
             (waiting ? "<meta http-equiv=\"refresh\" content=\"5\">" : "") +
-            "<title>Workbench</title><body style=\"font:18px system-ui;padding:32px\">" +
-            (waiting ? (zh ? "正在启动 Workbench，请稍候。页面会自动重试。" : "Workbench is starting; this page retries automatically.") :
-                (zh ? "Workbench 启动失败。请稍后刷新；持续失败时检查电脑上的 remote-gateway.log。" :
-                    "Workbench failed to start. Refresh in a moment; if it keeps failing, check remote-gateway.log on the computer.")) +
+            "<title>AIReins</title><body style=\"font:18px system-ui;padding:32px\">" +
+            (waiting ? (zh ? "正在启动 AIReins，请稍候。页面会自动重试。" : "AIReins is starting; this page retries automatically.") :
+                (zh ? "AIReins 启动失败。请稍后刷新；持续失败时检查电脑上的 remote-gateway.log。" :
+                    "AIReins failed to start. Refresh in a moment; if it keeps failing, check remote-gateway.log on the computer.")) +
             "<p><a href=\"\">" + (zh ? "刷新页面" : "Refresh") + "</a></p></body></html>";
         byte[] content = Encoding.UTF8.GetBytes(body);
         string header = "HTTP/1.1 " + status + (status == 403 ? " Forbidden" : " Service Unavailable") +

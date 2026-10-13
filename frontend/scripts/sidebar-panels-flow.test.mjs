@@ -123,15 +123,15 @@ t("底部单行显示历史与额度，额度为加宽胶囊、直达为圆钮�
   assert.ok(!css.includes(".sidebar-foot.has-panel"));
   const desktopFoot = css.match(/@media \(min-width: 721px\) \{\s*\/\* 桌面展开态[\s\S]*?\n\}/)?.[0];
   assert.ok(desktopFoot, "新增规则限定桌面展开态");
-  assert.match(desktopFoot, /flex-direction: row;.*flex-wrap: nowrap/);
+  assert.match(desktopFoot, /flex-direction: row;.*flex-wrap: wrap/);
   for (const [selector, order] of [["settings", 1], ["page-nav:first-child", 2], ["page-nav:not(:first-child)", 3], ["launcher", 4]]) {
     assert.ok(desktopFoot.includes(`.${selector} { order: ${order};`));
   }
-  assert.match(desktopFoot, /width: var\(--foot-btn\); height: var\(--foot-btn\)/);
+  assert.match(desktopFoot, /width: var\(--foot-round\); height: var\(--foot-round\)/);
   assert.match(desktopFoot, /border-radius: 50%/);
   assert.match(desktopFoot, /\.launcher-button > span \{ display: none; \}/);
   assert.ok(!desktopFoot.includes(".sidebar-foot-usage .page-nav-name"), "额度文字在桌面可见");
-  assert.match(css, /\.page-nav-item\.sidebar-foot-usage \{ min-width: 88px; justify-content: center; \}/);
+  assert.match(css, /\.page-nav-item\.sidebar-foot-usage \{ min-width: 0; justify-content: center; \}/);
   store.closeSidebarPanel();
   const closed = foot(renderApp());
   assert.ok(closed.includes('class="page-nav-name">历史</span>'));

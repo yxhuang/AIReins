@@ -83,6 +83,6 @@ t('右键、500ms 长按、⋮ 共用 openMenu；重命名 Enter/Esc/失焦与�
   const css = readFileSync(new URL('../src/styles.css', import.meta.url), 'utf8');
   assert.ok(source.includes('onContextMenu=')); assert.ok(source.includes('}, 500)')); assert.ok(source.includes('onBlur=')); assert.ok(source.includes('normalizeSidebarTitle'));
   assert.match(source, /onContextMenu={[\s\S]*?openMenu\(/); assert.match(source, /longPressTimer.current = window.setTimeout\([\s\S]*?openMenu\(/);
-  assert.match(css, /\.session-title-input[\s\S]*?font-size: 16px/); assert.ok(css.includes('min-height: 44px')); assert.ok(!css.includes('session-swipe-remove'));
+  assert.match(css, /\.session-title-input[\s\S]*?font-size: 15px/); assert.ok(css.includes('min-height: 44px')); assert.ok(!css.includes('session-swipe-remove'));
 });
 if (!process.exitCode) console.log(`✅ sidebar menu 回归全过（${pass} 例）`);

@@ -34,7 +34,7 @@ try {
   const provide = () => { providerCalls++; return [{ cwd: outsideCwd, nativeSessionId: "wb-native" }]; };
   const listed = await listDispatches(20, delegate, provide);
   assert.equal(listed.find(run => run.session === "sonnet")?.parent?.sessionId, "wb-native",
-    "注册在非 wb 项目 cwd 的 Claude 会话，无 delegate 也纳入子代理");
+    "注册在非 AIReins 项目 cwd 的 Claude 会话，无 delegate 也纳入子代理");
   assert.equal(listed.filter(run => run.tool === "claude").length, 1, "不纳入无关项目或同项目未注册父会话");
   assert.equal(providerCalls, 1);
   const hidden = await listDispatches(20, delegate, () => []);

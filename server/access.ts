@@ -62,7 +62,7 @@ export function checkAccess(
     return "没有 Tailscale 身份：请用 tailscale serve 给出的 https://…ts.net 地址访问";
   }
   if (!policy.logins.has(login)) {
-    return `Tailscale 账号 ${login} 未授权：把它加进 ~/.workbench/remote.json 的 allowedLogins，然后 wb restart`;
+    return `Tailscale 账号 ${login} 未授权：把它加进 ~/.workbench/remote.json 的 allowedLogins，然后 aireins restart`;
   }
   if (mutating && origin !== policy.origin) return `Origin 不匹配：${origin ?? "（空）"}，应为 ${policy.origin}`;
   return null;

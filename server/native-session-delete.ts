@@ -13,7 +13,7 @@ export class NativeDeleteError extends Error {}
 
 /** Validate before stopping a worker; never substitute a project purge or worktree removal. */
 export function validateNativeDelete(record: SessionRecord): void {
-  if (record.agent === "claude") throw new NativeDeleteError("Claude 当前没有已核实的单会话彻底删除接口；请使用「移除」。Workbench 不会清理整个项目或工作树。");
+  if (record.agent === "claude") throw new NativeDeleteError("Claude 当前没有已核实的单会话彻底删除接口；请使用「移除」。AIReins 不会清理整个项目或工作树。");
   const pattern = new RegExp(record.agent === "kimi" ? `^session_${UUID}$` : `^${UUID}$`);
   if (!record.nativeSessionId || !pattern.test(record.nativeSessionId)) {
     throw new NativeDeleteError("无法核验原生会话 ID，禁止彻底删除；请使用「移除」。");
@@ -23,7 +23,7 @@ export function validateNativeDelete(record: SessionRecord): void {
     : join(process.env.CODEX_HOME || join(homedir(), ".codex"), "sessions");
   const configured = record.agent === "kimi" ? process.env.WORKBENCH_KIMI_HISTORY_DIR : process.env.WORKBENCH_CODEX_HISTORY_DIR;
   if (configured && resolve(configured) !== resolve(root)) {
-    throw new NativeDeleteError("Workbench 历史目录与原生 CLI 目录不同，禁止删除其他位置的会话。");
+    throw new NativeDeleteError("AIReins 历史目录与原生 CLI 目录不同，禁止删除其他位置的会话。");
   }
 }
 
@@ -66,5 +66,5 @@ export async function deleteNativeSession(record: SessionRecord): Promise<void> 
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
     throw error;
   }
-  throw new NativeDeleteError("原生 CLI 返回成功，但历史文件仍存在；无法确认彻底删除，Workbench 记录已保留。");
+  throw new NativeDeleteError("原生 CLI 返回成功，但历史文件仍存在；无法确认彻底删除，AIReins 记录已保留。");
 }

@@ -38,9 +38,9 @@ export function setupPosixRemote({ check = false, home, localPort = 8790, platfo
   }
   if (result.error || result.status !== 0) print(T('⚠ Tailscale：未安装、未运行或读取失败；请安装并登录后重跑。', '⚠ Tailscale: not installed, not running, or unreadable; install it and log in, then rerun.'));
   if (config) {
-    print(T('Tailscale 与 Workbench 须运行在同一台机器；请自行执行（安装器不会更改 Serve）：', 'Tailscale and Workbench must run on the same machine; run this yourself (the installer does not change Serve):'));
+    print(T('Tailscale 与 AIReins 须运行在同一台机器；请自行执行（安装器不会更改 Serve）：', 'Tailscale and AIReins must run on the same machine; run this yourself (the installer does not change Serve):'));
     print(`  ${JSON.stringify(tailscale)} serve --bg http://127.0.0.1:${config.port}`);
-    print(T('远程终端默认关闭；需要时在 remote.json 显式设置 terminal: true，再自行 wb restart。', 'The remote terminal is off by default; when needed, set terminal: true explicitly in remote.json, then run wb restart yourself.'));
+    print(T('远程终端默认关闭；需要时在 remote.json 显式设置 terminal: true，再自行 aireins restart。', 'The remote terminal is off by default; when needed, set terminal: true explicitly in remote.json, then run aireins restart yourself.'));
   } else print(T('参考 server/README.md「远程入口配置」设置 remote.json，再自行执行 tailscale serve。', 'See server/README.md「远程入口配置」to set up remote.json, then run tailscale serve yourself.'));
   return { created: !check && !existing && !!config };
 }

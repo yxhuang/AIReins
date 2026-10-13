@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# wb（workbench）—— 个人 Agent 工作台的启动器。
-# 用法：wb [start|stop|status|restart|logs]   （不带参数 = start）
+# aireins（AIReins）—— 个人 Agent 工作台的启动器。
+# 用法：aireins [start|stop|status|restart|logs]   （不带参数 = start）
 # 启动后打开本平台默认浏览器；置 WORKBENCH_NO_OPEN=1 可跳过。
 set -uo pipefail
 
@@ -75,17 +75,17 @@ start() {
     fi
     say "❌ 端口 %s 被别的程序占用（PID %s）：" "❌ Port %s is used by another program (PID %s):" "$PORT" "$pid" >&2
     process_command "$pid" | cut -c1-120 >&2
-    say "   换端口：WORKBENCH_PORT=8791 workbench" "   Use another port: WORKBENCH_PORT=8791 workbench" >&2
+    say "   换端口：WORKBENCH_PORT=8791 aireins" "   Use another port: WORKBENCH_PORT=8791 aireins" >&2
     return 1
   fi
   if [[ ! -f "$REPO/frontend/dist/index.html" ]]; then
     say "前端尚未构建，执行 npm run build…" "Frontend is not built yet; running npm run build…"
     if ! (cd "$REPO" && npm run build); then
-      say "❌ 前端构建失败，工作台未启动；请修复构建错误后重试。" "❌ Frontend build failed; workbench not started. Fix the build errors and retry." >&2
+      say "❌ 前端构建失败，工作台未启动；请修复构建错误后重试。" "❌ Frontend build failed; AIReins not started. Fix the build errors and retry." >&2
       return 1
     fi
     if [[ ! -f "$REPO/frontend/dist/index.html" ]]; then
-      say "❌ 构建后仍缺少 frontend/dist/index.html，工作台未启动。" "❌ frontend/dist/index.html is still missing after the build; workbench not started." >&2
+      say "❌ 构建后仍缺少 frontend/dist/index.html，工作台未启动。" "❌ frontend/dist/index.html is still missing after the build; AIReins not started." >&2
       return 1
     fi
   fi
@@ -94,7 +94,7 @@ start() {
   [[ -f "$LOG" ]] && (( $(wc -c < "$LOG") > 5242880 )) && mv -f "$LOG" "$LOG.1"
   # setsid 而非仅 nohup：快捷方式经 `wsl.exe -e` 启动时，wsl.exe 退出会连坐清理
   # 整个进程组，nohup 只挡 SIGHUP 挡不住。必须新建会话彻底脱离。
-  # exec：让后台那份 bash 直接换成 setsid，别留一个占着调用方 stdout 的壳（否则 `workbench start | cat` 永不返回）
+  # exec：让后台那份 bash 直接换成 setsid，别留一个占着调用方 stdout 的壳（否则 `aireins start | cat` 永不返回）
   if [[ "$PLATFORM" == darwin ]]; then
     ( cd "$REPO" && exec nohup env WORKBENCH_PORT="$PORT" node --import tsx "$REPO/server/index.ts" >>"$LOG" 2>&1 < /dev/null & )
   else
@@ -110,7 +110,7 @@ start() {
 stop() {
   local pid; pid="$(port_pid)"
   [[ -z "$pid" ]] && { say "没有在运行" "Not running"; return 0; }
-  if ! is_ours "$pid"; then say "❌ 端口 %s 上不是本工作台，拒绝停它（PID %s）" "❌ Port %s is not this workbench; refusing to stop it (PID %s)" "$PORT" "$pid" >&2; return 1; fi
+  if ! is_ours "$pid"; then say "❌ 端口 %s 上不是本工作台，拒绝停它（PID %s）" "❌ Port %s is not AIReins; refusing to stop it (PID %s)" "$PORT" "$pid" >&2; return 1; fi
   kill "$pid"
   for (( attempt=0; attempt<20; attempt++ )); do [[ -z "$(port_pid)" ]] && { say "已停止" "Stopped"; return 0; }; sleep 0.25; done
   say "⚠ 仍未退出，可手动：kill -9 %s" "⚠ Still not exited; you can run it manually: kill -9 %s" "$pid" >&2; return 1
@@ -127,7 +127,7 @@ remote_status() {
   elif [[ -n "$rpid" ]]; then
     say "  远程：127.0.0.1:%s 被别的程序占用（PID %s），远程入口没起来" "  Remote: 127.0.0.1:%s is used by another program (PID %s); the remote entry is not up" "$port" "$rpid"
   else
-    say "  远程：%s → 127.0.0.1:%s 未监听（wb logs 里搜 remote 看原因）" "  Remote: %s → 127.0.0.1:%s not listening (search remote in wb logs for the reason)" "$origin" "$port"
+    say "  远程：%s → 127.0.0.1:%s 未监听（aireins logs 里搜 remote 看原因）" "  Remote: %s → 127.0.0.1:%s not listening (search remote in aireins logs for the reason)" "$origin" "$port"
   fi
 }
 
@@ -151,5 +151,5 @@ case "${1:-start}" in
   restart) stop; start ;;
   status)  status ;;
   logs)    tail -f "$LOG" ;;
-  *) say "用法：wb [start|stop|restart|status|logs]" "Usage: wb [start|stop|restart|status|logs]" >&2; exit 2 ;;
+  *) say "用法：aireins [start|stop|restart|status|logs]" "Usage: aireins [start|stop|restart|status|logs]" >&2; exit 2 ;;
 esac

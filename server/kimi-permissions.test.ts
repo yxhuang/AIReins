@@ -86,7 +86,7 @@ for (const mode of modes) {
     assert.deepEqual(h.sent.at(-1), { jsonrpc: "2.0", id, result: { outcome: { outcome: "selected", optionId } } });
   }
 
-  // 已获 CLI 放行的执行请求不再追加 Workbench 审批，保留真实文件/终端结果。
+  // 已获 CLI 放行的执行请求不再追加 AIReins 审批，保留真实文件/终端结果。
   const approvalsBefore = h.events.filter((event) => event.type === "permission_request").length;
   const file = join(root, `${mode}.txt`);
   h.receive({ jsonrpc: "2.0", id: 50, method: "fs/write_text_file", params: { path: file, content: `mode=${mode}` } });

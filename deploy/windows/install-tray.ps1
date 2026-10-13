@@ -1,6 +1,6 @@
 ﻿<#
 .SYNOPSIS
-    安装 Workbench 工作台托盘脚本并创建或更新快捷方式。
+    安装 AIReins 托盘脚本并创建或更新快捷方式。
 .NOTES
     Windows PowerShell 5.1；本文件必须是 UTF-8 带 BOM。
     只复制文件及更新快捷方式，不启动托盘、Chrome 或 WSL 服务。
@@ -68,8 +68,11 @@ public static class WbLink {
     }
 }
 '@
-$shortcutName = 'Workbench 工作台.lnk'
-$installDir = Join-Path $env:LOCALAPPDATA 'workbench'
+$shortcutName = 'AIReins.lnk'
+$legacyShortcutNames = @('Workbench 工作台.lnk') # 改名前安装的快捷方式继续原地更新，不另建一份
+$installDir = Join-Path $env:LOCALAPPDATA 'AIReins'
+# 改名前的安装目录；旧快捷方式与固定项会改指新目录，旧目录不删（远程网关也可能装在里面）。
+$legacyInstallDir = Join-Path $env:LOCALAPPDATA 'workbench'
 
 # 与 wb-tray.ps1 的 Resolve-Chrome 使用相同候选；只检查，不启动 Chrome。
 $chromeFound = $false
@@ -81,7 +84,7 @@ foreach ($candidate in @(
     if (Test-Path -LiteralPath $candidate -PathType Leaf) { $chromeFound = $true; break }
 }
 if (-not $chromeFound) { $chromeFound = $null -ne (Get-Command chrome.exe -ErrorAction SilentlyContinue) }
-if (-not $chromeFound) { Write-Warning (T '没有找到 Google Chrome，请安装 Google Chrome（工作台窗口用 chrome --app 打开）。' 'Google Chrome was not found. Install Google Chrome (the Workbench window opens with chrome --app).') }
+if (-not $chromeFound) { Write-Warning (T '没有找到 Google Chrome，请安装 Google Chrome（工作台窗口用 chrome --app 打开）。' 'Google Chrome was not found. Install Google Chrome (the AIReins window opens with chrome --app).') }
 
 # 默认仓库布局：脚本在 windows/，图标在它的上一层 deploy/。
 # -SourceDir 可指 windows/、deploy/，或把脚本与图标放一起的本地目录。
@@ -92,9 +95,9 @@ $scriptSource = Join-Path $sourceRoot 'wb-tray.ps1'
 if (-not (Test-Path -LiteralPath $scriptSource -PathType Leaf)) {
     $scriptSource = Join-Path $sourceRoot 'windows\wb-tray.ps1'
 }
-$iconSource = Join-Path $sourceRoot 'workbench.ico'
+$iconSource = Join-Path $sourceRoot 'aireins.ico'
 if (-not (Test-Path -LiteralPath $iconSource -PathType Leaf)) {
-    $iconSource = Join-Path (Split-Path -Parent $sourceRoot) 'workbench.ico'
+    $iconSource = Join-Path (Split-Path -Parent $sourceRoot) 'aireins.ico'
 }
 foreach ($source in @($scriptSource, $iconSource)) {
     if (-not (Test-Path -LiteralPath $source -PathType Leaf)) { throw (T "缺少源文件：$source（用 -SourceDir 指定）" "Missing source file: $source (specify it with -SourceDir)") }
@@ -118,9 +121,11 @@ function Find-Shortcut {
     )
     foreach ($root in $roots) {
         if (-not (Test-Path -LiteralPath $root -PathType Container)) { continue }
-        $hit = Get-ChildItem -LiteralPath $root -Filter $shortcutName -File -Recurse -ErrorAction SilentlyContinue |
-            Select-Object -First 1
-        if ($hit) { return $hit.FullName }
+        foreach ($name in @($shortcutName) + $legacyShortcutNames) {
+            $hit = Get-ChildItem -LiteralPath $root -Filter $name -File -Recurse -ErrorAction SilentlyContinue |
+                Select-Object -First 1
+            if ($hit) { return $hit.FullName }
+        }
     }
     return $null
 }
@@ -141,7 +146,7 @@ if ($mainShortcut) {
 $pinnedDir = "$env:APPDATA\Microsoft\Internet Explorer\Quick Launch\User Pinned\TaskBar"
 $pinned = @()
 if (Test-Path -LiteralPath $pinnedDir -PathType Container) {
-    $pinned = @(Get-ChildItem -LiteralPath $pinnedDir -Filter $shortcutName -File)
+    foreach ($name in @($shortcutName) + $legacyShortcutNames) { $pinned += @(Get-ChildItem -LiteralPath $pinnedDir -Filter $name -File) }
 }
 # 直接把 Chrome 工作台窗口固定到任务栏时，Windows 生成的是「Google Chrome (2).lnk」这类只指向 chrome.exe 的固定项：
 # 图标是 Chrome 的，窗口关掉后再点只会开一个普通 Chrome 窗口。按任务栏 ID 认出这类固定项，一并改成走托盘。
@@ -153,10 +158,29 @@ if (Test-Path -LiteralPath $pinnedDir -PathType Container) {
     }
 }
 foreach ($item in $pinned) { if ($targets -notcontains $item.FullName) { $targets += $item.FullName } }
+# 改名前装的其他副本（如桌面那份）仍指向旧目录的启动器；一并改指新目录，旧目录才能删。
+if (-not $ShortcutPath) {
+    $legacyLauncher = Join-Path $legacyInstallDir 'launcher.vbs'
+    $probe = New-Object -ComObject WScript.Shell
+    foreach ($root in @(
+        "$env:APPDATA\Microsoft\Windows\Start Menu\Programs",
+        "$env:ProgramData\Microsoft\Windows\Start Menu\Programs",
+        [Environment]::GetFolderPath('Desktop')
+    )) {
+        if (-not (Test-Path -LiteralPath $root -PathType Container)) { continue }
+        foreach ($name in @($shortcutName) + $legacyShortcutNames) {
+            foreach ($item in @(Get-ChildItem -LiteralPath $root -Filter $name -File -Recurse -ErrorAction SilentlyContinue)) {
+                if ($targets -contains $item.FullName) { continue }
+                $linkArgs = [string]($probe.CreateShortcut($item.FullName).Arguments)
+                if ($linkArgs.IndexOf($legacyLauncher, [StringComparison]::OrdinalIgnoreCase) -ge 0) { $targets += $item.FullName }
+            }
+        }
+    }
+}
 
 New-Item -ItemType Directory -Path $installDir -Force | Out-Null
 Copy-Item -LiteralPath $scriptSource -Destination (Join-Path $installDir 'wb-tray.ps1') -Force
-Copy-Item -LiteralPath $iconSource -Destination (Join-Path $installDir 'workbench.ico') -Force
+Copy-Item -LiteralPath $iconSource -Destination (Join-Path $installDir 'aireins.ico') -Force
 # 路径从 VBS 自身推导，用户名含中文时仍能保持脚本内容为纯 ASCII。
 # 显式选 System32\WindowsPowerShell，保证用系统 5.1，不被 PATH 中的 pwsh 替换。
 $trayArguments = ''
@@ -198,8 +222,8 @@ foreach ($target in $targets) {
     $shortcut.TargetPath = "$env:SystemRoot\System32\wscript.exe"
     $shortcut.Arguments = "`"$launcher`""
     $shortcut.WorkingDirectory = $installDir
-    $shortcut.IconLocation = "$(Join-Path $installDir 'workbench.ico'),0"
-    $shortcut.Description = (T 'Workbench 工作台' 'Workbench')
+    $shortcut.IconLocation = "$(Join-Path $installDir 'aireins.ico'),0"
+    $shortcut.Description = 'AIReins'
     try { $shortcut.Save() }
     catch {
         throw (T "无法修改 $target ：$($_.Exception.Message)。若位于所有用户开始菜单，请用管理员 PowerShell 重跑。已完成的其他项和备份保留。" "Cannot modify ${target}: $($_.Exception.Message). If it is in the all-users Start Menu, rerun in an elevated PowerShell. Completed items and backups are kept.")
@@ -218,5 +242,8 @@ foreach ($target in $targets) {
 }
 if ($pinned.Count -eq 0) { Write-Host (T '未找到同名任务栏固定项：请从安装后的快捷方式固定到任务栏。' 'No matching pinned taskbar shortcut found; pin the installed shortcut to the taskbar yourself.') }
 else { Write-Host (T '已有任务栏固定项已更新，无需重新固定。' 'Existing pinned taskbar shortcuts were updated; no need to re-pin.') }
-Write-Host (T "已安装到 $installDir。请点「Workbench 工作台」启动。" "Installed to $installDir. Launch it from the Workbench shortcut.")
+Write-Host (T "已安装到 $installDir。请点「AIReins」（改名前安装的为「Workbench 工作台」）启动。" "Installed to $installDir. Launch it from the AIReins shortcut (named 'Workbench 工作台' if installed before the rename).")
+if (Test-Path -LiteralPath (Join-Path $legacyInstallDir 'launcher.vbs') -PathType Leaf) {
+    Write-Host (T "旧安装目录 $legacyInstallDir 里的托盘文件已不再使用（上面列出的快捷方式已改指新目录）；退出旧托盘、确认没有自建的快捷方式还指向它后可自行删除，remote-gateway 子目录若存在仍在使用，保留。" "The tray files in the old install directory $legacyInstallDir are no longer used (the shortcuts listed above now point to the new directory); after exiting the old tray and checking that no shortcut you made yourself still points there, you may delete them. Keep its remote-gateway subfolder if present; it is still in use.")
+}
 Write-Host (T '仓库修改不会自动更新安装副本；以后需重跑此安装器，再退出旧托盘实例并重新启动。' 'Repository changes do not update the installed copy; rerun this installer, then exit the old tray instance and start it again.')

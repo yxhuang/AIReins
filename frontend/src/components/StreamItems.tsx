@@ -480,7 +480,7 @@ export const QuestionBlock = forwardRef<HTMLDivElement, { item: GateView; sessio
                       borderRadius: 6,
                       background: "var(--surface)",
                       color: "var(--text)",
-                      fontSize: 16,
+                      fontSize: 15,
                       fontFamily: "inherit",
                       padding: "4px 8px",
                       minWidth: 260,

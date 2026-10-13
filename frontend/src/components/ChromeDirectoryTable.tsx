@@ -45,7 +45,7 @@ for(const entry of entries) {
   link.title=(entry.folder ? copy.openFolder : copy.openFile)+entry.path;
   link.addEventListener('click',event=>{event.preventDefault();parent.postMessage({type:'wb-directory-open',path:entry.path},'*')});
 }
-// Keep native ordering within each group; preserve WB folders-first/unknown-last behavior.
+// Keep native ordering within each group; preserve AIReins folders-first/unknown-last behavior.
 const nativeSort=sortTable;
 sortTable=function(column) {
   nativeSort(column);

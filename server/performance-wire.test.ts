@@ -55,9 +55,9 @@ assert.equal(frames.at(-1)!.currentSeq, 6);
 assert.throws(() => replaySession({ getEventsAfter: () => undefined }, client, "missing", 0));
 console.log("✅ performance wire: gzip/fallback/cache, ephemeral WS delivery, replay/order/ring fallback");
 
-const launcher = readFileSync("bin/workbench", "utf8");
+const launcher = readFileSync("bin/aireins", "utf8");
 assert.match(launcher, /exec setsid env WORKBENCH_PORT="\$PORT" node --import tsx "\$REPO\/server\/index\.ts" >>"\$LOG" 2>&1 < \/dev\/null/);
 assert.match(launcher, /\[\[ "\$cmd" == \*"\$REPO\/server\/index\.ts"\* \]\]/);
 const serverSource = readFileSync("server/index.ts", "utf8");
-assert.match(serverSource, /spawn\("bash", \[fileURLToPath\(new URL\("\.\.\/bin\/workbench", import\.meta\.url\)\), "restart"\]/);
+assert.match(serverSource, /spawn\("bash", \[fileURLToPath\(new URL\("\.\.\/bin\/aireins", import\.meta\.url\)\), "restart"\]/);
 assert.match(serverSource, /process\.on\("SIGTERM", \(\) => void shutdown\("SIGTERM"\)\)/);

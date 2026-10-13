@@ -326,7 +326,7 @@ export class SessionManager {
       && record.nativeSessionId === input.resumeSessionId && this.deletingSessions.has(record.id))) {
       throw new SessionBusyError("原生会话正在彻底删除，无法续接。");
     }
-    if (this.stopping) throw new Error("Workbench 正在退出");
+    if (this.stopping) throw new Error("AIReins 正在退出");
     this.validateCwd(input.cwd);
     const id = ulid();
     const now = new Date().toISOString();
@@ -757,7 +757,7 @@ export class SessionManager {
       }
       if ([...this.sessions.values()].some(other => other.id !== id && other.agent === record.agent
         && other.nativeSessionId === record.nativeSessionId)) {
-        throw new SessionBusyError("另一条 Workbench 会话引用同一原生历史，请先移除其他引用。");
+        throw new SessionBusyError("另一条 AIReins 会话引用同一原生历史，请先移除其他引用。");
       }
       this.deletingSessions.add(id);
       try {
@@ -816,7 +816,7 @@ export class SessionManager {
     reason: "manual" | "idle",
     context: { idleMinutes?: number } = {},
   ): Promise<{ session: SessionRecord; resumeCommand: string; vscodeUri: string | null }> {
-    if (this.stopping) throw new Error("Workbench 正在退出");
+    if (this.stopping) throw new Error("AIReins 正在退出");
     this.assertWritableTranscript(id);
     const record = this.sessions.get(id);
     if (!record) throw new Error(`会话不存在：${id}`);
@@ -867,7 +867,7 @@ export class SessionManager {
 
   /** 自动释放跳过的原因；null 表示可以释放。手动释放把这些原因转成可读错误。 */
   private releaseBlocker(id: string, record: SessionRecord): string | null {
-    if (this.stopping) return "Workbench 正在退出";
+    if (this.stopping) return "AIReins 正在退出";
     if (this.damagedTranscripts.has(id)) return "transcript 损坏，禁止释放";
     if (this.thinkingUpdates.has(id) || this.sideQuestions.has(id)) return "会话正在切换 Thinking 或进行侧问，请稍候";
     if (this.restartingSessions.has(id)) return "会话正在切换配置或续接，请稍候";
@@ -909,7 +909,7 @@ export class SessionManager {
   }
 
   /**
-   * 退出 wb：有原生 id、没有待处理闸门的会话按「释放」处理（idle+released 持久化，重启后发送即原地续接），
+   * 退出 AIReins：有原生 id、没有待处理闸门的会话按「释放」处理（idle+released 持久化，重启后发送即原地续接），
    * 其余标 dead。先清 workers 再 stop，stop 触发的 exited 回调因 current() 为假直接返回。
    */
   async shutdown(): Promise<void> {
@@ -1230,7 +1230,7 @@ export class SessionManager {
     config: SessionConfig,
     nativeSessionId?: string,
   ): Promise<Driver> {
-    if (this.stopping) throw new Error("Workbench 正在退出");
+    if (this.stopping) throw new Error("AIReins 正在退出");
     await oldWorker?.stop();
     const record = this.sessions.get(id)!;
     let replacement!: Driver;

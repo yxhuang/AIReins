@@ -321,7 +321,7 @@ assert.equal(promptedSessions.has(created.id), true);
 assert.equal(existsSync(created.transcriptPath), true);
 await manager.remove(created.id);
 assert.equal(promptedSessions.has(created.id), false);
-// 移除时删掉 wb 自己的 transcript 副本
+// 移除时删掉 AIReins 自己的 transcript 副本
 assert.equal(existsSync(created.transcriptPath), false);
 
 const codex = await manager.create({ agent: "codex", cwd: process.cwd() });

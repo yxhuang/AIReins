@@ -1,4 +1,4 @@
-# Workbench
+# AIReins
 
 **一个运行在你自己电脑上的个人 AI 工作台。** 在桌面或手机上通过 [Tailscale](https://tailscale.com) 从浏览器驱动 Claude Code、Codex 和 Kimi Code，同时还能浏览这台电脑的目录、文件和终端。
 
@@ -8,12 +8,12 @@
 
 ## 为什么
 
-各家编码代理的官方远程方案只给你一扇看进**单个代理会话**的窗户。Workbench 给你的是**整台电脑**，可在你私有网络的任何浏览器上使用：
+各家编码代理的官方远程方案只给你一扇看进**单个代理会话**的窗户。AIReins 给你的是**整台电脑**，可在你私有网络的任何浏览器上使用：
 
 - 并排启动、恢复和切换 Claude Code、Codex 与 Kimi 会话。
 - 浏览任意目录（包括 `/mnt/c` 下的 Windows 盘符，不限于 git 仓库），在家目录、Windows 盘符和会话目录中预览和编辑文件，打开终端。
 - 用 Taildrop 在手机和电脑之间传文件。
-- 与原生 CLI 和 VS Code 扩展保持互通：在 Workbench 中开启的会话可以在那里恢复，反过来也一样。
+- 与原生 CLI 和 VS Code 扩展保持互通：在 AIReins 中开启的会话可以在那里恢复，反过来也一样。
 
 它刻意保持小巧：一个 Node 进程加一个网页。没有中继服务器，没有账号，没有遥测，也没有需要一直开着的桌面应用。它是为一个人与自己的代理协作而设计的，不是为在并行 worktree 中跑一队代理。
 
@@ -38,12 +38,12 @@
 **远程与多台电脑**
 - 手机版布局可添加到主屏幕，像应用一样使用。
 - 通过 Tailscale Serve 提供远程访问，仅限 Tailscale 登录白名单。见 [SECURITY.md](SECURITY.md)。
-- 发现你 tailnet 上的其他电脑，从一个菜单在它们的 Workbench 之间切换。
-- 在 Windows 上：托盘图标和开始菜单快捷方式，以应用窗口形式打开 Workbench。
+- 发现你 tailnet 上的其他电脑，从一个菜单在它们的 AIReins 之间切换。
+- 在 Windows 上：托盘图标和开始菜单快捷方式，以应用窗口形式打开 AIReins。
 
 ## 横向对比
 
-| | Workbench | Orca | Claude Code Remote Control | Codex Remote |
+| | AIReins | Orca | Claude Code Remote Control | Codex Remote |
 |---|---|---|---|---|
 | 远程控制的对象 | 整台电脑：会话、任意目录、文件、终端 | 工作区/worktree、代理会话、终端、git | 单个 Claude Code 会话 | 一台主机上的 Codex 任务 |
 | 代理 | Claude Code、Codex、Kimi | 一个 PTY 中的多种 CLI | Claude Code | Codex |
@@ -52,7 +52,7 @@
 | 运行形态 | 一个 Node 进程 + 浏览器 | 桌面应用（必须保持打开） | 你的终端（必须保持打开） | 桌面应用 |
 | 适合 | 一个人从任何地方用自己的一台电脑 | 在并行 worktree 中跑多个代理 | 快速查看单个会话 | 在 ChatGPT 应用中的 Codex 用户 |
 
-如果你想在并行 worktree 中跑一队代理，用 [Orca](https://github.com/stablyai/orca)。如果你想在手机上用整台电脑，用 Workbench。
+如果你想在并行 worktree 中跑一队代理，用 [Orca](https://github.com/stablyai/orca)。如果你想在手机上用整台电脑，用 AIReins。
 
 <!-- Comparison facts collected 2026-10-12; re-check before each release. -->
 
@@ -74,31 +74,31 @@
 | Node.js ≥ 22.12（含 npm） | 必需 |
 | `ss`（iproute2）、`rg`（ripgrep） | 必需 |
 | `zip` | 用 Taildrop 发送文件夹时需要 |
-| `curl`、`python3` | 可选，用于完整的 `wb status` 输出 |
+| `curl`、`python3` | 可选，用于完整的 `aireins status` 输出 |
 | Claude Code、Codex 或 Kimi Code CLI | 至少一个，已安装并登录 |
 | Windows 上的 Google Chrome | 用于应用窗口 |
 | Windows 上的 Tailscale | 可选，用于远程访问 |
 
 ```bash
-git clone <repository-url> workbench && cd workbench && bash install.sh
+git clone https://github.com/yxhuang/AIReins.git && cd AIReins && bash install.sh
 ```
 
-`install.sh` 会检查依赖、安装 npm 包、构建前端、安装 `wb` 命令、Windows 托盘图标和开始菜单快捷方式，并跑一次冒烟测试。`git pull` 后再运行一次即可更新。`bash install.sh --check` 只报告状态，不做任何改动。
+`install.sh` 会检查依赖、安装 npm 包、构建前端、安装 `aireins` 命令、Windows 托盘图标和开始菜单快捷方式，并跑一次冒烟测试。`git pull` 后再运行一次即可更新。`bash install.sh --check` 只报告状态，不做任何改动。
 
-请自行从开始菜单把 "Workbench" 固定到任务栏；Windows 没有可靠的编程方式来做到这一点。
+请自行从开始菜单把 "AIReins" 固定到任务栏；Windows 没有可靠的编程方式来做到这一点。
 
 日常使用：
 
 ```bash
-wb            # 后台启动并在默认 Windows 浏览器中打开
-wb status     # 还有：wb stop | wb restart | wb logs
+aireins            # 后台启动并在默认 Windows 浏览器中打开
+aireins status     # 还有：aireins stop | aireins restart | aireins logs
 ```
 
-Workbench 监听 `http://127.0.0.1:8790`（可用 `WORKBENCH_PORT` 修改）。托盘图标和开始菜单快捷方式会以 Chrome 应用窗口打开它。
+AIReins 监听 `http://127.0.0.1:8790`（可用 `WORKBENCH_PORT` 修改）。托盘图标和开始菜单快捷方式会以 Chrome 应用窗口打开它。
 
 ## 安装（原生 Linux / macOS 实验性）
 
-使用相同的 clone 和 `bash install.sh` 命令。原生 Linux 需要 Node ≥ 22.12、npm、`ss`（iproute2）与 `rg`；macOS 用 `lsof` 查询端口，还需 `rg`（例如 `brew install ripgrep`）。`wb` 在 Linux 调用 `xdg-open`，macOS 调用 `open`；无桌面环境可设 `WORKBENCH_NO_OPEN=1`。这些平台不安装 Windows 托盘或网关，界面隐藏 Chrome App 窗口、Windows 选择窗口、盘符转换和 PowerShell。Linux 的 systemd 部署是可选项，见[主机设置](docs/host-connections.md)。
+使用相同的 clone 和 `bash install.sh` 命令。原生 Linux 需要 Node ≥ 22.12、npm、`ss`（iproute2）与 `rg`；macOS 用 `lsof` 查询端口，还需 `rg`（例如 `brew install ripgrep`）。`aireins` 在 Linux 调用 `xdg-open`，macOS 调用 `open`；无桌面环境可设 `WORKBENCH_NO_OPEN=1`。这些平台不安装 Windows 托盘或网关，界面隐藏 Chrome App 窗口、Windows 选择窗口、盘符转换和 PowerShell。Linux 的 systemd 部署是可选项，见[主机设置](docs/host-connections.md)。
 
 WSL2 是作者日常使用的主力平台。Ubuntu CI 为必过门禁，macOS CI 允许实验性失败；作者没有 Mac，macOS 只在 CI 中测试。macOS 支持文件浏览与预览，安全目录 fd 操作未实现前隐藏文件编辑与文件夹 Taildrop；普通文件 Taildrop 可用。欢迎 macOS 用户在 issue 反馈。
 
@@ -109,7 +109,7 @@ WSL2 是作者日常使用的主力平台。Ubuntu CI 为必过门禁，macOS CI
 1. 写入 `~/.workbench/remote.json`（仅当不存在时），其中包含你的 MagicDNS HTTPS 地址和 Tailscale 登录名。远程终端默认**关闭**。
 2. 在一次 UAC 提示之后，安装一个小型 Windows 网关和 `tailscale serve`。
 
-原生 Linux/macOS 的 Tailscale 与 Workbench 必须在同一台机器。安装器仅生成缺失的 `remote.json`（`terminal: false`）并打印命令，不修改 Tailscale 配置；请自行执行：
+原生 Linux/macOS 的 Tailscale 与 AIReins 必须在同一台机器。安装器仅生成缺失的 `remote.json`（`terminal: false`）并打印命令，不修改 Tailscale 配置；请自行执行：
 
 ```bash
 tailscale serve --bg http://127.0.0.1:8793
@@ -121,7 +121,7 @@ tailscale serve --bg http://127.0.0.1:8793
 
 ## 配置
 
-Workbench 把数据保存在 `~/.workbench`。`WORKBENCH_HOME` 可以移动服务器数据目录和原生 POSIX 远程安装器的配置目录；WSL 安装、`wb` 日志和快照保留原有路径。它不会改变三家 CLI 的全局设置，唯一的例外是你在 Workbench 中切换的 Claude Remote Control 默认值。
+AIReins 把数据保存在 `~/.workbench`。`WORKBENCH_HOME` 可以移动服务器数据目录和原生 POSIX 远程安装器的配置目录；WSL 安装、`aireins` 日志和快照保留原有路径。它不会改变三家 CLI 的全局设置，唯一的例外是你在 AIReins 中切换的 Claude Remote Control 默认值。
 
 环境变量：
 
@@ -129,10 +129,10 @@ Workbench 把数据保存在 `~/.workbench`。`WORKBENCH_HOME` 可以移动服�
 |---|---|---|
 | `WORKBENCH_PORT` | `8790` | 本地端口（始终绑定 `127.0.0.1`） |
 | `WORKBENCH_HOME` | `~/.workbench` | 服务器数据目录 |
-| `WORKBENCH_LOG` | `~/.workbench/server.log` | `wb` 写入的日志文件 |
+| `WORKBENCH_LOG` | `~/.workbench/server.log` | `aireins` 写入的日志文件 |
 | `WORKBENCH_STATIC_DIR` | `frontend/dist` | 改用另一份前端构建产物 |
 
-机器相关的选项放在 `~/.workbench/prefs.json` 中。它们不显示在界面上；编辑后需要重启 Workbench：
+机器相关的选项放在 `~/.workbench/prefs.json` 中。它们不显示在界面上；编辑后需要重启 AIReins：
 
 ```json
 {
@@ -171,7 +171,7 @@ npm run typecheck && npm run typecheck:frontend
 
 ## 安全
 
-任何能访问到 Workbench 的人都拥有你在该电脑上用户账号的全部权限。让它只留在 loopback 和你的 tailnet 内；绝不要用 Funnel 或端口转发把它暴露出去。威胁模型和漏洞报告方式见 [SECURITY.md](SECURITY.md)。
+任何能访问到 AIReins 的人都拥有你在该电脑上用户账号的全部权限。让它只留在 loopback 和你的 tailnet 内；绝不要用 Funnel 或端口转发把它暴露出去。威胁模型和漏洞报告方式见 [SECURITY.md](SECURITY.md)。
 
 ## 许可证
 

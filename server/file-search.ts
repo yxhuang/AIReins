@@ -88,7 +88,7 @@ async function listCandidates(cwd: string): Promise<string[]> {
     } catch (error) {
       if ((error as CommandError).code !== "ENOENT") throw error;
       // Standalone Codex ships rg outside PATH; resolve its launcher symlink
-      // so upgrades do not leave Workbench pinned to an old release.
+      // so upgrades do not leave AIReins pinned to an old release.
       const bundledRg = await findCodexRipgrep();
       if (!bundledRg) throw new Error("找不到 rg 或 Codex 自带的 rg，无法检索非 Git 目录");
       output = await run(bundledRg, args, cwd, true);

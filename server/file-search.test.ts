@@ -26,7 +26,7 @@ await writeFile(join(project, "ignored.txt"), "ignored");
 await mkdir(join(project, "node_modules"));
 await writeFile(join(project, "node_modules", "skip.txt"), "skip");
 await symlink("/etc/passwd", join(project, "outside.txt"));
-// Simulate Workbench's PATH: Git/Codex available, rg only bundled with Codex.
+// Simulate AIReins's PATH: Git/Codex available, rg only bundled with Codex.
 await symlink("/usr/bin/git", join(bin, "git"));
 await writeFile(join(release, "bin", "codex"), "", { mode: 0o755 });
 await symlink(join(release, "bin", "codex"), join(bin, "codex"));

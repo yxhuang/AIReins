@@ -65,7 +65,7 @@ if ($serveConfig.Web) { $target = $serveConfig.Web.PSObject.Properties[$targetKe
 if ($target) {
     if ($target.Value.Handlers) { $rootHandler = $target.Value.Handlers.PSObject.Properties['/'] }
     if ($rootHandler -and $rootHandler.Value.Proxy -notin @('http://127.0.0.1:8792', "http://127.0.0.1:$($remote.port)")) {
-        throw (T '现有 HTTPS 根路径不是预期的 Workbench 目标，未更改任何内容。' 'The existing HTTPS root is not the expected Workbench target; nothing was changed.')
+        throw (T '现有 HTTPS 根路径不是预期的 AIReins 目标，未更改任何内容。' 'The existing HTTPS root is not the expected AIReins target; nothing was changed.')
     }
 }
 if ($serveConfig.AllowFunnel) {
@@ -73,7 +73,7 @@ if ($serveConfig.AllowFunnel) {
         if ($entry.Value) { throw (T 'Funnel 已开启。安装本私有网关前请先检查公开访问配置。' 'Funnel is enabled. Review public access before installing this private gateway.') }
     }
 }
-Write-Host (T "安装 loopback 网关 127.0.0.1:$Port -> Workbench 端口 $($remote.port)" "Install loopback gateway 127.0.0.1:$Port -> Workbench port $($remote.port)")
+Write-Host (T "安装 loopback 网关 127.0.0.1:$Port -> AIReins 端口 $($remote.port)" "Install loopback gateway 127.0.0.1:$Port -> AIReins port $($remote.port)")
 Write-Host (T "登录任务 '$TaskName' 在登录后以 $($identity.Name) 隐藏运行。" "Sign-in task '$TaskName' runs hidden as $($identity.Name) after sign-in.")
 Write-Host (T '仅更改 HTTPS / 目标；手机网址不变。' 'Change only the HTTPS / target; keep the phone URL.')
 New-Item -ItemType Directory -Path $installDir -Force | Out-Null
@@ -137,4 +137,4 @@ if ($readBack.Web.PSObject.Properties[$targetKey].Value.Handlers.PSObject.Proper
 }
 Write-Host (T "已安装。手机网址：$($remote.origin)" "Installed. Phone URL: $($remote.origin)")
 Write-Host (T "备份：$backup" "Backup: $backup")
-Write-Host (T '最终验收：重启 Windows 并登录，不要打开 Workbench，然后在手机上打开该网址。' 'Final check: restart Windows, sign in, do not open Workbench, then open the URL on your phone.')
+Write-Host (T '最终验收：重启 Windows 并登录，不要打开 AIReins，然后在手机上打开该网址。' 'Final check: restart Windows, sign in, do not open AIReins, then open the URL on your phone.')

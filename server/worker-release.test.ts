@@ -147,7 +147,7 @@ async function pendingMarks(manager: InstanceType<typeof SessionManager>, id: st
   assert.equal(reloaded.released, true);
 }
 
-// ── 1b. 退出 wb：活会话按释放处理，重启后发送以同一原生 ID 原地续接；没有原生 ID 的标 dead ──
+// ── 1b. 退出 AIReins：活会话按释放处理，重启后发送以同一原生 ID 原地续接；没有原生 ID 的标 dead ──
 {
   const { manager, instances, events } = harness();
   const live = await manager.create({ agent: "claude", cwd: fixture, resumeSessionId: claudeId, snapshot: "skip" });

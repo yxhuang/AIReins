@@ -68,7 +68,7 @@ export function saveSessionGroups(groups: SessionGroup[]): void {
 
 /**
  * 启动时清理（对标 Claude 的 cleanupPeriodDays）：最后活动早于 retentionDays 天的会话移出登记表；
- * 不在登记表里的 transcript 与 uploads/<id>（含 UI 里移除过的会话）一并删除。只删 wb 自己的副本，
+ * 不在登记表里的 transcript 与 uploads/<id>（含 UI 里移除过的会话）一并删除。只删 AIReins 自己的副本，
  * 不碰 CLI 的原生会话。retentionDays=0 只清残留、不过期。
  */
 export function pruneStorage(retentionDays: number, now = Date.now()): { expired: number; removedFiles: number } {
@@ -133,7 +133,7 @@ export function removeUploadDirs(ids: string[], kept: SessionRecord[]): number {
   return removed;
 }
 
-/** UI 移除会话时删掉 wb 自己的副本（transcript + 附件）；CLI 原生会话不受影响。 */
+/** UI 移除会话时删掉 AIReins 自己的副本（transcript + 附件）；CLI 原生会话不受影响。 */
 export function deleteSessionFiles(record: SessionRecord, kept: SessionRecord[]): void {
   flushTranscripts(record.transcriptPath);
   transcriptCache.delete(record.transcriptPath);
@@ -488,7 +488,7 @@ function legacyPartial(bytes: Buffer): boolean | undefined {
     && event.payload.inputComplete !== true;
 }
 
-/** 启动恢复前执行；只处理登记为 Claude 的 wb 副本，Codex/Kimi 即使有同名字段也保留。 */
+/** 启动恢复前执行；只处理登记为 Claude 的 AIReins 副本，Codex/Kimi 即使有同名字段也保留。 */
 export function compactClaudeTranscripts(sessions: SessionRecord[]): { files: number; rewrittenFiles: number; removedLines: number; removedBytes: number } {
   flushTranscripts();
   const result = { files: 0, rewrittenFiles: 0, removedLines: 0, removedBytes: 0 };

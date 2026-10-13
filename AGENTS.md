@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Workbench: one Node process (`server/`) plus a Vite/React page (`frontend/`) that drives Claude Code, Codex and Kimi Code through their official CLIs, for one person on their own computer and tailnet.
+AIReins: one Node process (`server/`) plus a Vite/React page (`frontend/`) that drives Claude Code, Codex and Kimi Code through their official CLIs, for one person on their own computer and tailnet.
 
 If `.work-orders/HANDOFF.md` exists (a local, untracked file), read it first: it holds the maintainer's current state and open tasks.
 
@@ -34,11 +34,11 @@ The second and third are outside `npm test`; run them too. Tests must not depend
 
 - **Stack**: Node + Vite only. Propose any new runtime dependency in an issue first.
 - **Build**: `npm run build` keeps old hashed assets in `frontend/dist` (`emptyOutDir: false`) because open pages still reference them. Keep it that way.
-- **Running instance**: backend changes take effect after `wb restart`; that stops every running session, so check `wb status` and let the user choose the moment. Frontend changes need `npm run build` and a page refresh (the backend serves `frontend/dist`); under `npm run dev` a refresh is enough.
+- **Running instance**: backend changes take effect after `aireins restart`; that stops every running session, so check `aireins status` and let the user choose the moment. Frontend changes need `npm run build` and a page refresh (the backend serves `frontend/dist`); under `npm run dev` a refresh is enough.
 - **Security boundary**: both listeners bind `127.0.0.1`. Keep the Host/Origin checks and the Tailscale login allowlist exactly as strict; remote access goes through Tailscale Serve only. See `SECURITY.md`.
 - **CLI state is the user's**: read the three CLIs' global config, never write it; per-session settings stay per-session. The one exception is the Claude Remote Control default (`remoteControlAtStartup`), written through the existing symlink without replacing it.
 - **Deleting native sessions** goes only through `codex delete --force` and Kimi ACP `session/delete`, keeping the realpath, reference and identity guards.
-- **Codex single writer**: release a Workbench session before another client resumes the same Codex thread.
+- **Codex single writer**: release an AIReins session before another client resumes the same Codex thread.
 - **Logs** carry no secrets. Pass proxy variables through in both cases (`HTTPS_PROXY` and `https_proxy`).
 - **Machine-specific behaviour** lives in `~/.workbench/prefs.json`, never in the repository (see `server/README.md`).
 - **Windows tray** (`deploy/windows/wb-tray.ps1`) finds the window by page title: when `workbenchWindowTitle` in `frontend/src/host-connections.ts` changes, update `IsWbTitle` to match. `Open-Workbench` manages its own Busy flag; call it without setting Busy first. Tray changes reach users only after `bash install.sh` and a tray restart.

@@ -82,6 +82,45 @@ const screenshot = async (name) => {
   writeFileSync(join(output, `${name}.png`), Buffer.from(result.data, "base64"));
 };
 const checkWidth = async (expected) => assert.equal(await evaluate("document.querySelector('.sidebar').offsetWidth"), expected);
+const checkControls = async () => {
+  const layout = await evaluate(`(() => {
+    const side = document.querySelector('.sidebar').getBoundingClientRect();
+    const visible = element => element.getClientRects().length > 0;
+    const buttons = [...document.querySelectorAll('.sidebar-head button,.sidebar-new-row button,.sidebar-foot button')].filter(visible);
+    const outOfBounds = [], clippedText = [];
+    for (const button of buttons) {
+      const bounds = button.getBoundingClientRect();
+      if (bounds.left < side.left - 1 || bounds.right > side.right + 1) outOfBounds.push(button.className);
+      // 检查实际文字，避免把扩展点击区域的伪元素当成内容溢出。
+      const walker = document.createTreeWalker(button, NodeFilter.SHOW_TEXT);
+      let node;
+      while (node = walker.nextNode()) {
+        if (!node.textContent.trim() || !visible(node.parentElement)) continue;
+        const range = document.createRange(); range.selectNodeContents(node);
+        const text = range.getBoundingClientRect();
+        if (text.left < bounds.left - 1 || text.right > bounds.right + 1 || text.top < bounds.top - 1 || text.bottom > bounds.bottom + 1) clippedText.push(node.textContent);
+      }
+    }
+    const footer = buttons.filter(button => button.closest('.sidebar-foot')).map(button => {
+      const r = button.getBoundingClientRect(); return { name: button.className, x: r.x, y: r.y, w: r.width, h: r.height };
+    });
+    const overlaps = [];
+    for (let i = 0; i < footer.length; i++) for (let j = i + 1; j < footer.length; j++) {
+      const a = footer[i], b = footer[j];
+      if (Math.min(a.x+a.w,b.x+b.w)-Math.max(a.x,b.x)>1 && Math.min(a.y+a.h,b.y+b.h)-Math.max(a.y,b.y)>1) overlaps.push([a.name,b.name]);
+    }
+    const labels = [...document.querySelectorAll('.sidebar-foot .page-nav-name')].filter(visible).map(label => ({ text:label.textContent, overflow:getComputedStyle(label).overflow }));
+    return { outOfBounds, clippedText, overlaps, labels, footer, wrap:getComputedStyle(document.querySelector('.sidebar-foot')).flexWrap, overflowX:document.documentElement.scrollWidth-innerWidth };
+  })()`);
+  assert.deepEqual(layout.outOfBounds, [], '顶部/底部按钮位于侧栏内');
+  assert.deepEqual(layout.clippedText, [], '按钮文字完整显示');
+  assert.deepEqual(layout.overlaps, [], '底栏按钮不重叠');
+  assert.ok(layout.overflowX <= 0, '页面不横向溢出');
+  assert.equal(layout.wrap, 'wrap', '底栏允许换行');
+  assert.equal(layout.labels.length, 2, '历史和额度文字均可见');
+  for (const label of layout.labels) assert.equal(label.overflow, 'visible', `${label.text} 不通过裁切省略`);
+  return layout;
+};
 let passed = 0;
 const check = async (name, task) => { await task(); passed++; console.log(`PASS ${name}`); };
 const watchdog = setTimeout(() => browser.kill(), 60000);
@@ -93,6 +132,7 @@ try {
   await send("Runtime.enable");
   await send("Emulation.setDeviceMetricsOverride", { width: 1280, height: 820, deviceScaleFactor: 1, mobile: false });
   await send("Page.addScriptToEvaluateOnNewDocument", { source: `
+    localStorage.setItem('workbench-language','en'); // 固定语言，Local 不依赖运行机器。
     // 模拟升级前用户把侧栏拖到了 260px，后续刷新不再覆盖存储。
     if (!localStorage.getItem('sidebar-test-seeded')) {
       localStorage.setItem('workbench-sidebar-width','260');
@@ -109,6 +149,7 @@ try {
       '/api/links': {links:[]}, '/api/prefs': {idleReleaseMinutes:0}, '/api/claude/settings': {remoteControlAtStartup:false},
       '/api/storage': {totalBytes:0,categories:Object.fromEntries(['transcripts','uploads','logs','other'].map(id=>[id,{bytes:0,files:0}])),cleanable:{bytes:0,rotatedLogs:{bytes:0,files:0},orphans:{bytes:0,files:0,uploadDirs:0},ended:{bytes:0,files:0,sessions:0}}},
     };
+    window.__fixtureTitle = fixtures['/api/sessions'].sessions[0].title;
     const realFetch = window.fetch;
     window.fetch = (input, init) => {
       const path = new URL(typeof input === 'string' ? input : input.url, location.href).pathname;
@@ -121,7 +162,7 @@ try {
     window.WebSocket = class {static CONNECTING=0;static OPEN=1;static CLOSING=2;static CLOSED=3;readyState=0;addEventListener(){}close(){}send(){}};
   ` });
   await send("Page.navigate", { url: base });
-  await waitFor("document.querySelector('[aria-label=\"AI 用量\"]') && document.querySelector('.sidebar-resize')");
+  await waitFor("document.querySelector('.sidebar-foot-usage') && document.querySelector('.sidebar-resize')");
   await settle();
   await evaluate("window.__pointerTrace=[]; ['pointerdown','pointermove','pointerup','gotpointercapture','lostpointercapture'].forEach(type=>document.addEventListener(type,e=>__pointerTrace.push({type:e.type,x:e.clientX,y:e.clientY,target:e.target.className,primary:e.isPrimary,button:e.button,buttons:e.buttons}),true))");
   await check("将升级前的当前 260px 记为默认，历史/额度文字可见", async () => {
@@ -131,49 +172,40 @@ try {
     assert.notEqual(await evaluate("getComputedStyle(document.querySelector('.brand-name')).display"), "none");
     await screenshot("default");
   });
-  await check("拉宽时按钮大小保持，分割线伸长，直达靠右且空白留在额度之后", async () => {
-    const foot = await rect(".sidebar-foot"), launcher = await rect(".sidebar-foot .launcher-button");
-    const history = await rect(".sidebar-foot-pages > .page-nav:first-child .page-nav-item");
-    const usage = await rect(".sidebar-foot-usage");
-    assert.ok(Math.abs(history.width - usage.width) < 1, "历史/额度均分剩余宽度");
-    assert.ok(Math.abs(foot.x + foot.width - launcher.x - launcher.width) < 1, "右侧剩余空间被使用");
-    const icon = await rect(".sidebar-foot-pages > .page-nav:first-child .page-icon");
-    const label = await rect(".sidebar-foot-pages > .page-nav:first-child .page-nav-name");
-    assert.ok(label.x - icon.x - icon.width >= 5.5, "图标文字至少约 6px 间隔");
-    const selectors = [".sidebar-foot-pages > .page-nav:first-child .page-nav-item", ".sidebar-foot-usage", ".btn-new-session", ".sidebar-chatgpt"];
-    const before = await Promise.all(selectors.map(rect));
+  await check("底栏按内容排列，拉宽不拉伸按钮，窄处可换行且文字完整", async () => {
+    // 从 320px 起比较：英文侧栏 ≤282px 时胶囊收起图标，宽度本就不同。
+    await dragTo(320); await checkWidth(320);
+    const initial = await checkControls();
+    const launcher = await rect('.sidebar-foot .launcher-button');
     await dragTo(380); await checkWidth(380);
-    const after = await Promise.all(selectors.map(rect));
-    for (let index=0;index<before.length;index++) {
-      assert.ok(Math.abs(before[index].width-after[index].width)<1, `${selectors[index]} 没有拉伸`);
-      assert.ok(Math.abs(before[index].x-after[index].x)<1, `${selectors[index]} 保持位置`);
+    const wide = await checkControls();
+    for (const button of initial.footer) {
+      const after = wide.footer.find(item => item.name === button.name);
+      assert.ok(Math.abs(button.w - after.w) < 1, `${button.name} 按内容保持宽度`);
+      assert.ok(Math.abs(button.h - after.h) < 1, `${button.name} 保持高度`);
     }
-    const wideFoot = await rect(".sidebar-foot"), wideLauncher = await rect(".sidebar-foot .launcher-button");
-    assert.ok(Math.abs(wideFoot.width - foot.width - 120) < 1, "底栏分割线跟随拉宽 120px");
-    assert.ok(Math.abs(wideLauncher.x - launcher.x - 120) < 1, "直达按钮跟随右边界移动");
-    assert.ok(Math.abs(wideFoot.x + wideFoot.width - wideLauncher.x - wideLauncher.width) < 1, "直达始终靠右");
-    assert.ok(Math.abs(wideLauncher.width - launcher.width) < 1, "直达按钮大小保持");
-    const wideUsage = await rect(".sidebar-foot-usage");
-    assert.ok(Math.abs((wideLauncher.x - wideUsage.x - wideUsage.width) - (launcher.x - usage.x - usage.width) - 120) < 1,
-      "增加的全部空白在额度与直达之间");
-    await screenshot("wide-fixed-buttons");
+    const wideLauncher = await rect('.sidebar-foot .launcher-button');
+    const wideFoot = await rect('.sidebar-foot');
+    assert.ok(Math.abs(wideFoot.x + wideFoot.width - wideLauncher.x - wideLauncher.width) < 1, '宽侧栏直达按钮靠右');
+    assert.equal(wideLauncher.width, launcher.width, '圆钮不随侧栏拉伸');
+    await screenshot('wide-fixed-buttons');
     await dragTo(260);
     await evaluate("document.documentElement.setAttribute('data-theme','dark')");
-    await screenshot("footer-dark");
+    await checkControls(); await screenshot('footer-dark');
     await evaluate("document.documentElement.setAttribute('data-theme','light')");
   });
-  await check("会话标题随拉宽持续显示更多文字，保留完整标题与悬停提示", async () => {
-    const title = await rect(".row-title"), text = await evaluate("document.querySelector('.row-title').textContent");
-    assert.ok(text.length > 15, "标题不在生成时截断为 15 个汉字");
-    assert.equal(await evaluate("document.querySelector('.row-title').title"), text);
+  await check("会话标题随拉宽显示更多前缀，记录保留完整原标题", async () => {
+    const original = await evaluate("window.__fixtureTitle");
+    const initial = await evaluate("document.querySelector('.row-title').textContent");
     for (const width of [320, 360, 390]) {
       await dragTo(width);
-      assert.ok(Math.abs((await rect(".row-title")).width - title.width - (width - 260)) < 1,
-        `标题在 ${width}px 随侧栏继续增长`);
-      assert.equal(await evaluate("document.querySelector('.row-title').textContent"), text);
+      const displayed = await evaluate("document.querySelector('.row-title').textContent");
+      assert.ok(displayed.length > initial.length, `标题在 ${width}px 显示更多文字`);
+      assert.ok(original.startsWith(displayed.replace(/…$/, '')), '显示原标题前缀');
+      assert.equal(await evaluate("document.querySelector('.row-title').title"), displayed, '悬停提示与可见标题一致');
       assert.ok(await evaluate("document.querySelector('.session-row').scrollWidth <= document.querySelector('.session-row').clientWidth"));
     }
-    await screenshot("wide-session-title");
+    await screenshot('wide-session-title');
     await dragTo(260);
   });
   await check("最大宽度为默认 260px 的 1.5 倍，即 390px", async () => {
@@ -184,24 +216,31 @@ try {
   await check("中间宽度的顶部与底部按钮均不溢出", async () => {
     for (const width of [320, 304, 300, 294, 292, 280, 260, 240]) {
       await dragTo(width); await checkWidth(width);
-      assert.ok(await evaluate("Array.from(document.querySelectorAll('.sidebar-head button,.sidebar-new-row button,.sidebar-foot button')).filter(b=>b.getBoundingClientRect().width>0).every(b=>{const r=b.getBoundingClientRect(),s=document.querySelector('.sidebar').getBoundingClientRect();return r.x>=s.x&&r.right<=s.right&&b.scrollWidth<=b.clientWidth;})"), `按钮在 ${width}px 溢出`);
+      await checkControls();
     }
   });
-  await check("最小 224px，完整 Workbench、历史/额度文字和两侧圆钮均不溢出", async () => {
+  await check("最小 224px，完整主机名、历史/额度文字和两侧圆钮均不溢出", async () => {
     await dragTo(224); await checkWidth(224);
     assert.notEqual(await evaluate("getComputedStyle(document.querySelector('.brand-name')).display"), "none");
-    assert.equal(await evaluate("document.querySelector('.brand-name').textContent"), "Workbench");
-    const reload = await rect(".sidebar-reload"), toggle = await rect(".sidebar-toggle"), side = await rect(".sidebar");
-    assert.ok(toggle.x - reload.x - reload.width <= 2, "刷新与收起按钮成组");
-    assert.ok(side.x + side.width - toggle.x - toggle.width <= 12, "顶部双钮靠右");
+    assert.equal(await evaluate("document.querySelector('.brand-name').textContent"), "Local"); // 测试固定英文，本机入口显示 Local
+    const reload = await rect(".sidebar-reload"), toggle = await rect(".sidebar-toggle"), head = await rect(".sidebar-head");
+    assert.ok(toggle.x - reload.x - reload.width >= 8 && toggle.x - reload.x - reload.width <= 16, "刷新与收起按钮成组且不重叠");
+    assert.ok(Math.abs(head.x + head.width - toggle.x - toggle.width - 4) < 1, "顶部双钮靠头栏右边，保留 4px 点击区留白");
     assert.notEqual(await evaluate("getComputedStyle(document.querySelector('.sidebar-foot .page-nav-name')).display"), "none");
     const buttons = await evaluate("Array.from(document.querySelectorAll('.sidebar-foot button')).filter(b=>b.getBoundingClientRect().width>0).map(b => {const r=b.getBoundingClientRect();return {className:b.className,w:r.width,h:r.height,radius:getComputedStyle(b).borderRadius};})");
     assert.equal(buttons.length, 4);
     for (const button of buttons.filter(button=>!button.className.includes('page-nav-item'))) {
       assert.equal(button.w, button.h); assert.equal(button.radius, "50%");
     }
-    assert.ok(await evaluate("Array.from(document.querySelectorAll('.sidebar-head button,.sidebar-new-row button,.sidebar-foot button')).every(b=>{const r=b.getBoundingClientRect(),s=document.querySelector('.sidebar').getBoundingClientRect();return r.x>=s.x&&r.right<=s.right&&b.scrollWidth<=b.clientWidth;})"));
+    const layout = await checkControls();
+    assert.equal(new Set(layout.footer.map(button => Math.round(button.y + button.h / 2))).size, 1, '224px 英文底栏收起胶囊图标后仍为一行');
+    assert.equal(await evaluate("document.querySelectorAll('.sidebar-foot .page-nav-item .page-icon').length && [...document.querySelectorAll('.sidebar-foot .page-nav-item .page-icon')].every(icon=>getComputedStyle(icon).display==='none')"), true, '窄侧栏收起历史/额度图标');
     await screenshot("minimum");
+  });
+  await check("最小字号 14 下，224px 英文底栏不溢出、不重叠、不省略", async () => {
+    await evaluate(`window.__fontStyles = [...document.querySelectorAll('.sidebar-foot,.sidebar-foot *')].filter(element=>element instanceof HTMLElement && parseFloat(getComputedStyle(element).fontSize)<14).map(element=>[element,element.getAttribute('style')]); for(const [element] of __fontStyles) element.style.setProperty('font-size','14px','important');`);
+    await settle(); await checkControls(); await screenshot('minimum-font14');
+    await evaluate("for(const [element,style] of __fontStyles) { if(style===null) element.removeAttribute('style'); else element.setAttribute('style',style); } delete window.__fontStyles;");
   });
   await check("最小宽度可打开新建，表单不横向溢出", async () => {
     await click(".btn-new-session");
@@ -210,21 +249,21 @@ try {
     await click(".btn-new-session");
   });
   await check("历史保持宽度；额度临时加宽至 334px，后退恢复打开前的 224px", async () => {
-    await click('[aria-label="历史会话"]'); await checkWidth(224);
-    await click('[aria-label="后退：收起历史会话"]');
-    await click('[aria-label="AI 用量"]'); await checkWidth(334);
-    assert.ok(await evaluate("!!document.querySelector('[aria-label=\"后退：收起AI 用量\"]')"));
-    await click('[aria-label="后退：收起AI 用量"]');
+    await click('.sidebar-foot-pages > .page-nav:first-child .page-nav-item'); await checkWidth(224);
+    await click('.sidebar-foot-pages > .page-nav:first-child .page-nav-item');
+    await click('.sidebar-foot-usage'); await checkWidth(334);
+    assert.ok(await evaluate("!!document.querySelector('.sidebar-panel-expanded')"));
+    await click('.sidebar-foot-usage');
     await checkWidth(224);
   });
   await check("额度页内拖动后仍恢复原宽度，原本更宽则保持；Escape 也恢复", async () => {
     await dragTo(250);
-    await click('[aria-label="AI 用量"]'); await checkWidth(334);
+    await click('.sidebar-foot-usage'); await checkWidth(334);
     await dragTo(380); await checkWidth(380);
     assert.equal(await evaluate("localStorage.getItem('workbench-sidebar-width')"), "250");
-    await click('[aria-label="后退：收起AI 用量"]'); await checkWidth(250);
+    await click('.sidebar-foot-usage'); await checkWidth(250);
     await dragTo(360);
-    await click('[aria-label="AI 用量"]'); await checkWidth(360);
+    await click('.sidebar-foot-usage'); await checkWidth(360);
     await key("Escape"); await checkWidth(360);
     await dragTo(224);
   });
@@ -266,7 +305,7 @@ try {
     await dragTo(224);
   });
   await check("页面打开时拖过下限关闭页面，效果等同收起按钮", async () => {
-    await click('[aria-label="AI 用量"]'); await dragTo(174); await checkWidth(52);
+    await click('.sidebar-foot-usage'); await dragTo(174); await checkWidth(52);
     assert.ok(await evaluate("!document.querySelector('.sidebar-panel-expanded')"));
     await click(".sidebar-toggle"); await checkWidth(224);
   });
@@ -292,19 +331,23 @@ try {
     await dragTo(250); await checkWidth(250);
     assert.equal((await rect(".sidebar")).width, 312.5);
     await dragTo(224); await checkWidth(224);
+    await checkControls();
     await evaluate("document.documentElement.style.setProperty('--font-scale','1')");
   });
   await check("设置与直达仍可打开", async () => {
-    await click('[aria-label="设置"]'); assert.ok(await evaluate("!!document.querySelector('[role=dialog][aria-label=\"设置\"]')"));
-    await click('[aria-label="设置"]'); await click('[aria-label="直达"]');
-    assert.ok(await evaluate("!!document.querySelector('[role=dialog][aria-label=\"直达链接\"]')")); await click('[aria-label="直达"]');
+    await click('.settings-gear'); assert.ok(await evaluate("!!document.querySelector('.settings-panel[role=dialog]')"));
+    await click('.settings-gear'); await click('.launcher-button');
+    assert.ok(await evaluate("!!document.querySelector('.launcher-panel[role=dialog]')")); await click('.launcher-button');
   });
   await check("手机 390px 沿用全宽布局，拖动条隐藏且页面不横向溢出", async () => {
     await send("Emulation.setDeviceMetricsOverride", { width:390,height:844,deviceScaleFactor:1,mobile:true });
     await settle();
     assert.equal(await evaluate("getComputedStyle(document.querySelector('.sidebar-resize')).display"), "none");
     assert.equal((await rect(".sidebar")).width, 390);
-    assert.ok(await evaluate("document.documentElement.scrollWidth <= innerWidth")); await screenshot("mobile");
+    await send('Emulation.setTouchEmulationEnabled', { enabled:true });
+    await settle();
+    assert.ok(await evaluate("matchMedia('(pointer: coarse)').matches"), '手机模拟启用触屏规则');
+    await checkControls(); await screenshot('mobile');
   });
   assert.deepEqual(errors, [], "没有未捕获的页面错误");
   console.log(`✅ sidebar resize: ${passed} browser checks; screenshots: ${output}`);

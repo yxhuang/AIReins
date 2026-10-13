@@ -14,11 +14,11 @@ labels: bug
 
 **Environment**
 
-- Workbench version or commit:
+- AIReins version or commit:
 - Platform (Windows + WSL2 / Linux / macOS):
 - Browser and device (desktop / phone):
 - Agent CLI and version (Claude Code / Codex / Kimi Code):
 
 **Logs**
 
-Relevant lines from `wb logs` (remove anything private).
+Relevant lines from `aireins logs` (remove anything private).

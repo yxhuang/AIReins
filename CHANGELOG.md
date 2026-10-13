@@ -4,6 +4,9 @@
 
 First public release.
 
+- The CLI command is now `aireins` (formerly `wb` / `workbench`); installation removes old symlinks that point to this repository's launcher.
+- The Windows tray installs to `%LOCALAPPDATA%\AIReins` with `aireins.ico` (formerly `%LOCALAPPDATA%\workbench`); reinstalling repoints existing shortcuts and taskbar pins and leaves the old folder in place.
+
 - English and Simplified Chinese interface, with a per-browser language preference.
 
 - Claude Code, Codex and Kimi Code sessions in one browser UI: approvals, questions, slash commands, skills, `@` mentions, model and effort switching, interrupt and steer.

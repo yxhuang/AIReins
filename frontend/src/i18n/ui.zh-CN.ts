@@ -469,7 +469,7 @@ const dictionary: Record<string, string> = {
   "ui.SettingsMenu.restarting": "重启中…",
   "ui.SettingsMenu.restart_not_confirmed": "重启未确认成功",
   "ui.SettingsMenu.waiting_for_to_reconnect_please_wait": "正在等待 {product} 恢复连接，请稍候。",
-  "ui.SettingsMenu.run_wb_restart_in_a_terminal_on": "{p0}。请在电脑终端按当前实例的端口和 WORKBENCH_HOME 执行 wb restart，再刷新页面；手机用户请到电脑操作。",
+  "ui.SettingsMenu.run_wb_restart_in_a_terminal_on": "{p0}。请在电脑终端按当前实例的端口和 WORKBENCH_HOME 执行 aireins restart，再刷新页面；手机用户请到电脑操作。",
   "ui.SettingsMenu.dismiss": "关闭提示",
   "ui.SidePanelResize.resize_panel": "调整{p0}面板宽度",
   "ui.SidePanelResize.drag_to_resize_double_click_to_reset": "拖动调整宽度，双击复位",

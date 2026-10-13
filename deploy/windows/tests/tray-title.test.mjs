@@ -12,6 +12,14 @@ assert.ok(match, 'wb-tray.ps1 must define WbTitle with a @"..." verbatim string'
 const regex = new RegExp(match.groups.regex);
 
 for (const title of [
+  '(2) 个闸门待处理 · AIReins · 本机',
+  'AIReins · 本机',
+  'AIReins · 远程 alice-desktop',
+  '(1) pending approval · AIReins · Local',
+  '(1,000) pending approvals · AIReins · Local',
+  '(1,000) 个闸门待处理 · AIReins · 本机',
+  'AIReins · Remote x1c',
+  'AIReins',
   '(2) 个闸门待处理 · Workbench · 本机',
   'Workbench · 本机',
   'Workbench · 远程 alice-desktop',
@@ -30,6 +38,8 @@ for (const title of [
   'Workbench · ',
   '(2) 个闸门待处理 · Other · 本机',
   'Workbench ·Remote x1c',
+  'AIReins · 工作台',
+  'AIReins - Google Chrome',
 ]) {
   test(`rejects: ${title}`, () => assert.ok(!regex.test(title)));
 }

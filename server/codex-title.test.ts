@@ -258,7 +258,7 @@ try {
   await manager.sendUserMessage(s.id, { text: "原始用户输入" });
   f.userItem(); await tick();
   const before = manager.getSnapshot(s.id)!;
-  assert.equal(manager.list().length, 1, "temporary thread never registers a WB session");
+  assert.equal(manager.list().length, 1, "temporary thread never registers a AIReins session");
   assert.equal(manager.get(s.id)!.nativeSessionId, "main-thread");
   f.complete(); await f.internal.titleTask;
   assert.equal(manager.get(s.id)!.title, "修复登录超时");

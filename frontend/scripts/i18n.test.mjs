@@ -16,7 +16,7 @@ assert.equal(getLocale(), 'en');
 assert.equal(readLanguagePreference(), 'en');
 assert.equal(interpolate('{name} {name} {missing}', { name: '$&' }), '$& $& {missing}');
 assert.equal(interpolate('{count}', { count: 1200 }), '1,200');
-assert.equal(interpolate('{product}'), 'Workbench');
+assert.equal(interpolate('{product}'), 'AIReins');
 // Plural blocks: {name, plural, one {…#…} other {…#…}} with Intl.PluralRules.
 assert.equal(interpolate('{n, plural, one {# file} other {# files}}', { n: 1 }), '1 file');
 assert.equal(interpolate('{n, plural, one {# file} other {# files}}', { n: 0 }), '0 files');
@@ -68,11 +68,11 @@ for (const html of [
 ]) assert.doesNotMatch(html, /\p{Script=Han}/u);
 const { workbenchWindowTitle } = await import('../src/host-connections.ts');
 const title = workbenchWindowTitle('http://127.0.0.1:18000/', 2);
-assert.equal(title, '(2) pending approvals · Workbench · Local');
-assert.equal(workbenchWindowTitle('http://127.0.0.1:18000/', 1), '(1) pending approval · Workbench · Local');
-assert.equal(workbenchWindowTitle('http://127.0.0.1:18000/', 0), 'Workbench · Local');
-assert.equal(workbenchWindowTitle('https://alice-desktop.tail123.ts.net/', 0), 'Workbench · Remote alice-desktop');
-assert.equal(workbenchWindowTitle('https://alice-desktop.tail123.ts.net/', 1), '(1) pending approval · Workbench · Remote alice-desktop');
+assert.equal(title, '(2) pending approvals · AIReins · Local');
+assert.equal(workbenchWindowTitle('http://127.0.0.1:18000/', 1), '(1) pending approval · AIReins · Local');
+assert.equal(workbenchWindowTitle('http://127.0.0.1:18000/', 0), 'AIReins · Local');
+assert.equal(workbenchWindowTitle('https://alice-desktop.tail123.ts.net/', 0), 'AIReins · Remote alice-desktop');
+assert.equal(workbenchWindowTitle('https://alice-desktop.tail123.ts.net/', 1), '(1) pending approval · AIReins · Remote alice-desktop');
 setLanguagePreference('zh-CN');
 assert.equal(workbenchWindowTitle('http://127.0.0.1:18000/', 2), title);
 assert.equal(readLanguagePreference(), 'zh-CN');

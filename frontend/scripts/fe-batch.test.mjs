@@ -2,11 +2,11 @@ import assert from "node:assert/strict";
 import { bodyFontSize, readBodyFontSize } from "../src/body-font.ts";
 import { highlightLanguage, highlightCode } from "../src/code-highlight.ts";
 
-for (const size of [14, 14.5, 15.5, 16, 19.5, 20]) assert.equal(bodyFontSize(String(size)), size);
-for (const value of [null, "", "13.5", "20.5", "15.3", "22", "bad", "__proto__"]) assert.equal(bodyFontSize(value), 16);
-assert.equal(readBodyFontSize(), 16);
+for (const size of [13, 13.5, 14, 14.5, 15, 15.5, 16, 19.5, 20]) assert.equal(bodyFontSize(String(size)), size);
+for (const value of [null, "", "12.5", "20.5", "15.3", "22", "bad", "__proto__"]) assert.equal(bodyFontSize(value), 15);
+assert.equal(readBodyFontSize(), 15);
 Object.defineProperty(globalThis, "localStorage", { configurable: true, get() { throw new Error("blocked"); } });
-assert.equal(readBodyFontSize(), 16);
+assert.equal(readBodyFontSize(), 15);
 delete globalThis.localStorage;
 
 assert.equal(highlightLanguage(undefined, "const x = 1"), null);

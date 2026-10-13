@@ -1,6 +1,6 @@
 {
-  "name": "Workbench 工作台",
-  "short_name": "Workbench",
+  "name": "AIReins",
+  "short_name": "AIReins",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

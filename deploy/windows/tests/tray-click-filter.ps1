@@ -1,6 +1,6 @@
 ﻿<#
 .SYNOPSIS
-    测试 wb 托盘的纯逻辑判据；Windows PowerShell 5.1 / Linux pwsh 均可运行。
+    测试 AIReins 托盘的纯逻辑判据；Windows PowerShell 5.1 / Linux pwsh 均可运行。
 .DESCRIPTION
     按 ai-usage 的 tray-click-filter 测试方式，用 AST 提取源函数，不复制实现。
     不加载 WinForms、不运行托盘、不调用 Win32；双击间隔以测试参数传入。

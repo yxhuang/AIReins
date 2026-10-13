@@ -51,13 +51,13 @@ export abstract class BaseDriver implements Driver {
 
   protected spawnProcess(command: string, args: string[], options: SpawnOptionsWithoutStdio = {}): void {
     const env = { ...(options.env ?? process.env) };
-    // A Workbench worker is its own conversation, not the launcher terminal's delegate.
+    // An AIReins worker is its own conversation, not the launcher terminal's delegate.
     for (const key of ["DELEGATE_RUN_ID", "DELEGATE_TOOL", "CLAUDE_CODE_SESSION_ID", "CODEX_THREAD_ID", "CODEX_SESSION_ID", "KIMI_CODE_SESSION_ID", "KIMI_SESSION_ID"]) delete env[key];
     env.WORKBENCH_PARENT_AGENT = this.kind;
     env.WORKBENCH_PARENT_SESSION_ID = this.sessionId;
     const child = spawn(command, args, {
       cwd: this.cwd,
-      // Keep launcher descendants identifiable after wb or the launcher itself is killed.
+      // Keep launcher descendants identifiable after AIReins or the launcher itself is killed.
       detached: platform === "linux" || platform === "wsl" || platform === "darwin",
       ...options,
       env,
@@ -70,7 +70,7 @@ export abstract class BaseDriver implements Driver {
     createInterface({ input: child.stderr }).on("line", (line) => {
       log("warn", "driver stderr", { sessionId: this.sessionId, driver: this.kind, line });
     });
-    // 进程退出瞬间的写入会异步抛 EPIPE；退出本身由 close 处理，这里只防止崩掉 wb
+    // 进程退出瞬间的写入会异步抛 EPIPE；退出本身由 close 处理，这里只防止崩掉 AIReins
     child.stdin.on("error", (error) => {
       log("warn", "driver stdin error", { sessionId: this.sessionId, driver: this.kind, message: error.message });
     });

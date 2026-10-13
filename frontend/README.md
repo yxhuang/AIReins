@@ -1,4 +1,4 @@
-# Workbench 前端
+# AIReins 前端
 
 Vite + React + TypeScript 调度台，将 Claude Code、Codex、Kimi 会话放在同一列表，跨会话显示审批与提问。本文记录现行开发约定；接手规则与后续待办见根目录 [AGENTS.md](../AGENTS.md)，接口契约见 [server/README.md](../server/README.md)。
 
@@ -19,7 +19,7 @@ node frontend/scripts/smoke-ws.mjs  # 需后端；会创建测试会话、批准
 
 开发代理包含 `/api`、`/pages` 和 `/ws`，目标为 `127.0.0.1:8790`；配置见 [vite.config.ts](vite.config.ts) 与 [package.json](../package.json)。没有 `@vitejs/plugin-react`，automatic JSX 下开发热更新退化为整页刷新。
 
-`frontend/dist/` 不入库。`install.sh` 安装/更新时执行 `npm run build`（含预压缩），构建失败则安装失败；`wb` 启动前缺少 `frontend/dist/index.html` 时也会自动构建，失败则退出。构建使用 `emptyOutDir: false`，保留已打开页面引用的旧 hash 资源，不要清空 dist。
+`frontend/dist/` 不入库。`install.sh` 安装/更新时执行 `npm run build`（含预压缩），构建失败则安装失败；`aireins` 启动前缺少 `frontend/dist/index.html` 时也会自动构建，失败则退出。构建使用 `emptyOutDir: false`，保留已打开页面引用的旧 hash 资源，不要清空 dist。
 针对功能可用根目录 `test:*` 脚本；直接运行前端逻辑测试用 `node --import tsx frontend/scripts/<name>.test.mjs`。`check:theme` 当前只检查文件浏览与侧栏入口样式，不能替代完整主题检查。
 
 ## 架构
@@ -61,9 +61,9 @@ node frontend/scripts/smoke-ws.mjs  # 需后端；会创建测试会话、批准
 
 ## 侧栏内面板
 
-- 左上角 **wb｜当前主机** 整体为主机选择按钮（沿用 Workbench 字体、描边/高光/轻投影，无小箭头）：本机入口显示「本机」，远程用 Tailscale MagicDNS 机器名；窗口标题同步连接身份且保留未决闸门计数。300px 菜单的本机项显示「机器名（本机）」；本机名来自 meta.hostName，并随来源返回上下文携带；旧后端缺字段时回退「本机」，需要后端重启后生效。菜单支持整页切换、新标签和管理主机，设置「主机」组的「主机与连接（Tailscale）」直接打开此菜单。地址只存浏览器，通过经过校验的 fragment 带到目标源并在 `store.init()` 前消费；目标列表合并保留，手机直接远程不产生 localhost 返回入口。文件保存/未保存与未发送输入有保护，切换不操作后台任务。连接与两机安装见 [主机连接说明](../docs/host-connections.md)，逻辑在 `host-connections.ts`，控件在 `HostSwitcher.tsx`。
+- 左上角 **AR 标志（`BrandMark`：单色随文字色，粗笔画、宽字形，R 是一根带缝线的皮缰绳摆成、尾端绕成缰绳圈；高 18px（收起态 16px）放进 35px 按钮，不改变顶栏高度；启动页同一标志放大到 64px；应用图标 `public/icon.svg` 同形）｜当前主机** 整体为主机选择按钮（描边/高光/轻投影，无小箭头）：本机入口显示「本机」，远程用 Tailscale MagicDNS 机器名；窗口标题同步连接身份且保留未决闸门计数。300px 菜单的本机项显示「机器名（本机）」；本机名来自 meta.hostName，并随来源返回上下文携带；旧后端缺字段时回退「本机」，需要后端重启后生效。菜单支持整页切换、新标签和管理主机，设置「主机」组的「主机与连接（Tailscale）」直接打开此菜单。地址只存浏览器，通过经过校验的 fragment 带到目标源并在 `store.init()` 前消费；目标列表合并保留，手机直接远程不产生 localhost 返回入口。文件保存/未保存与未发送输入有保护，切换不操作后台任务。连接与两机安装见 [主机连接说明](../docs/host-connections.md)，逻辑在 `host-connections.ts`，控件在 `HostSwitcher.tsx`。
 
-- 底栏第一行「历史会话 │ AI 用量等扩展页」（可换行），第二行「设置、直达」；直达为200px浮层，锚定直达按钮上方8px、右边缘对齐按钮，向左展开；链接去掉默认及行末箭头，保留配置的图标，打开时刷新 `/api/links`，按用户数据目录 `~/.workbench/pages/links.json`（可由 `WORKBENCH_HOME` 覆盖）的 group 分组，以普通新标签链接打开。输入框有文字时，Claude/Codex 的 R 在末尾追加 `/refine-prompt` / `$refine-prompt` 并保留焦点；手机替换缓存时间槽位，Kimi 暂无确切 skill 语法而隐藏。
+- 底栏第一行「历史会话 │ AI 用量等扩展页」（可换行），第二行「设置、直达」；直达为200px浮层，锚定直达按钮上方8px、右边缘对齐按钮，向左展开；链接去掉默认及行末箭头，保留配置的图标，打开时刷新 `/api/links`，按用户数据目录 `~/.workbench/pages/links.json`（可由 `WORKBENCH_HOME` 覆盖）的 group 分组，以普通新标签链接打开。输入框有文字时，Claude/Codex 的 R 在末尾追加 `/refine-prompt` / `$refine-prompt` 并保留焦点；手机替换缓存时间槽位，Kimi 暂无确切 skill 语法而隐藏。收起态侧栏宽 48px（用户 10-13 由 52 收窄），底栏按钮与顶部刷新、展开同为 32px 圆形浮起钮、图标 20px，从下到上为设置、历史、扩展页面、直达（同展开态从左到右）；桌面收起态的设置与直达浮层改为 fixed，贴侧栏右侧（left 56px）弹出、底边对齐侧栏底部，不被侧栏 overflow 裁切。
 
 - 主列表只放 `status !== "dead"` 且 `lastActivityAt` 距当前不超过 72 小时（含边界）的工作台会话，仍按活动时间倒序；`running` / `starting` 不限时间，未决闸门始终优先进「等待处理」。当前打开的旧非 dead 会话临时保留并显示选中项，切走后恢复时间筛选；消息事件更新活动时间后自然回列表。筛选见 [sidebar-sessions.ts](src/sidebar-sessions.ts)，复用 `store.now` 时钟，不另加轮询。
 - 「等待处理」之下按区块排列：**置顶** → **各用户分组**（可折叠标题，折叠状态按设备存 localStorage，标题行 ⋮ 可重命名分组/删除分组＝成员移回普通分区）→ **进行中**（running/starting 或最近 2 小时有活动，含恰好 2h 边界）→ **今天**（`lastActivityAt` 是本地时间今天）→ **更早**（仍受 72h 窗口约束）；空分区不显示标签，组内按最后活动倒序。置顶/分组会话不受 72h 限制、不在时间分区重复出现，dead 也保留显示（用户主动整理）。状态点：空闲绿点只给最近 2 小时内有活动的会话，「今天/更早」的空闲行只显示右侧时间；running/后台任务/未决闸门/error 在任何分区照常显示。分区与状态点规则是 [sidebar-sessions.ts](src/sidebar-sessions.ts) 的 `selectSidebarSections` / `sidebarStatusDot`，重新分组复用 `store.now` 时钟。
@@ -105,7 +105,7 @@ node frontend/scripts/smoke-ws.mjs  # 需后端；会创建测试会话、批准
 
 - Claude「/」按扩展分成「上下文 / 模型 / 自定义 / 设置 / 支持」；「管理插件」「MCP 服务器」放在自定义，副标题直接说明可启停/重载/重连。MCP 和插件均为 `role="switch"`；MCP 回复中可操作，启动或审批时在控件旁说明原因，操作后读回。Thinking 放在模型组，默认开启、会话保存，点后保持菜单展开；失败就地提示。Fast 通过能力接口读取原生 `supportsFastMode`，只在支持时显示，点击发用户命令 `/fast`。见 [SlashMenu.tsx](src/components/SlashMenu.tsx)。
 - `/tasks` 面板消费实时 `session.backgroundTasks`；停止前确认，控制成功不提前移除任务，等 CLI 元数据更新。侧问面板（Claude `/btw`、Codex `/side` 及别名 `/btw`）不进入 store 主事件流，只在组件内保存历史（最多传 20 轮），支持取消，关闭会取消请求并清空问答；synthetic/null 不加入历史。输入框打 `/` 即可补全这几个命令（`withSideCommands` 补进命令表，同名 CLI 项去重），整行「/btw 问题」发送时被 `parseSideCommand` 拦下、不发主对话，带问题打开面板并立即提问（延后一拍，StrictMode 不重复）；补全面板里对侧问命令按 Enter 直接打开空面板，Tab 只填充。Claude 的「/」菜单 `/btw` 入口打开同一面板（Codex 菜单无此入口）。Codex 请求上限 320 秒（服务端回合 300 秒），Claude 80 秒。见 [ClaudeMenuPanels.tsx](src/components/ClaudeMenuPanels.tsx)、[commands.ts](src/commands.ts)。
-- 配置文件链接只提供 VSCode 路径，不启动编辑器或写文件，部分设置需续接生效。Thinking 的 0/31999 控制覆盖由后端在 worker 初始化时重发，不写 `~/.claude/settings.json`。新增样式字号只用 14/15/16，复用现有冷色 switch。
+- 配置文件链接只提供 VSCode 路径，不启动编辑器或写文件，部分设置需续接生效。Thinking 的 0/31999 控制覆盖由后端在 worker 初始化时重发，不写 `~/.claude/settings.json`。新增界面字号沿用 12/13/14/15 阶梯（触屏输入至少 16px），复用现有冷色 switch；布局须兼容浏览器最小字号 14px。
 - 导出使用原生 `export_conversation` 文本，可复制/下载，不把前端事件窗口当完整存档；Rewind 尚未接入。面板渲染见 [ClaudeMenuPanels.tsx](src/components/ClaudeMenuPanels.tsx)。
 - Codex 提供 status/model/mcp/skills/compact/review/new/interrupt 客户端命令；未知命令明确报错。compact/review/new 限空闲无审批，interrupt 限运行中，错误就地展示；见 [CodexCommandPanel.tsx](src/components/CodexCommandPanel.tsx)、[SessionView.tsx](src/components/SessionView.tsx)。
 - Codex `$` 使用真实 skills/list 名称/描述与路径，过滤、键盘选择、IME 保护，插入 `$name` 并由后端附结构化 skill input；不展示禁用项、不改全局配置，Claude/Kimi 不触发；见 [codex-skills.ts](src/codex-skills.ts)。
@@ -135,12 +135,12 @@ node frontend/scripts/smoke-ws.mjs  # 需后端；会创建测试会话、批准
 - 当前、恢复与在外部继续的会话消息共用本地链接打开：以消息所属 cwd 解析相对路径，支持中文空格、Windows 盘符、`file://`、`vscode://file`、行号/片段；普通 http/https 网页仍新标签打开。链接的会话身份传入后端，授权根为 HOME、Windows盘及已登记会话 cwd，逻辑/真实路径同时校验，目录外软链不可读取。新定向逻辑回归：`node --import tsx frontend/scripts/file-preview.test.mjs`。
 - 本机支持原生选择窗口时，文件面板地址栏最左侧显示黄色文件夹按钮，悬停提示“Windows 浏览窗口”：调用 `/api/fs/pick-file`，以当前浏览目录为起点，显示所有扩展名文件；选中后直接预览，返回目录时浏览所选文件的父目录，不修改会话 cwd。取消保留当前目录，失败在面板内提示并保留网页导航。选择期间禁用导航与文件点击，关闭面板或切换会话后丢弃迟到选择；远程不显示原生入口。新建会话仍使用目录选择窗口。
 - 新建工作目录和目录浏览地址栏支持粘贴 Windows 盘符绝对路径（如 `C:\Users\user\项目`，支持“复制为路径”的双引号），统一转换为 `/mnt/c/Users/user/项目`；Linux 路径保持原样。地址栏按 Enter（手机输入法“前往”键）读取目标，不再单设“前往”按钮，成功后才能选定目录；失败保留输入并提示，不选用上次目录。目录弹窗嵌在新建表单中，地址栏 Enter 只导航，不提交创建会话。
-- 文件浏览地址栏默认显示可点击的目录层级，Linux从 `/` 开始、Windows挂载路径从 `C:` 等盘符开始；每层的title为完整路径，点击任意层直接导航。长路径横向滚动，进入目录默认露出末尾；点击空白处或分隔符切换完整路径输入，自动选中原地址，支持输入/粘贴、Enter前往；Esc放弃编辑并恢复当前目录层级，不关闭面板。层级按钮获得焦点时粘贴也可进入输入模式；成功导航返回层级显示，失败保留输入。输入与最近目录同栏，右侧箭头打开与地址栏动态等宽的主题菜单；菜单路径字号13px、行高1.35，长路径换行。复用浮层的外点/焦点关闭，支持方向键、Home/End、Enter选择与Esc返回下拉按钮；触屏条目至少44px。文件侧栏、文件选择弹窗和工作目录选择弹窗共用这一地址栏，不另显示路径层级行。第二行“WSL”打开主目录。文件侧栏地址栏右侧为“会话”（当前目录及子目录的对话）；地址栏下方是标签页行（沿用终端标签外形、换面板底色，桌面约34px、触屏约40px，低于地址栏），右端“+”新建标签页（会话 cwd）；目录行右键/长按菜单首项“在新标签页内打开”，文件夹在新标签浏览、文件在新标签预览（返回到其所在目录）。预览文件时标签行在顶栏下方。store 以 `fileTabs`/`fileTabId` 记标签，当前标签的目录与预览仍是 `fileDirectory`/`filePreview`，切走时存回标签（各标签的侧键返回记录由面板按标签保存，面板卸载即清空）；保存中不切换/新建，切走时中断的读取在切回时重读；关闭含未保存修改的标签需确认，beforeunload 覆盖所有标签；最后一个标签不可关闭；标签不跨刷新保存。
-- 文件列表由 `DirectoryTable.tsx` 直接显示名称、大小、修改日期的紧凑表格，无目录列表iframe、大路径标题或额外上级目录行；沿用 WB 地址栏与导航。表体只在目录变化时创建文本DOM，排序复用 `directory-path.ts` 并只移动位置改变的行；类型图标用CSS背景绘制，不增加逐行框架状态或图标节点；文件夹使用独立的Windows黄色令牌，地址栏原生选择按钮和目录选择列表同步用黄。表头、名称、大小、日期均为15px，行高1.4、单元格上下2px留白；大小/日期保持单行，日期列155px，宽面板目录项约25px高，窄面板分行约50px，触屏行命中区域不少于44px。点击任一列打开该目录/文件，名称按钮也支持键盘；数据一律通过 `textContent` 写入，不解释文件名HTML。事件在表体集中处理，不需要模板脚本、消息转发或主题观察器。深浅主题、字体、Esc直接继承宿主；文件夹始终在前，未知元数据显示“—”并在同类末尾，零字节显示“0 B”、文件夹大小留空。窄面板把元数据放在名称下方，宽面板并排成列；排序不重新请求接口。旧服务端未带元数据时仍可浏览/打开；目录选择模式保留原列表。原Chromium组件/vendor源保留供历史对比，已不进入生产引用图。PDF/HTML预览自身的iframe用途保持不变。
+- 文件浏览地址栏默认显示可点击的目录层级，Linux从 `/` 开始、Windows挂载路径从 `C:` 等盘符开始；每层的title为完整路径，点击任意层直接导航。长路径横向滚动，进入目录默认露出末尾；点击空白处或分隔符切换完整路径输入，自动选中原地址，支持输入/粘贴、Enter前往；Esc放弃编辑并恢复当前目录层级，不关闭面板。层级按钮获得焦点时粘贴也可进入输入模式；成功导航返回层级显示，失败保留输入。输入与最近目录同栏，右侧箭头打开与地址栏动态等宽的主题菜单；菜单路径字号12px、行高1.35，长路径换行。复用浮层的外点/焦点关闭，支持方向键、Home/End、Enter选择与Esc返回下拉按钮；触屏条目至少44px。文件侧栏、文件选择弹窗和工作目录选择弹窗共用这一地址栏，不另显示路径层级行。第二行“WSL”打开主目录。文件侧栏地址栏右侧为“会话”（当前目录及子目录的对话）；地址栏下方是标签页行（沿用终端标签外形、换面板底色，桌面约34px、触屏约40px，低于地址栏），右端“+”新建标签页（会话 cwd）；目录行右键/长按菜单首项“在新标签页内打开”，文件夹在新标签浏览、文件在新标签预览（返回到其所在目录）。预览文件时标签行在顶栏下方。store 以 `fileTabs`/`fileTabId` 记标签，当前标签的目录与预览仍是 `fileDirectory`/`filePreview`，切走时存回标签（各标签的侧键返回记录由面板按标签保存，面板卸载即清空）；保存中不切换/新建，切走时中断的读取在切回时重读；关闭含未保存修改的标签需确认，beforeunload 覆盖所有标签；最后一个标签不可关闭；标签不跨刷新保存。
+- 文件列表由 `DirectoryTable.tsx` 直接显示名称、大小、修改日期的紧凑表格，无目录列表iframe、大路径标题或额外上级目录行；沿用 AIReins 地址栏与导航。表体只在目录变化时创建文本DOM，排序复用 `directory-path.ts` 并只移动位置改变的行；类型图标用CSS背景绘制，不增加逐行框架状态或图标节点；文件夹使用独立的Windows黄色令牌，地址栏原生选择按钮和目录选择列表同步用黄。表头、名称、大小、日期均为14px，行高1.4、单元格上下2px留白；大小/日期保持单行，日期列155px，宽面板目录项约25px高，窄面板分行约50px，触屏行命中区域不少于44px。点击任一列打开该目录/文件，名称按钮也支持键盘；数据一律通过 `textContent` 写入，不解释文件名HTML。事件在表体集中处理，不需要模板脚本、消息转发或主题观察器。深浅主题、字体、Esc直接继承宿主；文件夹始终在前，未知元数据显示“—”并在同类末尾，零字节显示“0 B”、文件夹大小留空。窄面板把元数据放在名称下方，宽面板并排成列；排序不重新请求接口。旧服务端未带元数据时仍可浏览/打开；目录选择模式保留原列表。原Chromium组件/vendor源保留供历史对比，已不进入生产引用图。PDF/HTML预览自身的iframe用途保持不变。
 - 文件面板「发送到设备」（Taildrop）：目录表格行右键/菜单键/Android 长按走 `contextmenu`，iOS 触屏自己计时 500ms（移动超 10px 取消，长按后吞掉随之而来的点击）；预览顶栏「发送」按钮弹同一菜单。[TaildropMenu.tsx](src/components/TaildropMenu.tsx) 复用 `SidebarActionMenu`，打开时读 `/api/tailscale/file-targets`，当前访问设备排第一标「（本机）」，离线设备禁用。选中后菜单关闭，面板提示「正在发送…」，请求结束显示结果或错误；文件夹由服务端打包为 zip 后发送。
 - 文件面板把刷新、上一级（↑）、WSL、Windows 渲染进标题栏“文件”右侧（`DirectoryContents` 的 `navTarget` 门户；槽位未挂载时不渲染，弹窗仍用第二行内联按钮）。刷新重读当前目录及 Git 状态，不轮询、不监听。
 - `/api/fs/dirs?files=1` 在 Git 工作区内并行跑 `git --no-optional-locks rev-parse --show-prefix` 与 `status -z -- .`（各 1.5s 超时），返回 `git`：直接子项名 → M/A/R/D/U/!，文件夹取其下最高状态。当前目录不在仓库时（如 `~/projects`），含 `.git` 的子文件夹各跑一次 `status`（并发 4、总预算 2s），取整仓最高状态，干净仓库不标。返回 `git` 时表格名称左侧留 14px 槽：文件显示字母、文件夹显示圆点，悬停提示含状态。非仓库且无子仓库、git 不可用或超时不返回该字段、不显示标记；见 [dir-list.ts](../server/dir-list.ts)。
-- 新建表单只有一个“浏览…”，先打开 Workbench 目录弹窗；地址栏与文件子页面同一形态（可点的路径层级、点空白处编辑路径、右侧最近目录下拉），不再另设层级按钮行。本机入口 `meta.capabilities.windowsDirectoryPicker=true` 时地址栏左侧显示文件夹按钮，调用现代 Windows 文件夹窗口（PowerShell 7 WinForms），选定后直接填入工作目录并关闭弹窗；取消保留当前目录，失败在弹窗内报错。远程入口不提供原生窗口。最近目录取（本设备上次创建目录＋当前表单初始目录＋工作台会话，去重最多8个，原生 Windows 历史最多补1个）；手机可横滑路径层级或用“最近目录”选择电脑目录，点选后仍需确认“选定此目录”。
+- 新建表单只有一个“浏览…”，先打开 AIReins 目录弹窗；地址栏与文件子页面同一形态（可点的路径层级、点空白处编辑路径、右侧最近目录下拉），不再另设层级按钮行。本机入口 `meta.capabilities.windowsDirectoryPicker=true` 时地址栏左侧显示文件夹按钮，调用现代 Windows 文件夹窗口（PowerShell 7 WinForms），选定后直接填入工作目录并关闭弹窗；取消保留当前目录，失败在弹窗内报错。远程入口不提供原生窗口。最近目录取（本设备上次创建目录＋当前表单初始目录＋工作台会话，去重最多8个，原生 Windows 历史最多补1个）；手机可横滑路径层级或用“最近目录”选择电脑目录，点选后仍需确认“选定此目录”。
 - 目录浏览打开时后台预取三家原生历史 `q=/mnt/&limit=1`，Windows 按钮比较历史与工作台最近活动的 `/mnt/` 目录，无记录用 `/mnt/c/Users`。按钮不等待历史；慢请求/失败期间用本地结果，返回后仅供后续点击，不自动改变当前目录。关键词也匹配标题，仅遇到非 `/mnt/` 目录时继续最小页，1.5 秒后不再追加请求；接口自身超时仍由 `api.ts` 管理。历史列表会遍历目录和 stat，并按需读取文件头/检查用户消息，不预取完整历史消息。
 
 - 文件面板地址栏左侧的蓝色文件夹图标打开 Windows 浏览窗口，按钮比右侧最近目录下拉宽 4px，提供悬停提示；本机能力未确认或远程入口不显示。取消保持当前目录，选文件沿用原预览接口。WSL（弹窗第二行，文件面板在标题栏）打开 Linux 主目录，Windows 仍跳到最近使用的 Windows 目录。
@@ -150,13 +150,14 @@ node frontend/scripts/smoke-ws.mjs  # 需后端；会创建测试会话、批准
 - RC 胶囊仅 Claude，状态与 URL 由 session / `remote_control_updated` 驱动，失败原因可见于 title；快照/重连恢复，链接只打开 claude.ai。默认开启选项读写 Claude 启动设置；见 [SessionView.tsx](src/components/SessionView.tsx)、[SettingsMenu.tsx](src/components/SettingsMenu.tsx)。
 - 远程 user 只在 connecting/connected/reconnecting 识别，排除子代理/合成消息，本机回显 FIFO 最多 20 条且不随 result 清空；worker 替换按设置/此前状态恢复 RC，见 [server/drivers/claude.ts](../server/drivers/claude.ts)。
 - 「更多」保留「复制会话 ID」与「VSCode 继续」；复制项仅在有原生 id 时可用。「VSCode 继续」仅 idle 且有原生 id 可释放；成功复制 resumeCommand，失败退回 prompt，桌面尝试协议导航，手机只复制。释放不标 dead，输入框可再发，由后端磁盘续接；见 [SessionView.tsx](src/components/SessionView.tsx)、[server/README.md](../server/README.md)。
-- 空闲释放档位 0/15/30/60/120 分钟，经 `/api/prefs` 保存，写失败回滚；running、待审批、RC 已连接等跳过，释放事件更新列表。设置重启先重读忙会话数，有忙会话时弹与清理存储同款的确认弹层（默认聚焦取消，「仍要重启」才继续），重启中/失败提示也用同款弹层，POST 202 后须观察 WS 断开再恢复，60 秒超时提示失败；见 [restart.ts](src/restart.ts)。「关机」先弹与清理存储同款的确认弹层（默认聚焦取消），确认后交给后端 `/api/power-off`：无忙会话直接关机，否则后端等全部完成再关；等待/已排定时按钮显示状态并可点击取消，此时菜单打开期间每 3 秒刷新状态。设置面板桌面两栏，各为一个 `.settings-col`：左「会话（底部存储占用与清理）│ 重启 Workbench」，右「外观 │ 主机（主机与连接、关机）」；手机按同序单栏。「主机与连接（Tailscale）」关闭设置并派发 `OPEN_HOST_MENU_EVENT`，直接打开左上角 wb 主机菜单。
+- 空闲释放档位 0/15/30/60/120 分钟，经 `/api/prefs` 保存，写失败回滚；running、待审批、RC 已连接等跳过，释放事件更新列表。设置重启先重读忙会话数，有忙会话时弹与清理存储同款的确认弹层（默认聚焦取消，「仍要重启」才继续），重启中/失败提示也用同款弹层，POST 202 后须观察 WS 断开再恢复，60 秒超时提示失败；见 [restart.ts](src/restart.ts)。「关机」先弹与清理存储同款的确认弹层（默认聚焦取消），确认后交给后端 `/api/power-off`：无忙会话直接关机，否则后端等全部完成再关；等待/已排定时按钮显示状态并可点击取消，此时菜单打开期间每 3 秒刷新状态。设置面板桌面两栏，各为一个 `.settings-col`：左「会话（底部存储占用与清理）│ 重启 AIReins」，右「外观 │ 主机（主机与连接、关机）」；手机按同序单栏。「主机与连接（Tailscale）」关闭设置并派发 `OPEN_HOST_MENU_EVENT`，直接打开左上角品牌按钮的主机菜单。
 
 ## 外观与通用边界
 
 - 配色裁决以 [styles.css 顶部注释](src/styles.css) 为准：`--gate` 系专属闸门/提问/待处理，消息与终端内容有明确例外；终端 chrome 中性/冷色，会话状态点红绿灯。浅色外框 chrome、画布 bg、浮起 surface 分层，别把旧“暖色只用于审批”当完整规则。
 - 主题三态、整体字号四档 0.9/1/1.15/1.25 保存本机，首屏内联恢复；localStorage 不可用回退默认。sidebar/main 使用 zoom，AI 用量 iframe 抵消 zoom，终端独立 fit；手机侧栏按百分比包含块铺满，≤360px 顶栏收紧间距，窄空间底栏允许换行；设置/直达浮层尺寸受缩放后的视口约束；见 [font-scale.ts](src/font-scale.ts)、[index.html](index.html)。
-- 正文字号 14–20px、步长 0.5、默认 16，旧 22/无效值回退；作用于 stream 用户/助手/思考正文，代码块和工具细节用 `max(14px, 正文−2px)`，与整体 zoom 叠加；见 [body-font.ts](src/body-font.ts)、[styles.css](src/styles.css)。
+- 正文字号 13–20px、步长 0.5、默认 15，旧 22/无效值回退；作用于 stream 用户/助手/思考正文，代码块和工具细节用 `max(12px, 正文−2px)`（默认 13px），与整体 zoom 叠加；见 [body-font.ts](src/body-font.ts)、[styles.css](src/styles.css)。
+- 界面字号：会话/历史标题、设置条目、通用按钮与表单标签用 14px（侧栏会话列表例外，用户 10-12 定：会话标题 14.5px、行尾时间 13.5px、分组标题 14px；手机 ≤720px 各大一档，用户 10-13 定：15.5px / 14px / 15px）；菜单、分组标题、胶囊、说明和系统行用 13px；时间、计数及元信息用 12px。其他界面主标题用 15px，大标题下调一档；品牌、终端字号与 AI 用量 iframe 保留独立规则。桌面输入默认 15px，触屏输入至少 16px 防 iOS 聚焦放大。浏览器把小于 14px 的文字放大到 14px 时，关键文案须完整显示；使用可增长的高度、换行或滚动，不用窄固定尺寸截断。侧栏底栏「历史」「额度」胶囊文字 13px、图标 18px、高 32px，内边距图标侧 9px、文字侧 12px、图文间距 5px（桌面与手机一致），质感同左上角主机按钮（内描边/高光/轻投影，描边用 inset 阴影不占宽度），打开后的「‹ 后退」为凹陷按下态；设置齿轮与直达不随字号缩小，保持 36px、图标 22px，用负外边距吃进底栏内边距，底栏高度仍按 32px 计；手机胶囊文字 14px、历史/额度图标 20px、齿轮与直达图标 24px，高度不变；放不下一行时先收起历史/额度图标、只留文字（内边距 10px），「后退」收紧为 8px/间距 3px（桌面按底栏容器宽度，英文 ≤281px、各语言 ≤233px，英文 ≤235px 再收到 6px 且「后退」去掉箭头；手机英文 ≤409px；按 `<html data-locale>` 区分），仍放不下才换行（目前仅英文 + 最小字号 14 + 224px 最窄侧栏），触屏命中区至少 44px。
 - 主题切换复用 [Segmented.tsx](src/components/Segmented.tsx)，保持单选/方向键和禁用语义，滑块按实际布局度量；减少动态偏好关闭动画。设置浮层限高滚动、focus trap、Esc/外点关闭并还焦点。
 - 会话移除行内二次确认，Esc 取消，成功清本地状态/草稿并作废旧请求；只移除工作台条目和停 worker，原生 transcript 保留。手机左滑 80px 露入口，10px 锁方向，纵向保留滚动，同刻只展开一行；见 [Sidebar.tsx](src/components/Sidebar.tsx)、[store.ts](src/store.ts)。
 - 设置存储面板打开时读一次，清理需弹窗确认，可选移除结束会话；清理只涉及工作台副本，原生记录保留，返回最新统计再刷新会话列表；见 [WorkbenchStorage.tsx](src/components/WorkbenchStorage.tsx)。
@@ -174,11 +175,11 @@ node frontend/scripts/smoke-ws.mjs  # 需后端；会创建测试会话、批准
 
 - 左下扩展页面入口（包括 AI 用量）打开后变为“‹ 后退”，再次点击收起页面并回到会话列表；图标态也保留返回箭头和可访问标签，与历史会话一致。
 
-- 会话菜单的「删除」已改为「移除」；其下方「彻底删除」打开模态确认框，列出完整标题、工具与原生ID，说明无法恢复。默认聚焦取消，支持Esc/遮罩取消和Tab循环；进行中不可取消/重复提交。Codex/Kimi可确认；Claude菜单不显示彻底删除，缺失原生ID显示原因并禁用确认；执行中/后台任务需先停止。成功清除会话状态、草稿、选中的原生历史并触发历史重载；失败保留弹层及WB条目。新增前端调用专用接口，旧后端返回404，不误执行移除。见 [PermanentDeleteConfirm.tsx](src/components/PermanentDeleteConfirm.tsx) 与 `.work-orders/2026-10-05-permanent-session-delete/REPORT.md`。
+- 会话菜单的「删除」已改为「移除」；其下方「彻底删除」打开模态确认框，列出完整标题、工具与原生ID，说明无法恢复。默认聚焦取消，支持Esc/遮罩取消和Tab循环；进行中不可取消/重复提交。Codex/Kimi可确认；Claude菜单不显示彻底删除，缺失原生ID显示原因并禁用确认；执行中/后台任务需先停止。成功清除会话状态、草稿、选中的原生历史并触发历史重载；失败保留弹层及AIReins条目。新增前端调用专用接口，旧后端返回404，不误执行移除。见 [PermanentDeleteConfirm.tsx](src/components/PermanentDeleteConfirm.tsx) 与 `.work-orders/2026-10-05-permanent-session-delete/REPORT.md`。
 
 ## 平台入口（2026-10-12）
 
-界面使用 `/api/meta` 的 `platform` 和 `capabilities`，不以浏览器操作系统猜测后端平台。能力缺失或 false 时隐藏入口：`appWindow` 控制 WB 独立 App 窗口，`windowsDirectoryPicker` 控制文件/目录/历史的原生选择按钮，`powerOff` 控制关机，`powershell` 控制终端 shell 选择，`taildrop`/`folderTaildrop` 分别控制普通文件/目录的发送菜单。目录行的「在新标签页内打开」始终可用，不因 Taildrop 缺失而隐藏。
+界面使用 `/api/meta` 的 `platform` 和 `capabilities`，不以浏览器操作系统猜测后端平台。能力缺失或 false 时隐藏入口：`appWindow` 控制 AIReins 独立 App 窗口，`windowsDirectoryPicker` 控制文件/目录/历史的原生选择按钮，`powerOff` 控制关机，`powershell` 控制终端 shell 选择，`taildrop`/`folderTaildrop` 分别控制普通文件/目录的发送菜单。目录行的「在新标签页内打开」始终可用，不因 Taildrop 缺失而隐藏。
 
 `windowsPaths` 为 true 时保留 WSL 主目录、最近 Windows 目录和盘符转换；否则按钮显示「主目录」，不预取 `/mnt` 历史，不提供 Windows 导航/提示，输入与文件链接不转换盘符，`/mnt/c` 按普通 POSIX 目录显示。新建会话、历史目录筛选、文件面板和消息文件链接沿用同一能力判断。前端不展示托盘或网关安装入口；后端字段用于平台契约。
 

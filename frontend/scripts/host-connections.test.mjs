@@ -51,8 +51,8 @@ assert.equal(normalizeLocalOrigin('http://localhost:5173'), 'http://localhost:51
 for (const bad of ['https://localhost:8790', 'http://100.64.1.2:8790', 'http://127.0.0.1.evil.test:8790', `${local}/secret`, 'http://user@localhost:8790']) assert.equal(normalizeLocalOrigin(bad), null, bad);
 assert.equal(connectionLabel(`${local}/#/session/a`), '本机');
 assert.equal(connectionLabel(`${home}/#/session/a`), 'alice-desktop');
-assert.equal(workbenchWindowTitle(`${local}/`, 0), 'Workbench · 本机');
-assert.equal(workbenchWindowTitle(`${home}/`, 2), '(2) 个闸门待处理 · Workbench · 远程 alice-desktop');
+assert.equal(workbenchWindowTitle(`${local}/`, 0), 'AIReins · 本机');
+assert.equal(workbenchWindowTitle(`${home}/`, 2), '(2) 个闸门待处理 · AIReins · 远程 alice-desktop');
 
 const initial = connectionsForPage(`${local}/`, { localOrigin: null, remotes: [home, home, 'https://evil.test'] });
 assert.deepEqual(initial, { localOrigin: local, remotes: [home] });

@@ -16,6 +16,30 @@ function useConnections() {
 }
 
 // App 的左键 popup 继承 app 名；普通浏览器及修饰键沿用链接默认行为。
+const BRAND_R = "M88 82 V14 H104 C128 14 128 52 104 52 H90";
+const BRAND_R_LEG = "M100 52 C106 62 110 70 117 76 C122 81 130 82 134 76";
+
+/** 品牌标志 AR：R 是一根带缝线的皮缰绳摆成，尾端绕成缰绳圈；单色随文字色，尺寸随外层字号。 */
+export function BrandMark() {
+  const maskId = `brand-stitch-${useId().replace(/[^\w-]/g, "")}`;
+  return <svg className="brand-glyph" viewBox="-1 5 146 86" width="1.7em" height="1em" aria-hidden="true">
+    <defs>
+      <mask id={maskId} maskUnits="userSpaceOnUse" x="-10" y="-10" width="170" height="120">
+        <rect x="-10" y="-10" width="170" height="120" fill="white" />
+        <g fill="none" stroke="black" strokeWidth="2.6" strokeDasharray="5 4" strokeLinecap="round" strokeLinejoin="round">
+          <path d={BRAND_R} /><path d={BRAND_R_LEG} />
+        </g>
+      </mask>
+    </defs>
+    <g fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" mask={`url(#${maskId})`}>
+      <path d="M6 80 L36 14 L66 80 M19 58 H53" strokeWidth="13" />
+      <path d={BRAND_R} strokeWidth="15" />
+      <path d={BRAND_R_LEG} strokeWidth="15" />
+      <path d="M134 76 C138 69 129 64 125 71 C122 77 129 84 137 85" strokeWidth="8" />
+    </g>
+  </svg>;
+}
+
 export function openNewWindow(event: MouseEvent<HTMLAnchorElement>, standalone: boolean) {
   if (!standalone || event.defaultPrevented || event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
   event.preventDefault();
@@ -75,7 +99,7 @@ export function HostConnectionSettings() {
   </div>;
 }
 
-/** 设置里的「主机与连接」派发此事件，直接打开顶部 wb 主机菜单。 */
+/** 设置里的「主机与连接」派发此事件，直接打开顶部主机菜单。 */
 export const OPEN_HOST_MENU_EVENT = "workbench-open-host-menu";
 
 export function HostSwitcher() {
@@ -205,7 +229,7 @@ export function HostSwitcher() {
       aria-label={t("ui.HostSwitcher.select_host_current", { p0: (label) })} title={t("ui.HostSwitcher.current_click_to_switch_hosts", { p0: (normalizeLocalOrigin(currentOrigin) ? t("ui.HostSwitcher.local_detail") : t("ui.HostSwitcher.remote_detail", { p0: (label) })) })}
       aria-haspopup="menu" aria-expanded={open} aria-controls={open ? panelId : undefined}
       onClick={() => open ? close(false) : openMenu()}>
-      <span className="brand-mark" aria-hidden="true">wb</span>
+      <span className="brand-mark" aria-hidden="true"><BrandMark /></span>
       <span className="brand-line" aria-hidden="true" />
       <span className="brand-name" aria-hidden="true">{label}</span>
       <span className="brand-short" aria-hidden="true">{hostShortName(isLocal ? localName ?? "" : label)}</span>

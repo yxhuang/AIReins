@@ -27,7 +27,7 @@ export function busySessionCount(sessions: Pick<SessionRecord, "status" | "backg
 /**
  * 关机：空闲即执行，否则轮询到全部会话空闲再执行；run([]) 排定关机（delayMs 后生效），run(["abort"]) 取消。
  * 过了生效时刻 graceMs 还活着，说明关机没发生（如在 Windows 侧被取消），回到 idle 并带错误。
- * ponytail: 等待状态只在内存，WB 重启即丢失；需要跨重启再落盘。
+ * ponytail: 等待状态只在内存，AIReins 重启即丢失；需要跨重启再落盘。
  */
 export function createPowerOff({ busy, run, pollMs = 5000, delayMs = 60_000, graceMs = 60_000, now = Date.now }: {
   busy: () => number;

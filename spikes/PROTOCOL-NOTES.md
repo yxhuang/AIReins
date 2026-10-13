@@ -2,9 +2,9 @@
 
 ## 运行中插话探针（2026-10-01，steering）
 
-版本：Claude Code 2.1.285、Codex 0.159.3、Kimi 2.1.1。cwd 为 `/tmp/wb-steer-gxjL0R/{claude,codex,kimi}`，不触碰运行中的 wb；原始抓包未随仓库公开。NDJSON 的 `captureLine` 指向原始捕获行；思考内容、签名和凭证字段省略，Kimi 未完成的工具参数流省略。
+版本：Claude Code 2.1.285、Codex 0.159.3、Kimi 2.1.1。cwd 为 `/tmp/wb-steer-gxjL0R/{claude,codex,kimi}`，不触碰运行中的 AIReins；原始抓包未随仓库公开。NDJSON 的 `captureLine` 指向原始捕获行；思考内容、签名和凭证字段省略，Kimi 未完成的工具参数流省略。
 
-| 家族 | 实测与证据（归档文件行号） | Workbench 行为 |
+| 家族 | 实测与证据（归档文件行号） | AIReins 行为 |
 | --- | --- | --- |
 | Claude / Haiku 4.5 | `claude.ndjson:18-33`：首个 Bash 的 `sleep 3` 期间发送 user，省略 priority；工具正常输出 ONE（27），最终 OK（32-33），只有一个 result。 | 默认 priority 路径已能在当前回合注入；保留现有 driver，不加 interrupt、不改 priority。 |
 | Codex / gpt-6-luna，low | `codex.ndjson:24-77`：同一 turn 的首个 commandExecution 期间发 `turn/steer`（63）；返回原 turnId（64），工具 exitCode=0（66），同一 turn completed/OK（77），没有第二个 turn/started。 | 运行中用 `turn/steer{threadId,expectedTurnId,input}`，保留中断目标；空闲仍用 turn/start。 |
@@ -20,9 +20,9 @@ Codex schema 由本机 `codex app-server generate-json-schema` 导出：TurnStee
 
 ## Claude Remote Control（2026-09-29）
 
-已实测环境：Claude Code 2.1.281、无头 `--print --input-format stream-json --output-format stream-json --replay-user-messages`，`CLAUDE_CODE_ENTRYPOINT=claude-vscode`。此模式不会自行执行 `remoteControlAtStartup`，宿主需向 stdin 发 `{"type":"control_request","request_id":"<id>","request":{"subtype":"remote_control","enabled":true}}`；可选 `name`。成功的 `control_response.response.response` 含 `session_url`、`connect_url`、`environment_id`、`bridge_epoch`、`bridge_session_id`。stdout 先有 `system/bridge_state:ready`，开启后有 `connected`；关闭发同一请求且 `enabled:false`，实测 success。其他 bridge state 值尚无协议实测，Workbench 作为中间态或错误态容错。
+已实测环境：Claude Code 2.1.281、无头 `--print --input-format stream-json --output-format stream-json --replay-user-messages`，`CLAUDE_CODE_ENTRYPOINT=claude-vscode`。此模式不会自行执行 `remoteControlAtStartup`，宿主需向 stdin 发 `{"type":"control_request","request_id":"<id>","request":{"subtype":"remote_control","enabled":true}}`；可选 `name`。成功的 `control_response.response.response` 含 `session_url`、`connect_url`、`environment_id`、`bridge_epoch`、`bridge_session_id`。stdout 先有 `system/bridge_state:ready`，开启后有 `connected`；关闭发同一请求且 `enabled:false`，实测 success。其他 bridge state 值尚无协议实测，AIReins 作为中间态或错误态容错。
 
-2026-09-29 在隔离的 18790 实例上再次真机验证：空白 Claude 会话自动开启并得到 `https://claude.ai/code/session_...`；页面胶囊点关、点开均成功，关闭后 snapshot 为 `disconnected`，全程没有发送对话消息。CLI 返的 `session_url` 每次开启可能变化。收到 `remote_control_work_secret` 只属于旧 RC 会话重新挂接，本工单未实现；Workbench 会按未知控制请求回复 error，避免 CLI 悬挂。来自手机的普通 user 消息如何出现在 stdout 尚未真机验证，按 `--replay-user-messages` 与 driver 代码推演接入。
+2026-09-29 在隔离的 18790 实例上再次真机验证：空白 Claude 会话自动开启并得到 `https://claude.ai/code/session_...`；页面胶囊点关、点开均成功，关闭后 snapshot 为 `disconnected`，全程没有发送对话消息。CLI 返的 `session_url` 每次开启可能变化。收到 `remote_control_work_secret` 只属于旧 RC 会话重新挂接，本工单未实现；AIReins 会按未知控制请求回复 error，避免 CLI 悬挂。来自手机的普通 user 消息如何出现在 stdout 尚未真机验证，按 `--replay-user-messages` 与 driver 代码推演接入。
 
 ## P1-1：结构化提问协议复核（2026-09-26）
 
@@ -30,9 +30,9 @@ Codex schema 由本机 `codex app-server generate-json-schema` 导出：TurnStee
 
 ### Codex 0.157.1
 
-`ServerRequest.json` 仍含 `item/tool/requestUserInput`。`ToolRequestUserInputParams.json` 要求 `threadId`、`turnId`、`itemId`、`isBlocking`、`questions`；每题要求 `id`、`header`、`question`，可有 `options: [{label,description}] | null`、`isOther`（默认 false）、`isSecret`（默认 false）。`autoResolutionMs` 已标废弃。`ToolRequestUserInputResponse.json` 要求 `{answers:{[questionId]:{answers:string[]}}}`。无原生 `multiSelect`，无 accept/decline/cancel 枚举；空 `answers` 对象是 Workbench 的跳过约定，需真机确认 agent 对跳过的呈现。
+`ServerRequest.json` 仍含 `item/tool/requestUserInput`。`ToolRequestUserInputParams.json` 要求 `threadId`、`turnId`、`itemId`、`isBlocking`、`questions`；每题要求 `id`、`header`、`question`，可有 `options: [{label,description}] | null`、`isOther`（默认 false）、`isSecret`（默认 false）。`autoResolutionMs` 已标废弃。`ToolRequestUserInputResponse.json` 要求 `{answers:{[questionId]:{answers:string[]}}}`。无原生 `multiSelect`，无 accept/decline/cancel 枚举；空 `answers` 对象是 AIReins 的跳过约定，需真机确认 agent 对跳过的呈现。
 
-与 0.148.0 旧记录相比：请求/应答方法和按 id 回写仍成立；新增或明确了 blocking、secret、other、废弃的自动解决字段，Workbench driver 已接入。因现有前端只能渲染有选项的题，`options:null` 和 `isSecret:true` 会安全跳过。
+与 0.148.0 旧记录相比：请求/应答方法和按 id 回写仍成立；新增或明确了 blocking、secret、other、废弃的自动解决字段，AIReins driver 已接入。因现有前端只能渲染有选项的题，`options:null` 和 `isSecret:true` 会安全跳过。
 
 ### Kimi Code CLI 2.1.1
 
@@ -40,7 +40,7 @@ ACP initialize 的客户端能力字段为 `clientCapabilities: { elicitation: {
 
 回应为 `{action:"accept",content:{q0:"选项",q1:["选项A","选项B"]}}`，明确拒绝为 `{action:"decline"}`，关闭/取消为 `{action:"cancel"}`。Kimi 桥接对非 accept、无 content、无匹配选项均按「用户未回答」处理；对多选按原选项顺序拼成逗号加空格的工具答案。桥接源码明确说「其他」自由文本没有等价 form 字段；提交不在枚举里的内容会被过滤，所以 driver 必须拒绝并提示。
 
-与 0.38.0 旧记录相比：老版结论中 form 客户端可拿到多题/多选依然成立；本次确认了 2.1.1 的精确 capability 字段、schema 映射和三种 action，Workbench 已声明 form 能力并接入。普通审批与最终执行闸门不变。
+与 0.38.0 旧记录相比：老版结论中 form 客户端可拿到多题/多选依然成立；本次确认了 2.1.1 的精确 capability 字段、schema 映射和三种 action，AIReins 已声明 form 能力并接入。普通审批与最终执行闸门不变。
 
 实测日期：2026-08-21；工作目录：`/home/user/projects/workbench`。
 
@@ -159,7 +159,7 @@ client → CLI：`user`、`control_response`。
 
 两组均落盘为 `entrypoint:"sdk-cli"`、`userType:"external"`。因此结论是：**`--print` 模式硬编码为 sdk-cli 身份，与 `CLAUDE_CODE_ENTRYPOINT` 环境变量无关**；连裸 `--print` 都如此，不是 `stream-json` 参数造成。脚本仍按硬要求显式删除该变量，但 M1 不能依赖它改变会话身份。
 
-**2026-09-27 补充（修正上述结论）**：Claude Code 2.1.281 的 `isHiddenFromSessionPicker` 会把首条 `entrypoint` 为 `sdk-cli / sdk-ts / sdk-py` 的会话从 `claude --resume` 与 VSCode 扩展历史列表隐藏。实测在 `-p` 下设置 `CLAUDE_CODE_ENTRYPOINT=claude-vscode` 后落盘身份原样保留，会话出现在 `claude --resume`；不设置时仍为 `sdk-cli`、不出现；设置 `cli` 则被 CLI 改回 `sdk-cli`。官方 VSCode 扩展也以 `claude-vscode` 身份和 stream-json 控制协议驱动 CLI。`claude -p --resume <id>` 沿用同一 ID 并追加同一 jsonl。旧结论对当时测试的未设置变量和 `cli` 两组成立，但“与环境变量无关”的推断不成立；Workbench worker 现在明确设置 `claude-vscode`。
+**2026-09-27 补充（修正上述结论）**：Claude Code 2.1.281 的 `isHiddenFromSessionPicker` 会把首条 `entrypoint` 为 `sdk-cli / sdk-ts / sdk-py` 的会话从 `claude --resume` 与 VSCode 扩展历史列表隐藏。实测在 `-p` 下设置 `CLAUDE_CODE_ENTRYPOINT=claude-vscode` 后落盘身份原样保留，会话出现在 `claude --resume`；不设置时仍为 `sdk-cli`、不出现；设置 `cli` 则被 CLI 改回 `sdk-cli`。官方 VSCode 扩展也以 `claude-vscode` 身份和 stream-json 控制协议驱动 CLI。`claude -p --resume <id>` 沿用同一 ID 并追加同一 jsonl。旧结论对当时测试的未设置变量和 `cli` 两组成立，但“与环境变量无关”的推断不成立；AIReins worker 现在明确设置 `claude-vscode`。
 
 ### usage/token 样本
 
@@ -192,13 +192,13 @@ client → CLI：`user`、`control_response`。
 
 事实源为官方 tag `rust-v0.160.0`，下载于 `/tmp/wb-codex-title-source-0160`；本机 `codex-cli 0.160.0` 的 `codex app-server generate-json-schema --experimental --out /tmp/wb-codex-title-schema-0160` 成功。生成的 ClientRequest 方法全集没有 title generate/summarize 请求，配置 schema 没有标题生成开关；旧 `getConversationSummary` 仅读已有存储数据（[thread_processor.rs:5414-5453](https://github.com/openai/codex/blob/rust-v0.160.0/codex-rs/app-server/src/request_processors/thread_processor.rs#L5414-L5453)），不发模型请求。
 
-- TUI 在无名的活动线程收到 `item/completed` 的 `userMessage`、非空文本时触发；按线程和目的去重，手动改名取消。[thread_routing.rs:2199-2230](https://github.com/openai/codex/blob/rust-v0.160.0/codex-rs/tui/src/app/thread_routing.rs#L2199-L2230)、[thread_title.rs:60-129](https://github.com/openai/codex/blob/rust-v0.160.0/codex-rs/tui/src/app/thread_title.rs#L60-L129)。WB 限定为新建线程的首条用户消息，一次失败后也不重试；续接不生成。
+- TUI 在无名的活动线程收到 `item/completed` 的 `userMessage`、非空文本时触发；按线程和目的去重，手动改名取消。[thread_routing.rs:2199-2230](https://github.com/openai/codex/blob/rust-v0.160.0/codex-rs/tui/src/app/thread_routing.rs#L2199-L2230)、[thread_title.rs:60-129](https://github.com/openai/codex/blob/rust-v0.160.0/codex-rs/tui/src/app/thread_title.rs#L60-L129)。AIReins 限定为新建线程的首条用户消息，一次失败后也不重试；续接不生成。
 - 原 prompt 要求用户语言、祈使动词、尽量少于5词、最多36字符、保留工单编号、不答任务；输入和指令合计≤960 UTF-8 bytes，不切断 Unicode；输出 schema 为唯一 `title:string`，拒绝其他键。解析会压缩空白、去包裹引号和尾部 ASCII `.?!`，按 Unicode 字符截断36字。[thread_title.rs:29-31,263-304,412-436](https://github.com/openai/codex/blob/rust-v0.160.0/codex-rs/tui/src/app/thread_title.rs#L263-L304)。
-- OpenAI provider + ChatGPT account + catalog 含 `gpt-5.6-luna` 时用该模型及 `low`；否则当前模型，effort 不额外覆盖。[thread_title.rs:88-113](https://github.com/openai/codex/blob/rust-v0.160.0/codex-rs/tui/src/app/thread_title.rs#L88-L113)。TUI catalog 请求 `model/list` 时为 `includeHidden:true`、不设 limit，取完整目录；WB 同样读取完整目录用于标题选择，主会话配置菜单仍过滤 hidden。[app_server_session.rs:599-609](https://github.com/openai/codex/blob/rust-v0.160.0/codex-rs/tui/src/app_server_session.rs#L599-L609)。
-- 临时请求复用 `config/read` → `thread/start` → `turn/start(outputSchema)` → `thread/unsubscribe`。`ephemeral:true`、`approvalPolicy:"never"`，清空 runtime roots、environments、dynamicTools、capability roots；关闭工具相关 features、hooks/plugins/skills、web search，并按有效配置禁用全部 MCP。TUI 对内建权限用 `:read_only`/read-only，对自定义 profile 保留原 profile 并核验；WB 遵从本工单，始终要求返回 readOnly/never，不能满足则静默放弃。[temporary_structured_request.rs:47-208](https://github.com/openai/codex/blob/rust-v0.160.0/codex-rs/tui/src/temporary_structured_request.rs#L47-L208)。
+- OpenAI provider + ChatGPT account + catalog 含 `gpt-5.6-luna` 时用该模型及 `low`；否则当前模型，effort 不额外覆盖。[thread_title.rs:88-113](https://github.com/openai/codex/blob/rust-v0.160.0/codex-rs/tui/src/app/thread_title.rs#L88-L113)。TUI catalog 请求 `model/list` 时为 `includeHidden:true`、不设 limit，取完整目录；AIReins 同样读取完整目录用于标题选择，主会话配置菜单仍过滤 hidden。[app_server_session.rs:599-609](https://github.com/openai/codex/blob/rust-v0.160.0/codex-rs/tui/src/app_server_session.rs#L599-L609)。
+- 临时请求复用 `config/read` → `thread/start` → `turn/start(outputSchema)` → `thread/unsubscribe`。`ephemeral:true`、`approvalPolicy:"never"`，清空 runtime roots、environments、dynamicTools、capability roots；关闭工具相关 features、hooks/plugins/skills、web search，并按有效配置禁用全部 MCP。TUI 对内建权限用 `:read_only`/read-only，对自定义 profile 保留原 profile 并核验；AIReins 遵从本工单，始终要求返回 readOnly/never，不能满足则静默放弃。[temporary_structured_request.rs:47-208](https://github.com/openai/codex/blob/rust-v0.160.0/codex-rs/tui/src/temporary_structured_request.rs#L47-L208)。
 - `ThreadSource::Feature("thread_title")` 实际序列化为 `threadSource:"thread_title"`，不是 `feature:thread_title`，也不是 `source`；`source` 仍是原客户端来源。标签使原生 title 请求排除 managed reasoning override，按请求级 effort 执行。[protocol.rs:2839-2895](https://github.com/openai/codex/blob/rust-v0.160.0/codex-rs/protocol/src/protocol.rs#L2839-L2895)、[session.rs:1668-1680](https://github.com/openai/codex/blob/rust-v0.160.0/codex-rs/core/src/session/session.rs#L1668-L1680)。隔离字段需要握手 `capabilities.experimentalApi:true`；本机 schema 与真实 fixture 验证通过。
-- 原生 ephemeral 跳过 LiveThread 持久化和 state DB（`path:null`，不物化 sessions）；TUI 对启动和回合各设30秒上限，响应≤8KiB，取消时 interrupt，结束后 unsubscribe。WB 用全过程30秒、清理每步1秒。[session.rs:1007-1010,1111-1114](https://github.com/openai/codex/blob/rust-v0.160.0/codex-rs/core/src/session/session.rs#L1007-L1010)、[temporary_structured_request.rs:210-341](https://github.com/openai/codex/blob/rust-v0.160.0/codex-rs/tui/src/temporary_structured_request.rs#L210-L341)。unsubscribe 是脱订阅，原生按自身卸载生命周期回收内存，不是磁盘删除操作。
-- 自动结果写回前 `thread/read(includeTurns:false)` 复核无名，再 `thread/name/set`，由 `thread/name/updated.threadName` 同步。[event_dispatch.rs:2702-2716](https://github.com/openai/codex/blob/rust-v0.160.0/codex-rs/tui/src/app/event_dispatch.rs#L2702-L2716)。同一 app-server 调用 thread manager 修改 metadata，不另起进程 resume 主线程，也不碰单写者锁文件；原生 writer 由 [writer_lock.rs:17-80](https://github.com/openai/codex/blob/rust-v0.160.0/codex-rs/rollout/src/writer_lock.rs#L17-L80) 管理。read/name-set 不是原子 compare-and-set；Workbench 手动标题在本进程取消待结果，显示优先级始终 customTitle 在先。
+- 原生 ephemeral 跳过 LiveThread 持久化和 state DB（`path:null`，不物化 sessions）；TUI 对启动和回合各设30秒上限，响应≤8KiB，取消时 interrupt，结束后 unsubscribe。AIReins 用全过程30秒、清理每步1秒。[session.rs:1007-1010,1111-1114](https://github.com/openai/codex/blob/rust-v0.160.0/codex-rs/core/src/session/session.rs#L1007-L1010)、[temporary_structured_request.rs:210-341](https://github.com/openai/codex/blob/rust-v0.160.0/codex-rs/tui/src/temporary_structured_request.rs#L210-L341)。unsubscribe 是脱订阅，原生按自身卸载生命周期回收内存，不是磁盘删除操作。
+- 自动结果写回前 `thread/read(includeTurns:false)` 复核无名，再 `thread/name/set`，由 `thread/name/updated.threadName` 同步。[event_dispatch.rs:2702-2716](https://github.com/openai/codex/blob/rust-v0.160.0/codex-rs/tui/src/app/event_dispatch.rs#L2702-L2716)。同一 app-server 调用 thread manager 修改 metadata，不另起进程 resume 主线程，也不碰单写者锁文件；原生 writer 由 [writer_lock.rs:17-80](https://github.com/openai/codex/blob/rust-v0.160.0/codex-rs/rollout/src/writer_lock.rs#L17-L80) 管理。read/name-set 不是原子 compare-and-set；AIReins 手动标题在本进程取消待结果，显示优先级始终 customTitle 在先。
 
 隔离验证：真实 app-server + `/tmp` 独立 CODEX_HOME + loopback 假 Responses 服务运行3次（没有账户/凭据/收费模型），第2、3次全通过；第1次已生成写回，仅测试误把省略 `tools` 判为应返回空数组。样例“修复登录超时”，模型 `gpt-5.6-luna/low` 为本地 fixture，3次实际额外额度/token均0。核对辅助请求无 tools、临时 path=null、不在原生 thread/list 或 sessions 文件、收到主线程 name/updated、已 unsubscribe 和退出本次进程。最终证据 `/tmp/wb-title-native-fixture-IUeOT6/trace.json`，可复跑 `.work-orders/2026-10-05-codex-auto-title/app-server-fixture.mjs`。这不是收费模型或生产页面实测。
 
@@ -479,7 +479,7 @@ client 返回 `{"jsonrpc":"2.0","id":1,"result":{"terminalId":"m0-1787301167715"
 
 1. **显式 default 模式会发标准 `session/request_permission`；auto 会绕过它直接请求 `terminal/create`。**
 2. `session/new` 的 params 没有 permission/approval 字段；模式通过 `session/set_mode` 控制，而且 0.38.0 存在“返回 default 但未显式 set_mode 时仍直达 terminal/create”的实测差异。
-3. **Workbench 的真正安全边界必须在 client 提供的 `terminal/create`（以及 `fs/write_text_file`）处再做一次审批/白名单拦截，绝不能只等待 `session/request_permission`。** 否则 auto、未显式激活 default 或 agent 的能力回退路径都会绕过 UI 审批。
+3. **AIReins 的真正安全边界必须在 client 提供的 `terminal/create`（以及 `fs/write_text_file`）处再做一次审批/白名单拦截，绝不能只等待 `session/request_permission`。** 否则 auto、未显式激活 default 或 agent 的能力回退路径都会绕过 UI 审批。
 
 ### ⚠️ 病因补充（主会话 2026-08-21 事后查明）
 
@@ -586,30 +586,30 @@ Kimi 这里不是 input/output 分项，而是上下文已用量 `used` 与总�
 
 对照工单为本地归档，未随仓库公开。审计工具：`node server/scripts/cache-audit.mjs <jsonl|id 前缀> [--ttl 3600] [--json]`，`--since 14d` 扫全部。
 
-**系统提示快照让跨宿主续接不破缓存**。续接时 CLI 按 jsonl 里的 `prompt_snapshot` / `deferred_tools_record` 附件重放上次的系统提示和工具表，之后的变化只以 `deferred_tools_delta` / `agent_listing_delta` / `mcp_instructions_delta` 追加在对话尾部，所以 VSCode 与 wb 追加提示不同也不动前缀。VSCode 扩展在 initialize 里显式传 `systemPromptSnapshot: true` 并把「VSCode Extension Context」作为 `appendSystemPrompt`；wb 的 initialize 不带这两个字段，快照开关走默认值（开），同样生效。VSCode 独有工具（`FetchInboxMessage` / `ReadNotifications` / `SendUserFile`）也是 delta，不破缓存。
-- 真实会话 00000205（VSCode ↔ wb 来回切）：4 轮 0 次意外失效，切换轮 read 57169 / write 737、read 57906 / write 649。
-- scratch 实测（haiku，模拟 VSCode 宿主 = 扩展自带二进制 + 同参数同 env + 同 initialize，`/tmp/.../scratchpad/smoke/host.mjs`）：对照组 c745eec9 同宿主关→开两次，3 轮 0 失效（read 21894 → 45283 → 46450）；切换组 be402171「宿主 → wb 续接 → 宿主 → wb（走 replaceWorker）→ 宿主」5 轮 0 失效（read 21894 → 45108 → 46171 → 46540 → 46630）。
+**系统提示快照让跨宿主续接不破缓存**。续接时 CLI 按 jsonl 里的 `prompt_snapshot` / `deferred_tools_record` 附件重放上次的系统提示和工具表，之后的变化只以 `deferred_tools_delta` / `agent_listing_delta` / `mcp_instructions_delta` 追加在对话尾部，所以 VSCode 与 AIReins 追加提示不同也不动前缀。VSCode 扩展在 initialize 里显式传 `systemPromptSnapshot: true` 并把「VSCode Extension Context」作为 `appendSystemPrompt`；AIReins 的 initialize 不带这两个字段，快照开关走默认值（开），同样生效。VSCode 独有工具（`FetchInboxMessage` / `ReadNotifications` / `SendUserFile`）也是 delta，不破缓存。
+- 真实会话 00000205（VSCode ↔ AIReins 来回切）：4 轮 0 次意外失效，切换轮 read 57169 / write 737、read 57906 / write 649。
+- scratch 实测（haiku，模拟 VSCode 宿主 = 扩展自带二进制 + 同参数同 env + 同 initialize，`/tmp/.../scratchpad/smoke/host.mjs`）：对照组 c745eec9 同宿主关→开两次，3 轮 0 失效（read 21894 → 45283 → 46450）；切换组 be402171「宿主 → AIReins 续接 → 宿主 → AIReins（走 replaceWorker）→ 宿主」5 轮 0 失效（read 21894 → 45108 → 46171 → 46540 → 46630）。
 - 模拟宿主写入的用户条目 `turnOrigin` 是 `sdk`，真实 VSCode 面板是 `human`；来源字段不影响缓存，只影响防分叉 hook 提示里的「来源」文字。
 
-**缓存按组织隔离**。另有约 21–22.5k 的全局静态 CC 前缀跨组织共享。00000206 #46（2026-09-23 23:31，read 21134 / write 162204，前一轮 read 176033）就是换账号后组织缓存全丢、只命中全局前缀，不是 wb 的问题。
+**缓存按组织隔离**。另有约 21–22.5k 的全局静态 CC 前缀跨组织共享。00000206 #46（2026-09-23 23:31，read 21134 / write 162204，前一轮 read 176033）就是换账号后组织缓存全丢、只命中全局前缀，不是 AIReins 的问题。
 
 **CLI 自带破缓存诊断**：开调试（env `DEBUG` / `DEBUG_SDK` 或 `--debug`）时，调试日志里会有 `[PROMPT CACHE]` 行和原因。日志路径取 `CLAUDE_CODE_DEBUG_LOGS_DIR`（按文件路径用），未设时写 `~/.claude/debug/<sessionId>.txt`。
 
-**续接时的模型**：不带 `--model` 续接时，CLI 恢复该会话最后一条助手消息的模型；显式 `--model` / `ANTHROPIC_MODEL` 优先（`-p` stream-json 实测 d35fb1d6；模拟宿主 c745eec9 续接两次都不带 `--model`，仍是 haiku）。所以 wb 续接不传 `--model`，与原生「关掉再打开」一致；首个 `system/init` 到达之前，界面可能先显示配置默认值。
+**续接时的模型**：不带 `--model` 续接时，CLI 恢复该会话最后一条助手消息的模型；显式 `--model` / `ANTHROPIC_MODEL` 优先（`-p` stream-json 实测 d35fb1d6；模拟宿主 c745eec9 续接两次都不带 `--model`，仍是 haiku）。所以 AIReins 续接不传 `--model`，与原生「关掉再打开」一致；首个 `system/init` 到达之前，界面可能先显示配置默认值。
 
-**wb worker 与 VSCode 对齐的 env**：`CLAUDE_CODE_ENTRYPOINT=claude-vscode`、`CLAUDE_CODE_ENABLE_TASKS=0`（与 VSCode 一样用 TodoWrite，不用 Task* 工具，wb 渲染已核对）、`MCP_CONNECTION_NONBLOCKING=true`，另删掉从 VSCode 终端继承来的 `CLAUDE_CODE_SSE_PORT`，并设 `CC_FORK_GUARD=0`（见下）。不对齐的两项：`CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING` 只打开 SDK 模式的文件备份（给 rewind 用，wb 没有这个功能）；`CLAUDE_CODE_SDK_READS_SESSION_STATE=1` 是 Agent SDK 自动补上的宿主标志。这两项都不进 prompt 和工具表，上面的切换组宿主设了、wb 没设，照样 0 失效。
+**AIReins worker 与 VSCode 对齐的 env**：`CLAUDE_CODE_ENTRYPOINT=claude-vscode`、`CLAUDE_CODE_ENABLE_TASKS=0`（与 VSCode 一样用 TodoWrite，不用 Task* 工具，AIReins 渲染已核对）、`MCP_CONNECTION_NONBLOCKING=true`，另删掉从 VSCode 终端继承来的 `CLAUDE_CODE_SSE_PORT`，并设 `CC_FORK_GUARD=0`（见下）。不对齐的两项：`CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING` 只打开 SDK 模式的文件备份（给 rewind 用，AIReins 没有这个功能）；`CLAUDE_CODE_SDK_READS_SESSION_STATE=1` 是 Agent SDK 自动补上的宿主标志。这两项都不进 prompt 和工具表，上面的切换组宿主设了、AIReins 没设，照样 0 失效。
 
 **没有原生的「别的进程写过本会话」检测**。`~/.claude/sessions/<pid>.json` 活进程登记（pid、sessionId、procStart、kind、entrypoint、status）只被后台 agents 的「在别处打开」路径用。工单列的 `CLAUDE_CODE_RESUME_TOLERATES_CONTEXT_APPENDS`、`sessionMirror`、`CLAUDE_CODE_SDK_READS_SESSION_STATE` 都不做这件事。因此防分叉靠全局 hook `~/.claude/hooks/fork-guard.py`（SessionStart / UserPromptSubmit / Stop），相关 hook 事实：
 - hook 进程 env 有 `CLAUDE_PID`（发起 hook 的 claude 进程）和 `CLAUDE_CODE_SESSION_ID`；hook 的父进程是 `sh`。
 - UserPromptSubmit 触发时，本条用户消息**还没写进** jsonl；它的 `prompt_id` 等于 jsonl 的 `promptId`。
 - UserPromptSubmit 以 exit 2 退出时，stream-json 输出 `system/informational`（`prevent_continuation:true`，content 带 stderr），随后是 `num_turns:0` 的 result，不挂住。
-- `turnOrigin` 实见取值：`human`（VSCode / 终端 / 手机）、`sdk`（wb、`claude -p`）、`task_notification`、`peer`、`system`，以及缺失（中断续接提示）。hook 只把 `human` / `sdk` 当成人类消息。
+- `turnOrigin` 实见取值：`human`（VSCode / 终端 / 手机）、`sdk`（AIReins、`claude -p`）、`task_notification`、`peer`、`system`，以及缺失（中断续接提示）。hook 只把 `human` / `sdk` 当成人类消息。
 - 双进程实测（scratch，haiku）：A 空闲，B `--resume` 写一轮，A 再发被拦；A 重开后放行。`-p` 模式下排队消息逐条出队、各走一轮，不误拦。
-- wb 自己在发送前会从磁盘刷新（`refreshBeforeSend`），所以 worker 设 `CC_FORK_GUARD=0` 关掉这个 hook。
+- AIReins 自己在发送前会从磁盘刷新（`refreshBeforeSend`），所以 worker 设 `CC_FORK_GUARD=0` 关掉这个 hook。
 
-**Remote Control 与缓存**。b583f2f4（2026-09-29，CLI 2.1.281，opus）第 2、3 轮 read 都只有 22555（只命中全局前缀），各重写约 35k。当时 wb transcript 显示两轮之间 RC 被关掉又重开（04:49:27 disconnecting → 04:49:33 connected，bridge 会话从 `cse_01FVA…` 换成 `cse_01JBJ…`，jsonl 第 30–32 行）。wb 在这期间只转发了 RC 开关，没有动 prompt；三轮都由同一个 worker 进程发出，所以这是 CLI 内部的行为，不是 wb 的问题。2.1.284 在 scratch 复现（00000207，haiku，临时 wb 18790）：
+**Remote Control 与缓存**。b583f2f4（2026-09-29，CLI 2.1.281，opus）第 2、3 轮 read 都只有 22555（只命中全局前缀），各重写约 35k。当时 AIReins transcript 显示两轮之间 RC 被关掉又重开（04:49:27 disconnecting → 04:49:33 connected，bridge 会话从 `cse_01FVA…` 换成 `cse_01JBJ…`，jsonl 第 30–32 行）。AIReins 在这期间只转发了 RC 开关，没有动 prompt；三轮都由同一个 worker 进程发出，所以这是 CLI 内部的行为，不是 AIReins 的问题。2.1.284 在 scratch 复现（00000207，haiku，临时 AIReins 18790）：
 - RC 一直连着，手机隔 34 分钟发两轮（`turnOrigin:human`）：read 44502 / write 1257、read 45759 / write 81。RC 新增的 `FetchInboxMessage` / `ReadNotifications` / `SendUserFile` 和 claude.ai MCP 都以 `deferred_tools_delta` 追加在尾部。
-- RC 关→开（bridge 换成新会话）后，wb 发两轮：read 45840 / write 81、read 45921 / write 81。
+- RC 关→开（bridge 换成新会话）后，AIReins 发两轮：read 45840 / write 81、read 45921 / write 81。
 - 接着手机往新 bridge 发一轮：read 46002 / write 81。
 - 全程 0 次意外失效，调试日志里没有 `[PROMPT CACHE]` 行。
 结论：当前版本 RC 不破缓存，b583f2f4 那次只在 2.1.281 上出现过（没有旧版本可复测，opus 与 haiku 的差别也没排除）。用户 2026-09-30 决定 RC 保持按 `remoteControlAtStartup` 自动开启；之后用 `cache-audit --since` 定期扫一遍。
@@ -627,7 +627,7 @@ Kimi 这里不是 input/output 分项，而是上下文已用量 `used` 与总�
 
 - `type` 枚举为 `localImage`，`path` 必填字符串；`detail` 可选，取值 `auto | low | high | original`（`ImageDetail`），缺省/null 均可。
 - 另有 `{type:"image", url}` 与 `{type:"image", fileId}`（远程/已上传图片），以及 `localAudio`、`skill`、`mention`、`text` 变体。
-- Workbench 只发 `localImage`（不带 `detail`）；文件引用仍走 `{type:"mention", name, path}` + `text_elements`，图片不占 `text_elements` 占位。
+- AIReins 只发 `localImage`（不带 `detail`）；文件引用仍走 `{type:"mention", name, path}` + `text_elements`，图片不占 `text_elements` 占位。
 - Codex 本周期额度用尽，未做真机 turn 冒烟；以上仅为 schema 核对结论。
 
 ## 10. Claude 查看与插件重载 control_request（CLI 2.1.285，2026-10-01）
@@ -639,25 +639,25 @@ VSCode 扩展「/」菜单的 MCP servers / Hooks / Permissions / Context 数据
 - `list_permission_rules` → `{state:{rules:[{behavior:"allow"|"ask"|"deny", source, rule, description:{prefix, emphasis}, editability}], workspaceDirectories, originalCwd, managedOnly}}`。
 - `get_context_usage` → `{categories:[{name, tokens, color, kind:"used"|"deferred"|"buffer"|"free", isDeferred?}], totalTokens, maxTokens, rawMaxTokens, percentage, gridRows, model, memoryFiles, mcpTools, agents, slashCommands, skills, autoCompactThreshold, isAutoCompactEnabled, messageBreakdown, apiUsage}`（约 50KB，大头是 gridRows 与 mcpTools）。
 
-扩展还有 `mcp_toggle` / `mcp_reconnect` / `update_settings` 等写操作；wb 已接前两项（见 §11），未开放任意 `update_settings`。`get_settings` 的设置缓存刷新用途见下文。扩展「/」菜单全量 action（commandRegistry.registerAction，分组 Context / Model / Customize / Slash Commands / Settings / Support）可用 `webview/index.js` 里 grep `registerAction` 列出；Focus view 是扩展自己的前端开关（`focusViewEnabled`），不走 CLI。
+扩展还有 `mcp_toggle` / `mcp_reconnect` / `update_settings` 等写操作；AIReins 已接前两项（见 §11），未开放任意 `update_settings`。`get_settings` 的设置缓存刷新用途见下文。扩展「/」菜单全量 action（commandRegistry.registerAction，分组 Context / Model / Customize / Slash Commands / Settings / Support）可用 `webview/index.js` 里 grep `registerAction` 列出；Focus view 是扩展自己的前端开关（`focusViewEnabled`），不走 CLI。
 
 ### 插件启停后的刷新（2026-10-01 本机源码核对，未启动会话实测）
 
 本机扩展 `/home/user/.vscode-server/extensions/anthropic.claude-code-2.1.285-linux-x64/` 含可靠的 `reload_plugins` 协议实现，不必要求用户重启正在使用的会话。以下 minified JS 偏移为从 0 开始的字符位置；`resources/native-binary/claude` 为 ELF，只定向提取其嵌入 JavaScript 的相关片段，所列为从 0 开始的字节位置。
 
 - `extension.js` 的 `setPluginEnabled`（字符 2721647）用数组参数执行 `plugin enable|disable`，成功返回 `needsRestart:true`。这只是需要刷新组件的信号：`webview/index.js` 的 `A1`（字符 5349395）随后调用 `reloadPlugins()` 并刷新插件列表，再查询 MCP servers；不直接重启进程。重载失败才通过 `pluginReloadFailed` 提供后续重启入口。
-- 宿主 `reloadPluginsInChannels`（`extension.js` 字符 2928661）对已有 channels / pending channels 调用 `reloadPluginsAfterFreshSettings`，先 `await query.getSettings()`，再 `await query.reloadPlugins()`，单通道等待上限 30000ms。宿主还向同扩展的 peers 广播刷新；wb 本次只对目标会话已有 worker 刷新，不扩大到其他会话，不为已结束/已释放会话启动 worker。
-- 先发 `{type:"control_request",request_id,request:{subtype:"get_settings"}}`。CLI handler（binary 字节 221517192）调用 `jYn()`；`jYn`（字节 196723760）首先 `jo()`，而 `jo`（字节 195780271）执行 `da().invalidateAll()`，再读取 `effective` / `sources`。这是启停 CLI 改完磁盘设置后刷新运行进程设置缓存的必要前置，不能只沿用内存中的旧插件启用值。此请求在不支持的连接上返回 `get_settings is not available on this connection`；wb 的本地 stdio worker 使用已确认的请求通道。
+- 宿主 `reloadPluginsInChannels`（`extension.js` 字符 2928661）对已有 channels / pending channels 调用 `reloadPluginsAfterFreshSettings`，先 `await query.getSettings()`，再 `await query.reloadPlugins()`，单通道等待上限 30000ms。宿主还向同扩展的 peers 广播刷新；AIReins 本次只对目标会话已有 worker 刷新，不扩大到其他会话，不为已结束/已释放会话启动 worker。
+- 先发 `{type:"control_request",request_id,request:{subtype:"get_settings"}}`。CLI handler（binary 字节 221517192）调用 `jYn()`；`jYn`（字节 196723760）首先 `jo()`，而 `jo`（字节 195780271）执行 `da().invalidateAll()`，再读取 `effective` / `sources`。这是启停 CLI 改完磁盘设置后刷新运行进程设置缓存的必要前置，不能只沿用内存中的旧插件启用值。此请求在不支持的连接上返回 `get_settings is not available on this connection`；AIReins 的本地 stdio worker 使用已确认的请求通道。
 - 再发 `{type:"control_request",request_id,request:{subtype:"reload_plugins"}}`。SDK 包装在 `extension.js` 字符 2510958；CLI schema 在 binary 字节 197801135，处理分支在字节 221496390。成功 payload（位于 `control_response.response.response`）为 `{commands,agents,plugins,mcpServers,error_count}`；`plugins` 项包含 `{name,path,source?,version?}`。CLI 的 `refreshActivePlugins`（字节 214942521）清插件缓存、刷新 commands / skills / agents / hooks / MCP / LSP；请求不耗模型轮次。宿主用返回的 `commands` 更新命令缓存、用 `error_count` 汇总组件错误；前端插件列表仍应重新执行 list 获取落盘后的状态。
 - 可选 `hold_on_cache_impact:true` 会在影响工具列表的 prompt cache 时返回 `held:true` 和 `cache_impact:{mcp_servers_added,mcp_servers_removed,lsp_tool_change}`，保持当前进程插件不变；默认不传则无条件应用，与扩展默认行为一致。这里未实测在途模型轮次的切换效果；本机 handler 未给 `reload_plugins` 设置独立的 busy 拒绝条件。异常按现有 `control_response` error 回传；`error_count>0` 表示已返回成功但仍有组件错误，不能称为完全重载成功。部分 MCP diff / plugin load 异常会被 CLI 捕获并写日志（字节 221497650），因此成功回包也不能证明每个组件都正常。
 
-wb 在 enable / disable 成功后只对当前已有 worker 顺序发送上述两次请求，并刷新菜单。无 worker 时显示「新会话或重新续接后生效」；请求失败或组件错误时应保留已保存的启停状态并显示刷新失败，不能把它误报成 CLI 写入失败。调查未运行真实 `plugin enable/disable`、未改用户插件状态、未启动 Claude 会话。
+AIReins 在 enable / disable 成功后只对当前已有 worker 顺序发送上述两次请求，并刷新菜单。无 worker 时显示「新会话或重新续接后生效」；请求失败或组件错误时应保留已保存的启停状态并显示刷新失败，不能把它误报成 CLI 写入失败。调查未运行真实 `plugin enable/disable`、未改用户插件状态、未启动 Claude 会话。
 
 插件开关以 list 的 `enabled === true` 为准，不能与 `projectEnabled` 做 OR。CLI 字段构造（binary 约字节 231301800）以 `editableScopeOf(getPluginEditableScopes(),id)!==undefined` 生成 `enabled`；`getPluginEditableScopes`（字节 212617353）按 managed / user / project / local / flag 叠加 true 加入、false 删除。`projectEnabled:H_t(id)`（字节 212629696）仅检查项目文件显式 true；因此 `enabled:false,projectEnabled:true` 可能是被更高优先级 local 设置关闭，仍应显示关闭。扩展 webview（字符 5355079）也以 `plugin.enabled===true` 判断实际启用。
 
 ### Remote Control 默认开关的落盘语义
 
-CLI `/config` 的 `Te(e)`（binary 字节 215603696）在选 `"false"` 时执行 `V("remoteControlAtStartup",false)`，只有选 `"default"` 才写 `undefined` 并删除旧全局键。`V` 的闭包（字节 215601200）调用 `S1`，`S1`（字节 199005860）写 `fn("userSettings",{[n]:i})`。因此 wb 二态开关关闭应显式保存 `remoteControlAtStartup:false`，与 CLI 关闭语义一致。扩展 `setRemoteControlAtStartup`（`webview/index.js` 字符 3480628）也保存 `{remoteControlAtStartup:<boolean>}`。wb 只改用户设置文件这一个键，保留软链接；新值仅供之后启动的 worker 读取，不向当前会话发送 RC 开关请求。
+CLI `/config` 的 `Te(e)`（binary 字节 215603696）在选 `"false"` 时执行 `V("remoteControlAtStartup",false)`，只有选 `"default"` 才写 `undefined` 并删除旧全局键。`V` 的闭包（字节 215601200）调用 `S1`，`S1`（字节 199005860）写 `fn("userSettings",{[n]:i})`。因此 AIReins 二态开关关闭应显式保存 `remoteControlAtStartup:false`，与 CLI 关闭语义一致。扩展 `setRemoteControlAtStartup`（`webview/index.js` 字符 3480628）也保存 `{remoteControlAtStartup:<boolean>}`。AIReins 只改用户设置文件这一个键，保留软链接；新值仅供之后启动的 worker 读取，不向当前会话发送 RC 开关请求。
 
 
 ## 11. 扩展菜单补齐：MCP 管理与只读面板（2026-10-01）
@@ -668,24 +668,24 @@ CLI `/config` 的 `Te(e)`（binary 字节 215603696）在选 `"false"` 时执行
 
 请求公共封套为 `{type:"control_request",request_id:"<uuid>",request:{subtype,…}}`。成功回应公共封套为 `{type:"control_response",response:{subtype:"success",request_id:"<uuid>",response?:<payload>}}`；MCP 开关/重连成功实测没有 `response` 字段，不能把空 payload 判为失败。
 
-| subtype / 字段 | 成功 payload 与 wb 用途 |
+| subtype / 字段 | 成功 payload 与 AIReins 用途 |
 | --- | --- |
 | `mcp_toggle`, `serverName:"slash-smoke"`, `enabled:false/true` | 无 payload；随后 `mcp_status` 返回 disabled / connected。仅当前 worker 生效，不落盘 settings。 |
 | `mcp_reconnect`, `serverName:"slash-smoke"` | 无 payload；随后 `mcp_status` 返回 connected（也可能先 connecting/pending，前端允许手动刷新）。 |
 | `get_status` | `{sections:[{title,rows:[{label,value}]}]}`，版本/原生 ID/cwd/账户/模型/MCP/设置来源等。 |
 | `get_usage` | `{session:{total_cost_usd,total_api_duration_ms,total_duration_ms,total_lines_added,total_lines_removed,model_usage},subscription_type,rate_limits_available,rate_limits,behaviors}`；前端显示会话费用与 `rate_limits.limits[{kind,percent,resets_at,…}]`。 |
-| `get_memory_dialog` | `{files:[{kind,path,label,description,exists}],folders:[{kind,path,label,description}],memories,auto_memory:{enabled,toggleable,status},auto_dream:{shown,enabled,toggleable,status,detail?}}`；wb 生成 VSCode 文件/目录协议链接，不在服务端打开文件。 |
+| `get_memory_dialog` | `{files:[{kind,path,label,description,exists}],folders:[{kind,path,label,description}],memories,auto_memory:{enabled,toggleable,status},auto_dream:{shown,enabled,toggleable,status,detail?}}`；AIReins 生成 VSCode 文件/目录协议链接，不在服务端打开文件。 |
 | `get_skills_dialog` | `{skills:[{name,display_name,description,source,tokens,state,advertised,handles,…}]}`；state 为 on / name-only / user-invocable-only / off。管理入口为 settings 文件编辑。 |
 | `get_sandbox_dialog` | `{supported,locked,overrides_locked,enabled,enabled_in_settings,mode,auto_allow_available,no_sandbox_allowed,unsandboxed_fallback,dependencies:{errors,warnings},excluded_commands,restrictions}`；本机返回关闭，依赖错误 socat not installed；不安装依赖。 |
-| `export_conversation` | `{text,default_filename}`；扩展也调用这一请求，随后 `open_export_document` 由 VSCode 打开 untitled 文档。wb 改为浏览器复制/下载 `.txt`，以 CLI 返回内容为准。 |
+| `export_conversation` | `{text,default_filename}`；扩展也调用这一请求，随后 `open_export_document` 由 VSCode 打开 untitled 文档。AIReins 改为浏览器复制/下载 `.txt`，以 CLI 返回内容为准。 |
 | `initialize` + `get_settings` | 前者 `available_output_styles` 给样式列表，后者 `effective.outputStyle` 给当前样式；只返回必要字段到浏览器。 |
-| `rewind_files`, `user_message_id:"<uuid>"`, `dry_run:true` | wb 当前启动方式返回 `{canRewind:false,error:"File rewinding is not enabled."}`；本单不接 Rewind。 |
+| `rewind_files`, `user_message_id:"<uuid>"`, `dry_run:true` | AIReins 当前启动方式返回 `{canRewind:false,error:"File rewinding is not enabled."}`；本单不接 Rewind。 |
 
-扩展 Rewind 的文件预览是 `rewindFiles(userMessageId,{dryRun:true})`，界面使用 `canRewind/filesChanged/insertions/deletions/skippedLinks` 再二次选择恢复代码/会话/两者；会话恢复走宿主 fork + resumeSessionAt。扩展启动 SDK 配置 `enableFileCheckpointing:true`，wb 没有这项且统一事件没有原生用户 UUID。不能仅凭 dry_run 字段存在就开放修改文件或截断会话。
+扩展 Rewind 的文件预览是 `rewindFiles(userMessageId,{dryRun:true})`，界面使用 `canRewind/filesChanged/insertions/deletions/skippedLinks` 再二次选择恢复代码/会话/两者；会话恢复走宿主 fork + resumeSessionAt。扩展启动 SDK 配置 `enableFileCheckpointing:true`，AIReins 没有这项且统一事件没有原生用户 UUID。不能仅凭 dry_run 字段存在就开放修改文件或截断会话。
 
-Hooks 编辑在扩展实际通过 `claude edit-hook`（JSON stdin）后刷新 `get_hooks_listing`；权限/Memory/Sandbox/Skills 分别通过 `edit-permission-rules` / `edit-memory-settings` / `edit-sandbox-settings` / `edit-skill-overrides` 子命令，输出样式经宿主 apply_settings 转 `update_settings {source,settings}` 或 `apply_flag_settings {settings}`。wb 本单用 settings 文件协议链接提供编辑等价物，不新增配置写 API。可编辑配置源为 userSettings/projectSettings/localSettings；插件与 managed 来源按原样显示，不能假装能在用户配置中编辑其原件。
+Hooks 编辑在扩展实际通过 `claude edit-hook`（JSON stdin）后刷新 `get_hooks_listing`；权限/Memory/Sandbox/Skills 分别通过 `edit-permission-rules` / `edit-memory-settings` / `edit-sandbox-settings` / `edit-skill-overrides` 子命令，输出样式经宿主 apply_settings 转 `update_settings {source,settings}` 或 `apply_flag_settings {settings}`。AIReins 本单用 settings 文件协议链接提供编辑等价物，不新增配置写 API。可编辑配置源为 userSettings/projectSettings/localSettings；插件与 managed 来源按原样显示，不能假装能在用户配置中编辑其原件。
 
-真机证据：`scratch/slash-ext/smoke-protocol.ndjson` 为隔离服务器 driver 实际 stdin/stdout（48 行、24 对请求回应）；`smoke-http.json` 为 HTTP 与链接点击记录。18791，Haiku 4.5，真实回复 SLASH_SMOKE_OK；MCP 停用/启用/重连 success，停用后 disabled、启用/重连后 connected；本地 mock MCP 仅提供 initialize/tools/list，不访问第三方服务。10 个新/增强面板及复制/下载均用 Playwright 真点，字体检查 >=16px。负例：非法 enabled、不存在服务器、缺失会话分别 40066/40066/40401。隔离实例按监听端口反查进程组并 trap 结束，18791 已释放；没有 wb restart，没有修改 ~/.claude 设置，fixture 的配置原值保持不变。前期只读协议探针会因原有 SessionStart hooks 试写沙箱外路径而报 EROFS，独立冒烟 fixture 用 disableAllHooks 避免该旁支，模型与新功能均成功。
+真机证据：`scratch/slash-ext/smoke-protocol.ndjson` 为隔离服务器 driver 实际 stdin/stdout（48 行、24 对请求回应）；`smoke-http.json` 为 HTTP 与链接点击记录。18791，Haiku 4.5，真实回复 SLASH_SMOKE_OK；MCP 停用/启用/重连 success，停用后 disabled、启用/重连后 connected；本地 mock MCP 仅提供 initialize/tools/list，不访问第三方服务。10 个新/增强面板及复制/下载均用 Playwright 真点，字体检查 >=16px。负例：非法 enabled、不存在服务器、缺失会话分别 40066/40066/40401。隔离实例按监听端口反查进程组并 trap 结束，18791 已释放；没有 aireins restart，没有修改 ~/.claude 设置，fixture 的配置原值保持不变。前期只读协议探针会因原有 SessionStart hooks 试写沙箱外路径而报 EROFS，独立冒烟 fixture 用 disableAllHooks 避免该旁支，模型与新功能均成功。
 
 
 ## 12. Codex 客户端命令与 skills（2026-10-01，0.159.3）
@@ -708,7 +708,7 @@ Hooks 编辑在扩展实际通过 `claude edit-hook`（JSON stdin）后刷新 `g
 {"id":38,"method":"turn/interrupt","params":{"threadId":"thr","turnId":"turn"}}
 ```
 
-以上为 schema 对齐的字段示例，非真机成功声明。skills input 的 name/path/type 均 required，无 byte-range 字段；text_elements 仍只用于已有文件 @mention。`compact` 返回 `{}`，进度为 turn/started、contextCompaction item/started/completed、turn/completed；review 返回 turn 与 reviewThreadId，通过当前线程事件流呈现。model/list 与 mcpServerStatus/list 的 data/nextCursor 按 cursor 读完；MCP 含 authStatus、tools、resources、resourceTemplates 及可选 runtimeStatus/toolsError。new 沿用新 wb session 的 thread/start，模型/effort 不添加新的默认覆盖。
+以上为 schema 对齐的字段示例，非真机成功声明。skills input 的 name/path/type 均 required，无 byte-range 字段；text_elements 仍只用于已有文件 @mention。`compact` 返回 `{}`，进度为 turn/started、contextCompaction item/started/completed、turn/completed；review 返回 turn 与 reviewThreadId，通过当前线程事件流呈现。model/list 与 mcpServerStatus/list 的 data/nextCursor 按 cursor 读完；MCP 含 authStatus、tools、resources、resourceTemplates 及可选 runtimeStatus/toolsError。new 沿用新 AIReins session 的 thread/start，模型/effort 不添加新的默认覆盖。
 
 实测脚本：`scratch/codex-commands/run-smoke.sh`；限 18794、setsid、端口反查 PGID、trap，仅终止自身启动的进程组。wrapper 只记录本单 RPC 与 turn/item 通知，不记录 config/read 或 account/auth。原 ~/.codex 状态库在沙箱只读启动失败，脚本以 scratch 下独立 CODEX_HOME（配置/auth 0600）运行。结果、真实 RPC 路径及截图验收状态以工单报告为准，失败不伪造成功。
 
@@ -722,9 +722,9 @@ Hooks 编辑在扩展实际通过 `claude edit-hook`（JSON stdin）后刷新 `g
 {"type":"control_request","request_id":"model-id","request":{"subtype":"set_model","model":"sonnet"}}
 ```
 
-两者均收到对应 request_id 的 `control_response` / `response.subtype:"success"`。effort 约 9ms，之后 `get_settings.effective.effortLevel` 从 high 变成 low；model 约 0.92s，但 get_settings 的 model 仍为 settings 层 opus。`set_model` 修改运行时模型，不落 settings；不要用 get_settings.model 判断它是否成功。CLI 定义允许 model 为 null 或 "default"，回到会话默认模型；wb 使用 null。
+两者均收到对应 request_id 的 `control_response` / `response.subtype:"success"`。effort 约 9ms，之后 `get_settings.effective.effortLevel` 从 high 变成 low；model 约 0.92s，但 get_settings 的 model 仍为 settings 层 opus。`set_model` 修改运行时模型，不落 settings；不要用 get_settings.model 判断它是否成功。CLI 定义允许 model 为 null 或 "default"，回到会话默认模型；AIReins 使用 null。
 
-wb schema 对 model/effort 标为 `mutableVia:"control"`。仅空闲且无待审批闸门时发送控制请求；success 后发 config_updated 并更新 config/effectiveModel/effectiveEffort。控制报错或 15 秒超时回落到原重启路径，释放后仅保存配置，下一次 worker 启动带入 flags。effort:null 尝试 apply_flag_settings 清除覆盖，CLI 不支持时回落到省略 --effort 的重启；这个 null 协议行为尚待真机验证。仍拒绝进行中的回合；不放宽审批或最终闸门。切换期间与发送、释放、移除互斥。成功事件 mutableVia=control、workerRestarted=false；回落成功为 restart、workerRestarted=true。
+AIReins schema 对 model/effort 标为 `mutableVia:"control"`。仅空闲且无待审批闸门时发送控制请求；success 后发 config_updated 并更新 config/effectiveModel/effectiveEffort。控制报错或 15 秒超时回落到原重启路径，释放后仅保存配置，下一次 worker 启动带入 flags。effort:null 尝试 apply_flag_settings 清除覆盖，CLI 不支持时回落到省略 --effort 的重启；这个 null 协议行为尚待真机验证。仍拒绝进行中的回合；不放宽审批或最终闸门。切换期间与发送、释放、移除互斥。成功事件 mutableVia=control、workerRestarted=false；回落成功为 restart、workerRestarted=true。
 
 
 ## 14. Claude 扩展菜单第二轮：Thinking、Fast、MCP busy、tasks、side_question（CLI 2.1.287，2026-10-02）
@@ -733,11 +733,11 @@ wb schema 对 model/effort 标为 `mutableVia:"control"`。仅空闲且无待审
 
 ### 扩展依据（0 起点字符偏移）
 
-- webview 字符 5430293：`toggle-thinking` 注册在 Model，`thinkingLevel !== "off"` 为开，`keepMenuOpen:true`，调用 `setThinkingLevel("off"|"default_on")`。字符 3421939 附近的计算属性优先 override，再读 connection.config.thinkingLevel；宿主 extension 字符 1445724 默认全局状态 `default_on`（不是 CLI 设置查询结果）。wb 使用会话配置，旧记录默认开启。
-- extension 字符 2848213：默认预算 `yt=31999`，`gt("off")` disabled，否则 enabled/budgetTokens 31999。字符 2967836：开启调用 `setMaxThinkingTokens(budget, display ?? null)`，关闭调用 `setMaxThinkingTokens(0)`。wb 开启下发 31999 + display:null，保持现有思考流呈现；启动/重启/续接每次重发会话覆盖。
-- webview 字符 5433783：Fast 只在 `currentModelSupportsFastMode` 时注册，在 Model 组，通过 send("/fast") 发用户命令。字符 3421939：能力取 currentModelInfo.supportsFastMode，按 models 的 value/resolvedModel 匹配，去除 `[1m]` 后缀，无字段为 false。wb 可拿到同一字段，因此接入。
-- MCP webview 字符 5074000 附近 Disable/Reconnect 的 disabled 只看该服务器管理动作 pending，无模型 busy 禁用；宿主字符 2917731 的 setMcpServerEnabled/reconnectMcpServer 直接 withChannel 转控制请求。真实 busy 实测如下，wb 去掉 running 限制，保留启动/审批提示。
-- extension 字符 2565898：stopTask 发送 `stop_task {task_id}`；字符 2586927：askSideQuestion 发送 `side_question {question,history?}`，回 payload.response/synthetic/refusal_fallback。webview 字符 3405858 的侧问用 AbortController，历史只取 answer；取消路径 extension request 字符 2588000 附近写 `control_cancel_request {request_id}`。wb 同样提供取消，答案仅保留在弹窗。
+- webview 字符 5430293：`toggle-thinking` 注册在 Model，`thinkingLevel !== "off"` 为开，`keepMenuOpen:true`，调用 `setThinkingLevel("off"|"default_on")`。字符 3421939 附近的计算属性优先 override，再读 connection.config.thinkingLevel；宿主 extension 字符 1445724 默认全局状态 `default_on`（不是 CLI 设置查询结果）。AIReins 使用会话配置，旧记录默认开启。
+- extension 字符 2848213：默认预算 `yt=31999`，`gt("off")` disabled，否则 enabled/budgetTokens 31999。字符 2967836：开启调用 `setMaxThinkingTokens(budget, display ?? null)`，关闭调用 `setMaxThinkingTokens(0)`。AIReins 开启下发 31999 + display:null，保持现有思考流呈现；启动/重启/续接每次重发会话覆盖。
+- webview 字符 5433783：Fast 只在 `currentModelSupportsFastMode` 时注册，在 Model 组，通过 send("/fast") 发用户命令。字符 3421939：能力取 currentModelInfo.supportsFastMode，按 models 的 value/resolvedModel 匹配，去除 `[1m]` 后缀，无字段为 false。AIReins 可拿到同一字段，因此接入。
+- MCP webview 字符 5074000 附近 Disable/Reconnect 的 disabled 只看该服务器管理动作 pending，无模型 busy 禁用；宿主字符 2917731 的 setMcpServerEnabled/reconnectMcpServer 直接 withChannel 转控制请求。真实 busy 实测如下，AIReins 去掉 running 限制，保留启动/审批提示。
+- extension 字符 2565898：stopTask 发送 `stop_task {task_id}`；字符 2586927：askSideQuestion 发送 `side_question {question,history?}`，回 payload.response/synthetic/refusal_fallback。webview 字符 3405858 的侧问用 AbortController，历史只取 answer；取消路径 extension request 字符 2588000 附近写 `control_cancel_request {request_id}`。AIReins 同样提供取消，答案仅保留在弹窗。
 
 ### 实测请求回应
 
@@ -762,8 +762,8 @@ wb schema 对 model/effort 标为 `mutableVia:"control"`。仅空闲且无待审
 
 MCP 初始 `mcp_status` 为 connected。wire 的第 13（0 起点）项为 stream_event/message_start，14–20 项是三次 MCP 请求回应，60 项才是主回复 result，证明确在回复期间执行且主回复成功（Haiku，80 个整数，is_error:false，费用 USD 0.054562）。这是无正在执行 MCP 工具的 smoke，不声称覆盖所有工具中途停用行为。
 
-`initialize.models` 的 default/opus 条目均有 `supportsFastMode:true`（resolvedModel `claude-opus-5-5`），Haiku 条目没有该字段；wb 不按模型名猜能力。没有发送 `/fast`，没有切换到 Opus，实际 Fast 收费/额度与切换由主会话在临时实例补验。
+`initialize.models` 的 default/opus 条目均有 `supportsFastMode:true`（resolvedModel `claude-opus-5-5`），Haiku 条目没有该字段；AIReins 不按模型名猜能力。没有发送 `/fast`，没有切换到 Opus，实际 Fast 收费/额度与切换由主会话在临时实例补验。
 
-side_question 前主回复已完成，回包前另有 `system/control_request_progress {request_id:"probe-8",status:"started"}`，随后只回控制答案，没有 assistant/user/result 主线消息。wb 抑制侧问的控制进度、忽略迟到控制响应，HTTP 断开或超时取消请求。并发主回复侧问、实际取消效果尚未用真实模型探针覆盖，已做打桩回归，主会话补验。
+side_question 前主回复已完成，回包前另有 `system/control_request_progress {request_id:"probe-8",status:"started"}`，随后只回控制答案，没有 assistant/user/result 主线消息。AIReins 抑制侧问的控制进度、忽略迟到控制响应，HTTP 断开或超时取消请求。并发主回复侧问、实际取消效果尚未用真实模型探针覆盖，已做打桩回归，主会话补验。
 
-不存在的 task ID 也返回 success/{}，所以 wb 必须先校验会话 backgroundTasks 名单，且不能根据 success 伪造任务已消失；真实后台任务停止需临时实例补验。
+不存在的 task ID 也返回 success/{}，所以 AIReins 必须先校验会话 backgroundTasks 名单，且不能根据 success 伪造任务已消失；真实后台任务停止需临时实例补验。

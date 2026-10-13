@@ -366,7 +366,7 @@ async function shutdown(signal: string): Promise<void> {
     for (const client of clients) client.socket.close(1001, "server shutdown");
     for (const socket of terminalClients.keys()) socket.close(1001, "server shutdown");
     terminals.shutdown();
-    // wb stop 以主监听空出作为 worker 已停完的标志；此前只拒绝请求，不关闭监听。
+    // aireins stop 以主监听空出作为 worker 已停完的标志；此前只拒绝请求，不关闭监听。
     await manager.shutdown();
     const listeners = remoteServer ? [server, remoteServer] : [server];
     const closed = listeners.map((listener) => new Promise<void>((resolveClose, rejectClose) => {
@@ -413,7 +413,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
           powerOff: powerOffEnabled(prefs.shutdownCommand) }),
       }, requestId);
     } else if (method === "POST" && url.pathname === "/api/open-app-window") {
-      if (policy.kind !== "local") throw new ApiError(403, 40300, "仅本机入口可打开 WB 窗口");
+      if (policy.kind !== "local") throw new ApiError(403, 40300, "仅本机入口可打开 AIReins 窗口");
       try {
         await openAppWindow(policy, PORT, await readJson(request, 32 * 1024), APP_CHROME);
       } catch (error) {
@@ -461,7 +461,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
         response.once("finish", () => {
           setTimeout(() => {
             // POSIX detached 会新建 session / process group，stop 不会连坐此启动器。
-            const child = spawn("bash", [fileURLToPath(new URL("../bin/workbench", import.meta.url)), "restart"], {
+            const child = spawn("bash", [fileURLToPath(new URL("../bin/aireins", import.meta.url)), "restart"], {
               detached: true,
               stdio: "ignore",
               env: {
@@ -475,7 +475,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
             });
             child.once("error", (error) => {
               restartPending = false;
-              log("error", "workbench restart launcher failed", { message: error.message });
+              log("error", "aireins restart launcher failed", { message: error.message });
             });
             // 启动器在停服前就失败退出时放开闸门，允许再点
             child.once("exit", (code) => { if (code) restartPending = false; });

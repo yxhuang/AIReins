@@ -327,7 +327,7 @@ export class ClaudeDriver extends BaseDriver {
     // Same tool set as the VSCode extension, so a session resumed on either side sees identical tools.
     env.CLAUDE_CODE_ENABLE_TASKS = "0";
     env.MCP_CONNECTION_NONBLOCKING = "true";
-    // Inherited when wb is started from a VSCode terminal; wb is not an IDE host.
+    // Inherited when AIReins is started from a VSCode terminal; AIReins is not an IDE host.
     delete env.CLAUDE_CODE_SSE_PORT;
     // Hooks can identify workers that reload native history before sending.
     delete env.CC_FORK_GUARD;

@@ -50,7 +50,7 @@ export function gateLabel(payload: Record<string, unknown>): string {
 }
 
 export function gateText(session: Pick<SessionRecord, "id" | "agent" | "cwd">, label: string, baseUrl?: string): string {
-  const head = `[workbench] ${session.agent} @ ${basename(session.cwd)} 有闸门等你处理：${label}`;
+  const head = `[AIReins] ${session.agent} @ ${basename(session.cwd)} 有闸门等你处理：${label}`;
   return baseUrl ? `${head}\n${baseUrl}/#/session/${encodeURIComponent(session.id)}` : head;
 }
 

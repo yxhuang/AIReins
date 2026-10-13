@@ -15,7 +15,7 @@ if ($config.linuxHome -notmatch '^/[a-zA-Z0-9_./=-]+$') { throw (T 'Linux HOME è
 Add-Type -Path (Join-Path $PSScriptRoot 'wb-remote-gateway.cs')
 $log = [WbRemoteGateway]::FileLogger((Join-Path $PSScriptRoot 'remote-gateway.log'))
 # Same lock/scope as the existing Linux socket entry; only this request launches WSL.
-$command = 'flock -o /run/user/$(id -u)/wb-remote.lock systemd-run --user --scope -q /bin/bash -lc ''WORKBENCH_NO_OPEN=1 ' + $config.linuxHome + '/.local/bin/wb start'''
+$command = 'flock -o /run/user/$(id -u)/wb-remote.lock systemd-run --user --scope -q /bin/bash -lc ''WORKBENCH_NO_OPEN=1 ' + $config.linuxHome + '/.local/bin/aireins start'''
 $arguments = '-d ' + $config.distro + ' -u ' + $config.linuxUser + ' -e /bin/bash -lc "' + $command + '"'
 $starter = [WbRemoteGateway]::WslStarter((Join-Path $env:SystemRoot 'System32\wsl.exe'), $arguments, $log)
 $gateway = [WbRemoteGateway]::new(

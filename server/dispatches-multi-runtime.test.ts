@@ -85,7 +85,7 @@ try {
   assert.ok(!list.some((run) => run.session === "foreign"));
   const fromCodex = await listParentDispatches("codex-main", delegate, "codex", () => sessions);
   assert.equal(fromCodex.length, 5, "direct delegate + native Luna + nested native + Luna delegate + nested external delegate");
-  assert.equal((await listParentDispatches("wb-codex", delegate, "codex", () => sessions)).length, 5, "WB ID alias resolves to native parent");
+  assert.equal((await listParentDispatches("wb-codex", delegate, "codex", () => sessions)).length, 5, "AIReins ID alias resolves to native parent");
   const fromKimi = await listParentDispatches("kimi-main", delegate, "kimi", () => sessions);
   assert.equal(fromKimi.length, 3, "Copilot plus two running Kimi native children");
   assert.ok(!fromKimi.some((run) => run.parent?.agent === "codex"));

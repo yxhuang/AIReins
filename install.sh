@@ -3,9 +3,9 @@
 set -uo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)" || exit 1
-source "$REPO/bin/workbench"
+source "$REPO/bin/aireins"
 # 被 source 的启动器目录仍是同一个仓库。
-# 测试桩可能用极简脚本顶替 bin/workbench；缺失语言助手时补一份相同定义。
+# 测试桩可能用极简脚本顶替 bin/aireins；缺失语言助手时补一份相同定义。
 declare -F wb_is_zh >/dev/null || wb_is_zh() { case "${LC_ALL:-${LC_MESSAGES:-${LANG:-}}}" in [zZ][hH]*) return 0;; *) return 1;; esac; }
 declare -F say >/dev/null || say() {
   local format="$2"; wb_is_zh && format="$1"; shift 2
@@ -36,7 +36,7 @@ case "${1:-}" in
 esac
 if (( $# > 1 )); then say '用法：bash install.sh [--check]' 'Usage: bash install.sh [--check]' >&2; exit 2; fi
 
-say 'Workbench 安装依赖体检' 'Workbench install dependency check'
+say 'AIReins 安装依赖体检' 'AIReins install dependency check'
 case "$PLATFORM" in
   wsl|linux) ok 'Linux' ;;
   darwin) ok 'macOS（实验性）' 'macOS (experimental)' ;;
@@ -88,8 +88,8 @@ for dep in python3 curl; do
   if command -v "$dep" >/dev/null 2>&1; then
     ok "$dep 已安装" "$dep installed"
   else
-    if [[ "$PLATFORM" == darwin ]]; then warn "$dep 未安装（wb status 使用它）；可自行安装。" "$dep is not installed (wb status uses it); you may install it yourself."
-    else warn "$dep 未安装（wb status 使用它）；可执行 sudo apt-get install -y $dep。" "$dep is not installed (wb status uses it); you can run sudo apt-get install -y $dep."; fi
+    if [[ "$PLATFORM" == darwin ]]; then warn "$dep 未安装（aireins status 使用它）；可自行安装。" "$dep is not installed (aireins status uses it); you may install it yourself."
+    else warn "$dep 未安装（aireins status 使用它）；可执行 sudo apt-get install -y $dep。" "$dep is not installed (aireins status uses it); you can run sudo apt-get install -y $dep."; fi
   fi
 done
 cli_found=false
@@ -126,6 +126,11 @@ else
 fi
 
 if [[ "${1:-}" == --check ]] || (( ${#errors[@]} > 0 )); then
+  if [[ -x "$HOME/.local/bin/aireins" ]]; then
+    ok '~/.local/bin/aireins 已安装' '~/.local/bin/aireins installed'
+  else
+    warn '~/.local/bin/aireins 未安装；运行 bash install.sh 安装。' '~/.local/bin/aireins is not installed; run bash install.sh to install it.'
+  fi
   if [[ "$node_major" =~ ^[0-9]+$ ]] && (( 10#$node_major >= 22 )); then
     say $'\n远程入口体检（只读）' $'\nRemote entry check (read-only)'
     if [[ "$PLATFORM" == wsl ]]; then remote_installer="$REPO/deploy/windows/install-remote.mjs"
@@ -162,24 +167,34 @@ if ! mkdir -p "$HOME/.local/bin"; then
   summary
   exit 1
 fi
+link="$HOME/.local/bin/aireins"
+if [[ -d "$link" && ! -L "$link" ]]; then
+  fail "$link 已是目录，请先自行处理该目录，再重跑安装。" "$link is already a directory; handle it yourself, then rerun the install."
+elif ln -sfn "$REPO/bin/aireins" "$link"; then
+  ok "aireins → $REPO/bin/aireins"
+else
+  fail "无法安装 $link，请检查路径和权限。" "Cannot install $link; check the path and permissions."
+fi
 for name in wb workbench; do
   link="$HOME/.local/bin/$name"
   if [[ -L "$link" ]]; then
     old_target="$(readlink "$link")"
-    if [[ "$old_target" != "$REPO/bin/workbench" ]]; then
-      say '更新 %s：原指向 %s' 'Updating %s: previously pointed to %s' "$link" "$old_target"
+    [[ "$old_target" == /* ]] || old_target="$(dirname "$link")/$old_target"
+    # 只解析现存父目录，旧入口改名后目标文件可能已经不存在；兼容 BSD readlink。
+    old_directory="$(cd -P -- "$(dirname "$old_target")" 2>/dev/null && pwd)"
+    old_target="$old_directory/${old_target##*/}"
+    repo_bin="$(cd -P -- "$REPO/bin" && pwd)"
+    if [[ "$old_target" == "$repo_bin/workbench" || "$old_target" == "$repo_bin/aireins" ]]; then
+      if unlink "$link"; then
+        ok "已移除本仓库旧命令链接 $link；请使用 aireins。" "Removed this repository's old command link $link; use aireins."
+      else
+        fail "无法移除旧命令链接 $link，请检查路径和权限。" "Cannot remove the old command link $link; check the path and permissions."
+      fi
+    else
+      warn "保留 $link：不是本仓库的命令链接。" "Keeping $link: it is not this repository's command link."
     fi
   elif [[ -e "$link" ]]; then
-    say '更新 %s：原为非软链文件' 'Updating %s: previously a non-symlink file' "$link"
-  fi
-  if [[ -d "$link" && ! -L "$link" ]]; then
-    fail "$link 已是目录，请先自行处理该目录，再重跑安装。" "$link is already a directory; handle it yourself, then rerun the install."
-    continue
-  fi
-  if ln -sfn "$REPO/bin/workbench" "$link"; then
-    ok "$name → $REPO/bin/workbench"
-  else
-    fail "无法安装 $link，请检查路径和权限。" "Cannot install $link; check the path and permissions."
+    warn "保留 $link：不是本仓库的命令链接。" "Keeping $link: it is not this repository's command link."
   fi
 done
 
@@ -187,12 +202,12 @@ if "$windows"; then
   say $'\n安装 Windows 托盘与快捷方式' $'\nInstalling Windows tray and shortcuts'
   installer="$(wslpath -w "$REPO/deploy/windows/install-tray.ps1")"
   if [[ -n "$installer" ]] && (cd /mnt/c && powershell.exe -NoProfile -ExecutionPolicy Bypass \
-      -File "$installer" -Distro "$WSL_DISTRO_NAME" -WbPath "$REPO/bin/workbench"); then
+      -File "$installer" -Distro "$WSL_DISTRO_NAME" -WbPath "$REPO/bin/aireins"); then
     ok 'Windows 托盘与快捷方式已安装 / 更新（未启动）' 'Windows tray and shortcuts installed / updated (not started)'
   else
     warn 'Windows 安装失败；修复 interop 或上面的错误后，可在 WSL 手动重跑：' 'Windows install failed; after fixing interop or the errors above, rerun manually in WSL:'
     printf '  cd /mnt/c && powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$(wslpath -w %q)" -Distro %q -WbPath %q\n' \
-      "$REPO/deploy/windows/install-tray.ps1" "$WSL_DISTRO_NAME" "$REPO/bin/workbench"
+      "$REPO/deploy/windows/install-tray.ps1" "$WSL_DISTRO_NAME" "$REPO/bin/aireins"
   fi
 fi
 
@@ -209,16 +224,16 @@ esac
 
 say $'\n冒烟测试' $'\nSmoke test'
 # status 的退出码可能受可选 python3/curl 影响；以“运行中 / Running”输出识别现有服务。
-status_output="$("$REPO/bin/workbench" status 2>&1 || true)"
+status_output="$("$REPO/bin/aireins" status 2>&1 || true)"
 started_pid=''
 smoke_ready=true
 if [[ "$status_output" == 运行中（PID\ * || "$status_output" == "Running (PID "* ]]; then
   say '服务已运行，验证 /api/meta、首页与静态资源，保留现有服务。' 'The service is already running; verifying /api/meta, the homepage and static assets, and keeping the existing service.'
   if "$remote_created"; then
-    warn '运行 wb restart 使远程入口生效（本次不自动重启）。' 'Run wb restart for the remote entry to take effect (not restarting automatically this time).'
+    warn '运行 aireins restart 使远程入口生效（本次不自动重启）。' 'Run aireins restart for the remote entry to take effect (not restarting automatically this time).'
   fi
 else
-  start_output="$(WORKBENCH_NO_OPEN=1 "$REPO/bin/workbench" start 2>&1)"
+  start_output="$(WORKBENCH_NO_OPEN=1 "$REPO/bin/aireins" start 2>&1)"
   start_rc=$?
   printf '%s\n' "$start_output"
   # start 也可能遇到并发启动；仅记录本次明确启动的 PID。
@@ -271,9 +286,9 @@ if ! "$smoke_ready"; then
   tail -n 10 "${WORKBENCH_LOG:-$HOME/.workbench/server.log}" 2>/dev/null || true
 fi
 if [[ -n "$started_pid" ]]; then
-  current_status="$("$REPO/bin/workbench" status 2>&1 || true)"
+  current_status="$("$REPO/bin/aireins" status 2>&1 || true)"
   if [[ "$current_status" == "运行中（PID $started_pid）"* || "$current_status" == "Running (PID $started_pid)"* ]]; then
-    if "$REPO/bin/workbench" stop; then
+    if "$REPO/bin/aireins" stop; then
       ok '已停止本次冒烟启动的服务' 'Stopped the service started by this smoke test'
     else
       fail '本次冒烟启动的服务未能停止，请查看上面的提示。' 'Could not stop the service started by this smoke test; see the messages above.'
@@ -285,7 +300,7 @@ fi
 
 summary
 if [[ "$PLATFORM" == wsl ]]; then
-  say $'\n最后一步：开始菜单（或桌面）找到“Workbench 工作台” → 右键 → 固定到任务栏（Windows 不提供程序化固定任务栏的可靠接口）。' $'\nFinal step: find “Workbench 工作台” in the Start menu (or on the desktop) → right-click → Pin to taskbar (Windows has no reliable programmatic way to pin to the taskbar).'
+  say $'\n最后一步：开始菜单（或桌面）找到“AIReins”（改名前安装的为“Workbench 工作台”）→ 右键 → 固定到任务栏（Windows 不提供程序化固定任务栏的可靠接口）。' $'\nFinal step: find “AIReins” (or “Workbench 工作台” if installed before the rename) in the Start menu (or on the desktop) → right-click → Pin to taskbar (Windows has no reliable programmatic way to pin to the taskbar).'
   say '已有同名任务栏固定项时，安装器已一并更新，安装成功后无需重固定。' 'If a taskbar pin with the same name already exists, the installer has updated it; no need to re-pin after a successful install.'
 fi
 (( ${#errors[@]} == 0 ))

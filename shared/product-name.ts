@@ -1,1 +1,1 @@
-export const PRODUCT_NAME = "Workbench";
+export const PRODUCT_NAME = "AIReins";

@@ -468,7 +468,7 @@ export class CodexDriver extends BaseDriver {
       await withTimeout(this.interrupt(), 15_000, "Codex turn/interrupt");
       return { message: "中断请求已接受；以执行结束事件为准" };
     }
-    if (name !== "compact" && name !== "review") throw new Error("新会话必须通过 Workbench 会话管理器创建");
+    if (name !== "compact" && name !== "review") throw new Error("新会话必须通过 AIReins 会话管理器创建");
     this.callbacks.status("running");
     this.turnId = "";
     try {
@@ -869,7 +869,7 @@ export class CodexDriver extends BaseDriver {
     return true;
   }
 
-  /** Codex-only: a Workbench manual title supersedes any pending automatic result. */
+  /** Codex-only: an AIReins manual title supersedes any pending automatic result. */
   cancelAutomaticTitle(): void {
     this.titleAttempted = true;
     if (this.titleRequest) {
@@ -888,7 +888,7 @@ export class CodexDriver extends BaseDriver {
     }
     if (!this.titleThreadIds.has(params.threadId)) return false;
     if (rpcId !== undefined) {
-      // Fail closed: this hidden thread never exposes tools or approval gates to WB.
+      // Fail closed: this hidden thread never exposes tools or approval gates to AIReins.
       this.send({ jsonrpc: "2.0", id: rpcId, error: { code: -32601, message: "Tools disabled for title generation" } });
       job?.reject(new Error("Unexpected title tool request"));
     } else if (job && params.threadId === job.threadId && !job.cancelled) {

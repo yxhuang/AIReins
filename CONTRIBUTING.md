@@ -1,6 +1,6 @@
 # Contributing
 
-Thanks for your interest. Workbench is a small, personal tool maintained by one person, so the most useful contributions are focused ones.
+Thanks for your interest. AIReins is a small, personal tool maintained by one person, so the most useful contributions are focused ones.
 
 ## What helps most
 
@@ -12,11 +12,11 @@ For a larger feature, open an issue first so we can agree on the approach before
 
 ## Out of scope
 
-Workbench stays a single Node process plus a web page, for one person on their own computer. These are deliberate choices:
+AIReins stays a single Node process plus a web page, for one person on their own computer. These are deliberate choices:
 
 - Desktop wrappers or rewrites (Electron, Tauri, Rust, Go).
 - Managing fleets of agents in parallel git worktrees; [Orca](https://github.com/stablyai/orca) does that well.
-- Hosted relays, accounts, or exposing Workbench to the public internet.
+- Hosted relays, accounts, or exposing AIReins to the public internet.
 
 ## Development setup
 

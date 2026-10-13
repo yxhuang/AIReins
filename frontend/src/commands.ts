@@ -90,7 +90,7 @@ export function filterCommands(
   return [...weighted(prefix), ...weighted(fuzzy), ...weighted(desc)];
 }
 
-/** WB 接管的侧问命令：Claude /btw；Codex /side 及其原生别名 /btw。 */
+/** AIReins 接管的侧问命令：Claude /btw；Codex /side 及其原生别名 /btw。 */
 const SIDE_COMMANDS: Record<string, CommandInfo[]> = {
   claude: [{ name: "btw", description: t("core.011"), argHint: t("core.012"), source: "claude" }],
   codex: [
@@ -99,7 +99,7 @@ const SIDE_COMMANDS: Record<string, CommandInfo[]> = {
   ],
 };
 
-/** 命令表补上侧问命令（CLI 已列出同名项时以 WB 版本为准）。 */
+/** 命令表补上侧问命令（CLI 已列出同名项时以 AIReins 版本为准）。 */
 export function withSideCommands(agent: string, commands: CommandInfo[]): CommandInfo[] {
   const side = SIDE_COMMANDS[agent] ?? [];
   return side.length ? [...side, ...commands.filter((cmd) => !side.some((s) => s.name === cmd.name))] : commands;

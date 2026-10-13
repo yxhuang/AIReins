@@ -1,4 +1,4 @@
-# Workbench
+# AIReins
 
 **A personal AI workbench that runs on your own computer.** Drive Claude Code, Codex and Kimi Code from a browser, on the desktop or on your phone over [Tailscale](https://tailscale.com), and browse that computer's folders, files and terminal while you do it.
 
@@ -8,12 +8,12 @@ English | [简体中文](README.zh-CN.md)
 
 ## Why
 
-The official remote options for coding agents give you a window into **one agent session**. Workbench gives you **the whole computer**, from any browser on your private network:
+The official remote options for coding agents give you a window into **one agent session**. AIReins gives you **the whole computer**, from any browser on your private network:
 
 - Start, resume and switch between Claude Code, Codex and Kimi sessions side by side.
 - Browse any directory (including Windows drives under `/mnt/c`, not just git repos), preview and edit files in your home folder, Windows drives and session folders, open a terminal.
 - Send files between your phone and computer with Taildrop.
-- Keep everything interoperable with the native CLIs and the VS Code extension: sessions started in Workbench can be resumed there, and the other way round.
+- Keep everything interoperable with the native CLIs and the VS Code extension: sessions started in AIReins can be resumed there, and the other way round.
 
 It is deliberately small: one Node process plus a web page. No relay server, no account, no telemetry, no desktop app to keep open. It is built for one person working with their own agents, not for running a fleet of agents in parallel worktrees.
 
@@ -38,12 +38,12 @@ The interface supports English and Simplified Chinese; choose a language under S
 **Remote and multi-computer**
 - Phone layout installable as a home-screen web app.
 - Remote access through Tailscale Serve, restricted to an allowlist of Tailscale logins. See [SECURITY.md](SECURITY.md).
-- Discover the other computers on your tailnet and switch between their Workbenches from one menu.
-- On Windows: a tray icon and a Start-menu shortcut that open Workbench as an app window.
+- Discover the other computers on your tailnet and switch between their AIReins instances from one menu.
+- On Windows: a tray icon and a Start-menu shortcut that open AIReins as an app window.
 
 ## How it compares
 
-| | Workbench | Orca | Claude Code Remote Control | Codex Remote |
+| | AIReins | Orca | Claude Code Remote Control | Codex Remote |
 |---|---|---|---|---|
 | What you control remotely | The whole computer: sessions, any folder, files, terminal | Workspaces/worktrees, agent sessions, terminal, git | One Claude Code session | Codex tasks on a host |
 | Agents | Claude Code, Codex, Kimi | Many CLIs in a PTY | Claude Code | Codex |
@@ -52,7 +52,7 @@ The interface supports English and Simplified Chinese; choose a language under S
 | Runs as | One Node process + browser | Desktop app (must stay open) | Your terminal (must stay open) | Desktop app |
 | Best for | One person using one computer from anywhere | Running many agents in parallel worktrees | Quick check-ins on one session | Codex users in the ChatGPT app |
 
-If you want to run a team of agents in parallel worktrees, use [Orca](https://github.com/stablyai/orca). If you want to use your whole computer from your phone, use Workbench.
+If you want to run a team of agents in parallel worktrees, use [Orca](https://github.com/stablyai/orca). If you want to use your whole computer from your phone, use AIReins.
 
 <!-- Comparison facts collected 2026-10-12; re-check before each release. -->
 
@@ -74,31 +74,31 @@ Requirements:
 | Node.js ≥ 22.12 with npm | Required |
 | `ss` (iproute2), `rg` (ripgrep) | Required |
 | `zip` | For sending folders with Taildrop |
-| `curl`, `python3` | Optional, for full `wb status` output |
+| `curl`, `python3` | Optional, for full `aireins status` output |
 | Claude Code, Codex or Kimi Code CLI | At least one, installed and logged in |
 | Google Chrome on Windows | For the app window |
 | Tailscale on Windows | Optional, for remote access |
 
 ```bash
-git clone <repository-url> workbench && cd workbench && bash install.sh
+git clone https://github.com/yxhuang/AIReins.git && cd AIReins && bash install.sh
 ```
 
-`install.sh` checks dependencies, installs npm packages, builds the frontend, installs the `wb` command, the Windows tray icon and a Start-menu shortcut, and runs a smoke test. Run it again after `git pull` to update. `bash install.sh --check` only reports status and changes nothing.
+`install.sh` checks dependencies, installs npm packages, builds the frontend, installs the `aireins` command, the Windows tray icon and a Start-menu shortcut, and runs a smoke test. Run it again after `git pull` to update. `bash install.sh --check` only reports status and changes nothing.
 
-Pin "Workbench" from the Start menu to the taskbar yourself; Windows offers no reliable way to do it programmatically.
+Pin "AIReins" from the Start menu to the taskbar yourself; Windows offers no reliable way to do it programmatically.
 
 Daily use:
 
 ```bash
-wb            # start in the background and open it in your default Windows browser
-wb status     # also: wb stop | wb restart | wb logs
+aireins            # start in the background and open it in your default Windows browser
+aireins status     # also: aireins stop | aireins restart | aireins logs
 ```
 
-Workbench listens on `http://127.0.0.1:8790` (change with `WORKBENCH_PORT`). The tray icon and Start-menu shortcut open it as a Chrome app window.
+AIReins listens on `http://127.0.0.1:8790` (change with `WORKBENCH_PORT`). The tray icon and Start-menu shortcut open it as a Chrome app window.
 
 ## Install (native Linux / experimental macOS)
 
-Use the same `git clone` and `bash install.sh` commands. Native Linux needs Node ≥ 22.12, npm, `ss` (iproute2) and `rg`; macOS uses `lsof` instead of `ss` and needs `rg` (for example, `brew install ripgrep`). `wb` opens `xdg-open` on Linux or `open` on macOS. Headless hosts can set `WORKBENCH_NO_OPEN=1`. No Windows tray, gateway, app window, directory picker or PowerShell is installed or offered on these platforms. Linux systemd deployment is optional; see [host setup](docs/host-connections.md).
+Use the same `git clone` and `bash install.sh` commands. Native Linux needs Node ≥ 22.12, npm, `ss` (iproute2) and `rg`; macOS uses `lsof` instead of `ss` and needs `rg` (for example, `brew install ripgrep`). `aireins` opens `xdg-open` on Linux or `open` on macOS. Headless hosts can set `WORKBENCH_NO_OPEN=1`. No Windows tray, gateway, app window, directory picker or PowerShell is installed or offered on these platforms. Linux systemd deployment is optional; see [host setup](docs/host-connections.md).
 
 WSL2 is the maintainer's daily platform. Ubuntu CI is a required gate; macOS CI may fail while experimental. The maintainer has no Mac, so macOS is tested only in CI. macOS supports file browsing and preview, but file editing and folder Taildrop remain disabled until secure directory-fd operations are available. Ordinary file Taildrop is supported. Please report macOS results in an issue.
 
@@ -109,7 +109,7 @@ When Tailscale is installed and logged in on Windows, `install.sh` sets up remot
 1. It writes `~/.workbench/remote.json` (only if missing) with your MagicDNS HTTPS address and your Tailscale login. The remote terminal is **off** by default.
 2. It installs a small Windows gateway plus `tailscale serve`, after one UAC prompt.
 
-On native Linux and macOS, install and log in to Tailscale **on the same machine as Workbench**. The installer only creates a missing `remote.json` with `terminal: false` and prints the command for you to run; it never changes Tailscale Serve configuration:
+On native Linux and macOS, install and log in to Tailscale **on the same machine as AIReins**. The installer only creates a missing `remote.json` with `terminal: false` and prints the command for you to run; it never changes Tailscale Serve configuration:
 
 ```bash
 tailscale serve --bg http://127.0.0.1:8793
@@ -121,7 +121,7 @@ Open `https://<your-computer>.<tailnet>.ts.net/` on your phone and add it to the
 
 ## Configuration
 
-Workbench keeps its data in `~/.workbench`. `WORKBENCH_HOME` moves the server's data directory and the native POSIX remote installer's config directory. WSL installation, `wb` logs and snapshots retain their existing paths. It does not change the three CLIs' global settings, except the Claude Remote Control default when you toggle it in Workbench.
+AIReins keeps its data in `~/.workbench`. `WORKBENCH_HOME` moves the server's data directory and the native POSIX remote installer's config directory. WSL installation, `aireins` logs and snapshots retain their existing paths. It does not change the three CLIs' global settings, except the Claude Remote Control default when you toggle it in AIReins.
 
 Environment variables:
 
@@ -129,10 +129,10 @@ Environment variables:
 |---|---|---|
 | `WORKBENCH_PORT` | `8790` | Local port (always bound to `127.0.0.1`) |
 | `WORKBENCH_HOME` | `~/.workbench` | Server data directory |
-| `WORKBENCH_LOG` | `~/.workbench/server.log` | Log file written by `wb` |
+| `WORKBENCH_LOG` | `~/.workbench/server.log` | Log file written by `aireins` |
 | `WORKBENCH_STATIC_DIR` | `frontend/dist` | Serve another frontend build |
 
-Machine-specific options go in `~/.workbench/prefs.json`. They are not shown in the UI; restart Workbench after editing:
+Machine-specific options go in `~/.workbench/prefs.json`. They are not shown in the UI; restart AIReins after editing:
 
 ```json
 {
@@ -171,7 +171,7 @@ Design notes and API contracts live in [server/README.md](server/README.md), [fr
 
 ## Security
 
-Anyone who can reach Workbench has the power of your user account on that computer. Keep it on loopback and your tailnet; never expose it with Funnel or port forwarding. Read [SECURITY.md](SECURITY.md) for the threat model and how to report a vulnerability.
+Anyone who can reach AIReins has the power of your user account on that computer. Keep it on loopback and your tailnet; never expose it with Funnel or port forwarding. Read [SECURITY.md](SECURITY.md) for the threat model and how to report a vulnerability.
 
 ## License
 

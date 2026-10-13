@@ -48,14 +48,14 @@ try {
   if (-not $start -or -not [System.IO.Directory]::Exists($start)) { $start = $env:USERPROFILE }
   if ($fileMode) {
     $dialog.InitialDirectory = $start
-    $dialog.Title = 'Workbench - Select file'
+    $dialog.Title = 'AIReins - Select file'
     $dialog.Filter = 'All files (*.*)|*.*'
     $dialog.Multiselect = $false
     $dialog.CheckFileExists = $true
     $dialog.RestoreDirectory = $true
   } else {
     $dialog.AutoUpgradeEnabled = $true
-    $dialog.Description = 'Workbench - Select working directory'
+    $dialog.Description = 'AIReins - Select working directory'
     $dialog.UseDescriptionForTitle = $true
     $dialog.ShowNewFolderButton = $false
     $dialog.SelectedPath = $start

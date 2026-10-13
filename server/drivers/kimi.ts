@@ -508,7 +508,7 @@ export class KimiDriver extends BaseDriver {
       this.handleTerminalRelease(message.id, message.params ?? {});
       return;
     }
-    this.replyError(message.id, -32601, `Workbench 未实现 Kimi 方法：${method}`);
+    this.replyError(message.id, -32601, `AIReins 未实现 Kimi 方法：${method}`);
   }
 
   private queueElicitation(message: Record<string, any>): void {

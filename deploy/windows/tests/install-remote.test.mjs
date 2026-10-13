@@ -141,7 +141,7 @@ test('English locale prints English copy without Han characters', () => {
   try {
     const f = fixture({ uacCode: 1 });
     assert.equal(setupRemote(f.options).created, true);
-    assert.ok(f.messages.some(s => s.includes('off by default') && s.includes('wb restart')));
+    assert.ok(f.messages.some(s => s.includes('off by default') && s.includes('aireins restart')));
     assert.ok(f.messages.some(s => s.includes('UAC was declined or installation failed')));
     for (const message of f.messages) assert.ok(!/[\u3400-\u9fff]/.test(message), message);
   } finally {
@@ -160,8 +160,8 @@ function installerFixture(running = true, extraEnv = {}) {
   // Stubs run with LC_ALL=C so an uninstalled zh locale cannot leak bash setlocale
   // warnings into the captured stub output that install.sh pattern-matches on.
   const executable = (path, text) => writeFileSync(path, '#!/usr/bin/env -S LC_ALL=C bash\n' + text + '\n', { mode: 0o755 });
-  executable(join(repo, 'bin/workbench'), `if [[ "\${BASH_SOURCE[0]}" != "$0" ]]; then PLATFORM=wsl; return 0; fi
-echo "wb $*" >> "$TEST_TRACE"
+  executable(join(repo, 'bin/aireins'), `if [[ "\${BASH_SOURCE[0]}" != "$0" ]]; then PLATFORM=wsl; return 0; fi
+echo "aireins $*" >> "$TEST_TRACE"
 case "$1" in
   status) if [[ -f "$TEST_HOME/running" ]]; then echo '运行中（PID 123）'; else echo '未运行'; fi ;;
   start) touch "$TEST_HOME/running"; echo '已启动（PID 123）' ;;
@@ -217,11 +217,11 @@ test('install.sh --check reports remote states without npm, Windows writes or se
   assert.equal(existsSync(join(f.home, '.local')), false);
   assert.equal(existsSync(f.trace), false);
 });
-test('install.sh keeps running WB, requests restart, continues after refused UAC and reruns idempotently', () => {
+test('install.sh keeps running AIReins, requests restart, continues after refused UAC and reruns idempotently', () => {
   const f = installerFixture();
   const output = f.run(false);
   assert.equal(output.status, 0, output.stdout + output.stderr);
-  assert.ok(output.stdout.includes('运行 wb restart 使远程入口生效'));
+  assert.ok(output.stdout.includes('运行 aireins restart 使远程入口生效'));
   assert.ok(output.stdout.includes('UAC 被拒绝或安装失败'), output.stdout + output.stderr);
   assert.ok(output.stdout.includes('冒烟测试：/api/meta 返回 code: 0'));
   assert.ok(output.stdout.includes('首页 / 与静态资源 /assets/fixture.js 返回 200'));
@@ -229,19 +229,19 @@ test('install.sh keeps running WB, requests restart, continues after refused UAC
   for (const path of ['/api/meta', '/', '/assets/fixture.js']) {
     assert.ok(readFileSync(f.trace, 'utf8').includes(`curl http://127.0.0.1:8790${path}`));
   }
-  assert.doesNotMatch(readFileSync(f.trace, 'utf8'), /wb (start|stop|restart)/);
+  assert.doesNotMatch(readFileSync(f.trace, 'utf8'), /aireins (start|stop|restart)/);
   const path = join(f.home, '.workbench/remote.json'); const before = readFileSync(path, 'utf8');
   const again = f.run(false);
   assert.equal(again.status, 0, again.stdout + again.stderr);
   assert.equal(readFileSync(path, 'utf8'), before);
   assert.ok(again.stdout.includes('已有配置，未覆盖'));
 });
-test('install.sh uses existing smoke start/stop logic when WB is not running', () => {
+test('install.sh uses existing smoke start/stop logic when AIReins is not running', () => {
   const f = installerFixture(false); const output = f.run(false);
   assert.equal(output.status, 0, output.stdout + output.stderr);
   const trace = readFileSync(f.trace, 'utf8');
-  assert.match(trace, /wb start/); assert.match(trace, /wb stop/);
-  assert.doesNotMatch(trace, /wb restart/);
+  assert.match(trace, /aireins start/); assert.match(trace, /aireins stop/);
+  assert.doesNotMatch(trace, /aireins restart/);
   assert.ok(output.stdout.includes('已停止本次冒烟启动的服务'));
 });
 
@@ -250,14 +250,14 @@ test('install.sh fails a build before installing links or touching services', ()
   assert.equal(output.status, 1, output.stdout + output.stderr);
   assert.ok(output.stdout.includes('npm run build 失败，安装未完成'));
   assert.match(readFileSync(f.trace, 'utf8'), /npm run build/);
-  assert.doesNotMatch(readFileSync(f.trace, 'utf8'), /wb |powershell/);
+  assert.doesNotMatch(readFileSync(f.trace, 'utf8'), /aireins |powershell/);
   assert.equal(existsSync(join(f.home, '.local/bin')), false);
 });
 for (const name of ['TEST_HOME_STATUS', 'TEST_ASSET_STATUS']) {
-  test(`install.sh rejects non-200 ${name} and preserves running WB`, () => {
+  test(`install.sh rejects non-200 ${name} and preserves running AIReins`, () => {
     const f = installerFixture(true, { [name]: '404' }); const output = f.run(false);
     assert.equal(output.status, 1, output.stdout + output.stderr);
     assert.ok(output.stdout.includes('首页或引用的静态资源未返回 200'));
-    assert.doesNotMatch(readFileSync(f.trace, 'utf8'), /wb (start|stop|restart)/);
+    assert.doesNotMatch(readFileSync(f.trace, 'utf8'), /aireins (start|stop|restart)/);
   });
 }

@@ -209,7 +209,7 @@ export type Mention = FileMention | ImageMention;
 export interface DriverCapabilities {
   usage: "detailed" | "context" | false;
   interrupt: boolean;
-  /** Codex 使用 wb 按本机协议映射的命令表；Claude/Kimi 使用原生枚举。 */
+  /** Codex 使用 AIReins 按本机协议映射的命令表；Claude/Kimi 使用原生枚举。 */
   commands: boolean;
   /** @ 文件引用能力位：false = 不弹 @ 面板、不显示预览条、发送不解析引用（纯文本原样发） */
   mentions: boolean;

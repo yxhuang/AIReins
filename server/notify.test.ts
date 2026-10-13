@@ -31,7 +31,7 @@ function harness() {
   const { sent, notifier } = harness();
   notifier.handle(event("permission_request", { requestId: "r1", toolName: "Bash" }));
   await wait(80);
-  assert.deepEqual(sent, [`[workbench] claude @ proj 有闸门等你处理：Bash\n${base}/#/session/s1`]);
+  assert.deepEqual(sent, [`[AIReins] claude @ proj 有闸门等你处理：Bash\n${base}/#/session/s1`]);
 }
 // 延迟内解决、进程退出、重复请求都不能额外发送。
 {
@@ -86,7 +86,7 @@ function harness() {
 
 assert.equal(gateLabel({ interactionType: "ask_user_question", toolName: "AskUserQuestion" }), "提问");
 assert.equal(gateLabel({ gate: "terminal/create" }), "terminal/create");
-assert.equal(gateText(session, "Bash"), "[workbench] claude @ proj 有闸门等你处理：Bash");
+assert.equal(gateText(session, "Bash"), "[AIReins] claude @ proj 有闸门等你处理：Bash");
 
 const dir = await mkdtemp(join(tmpdir(), "workbench-notify-test-"));
 const file = join(dir, "notify.json");
@@ -134,8 +134,8 @@ try {
 const fakeCli = join(dir, "fake-lark-cli");
 await writeFile(fakeCli, `#!/bin/sh\nif [ "$1" = im ]; then printf '{"ok":true}'; echo "$@" > "${dir}/args"; else printf '{"ok":false}'; fi\n`);
 await chmod(fakeCli, 0o755);
-await larkCliSender("ou_me", fakeCli)("[workbench] hi");
-assert.equal((await readFile(join(dir, "args"), "utf8")).trim(), "im +messages-send --as bot --user-id ou_me --text [workbench] hi");
+await larkCliSender("ou_me", fakeCli)("[AIReins] hi");
+assert.equal((await readFile(join(dir, "args"), "utf8")).trim(), "im +messages-send --as bot --user-id ou_me --text [AIReins] hi");
 await assert.rejects(larkCliSender("ou_me", join(dir, "missing"))("x"), /lark-cli 发送失败/);
 await writeFile(fakeCli, `#!/bin/sh\nprintf '{"ok":false}'\n`);
 await assert.rejects(larkCliSender("ou_me", fakeCli)("x"), /lark-cli 发送失败/);

@@ -89,7 +89,7 @@ export function setupRemote({ check = false, home, repo, distro, user, localPort
       config = generated;
       result.created = true;
       print(t(`✅ remote.json：已生成 ${config.origin}（权限 600，terminal: false）`, `✅ remote.json: generated ${config.origin} (mode 600, terminal: false)`));
-      print(t('远程终端默认关闭；如需允许白名单内账号远程使用本机 shell，将 ~/.workbench/remote.json 的 terminal 改为 true 后 wb restart', 'The remote terminal is off by default; to let allowlisted accounts use this machine\'s shell remotely, set terminal to true in ~/.workbench/remote.json and run wb restart'));
+      print(t('远程终端默认关闭；如需允许白名单内账号远程使用本机 shell，将 ~/.workbench/remote.json 的 terminal 改为 true 后 aireins restart', 'The remote terminal is off by default; to let allowlisted accounts use this machine\'s shell remotely, set terminal to true in ~/.workbench/remote.json and run aireins restart'));
     } catch (error) { print(t(`⚠ remote.json：未生成，保留现有文件（${error.message}）`, `⚠ remote.json: not generated; the existing file was kept (${error.message})`)); }
   }
   if (available(tailscale)) {

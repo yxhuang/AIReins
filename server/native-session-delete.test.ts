@@ -104,7 +104,7 @@ assert.ok(existsSync(records[2]!.nativeTranscriptPath!));
 delete process.env.TEST_KIMI_FAIL;
 process.env.TEST_KIMI_KEEP_DIR = "1";
 await assert.rejects(manager.remove(records[2]!.id, true), /历史文件仍存在/);
-assert.ok(manager.get(records[2]!.id), "a partial native deletion keeps the WB record");
+assert.ok(manager.get(records[2]!.id), "a partial native deletion keeps the AIReins record");
 await writeFile(records[2]!.nativeTranscriptPath!, "");
 delete process.env.TEST_KIMI_KEEP_DIR;
 await manager.remove(records[2]!.id, true);
@@ -129,7 +129,7 @@ delete process.env.KIMI_CODE_HOME;
 process.env.WORKBENCH_KIMI_HISTORY_DIR = join(fixture, ".kimi-code", "sessions");
 
 await assert.rejects(manager.remove(records[3]!.id, true), /Codex.*失败/);
-assert.ok(manager.get(records[3]!.id), "failed native deletion keeps WB record");
+assert.ok(manager.get(records[3]!.id), "failed native deletion keeps AIReins record");
 assert.ok(existsSync(records[3]!.transcriptPath));
 assert.ok(existsSync(records[3]!.nativeTranscriptPath!));
 await assert.rejects(manager.remove(records[4]!.id, true), /Claude/);

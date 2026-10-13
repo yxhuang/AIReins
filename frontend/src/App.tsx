@@ -13,6 +13,7 @@ import { sessionTitle } from "./format";
 import { store, type Store } from "./store";
 import { shallowEqual, useStore } from "./useStore";
 import { workbenchWindowTitle } from "./host-connections";
+import { BrandMark } from "./components/HostSwitcher";
 
 const selectCurrentSession = (value: Store) =>
   value.currentId ? value.session(value.currentId) : undefined;
@@ -125,10 +126,10 @@ export function App() {
             <section className="welcome-view">
             <div className="view-panel-actions"><PanelActions /></div>
             <div className="empty-state">
-              <h1 className="empty-logo" aria-label={PRODUCT_NAME.toLowerCase()}>
-                <span className="empty-logo-mark" aria-hidden="true">wb</span>
+              <h1 className="empty-logo" aria-label={PRODUCT_NAME}>
+                <span className="empty-logo-mark" aria-hidden="true"><BrandMark /></span>
                 <span className="empty-logo-line" aria-hidden="true" />
-                <span className="empty-logo-name" aria-hidden="true">{PRODUCT_NAME.toLowerCase()}</span>
+                <span className="empty-logo-name" aria-hidden="true">{PRODUCT_NAME}</span>
               </h1>
               <p>{t("core.001")}</p>
               <button

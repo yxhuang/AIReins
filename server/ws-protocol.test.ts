@@ -10,7 +10,7 @@ import { WebSocket } from "ws";
 
 // K1：主 WS 收到 null/数组/数字/字符串帧时回协议错误 40001，进程不得崩溃；之后正常帧仍能处理。
 // 修前行为：JSON.parse("null") 成功后在 try 外读 message.type 抛 TypeError，void 丢弃的 Promise
-// 变成未处理拒绝，Node 22 默认行为直接退出整个 wb 进程。
+// 变成未处理拒绝，Node 22 默认行为直接退出整个 AIReins 进程。
 const serverDir = fileURLToPath(new URL(".", import.meta.url));
 const forbiddenPorts = new Set([8790, 8793]);
 async function freePort(): Promise<number> {

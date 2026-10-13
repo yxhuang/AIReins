@@ -133,7 +133,7 @@ export function hostNavigationUrl(target: string, value: HostConnections): strin
   return `${remote ?? local}/${TRANSFER_PREFIX}${encodeURIComponent(JSON.stringify(state))}`;
 }
 
-/** 只在本机页面消费启动 fragment，目标限制为此 WB 的本机入口。 */
+/** 只在本机页面消费启动 fragment，目标限制为此 AIReins 的本机入口。 */
 export function parseAppWindowRequest(href: string): string | null {
   const page = new URL(href);
   if (!normalizeLocalOrigin(page.origin) || page.hash.length > 32_768) return null;

@@ -43,12 +43,12 @@ test("D4：空状态只有标题、行动说明和按钮", () => {
   assert.equal(coreZh["core.001"], "选一个会话，或新建一个");
   assert.doesNotMatch(app, /暖色只出现在/);
   assert.match(rule(".empty-state"), /max-width:\s*360px/);
-  assert.match(rule(".empty-state h1"), /font-size:\s*16px/);
+  assert.match(rule(".empty-state h1"), /font-size:\s*15px/);
   // 审批胶囊不被长模型名挤成只剩图标
   assert.match(rule(".cfg-pills > .cfg-pill-wrap + .cfg-pill-wrap"), /flex-shrink:\s*0/);
-  // 空状态 logo：wb 缩写 + 竖线 + workbench 整体放大显示
+  // 空状态 logo：AIReins 标志整体放大显示
   assert.match(rule(".empty-state .empty-logo"), /display:\s*inline-flex/);
-  assert.match(rule(".empty-logo-mark"), /44px/);
+  assert.match(rule(".empty-logo-mark"), /64px/);
   assert.match(readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8"), /empty-logo-mark[\s\S]*empty-logo-line[\s\S]*empty-logo-name/);
 });
 test("D5：桌面派单胶囊收进顶栏，手机横带另留", () => {
@@ -103,9 +103,9 @@ test("C2：运行中输入有字时可单独中断，空白保持原入口", asy
   assert.match(view, /className="composer-interrupt"/);
   assert.match(rule(".composer-interrupt"), /width:\s*30px/); assert.doesNotMatch(rule(".composer-interrupt"), /--gate|--danger/);
 });
-test("C4：手机模型浮层展示 14px 完整 cwd", () => {
+test("C4：手机模型浮层展示 13px 完整 cwd", () => {
   assert.match(config, /className="cfg-menu-cwd mono"/); assert.match(view, /cwd=\{session\.cwd\}/);
-  assert.match(rule(".cfg-menu-cwd"), /font-size:\s*14px/);
+  assert.match(rule(".cfg-menu-cwd"), /font-size:\s*13px/);
 });
 test("截图场景：覆盖空状态、长路径闸门、运行中断、回到最新及窄屏大字号", () => {
   const shots = source("./msg-display-shots.mjs");

@@ -24,7 +24,7 @@ export class StdioRpcProbe {
       this.stderr += chunk.toString("utf8");
     });
     this.child.on("error", (error) => this.rejectAll(error));
-    // CLI 提前退出时写 stdin 会异步抛 EPIPE；不接住会让整个 wb 进程崩溃
+    // CLI 提前退出时写 stdin 会异步抛 EPIPE；不接住会让整个 AIReins 进程崩溃
     this.child.stdin.on("error", (error) => this.rejectAll(error));
     this.child.on("close", () => {
       if (this.pending.size > 0) {

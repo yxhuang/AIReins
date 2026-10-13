@@ -25,6 +25,8 @@ export function resolveLocale(preference: LanguagePreference, systemLanguage: st
   return preference === "system" ? (/^zh/i.test(systemLanguage) ? "zh-CN" : "en") : preference;
 }
 const currentLocale = resolveLocale(readLanguagePreference(), typeof navigator === "undefined" ? "en" : navigator.language);
+// 只给样式按语言取阈值用（如底栏收图标）；不改 lang，避免影响中文字体回退。
+if (typeof document !== "undefined" && document.documentElement) document.documentElement.dataset.locale = currentLocale;
 export function getLocale(): Locale { return currentLocale; }
 /** The selected preference applies on page reload, including module-level labels. */
 export function setLanguagePreference(value: LanguagePreference): boolean {

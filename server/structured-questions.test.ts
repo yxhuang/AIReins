@@ -104,7 +104,7 @@ function harness<T extends CodexDriver | KimiDriver>(Driver: new (options: Drive
   h.exit();
   await assert.rejects(h.driver.resolvePermission("kimi:elicitation:54", "deny"), /不存在/);
 
-  // Form 能力不影响 CLI 原生审批；Workbench 仍转发它并回传拒绝。
+  // Form 能力不影响 CLI 原生审批；AIReins 仍转发它并回传拒绝。
   h.receive({ jsonrpc: "2.0", id: 55, method: "session/request_permission", params: {
     toolCall: { title: "Shell" }, options: [{ kind: "reject_once", optionId: "reject" }],
   } });
