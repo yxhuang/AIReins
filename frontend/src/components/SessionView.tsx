@@ -1424,7 +1424,7 @@ function Composer({ session, dead, errored }: { session: SessionRecord; dead: bo
       )}
       {!slashOpen && activeCmd?.argHint && (
         <div className="composer-hint">
-          <span className="mono">/{activeCmd.name}</span>{t("ui.SessionView.arguments")}{activeCmd.argHint}
+          <span className="mono">/{activeCmd.name}</span> {t("ui.SessionView.arguments")}{activeCmd.argHint}
         </div>
       )}
       {codexResult && <CodexCommandPanel result={codexResult} onClose={closeCodexResult} />}

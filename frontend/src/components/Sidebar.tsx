@@ -688,7 +688,7 @@ function SessionRow({
           }
         }}
       >
-        <p className="session-confirm-text">{t("ui.Sidebar.remove_this_session_from_the_workspace")}{AGENT_LABELS[session.agent]}{t("ui.Sidebar.the_native_conversation_history_will_be_preserved")}{running && t("ui.Sidebar.this_session_is_still_running_removing_it")}
+        <p className="session-confirm-text">{t("ui.Sidebar.remove_this_session_from_the_workspace")} {t("ui.Sidebar.the_native_conversation_history_will_be_preserved", { p0: AGENT_LABELS[session.agent] })}{running && t("ui.Sidebar.this_session_is_still_running_removing_it")}
         </p>
         {error && <p className="session-confirm-error">{error}</p>}
         <div className="session-confirm-actions">

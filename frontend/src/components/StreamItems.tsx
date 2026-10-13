@@ -291,7 +291,7 @@ export const GateBlock = forwardRef<HTMLDivElement, { item: GateView; sessionId:
       return (
         <div className="gate-block gate-resolved" ref={ref}>
           <span className="gate-resolved-label">
-            {item.agent}{t("ui.StreamItems.wants_to_run")}<span className="mono">{item.toolName}</span> —— {label}
+            {item.agent} {t("ui.StreamItems.wants_to_run")} <span className="mono">{item.toolName}</span> —— {label}
           </span>
         </div>
       );
@@ -301,7 +301,7 @@ export const GateBlock = forwardRef<HTMLDivElement, { item: GateView; sessionId:
       return (
         <div className="gate-block gate-expired" ref={ref}>
           <span className="gate-resolved-label">
-            {item.agent}{t("ui.StreamItems.wants_to_run")}<span className="mono">{item.toolName}</span>{t("ui.StreamItems.this_session_has_ended_this_approval_is")}</span>
+            {item.agent} {t("ui.StreamItems.wants_to_run")} <span className="mono">{item.toolName}</span>{t("ui.StreamItems.this_session_has_ended_this_approval_is")}</span>
         </div>
       );
     }
@@ -317,7 +317,7 @@ export const GateBlock = forwardRef<HTMLDivElement, { item: GateView; sessionId:
     return (
       <div className="gate-block" ref={ref}>
         <div className="gate-title">
-          {item.agent}{t("ui.StreamItems.wants_to_run")}<span className="mono">{item.toolName}</span>
+          {item.agent} {t("ui.StreamItems.wants_to_run")} <span className="mono">{item.toolName}</span>
           {item.finalGate && <span className="gate-final-tag">{t("ui.StreamItems.final_approval")}</span>}
         </div>
         {item.label !== item.toolName && <div className="gate-label">{item.label}</div>}

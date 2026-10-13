@@ -512,7 +512,7 @@ const dictionary: Record<string, string> = {
   "ui.Sidebar.new_group": "新建分组…",
   "ui.Sidebar.remove_from_group": "移出分组",
   "ui.Sidebar.remove_this_session_from_the_workspace": "从工作台移除此会话？",
-  "ui.Sidebar.the_native_conversation_history_will_be_preserved": "自己的对话记录不会被删除（CLI / VS Code 仍可续接），工作台里的这份记录与附件会一并删除。",
+  "ui.Sidebar.the_native_conversation_history_will_be_preserved": "{p0} 自己的对话记录不会被删除（CLI / VS Code 仍可续接），工作台里的这份记录与附件会一并删除。",
   "ui.Sidebar.this_session_is_still_running_removing_it": "该会话仍在运行，移除会停止它。",
   "ui.Sidebar.removing": "移除中…",
   "ui.Sidebar.confirm_removal": "确认移除",

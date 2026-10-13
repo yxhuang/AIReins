@@ -512,7 +512,7 @@ const dictionary: Record<string, string> = {
   "ui.Sidebar.new_group": "New group…",
   "ui.Sidebar.remove_from_group": "Remove from group",
   "ui.Sidebar.remove_this_session_from_the_workspace": "Remove this session from the workspace?",
-  "ui.Sidebar.the_native_conversation_history_will_be_preserved": "The native conversation history will be preserved and can still be resumed in the CLI or VS Code. The workspace copy and its attachments will be deleted.",
+  "ui.Sidebar.the_native_conversation_history_will_be_preserved": "The native {p0} conversation history will be preserved and can still be resumed in the CLI or VS Code. The workspace copy and its attachments will be deleted.",
   "ui.Sidebar.this_session_is_still_running_removing_it": "This session is still running. Removing it will stop it.",
   "ui.Sidebar.removing": "Removing…",
   "ui.Sidebar.confirm_removal": "Confirm removal",

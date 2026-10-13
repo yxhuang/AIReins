@@ -86,7 +86,7 @@ export function WorkbenchStorage({ dialogOpen, onDialogOpenChange }: {
     <div className="settings-item settings-storage">
       <span className="settings-item-label">{t("ui.WorkbenchStorage.storage_usage_sentence", { p0: (storage ? formatBytes(storage.totalBytes) : loading ? t("ui.common.reading_2") : t("ui.common.read_failed")) })}</span>
       <span className="settings-hint settings-storage-breakdown" aria-busy={loading}>
-        {storage ? <>{t("ui.WorkbenchStorage.session_records")}{formatBytes(storage.categories.transcripts.bytes)}{t("ui.WorkbenchStorage.attachments")}{formatBytes(storage.categories.uploads.bytes)}{t("ui.WorkbenchStorage.logs")}{formatBytes(storage.categories.logs.bytes)}{t("ui.WorkbenchStorage.other")}{formatBytes(storage.categories.other.bytes)}</>
+        {storage ? <>{t("ui.WorkbenchStorage.session_records")} {formatBytes(storage.categories.transcripts.bytes)} {t("ui.WorkbenchStorage.attachments")} {formatBytes(storage.categories.uploads.bytes)} {t("ui.WorkbenchStorage.logs")} {formatBytes(storage.categories.logs.bytes)} {t("ui.WorkbenchStorage.other")} {formatBytes(storage.categories.other.bytes)}</>
           : t("ui.WorkbenchStorage.session_records_attachments_logs_other")}
       </span>
       {error && !dialogOpen && <span className="new-error" role="alert">{error}</span>}

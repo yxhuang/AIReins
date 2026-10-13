@@ -1,45 +1,94 @@
-# AIReins
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/banner-en-dark.png">
+    <img src="docs/assets/banner-en-light.png" alt="AIReins: Let the agents run. Keep the reins. Claude Code, Codex and Kimi Code converge through AR on an Approve button on your phone" width="100%">
+  </picture>
+</p>
 
-**A personal AI workbench that runs on your own computer.** Drive Claude Code, Codex and Kimi Code from a browser, on the desktop or on your phone over [Tailscale](https://tailscale.com), and browse that computer's folders, files and terminal while you do it.
+<p align="center">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-1F1E1D?style=flat-square" alt="MIT License"></a>
+  <img src="https://img.shields.io/badge/Node.js-%E2%89%A5%2022.12-1F1E1D?style=flat-square&logo=nodedotjs&logoColor=white" alt="Node.js ≥ 22.12">
+  <img src="https://img.shields.io/badge/WSL2%20%C2%B7%20Linux-supported-1F1E1D?style=flat-square" alt="WSL2 · Linux supported">
+  <img src="https://img.shields.io/badge/macOS-experimental-8a8580?style=flat-square" alt="macOS experimental">
+  <img src="https://img.shields.io/badge/Claude%20Code%20%C2%B7%20Codex%20%C2%B7%20Kimi-official%20CLIs-1F1E1D?style=flat-square" alt="Claude Code · Codex · Kimi: official CLIs">
+</p>
 
-English | [简体中文](README.zh-CN.md)
+<p align="center">
+  <b>Use your whole computer from your phone. Let three AI agents do the work; you set the direction.</b><br>
+  One Node process and a web page, on your own private network.
+</p>
 
-> Status: early (v0.1). Built and used daily by one person on Windows + WSL2. Native Linux is supported with required Ubuntu CI checks; macOS is experimental with CI-only coverage; see [Platform support](#platform-support).
+<p align="center">
+  <b>English</b> · <a href="README.zh-CN.md">简体中文</a>
+</p>
 
-## Why
+<p align="center">
+  <a href="#get-started">Get started</a> ·
+  <a href="#remote-access-from-your-phone">Phone access</a> ·
+  <a href="#how-it-works">How it works</a> ·
+  <a href="#security">Security</a> ·
+  <a href="CONTRIBUTING.md">Contributing</a>
+</p>
 
-The official remote options for coding agents give you a window into **one agent session**. AIReins gives you **the whole computer**, from any browser on your private network:
+<br>
 
-- Start, resume and switch between Claude Code, Codex and Kimi sessions side by side.
-- Browse any directory (including Windows drives under `/mnt/c`, not just git repos), preview and edit files in your home folder, Windows drives and session folders, open a terminal.
-- Send files between your phone and computer with Taildrop.
-- Keep everything interoperable with the native CLIs and the VS Code extension: sessions started in AIReins can be resumed there, and the other way round.
+## What it is
 
-It is deliberately small: one Node process plus a web page. No relay server, no account, no telemetry, no desktop app to keep open. It is built for one person working with their own agents, not for running a fleet of agents in parallel worktrees.
+AIReins is an AI workbench that runs on your own computer. It drives Claude Code, Codex and Kimi Code through their official CLIs and your existing logins. You open sessions, approve tool calls, browse files and use a terminal from a browser on your desktop or phone, and reach the computer from anywhere over [Tailscale](https://tailscale.com).
 
-The interface supports English and Simplified Chinese; choose a language under Settings → Appearance.
+Official remote options usually give you a window into one session. AIReins gives you the whole computer: any folder (including Windows drives under `/mnt/c`, not just git repos), file preview and editing, a terminal, sending with Taildrop, and the native history of all three CLIs.
 
-## Features
+## Why "Reins"
 
-**Sessions**
-- Claude Code (stream-json), Codex (`codex app-server`) and Kimi Code (ACP), each driven through its official CLI and your existing login.
-- Approve or deny tool calls and answer agent questions from any device; pending approvals across all sessions are surfaced in one place.
-- Native history browser: search, filter by folder, and resume any past session from the three CLIs.
-- Per-session model, reasoning effort and permission mode; slash commands, skills and `@` file mentions with completion.
-- Context-usage ring, interrupt and steer mid-turn, side questions.
-- Pin, group and rename sessions; sessions are titled automatically.
+Agents keep getting more capable. They read code, edit files, run commands and work through long task lists on their own. I still don't want to hand over the wheel entirely: what is worth doing, when a task is finished, which command may run and which conclusion doesn't hold up are judgments that belong to a person.
 
-**The computer**
-- File panel: browse any readable directory with Git status and tabs. Inside your home folder, Windows drives and the session's folder, preview Markdown, code, images and PDF, and edit UTF-8 text files up to 1 MiB in place.
-- Multi-tab terminal (on the remote entry only when you enable it).
-- Taildrop: send a file or folder (zipped) from the file panel to your online Taildrop devices.
-- Dispatch view: see sub-agent and delegated runs as a parent/child tree.
+So everything in AIReins serves one idea: **let the agents run, and keep the reins in your hand.**
 
-**Remote and multi-computer**
-- Phone layout installable as a home-screen web app.
-- Remote access through Tailscale Serve, restricted to an allowlist of Tailscale logins. See [SECURITY.md](SECURITY.md).
-- Discover the other computers on your tailnet and switch between their AIReins instances from one menu.
-- On Windows: a tray icon and a Start-menu shortcut that open AIReins as an app window.
+- **Decide from anywhere.** Approve or deny tool calls and answer the agents' questions from your phone. Everything waiting on you, across all sessions, is collected in one place.
+- **Pull them back mid-run.** Interrupt with one tap; with Claude Code and Codex you can also steer a running turn or ask a side question (Kimi queues messages until the current turn ends), instead of waiting for the run to finish and redoing it.
+- **See what they are doing.** Context usage and every tool call in plain view, with sub-agents and delegated runs laid out as a parent/child tree.
+- **Use all three together.** Let one agent lead and hand work to another (with an external delegation tool, see [Optional integrations](#optional-integrations)) and follow the whole dispatch tree on your phone. You decide which agent suits which job; no single vendor locks you in.
+- **Keep everything yours.** No vendor relay, no account, no telemetry. Sessions are the CLIs' own native history, so you can resume them from the command line or VS Code as usual.
+
+## Before you start
+
+- **I built this for myself.** I use it every day on Windows + WSL2, and much of its code was written inside it, together with these three agents. It is not a polished general-purpose product and it has rough edges. Issues are welcome; I may be slow to reply, and I apologise in advance.
+- **Platforms.** Windows + WSL2 is the main platform. Native Linux is supported with required Ubuntu CI checks. macOS is experimental: I have no Mac, so it is tested only in CI. macOS reports are very welcome.
+- **It grants access to the whole computer.** Anyone who can reach AIReins has the power of your user account on that machine. It therefore listens on loopback only, remote access goes only through Tailscale, and only the logins you allow get in. Please read [Security](#security) first.
+- **It is not an agent farm.** To run a team of agents in parallel worktrees, [Orca](https://github.com/stablyai/orca) is a better fit. To use your whole computer from your phone and steer the agents yourself, use AIReins.
+
+## How it works
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/how-en-dark.png">
+  <img src="docs/assets/how-en-light.png" alt="Six steps: open, your tailnet, one process, official CLIs, whole computer, your call" width="100%">
+</picture>
+
+A browser on the same computer connects to `127.0.0.1` directly. Other devices join your tailnet first, then Tailscale Serve forwards them to AIReins' remote entry, which checks Host/Origin and admits only allowlisted Tailscale logins. AIReins is a single Node process listening on loopback only. It drives the three CLIs through their official protocols: Claude Code's stream-json, Codex's `codex app-server` and Kimi Code's ACP. Sessions are written to each CLI's own history; AIReins is just another way in. Protocol details are in [spikes/PROTOCOL-NOTES.md](spikes/PROTOCOL-NOTES.md).
+
+## What you get
+
+| | |
+|---|---|
+| **Three agents** | Claude Code, Codex and Kimi Code side by side; per-session model, reasoning effort and permission mode; slash commands, skills and `@` file mentions with completion; automatic titles, pinning, groups and renaming |
+| **Approvals and questions** | Approve or deny tool calls and answer agent questions from any device; everything pending across sessions in one place |
+| **Control mid-run** | Context-usage ring; interrupt; Claude Code and Codex also let you steer a running turn and ask side questions, while Kimi queues messages until the current turn ends |
+| **Native history** | Search and filter the three CLIs' native history by folder and resume sessions; sessions started in AIReins resume in the CLIs and the VS Code extension, and the other way round (a Codex thread allows one writer at a time, so release it in AIReins before resuming elsewhere) |
+| **Dispatch tree** | Sub-agents and delegated runs as a parent/child tree, on desktop and phone |
+| **The whole computer** | File panel for any readable folder, with Git status and tabs; inside your home folder, Windows drives and the session folder, preview Markdown, code, images and PDF and edit UTF-8 text up to 1 MiB in place; multi-tab terminal (off on the remote entry until you enable it) |
+| **Phone and Taildrop** | Phone layout installable as a home-screen app; send files or folders (zipped) to your online Taildrop devices |
+| **Several computers** | Lists the other computers on your tailnet; add one with a click and switch between their AIReins instances from one menu |
+| **On Windows** | Tray icon and Start-menu shortcut that open AIReins in its own app window |
+| **English and Chinese** | Follows your browser language; switch under Settings → Appearance |
+
+## A look
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/shots-en-dark.png">
+  <img src="docs/assets/shots-en-light.png" alt="Three agents side by side on the desktop, the whole computer on the phone" width="100%">
+</picture>
+
+<p align="center"><sub>Screenshots from a local instance running on demo data; the sessions and paths are made up.</sub></p>
 
 ## How it compares
 
@@ -47,16 +96,16 @@ The interface supports English and Simplified Chinese; choose a language under S
 |---|---|---|---|---|
 | What you control remotely | The whole computer: sessions, any folder, files, terminal | Workspaces/worktrees, agent sessions, terminal, git | One Claude Code session | Codex tasks on a host |
 | Agents | Claude Code, Codex, Kimi | Many CLIs in a PTY | Claude Code | Codex |
-| Network path | Your tailnet only, no relay | Orca relay (account) by default; LAN or Tailscale optional | Anthropic relay | OpenAI relay |
+| Network path | Your tailnet only; no AIReins or AI-vendor relay (Tailscale may fall back to its encrypted DERP relays) | Orca relay (account) by default; LAN or Tailscale optional | Anthropic relay | OpenAI relay |
 | Phone client | Web app | iOS / Android apps (beta) | Claude app | ChatGPT app |
 | Runs as | One Node process + browser | Desktop app (must stay open) | Your terminal (must stay open) | Desktop app |
 | Best for | One person using one computer from anywhere | Running many agents in parallel worktrees | Quick check-ins on one session | Codex users in the ChatGPT app |
 
-If you want to run a team of agents in parallel worktrees, use [Orca](https://github.com/stablyai/orca). If you want to use your whole computer from your phone, use AIReins.
-
 <!-- Comparison facts collected 2026-10-12; re-check before each release. -->
 
-## Platform support
+## Get started
+
+### Platform support
 
 | Platform | Status |
 |---|---|
@@ -65,7 +114,7 @@ If you want to run a team of agents in parallel worktrees, use [Orca](https://gi
 | macOS | Experimental; CI only, no maintainer hardware |
 | Native Windows (no WSL) | Not planned for now |
 
-## Install (Windows + WSL2)
+### Windows + WSL2
 
 Requirements:
 
@@ -96,7 +145,7 @@ aireins status     # also: aireins stop | aireins restart | aireins logs
 
 AIReins listens on `http://127.0.0.1:8790` (change with `WORKBENCH_PORT`). The tray icon and Start-menu shortcut open it as a Chrome app window.
 
-## Install (native Linux / experimental macOS)
+### Native Linux / experimental macOS
 
 Use the same `git clone` and `bash install.sh` commands. Native Linux needs Node ≥ 22.12, npm, `ss` (iproute2) and `rg`; macOS uses `lsof` instead of `ss` and needs `rg` (for example, `brew install ripgrep`). `aireins` opens `xdg-open` on Linux or `open` on macOS. Headless hosts can set `WORKBENCH_NO_OPEN=1`. No Windows tray, gateway, app window, directory picker or PowerShell is installed or offered on these platforms. Linux systemd deployment is optional; see [host setup](docs/host-connections.md).
 
@@ -172,6 +221,10 @@ Design notes and API contracts live in [server/README.md](server/README.md), [fr
 ## Security
 
 Anyone who can reach AIReins has the power of your user account on that computer. Keep it on loopback and your tailnet; never expose it with Funnel or port forwarding. Read [SECURITY.md](SECURITY.md) for the threat model and how to report a vulnerability.
+
+## Last word
+
+Agents will keep getting faster. I hope these reins let you ride with a little more confidence.
 
 ## License
 
