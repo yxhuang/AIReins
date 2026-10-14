@@ -135,6 +135,19 @@ assert.equal(stripReplayQueries("plain text"), "plain text");
 assert.equal(stripReplayQueries("before\x1b[5n\x1b[6n\x1b[?6nafter"), "beforeafter");
 assert.equal(stripReplayQueries("\x1b[1n\x1b[?5n\x1b[31mred\x1b[0m"), "\x1b[1n\x1b[?5n\x1b[31mred\x1b[0m", "只剥标准查询，不泛化所有 n 或视觉控制");
 
+// 无人订阅时服务端代答 CPR：ConPTY 启动发 \x1b[6n 后阻塞，远程 attach 晚到且回放剥询问会让 PowerShell 永远空白
+const registryCpr = new TerminalRegistry(process.cwd(), fakeSpawn);
+const cprTerm = registryCpr.create({ cols: 80, rows: 24 });
+const cprPty = ptys.at(-1)!;
+cprPty.output("\x1b[6n");
+assert.deepEqual(cprPty.writes, ["\x1b[1;1R"], "无人订阅时代答一次 CPR");
+cprPty.output("\x1b[?6n\x1b[5n");
+assert.deepEqual(cprPty.writes, ["\x1b[1;1R"], "只代答标准 CPR，不碰 DECXCPR/DSR 状态");
+registryCpr.attach(cprTerm.id, () => undefined);
+cprPty.output("\x1b[6n");
+assert.deepEqual(cprPty.writes, ["\x1b[1;1R"], "有订阅时交给前端 xterm 应答");
+registryCpr.shutdown();
+
 const local = localPolicy(8790);
 const remote = remotePolicy({ port: 8792, origin: "https://desk.tail1234.ts.net", allowedLogins: ["me@github"] });
 assert.equal(terminalEnabled(local, null), true);

@@ -405,7 +405,7 @@ REST 沿用 `{code,msg,data,request_id}` 信封：
 
 `TerminalInfo = {id:string, cwd:string, shell:string, cols:number, rows:number, createdAt:string, exited:boolean, exitCode:number|null}`。
 
-`/ws/terminal` 是独立的 JSON 文本帧通道，一个连接可订阅多个终端。上行 `{type:"attach",terminalId}` 后，服务端依次发送 `{type:"attached",terminalId,omitted}`、`{type:"data",terminalId,data}`（当前全部回放），随后推送实时 `{type:"data",terminalId,data}`。重复 attach 同一 id 会重新回放。**回放帧会剥掉 OSC 4/10/11/12 颜色查询与 CSI DA 与 DSR/CPR（5n/6n/?6n）询问序列**（`stripReplayQueries`）：查询无视觉效果，但重放时 xterm 会重新应答，应答字节进 PTY 输入被 shell 回显成垃圾；实时推送不剥。每终端只保留最近 256KB 输出，`omitted` 为此前丢弃的字节数。上行还支持 `{type:"input",terminalId,data}` 和 `{type:"resize",terminalId,cols,rows}`。进程退出发送 `{type:"exit",terminalId,exitCode}`；未知 id、已退出或参数无效发送 `{type:"error",terminalId?,message}`。连接断开仅解除订阅，不结束 PTY。
+`/ws/terminal` 是独立的 JSON 文本帧通道，一个连接可订阅多个终端。上行 `{type:"attach",terminalId}` 后，服务端依次发送 `{type:"attached",terminalId,omitted}`、`{type:"data",terminalId,data}`（当前全部回放），随后推送实时 `{type:"data",terminalId,data}`。重复 attach 同一 id 会重新回放。**回放帧会剥掉 OSC 4/10/11/12 颜色查询与 CSI DA 与 DSR/CPR（5n/6n/?6n）询问序列**（`stripReplayQueries`）：查询无视觉效果，但重放时 xterm 会重新应答，应答字节进 PTY 输入被 shell 回显成垃圾；实时推送不剥。PTY 输出 CPR 询问（`ESC[6n`）时若没有任何订阅者，服务端代答 `ESC[1;1R`：WSL 拉起的 Windows 程序（ConPTY）启动即询问并阻塞到收到应答，远程高延迟下 attach 晚于这一刻、回放又剥掉询问，PowerShell 会永远空白；有订阅者时仍由前端 xterm 应答。每终端只保留最近 256KB 输出，`omitted` 为此前丢弃的字节数。上行还支持 `{type:"input",terminalId,data}` 和 `{type:"resize",terminalId,cols,rows}`。进程退出发送 `{type:"exit",terminalId,exitCode}`；未知 id、已退出或参数无效发送 `{type:"error",terminalId?,message}`。连接断开仅解除订阅，不结束 PTY。
 
 ## 委派前自动快照
 

@@ -17,6 +17,8 @@ const MAX_TERMINAL_ROWS = 300;
  */
 const REPLAY_QUERY_RE = /\x1b\](?:4|10|11|12)(?:;[\d?]+)+(?:\x07|\x1b\\)|\x1b\[[\d;>]*c|\x1b\[(?:5|6|\?6)n/g;
 
+const CPR_QUERY_RE = /\x1b\[6n/g;
+
 export function stripReplayQueries(data: string): string {
   return data.replace(REPLAY_QUERY_RE, "");
 }
@@ -149,6 +151,10 @@ export class TerminalRegistry {
     };
     this.records.set(info.id, record);
     pty.onData((data) => {
+      // WSL 拉起的 Windows 程序（ConPTY）启动即发 CPR 询问并阻塞到收到应答。没人订阅时（远程
+      // 高延迟下 attach 晚于这一刻）回放又会剥掉询问，PowerShell 就永远空白；此时由服务端代答。
+      const cprQueries = record.listeners.size === 0 ? data.match(CPR_QUERY_RE)?.length ?? 0 : 0;
+      if (cprQueries > 0) pty.write("\x1b[1;1R".repeat(cprQueries));
       this.append(record, data);
       this.emit(record, { type: "data", terminalId: info.id, data });
     });
