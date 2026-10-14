@@ -1,4 +1,6 @@
 import './cli-rename.test.mjs';
+import './install-posix-remote.test.mjs';
+import './install-dependencies.test.mjs';
 import assert from 'node:assert/strict';
 import { copyFileSync, mkdtempSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
@@ -33,8 +35,13 @@ const temp = mkdtempSync(join(tmpdir(), 'wb-posix-platform-'));
 const status = { BackendState: 'Running', Self: { DNSName: 'alice.example.ts.net.', UserID: 7 }, User: { 7: { LoginName: 'alice@example.test' } } };
 for (const platform of ['linux', 'darwin']) {
   const home = join(temp, platform); const calls = []; const lines = [];
+  let serve = {};
   const options = { home, platform, print: value => lines.push(value), run(file, args) {
-    calls.push([file, args]); return { status: 0, stdout: JSON.stringify(status) };
+    calls.push([file, args]);
+    if (args.join(' ') === 'serve --bg http://127.0.0.1:8793') serve = {
+      TCP: { 443: { HTTPS: true } }, Web: { 'alice.example.ts.net:443': { Handlers: { '/': { Proxy: 'http://127.0.0.1:8793' } } } },
+    };
+    return { status: 0, stdout: JSON.stringify(args[0] === 'status' ? status : serve) };
   } };
   assert.equal(setupPosixRemote({ ...options, check: true }).created, false);
   assert.equal(setupPosixRemote(options).created, true);
@@ -42,10 +49,11 @@ for (const platform of ['linux', 'darwin']) {
   const before = readFileSync(configPath, 'utf8');
   assert.equal(JSON.parse(before).terminal, false);
   assert.equal(statSync(configPath).mode & 0o777, 0o600);
-  assert(lines.some(line => line.includes('serve --bg http://127.0.0.1:8793')));
-  assert(calls.every(([, args]) => args.join(' ') === 'status --json'));
+  assert(lines.some(line => line.includes('https://alice.example.ts.net')));
+  assert(calls.some(([, args]) => args.join(' ') === 'serve status --json'));
   assert.equal(setupPosixRemote(options).created, false);
   assert.equal(readFileSync(configPath, 'utf8'), before);
+  assert.equal(calls.filter(([, args]) => args[1] === '--bg').length, 1, '首次启用后重跑不改 Serve');
 }
 const invalid = join(temp, 'invalid'); mkdirSync(invalid); writeFileSync(join(invalid, 'remote.json'), 'invalid');
 setupPosixRemote({ home: invalid, run: () => ({ status: 0, stdout: JSON.stringify(status) }), print() {} });
@@ -104,4 +112,4 @@ assert(!/\p{Script=Han}/u.test(enCheck), enCheck);
 const langZhCheck = checkInstaller(afterInstaller, 'Linux', '6.6-generic', '', { LANG: 'zh_CN.UTF-8' });
 assert(langZhCheck.includes('AIReins 安装依赖体检'));
 assert.equal(langZhCheck, linuxCheck);
-console.log('POSIX platform OK: detection, port/process branches, remote setup preserves existing config and never invokes Serve');
+console.log('POSIX platform OK: detection, port/process branches, remote setup preserves existing config and only enables unconfigured Serve');

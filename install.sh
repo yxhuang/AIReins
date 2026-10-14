@@ -42,13 +42,36 @@ case "$PLATFORM" in
   darwin) ok 'macOS（实验性）' 'macOS (experimental)' ;;
   *) fail '需要 WSL2、原生 Linux 或 macOS（实验性）。' 'Requires WSL2, native Linux, or macOS (experimental).' ;;
 esac
-node_version="$(node --version 2>/dev/null || true)"
-node_major="${node_version#v}"
-node_minor="${node_version#v*.}"
-node_major="${node_major%%.*}"
-node_minor="${node_minor%%.*}"
+detect_node() {
+  node_version="$(node --version 2>/dev/null || true)"
+  node_major="${node_version#v}"
+  node_minor="${node_version#v*.}"
+  node_major="${node_major%%.*}"
+  node_minor="${node_minor%%.*}"
+}
 # Vite 要求 22.12 起
-if [[ "$node_major" =~ ^[0-9]+$ && "$node_minor" =~ ^[0-9]+$ ]] && (( 10#$node_major > 22 || (10#$node_major == 22 && 10#$node_minor >= 12) )); then
+node_supported() {
+  [[ "$node_major" =~ ^[0-9]+$ && "$node_minor" =~ ^[0-9]+$ ]] && (( 10#$node_major > 22 || (10#$node_major == 22 && 10#$node_minor >= 12) ))
+}
+detect_node
+if [[ "$PLATFORM" == darwin && "${1:-}" != --check && -t 0 && -t 1 ]] && command -v brew >/dev/null 2>&1; then
+  brew_packages=()
+  node_supported || brew_packages+=(node)
+  command -v rg >/dev/null 2>&1 || brew_packages+=(ripgrep)
+  if (( ${#brew_packages[@]} )); then
+    say '通过 Homebrew 安装缺失或版本不足的依赖（%s）？[Y/n]' 'Install missing or outdated dependencies via Homebrew (%s)? [Y/n]' "${brew_packages[*]}"
+    brew_answer=''
+    if IFS= read -r brew_answer && [[ "$brew_answer" == '' || "$brew_answer" == y || "$brew_answer" == Y ]]; then
+      if brew install "${brew_packages[@]}"; then
+        ok 'Homebrew 安装完成，重新检查依赖。' 'Homebrew install finished; checking dependencies again.'
+      else
+        warn 'Homebrew 安装失败，下面给出仍缺依赖的修复提示。' 'Homebrew install failed; fixes for dependencies still missing are shown below.'
+      fi
+      detect_node
+    fi
+  fi
+fi
+if node_supported; then
   ok "Node $node_version（≥ 22.12）" "Node $node_version (≥ 22.12)"
 else
   fail "Node 未安装或版本过低（${node_version:-未安装}）；需要 ≥ 22.12。" "Node is missing or too old (${node_version:-not installed}); need ≥ 22.12."

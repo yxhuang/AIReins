@@ -38,6 +38,30 @@ AIReins is an AI workbench that runs on your own computer. It drives Claude Code
 
 Official remote options usually give you a window into one session. AIReins gives you the whole computer: any folder (including Windows drives under `/mnt/c`, not just git repos), file preview and editing, a terminal, sending with Taildrop, and the native history of all three CLIs.
 
+## Highlights
+
+- **Keeps your harness.** AIReins is not another agent framework. It drives the official Claude Code, Codex and Kimi Code CLIs you already have, so your `CLAUDE.md`, `AGENTS.md`, skills, hooks, MCP servers, plugins and CLI settings load as usual. Nothing to migrate, and AIReins never rewrites them on its own; only when you toggle the Claude Remote Control default or a Claude plugin in the UI is that saved to the matching native config. You can pick a model, reasoning effort and permission mode per session; the choice applies to that session only.
+- **One workbench for all three.** No more switching between CLI windows: sessions from all three agents sit side by side, and approvals, answers and interrupts all happen in one place.
+- **One history, free to come and go.** Search, filter by folder and resume the native history of all three CLIs in one place. Sessions live in each CLI's own history, so you can pick them up again in the CLI, the VS Code extension or the Codex app, and reach a Claude session from the Claude app once Remote Control is on. (For Claude sessions to appear in the CLI and VS Code history lists, set `claudeCodeEntrypoint` in `prefs.json`, see [Configuration](#configuration); without it, `claude --resume <session ID>` still works.)
+- **Files and terminal at hand.** The right-hand panel holds a file window (browse any folder, preview, edit in place, see Git status) and a multi-tab terminal: your default shell (`$SHELL`) on Linux and macOS, bash plus Windows PowerShell under WSL.
+- **A live dispatch map.** When one agent leads and hands work to the others, the dispatch flow chart shows who sent what to whom, how far each run has got and whether it passed; sub-agents unfold as a parent/child tree too.
+- **Quick links and AI usage.** The Quick links menu holds your own links (web pages, `vscode://`, `obsidian://` and more, from one JSON file). An optional embedded [AI-Usage](https://github.com/yxhuang/ai-usage) panel shows the subscription quota of all three on one page; bars with a fixed time window also mark how much of that window has elapsed, so you can see at a glance whether you are spending faster than time.
+- **The whole computer on your phone.** Connect back over Tailscale to approve, read files and open a terminal from your phone.
+
+## A look
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/desktop-en-dark.png">
+  <img src="docs/assets/desktop-en-light.png" alt="Desktop: sessions from three agents on the left, a Claude session with a pending approval in the middle, and the dispatch flow chart on the right showing Codex and Kimi runs live" width="100%">
+</picture>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/mobile-en-dark.png">
+  <img src="docs/assets/mobile-en-light.png" alt="Three phone screens: the session list, a session with an approval card, and the terminal" width="100%">
+</picture>
+
+<p align="center"><sub>Screenshots from a local instance running on demo data; the sessions and paths are made up.</sub></p>
+
 ## Why "Reins"
 
 Agents keep getting more capable. They read code, edit files, run commands and work through long task lists on their own. I still don't want to hand over the wheel entirely: what is worth doing, when a task is finished, which command may run and which conclusion doesn't hold up are judgments that belong to a person.
@@ -57,6 +81,17 @@ So everything in AIReins serves one idea: **let the agents run, and keep the rei
 - **It grants access to the whole computer.** Anyone who can reach AIReins has the power of your user account on that machine. It therefore listens on loopback only, remote access goes only through Tailscale, and only the logins you allow get in. Please read [Security](#security) first.
 - **It is not an agent farm.** To run a team of agents in parallel worktrees, [Orca](https://github.com/stablyai/orca) is a better fit. To use your whole computer from your phone and steer the agents yourself, use AIReins.
 
+## How I use it: dispatching work
+
+My daily setup is one agent leading and several executing:
+
+1. **Lead.** I open a Claude Code session in AIReins. It works out what I want, splits the task, sets the acceptance criteria and checks the results at the end.
+2. **Dispatch.** Execution goes to whichever agent fits best and costs least: open-ended implementation and hard debugging to Codex, well-bounded batch work and Chinese-language checks to Kimi, purely mechanical edits to GitHub Copilot. Each dispatch is a self-contained work order (goal, read/write scope, acceptance command); a small script, `delegate`, runs the right CLI in the background and runs the acceptance command when it finishes.
+3. **Review.** Important output gets a read-only review from a different agent, and the lead verifies each finding before accepting it.
+4. **Stay in control.** The whole flow is visible live in the dispatch chart, on the phone too; when something stalls, I decide whether to pull it back.
+
+`delegate` is my personal script and is not part of this repository. The dispatch view reads the run records it writes; without it, the view shows only each CLI's native sub-agents.
+
 ## How it works
 
 <picture>
@@ -66,29 +101,21 @@ So everything in AIReins serves one idea: **let the agents run, and keep the rei
 
 A browser on the same computer connects to `127.0.0.1` directly. Other devices join your tailnet first, then Tailscale Serve forwards them to AIReins' remote entry, which checks Host/Origin and admits only allowlisted Tailscale logins. AIReins is a single Node process listening on loopback only. It drives the three CLIs through their official protocols: Claude Code's stream-json, Codex's `codex app-server` and Kimi Code's ACP. Sessions are written to each CLI's own history; AIReins is just another way in. Protocol details are in [spikes/PROTOCOL-NOTES.md](spikes/PROTOCOL-NOTES.md).
 
-## What you get
+## Features
 
 | | |
 |---|---|
 | **Three agents** | Claude Code, Codex and Kimi Code side by side; per-session model, reasoning effort and permission mode; slash commands, skills and `@` file mentions with completion; automatic titles, pinning, groups and renaming |
 | **Approvals and questions** | Approve or deny tool calls and answer agent questions from any device; everything pending across sessions in one place |
 | **Control mid-run** | Context-usage ring; interrupt; Claude Code and Codex also let you steer a running turn and ask side questions, while Kimi queues messages until the current turn ends |
-| **Native history** | Search and filter the three CLIs' native history by folder and resume sessions; sessions started in AIReins resume in the CLIs and the VS Code extension, and the other way round (a Codex thread allows one writer at a time, so release it in AIReins before resuming elsewhere) |
-| **Dispatch tree** | Sub-agents and delegated runs as a parent/child tree, on desktop and phone |
-| **The whole computer** | File panel for any readable folder, with Git status and tabs; inside your home folder, Windows drives and the session folder, preview Markdown, code, images and PDF and edit UTF-8 text up to 1 MiB in place; multi-tab terminal (off on the remote entry until you enable it) |
+| **Native history** | Search and filter the three CLIs' native history by folder and resume sessions; sessions started in AIReins resume in the CLIs and the VS Code extension (Claude sessions appear in the history lists only with `claudeCodeEntrypoint` set), and the other way round (a Codex thread allows one writer at a time, so release it in AIReins before resuming elsewhere) |
+| **Dispatch tree** | Sub-agents and delegated runs as a parent/child tree, with a live dispatch flow chart, on desktop and phone |
+| **Quick links and pages** | The Quick links menu reads your own links from `~/.workbench/pages/links.json`; extension pages can embed local tools such as [AI-Usage](https://github.com/yxhuang/ai-usage) |
+| **The whole computer** | File panel for any readable folder, with Git status and tabs; inside your home folder, Windows drives and the session folder, preview Markdown, code, images and PDF and edit UTF-8 text in place (files over 4 MiB load after a confirmation, up to 32 MiB); multi-tab terminal (off on the remote entry until you enable it) |
 | **Phone and Taildrop** | Phone layout installable as a home-screen app; send files or folders (zipped) to your online Taildrop devices |
 | **Several computers** | Lists the other computers on your tailnet; add one with a click and switch between their AIReins instances from one menu |
 | **On Windows** | Tray icon and Start-menu shortcut that open AIReins in its own app window |
 | **English and Chinese** | Follows your browser language; switch under Settings → Appearance |
-
-## A look
-
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/shots-en-dark.png">
-  <img src="docs/assets/shots-en-light.png" alt="Three agents side by side on the desktop, the whole computer on the phone" width="100%">
-</picture>
-
-<p align="center"><sub>Screenshots from a local instance running on demo data; the sessions and paths are made up.</sub></p>
 
 ## How it compares
 
@@ -110,67 +137,81 @@ A browser on the same computer connects to `127.0.0.1` directly. Other devices j
 | Platform | Status |
 |---|---|
 | Windows 11 + WSL2 (Ubuntu) | Supported: installer, tray, app window, remote gateway |
-| Native Linux | Supported; required Ubuntu CI checks |
-| macOS | Experimental; CI only, no maintainer hardware |
-| Native Windows (no WSL) | Not planned for now |
+| Native Linux | Supported; Ubuntu CI is a required check |
+| macOS | Experimental; covered by CI only, the author has no Mac |
+| Native Windows (no WSL) | Not planned |
 
-### Windows + WSL2
+### Step 1: have these ready
 
-Requirements:
+| | Windows + WSL2 | Native Linux | macOS |
+|---|---|---|---|
+| Node.js ≥ 22.12 (with npm) | Install inside WSL | Install yourself | The installer can install it with Homebrew |
+| `rg` (ripgrep) | `sudo apt-get install -y ripgrep` | Same | The installer can install it with Homebrew |
+| Port detection | `ss` (iproute2) | `ss` (iproute2) | Built-in `lsof` |
+| At least one AI CLI | Claude Code, Codex or Kimi Code, installed and logged in | Same | Same |
+| Remote access (optional) | Tailscale on Windows, logged in | Tailscale on this machine, logged in | Tailscale on this machine, logged in |
+| Other | Google Chrome on Windows (for the app window) | | |
 
-| Dependency | Notes |
-|---|---|
-| Node.js ≥ 22.12 with npm | Required |
-| `ss` (iproute2), `rg` (ripgrep) | Required |
-| `zip` | For sending folders with Taildrop |
-| `curl`, `python3` | Optional, for full `aireins status` output |
-| Claude Code, Codex or Kimi Code CLI | At least one, installed and logged in |
-| Google Chrome on Windows | For the app window |
-| Tailscale on Windows | Optional, for remote access |
+`curl` and `python3` (full `aireins status` output) are optional; sending folders with Taildrop also needs `zip`, which the installer does not check. If Node, npm, `rg` or the port tool is missing, the installer names it and prints a fix; for the AI CLIs it only checks that they are installed, so confirm you are logged in yourself.
+
+### Step 2: install with one command
+
+The same on all three platforms:
 
 ```bash
 git clone https://github.com/yxhuang/AIReins.git && cd AIReins && bash install.sh
 ```
 
-`install.sh` checks dependencies, installs npm packages, builds the frontend, installs the `aireins` command, the Windows tray icon and a Start-menu shortcut, and runs a smoke test. Run it again after `git pull` to update. `bash install.sh --check` only reports status and changes nothing.
+What the installer does **automatically**:
 
-Pin "AIReins" from the Start menu to the taskbar yourself; Windows offers no reliable way to do it programmatically.
+1. **Checks** Node, npm, the port tool, `rg` and the three CLIs. If a core dependency is missing it stops and prints the fix for your platform. On macOS, with Homebrew and an interactive terminal, it asks once `[Y/n]`; press Enter and it runs `brew install` for the missing Node or ripgrep, then checks again. On Linux, commands that need `sudo` are only printed, never run for you.
+2. **Installs and builds**: npm dependencies and the frontend.
+3. **Installs the `aireins` command** as a link in `~/.local/bin/aireins`.
+4. **WSL: installs the Windows tray icon and Start-menu shortcut** (independent of Tailscale; the tray is not started).
+5. **Sets up the remote entry** (when Tailscale on this machine is logged in): writes `~/.workbench/remote.json` (an existing one is never overwritten; the remote terminal starts off; a new file uses remote port 8793). Then:
+   - **WSL**: if the Windows remote gateway task is not installed yet, installs the gateway and `tailscale serve` after one UAC prompt; if it is, skips this.
+   - **Native Linux / macOS**: if Tailscale Serve has no configuration yet, runs `tailscale serve --bg http://127.0.0.1:<port from remote.json>`; if it already points at AIReins, leaves it alone; if something else is configured, it does **not** overwrite it and prints the current state and the command to run yourself. If Linux reports a permission error, run `sudo tailscale set --operator="$USER"` once as prompted, then rerun `bash install.sh`.
+6. **Smoke-tests** the API, the homepage and the static assets. If AIReins is already running it checks that instance; otherwise it starts one temporarily and stops it afterwards.
 
-Daily use:
+What you still do **by hand**:
+
+- Install and log in to at least one AI CLI, and to Tailscale if you want remote access. The installer never touches your accounts or the CLIs' settings.
+- If the installer says `~/.local/bin` is not on your PATH, add the line it prints to your shell config (usually `~/.zshrc` on macOS, `~/.bashrc` on Linux/WSL) and open a new terminal.
+- **WSL**: open "AIReins" from the Start menu to start the tray, and pin it to the taskbar (Windows does not let programs pin themselves).
+- If the installer reports that the remote setup failed (for example a declined UAC prompt, or Serve already has another configuration), follow its instructions and rerun `bash install.sh`.
+- Starting at boot or login is up to you for now. On native Linux the systemd units in the repository can start AIReins on demand when a remote connection arrives, but Serve must then point at port 8792; see [host setup](docs/host-connections.md).
+
+### Step 3: everyday use
 
 ```bash
-aireins            # start in the background and open it in your default Windows browser
+aireins            # start in the background and open it in your browser
 aireins status     # also: aireins stop | aireins restart | aireins logs
 ```
 
-AIReins listens on `http://127.0.0.1:8790` (change with `WORKBENCH_PORT`). The tray icon and Start-menu shortcut open it as a Chrome app window.
+AIReins listens on `http://127.0.0.1:8790` (change it with `WORKBENCH_PORT`). On Windows the tray icon and Start-menu shortcut open it in a Chrome app window; Linux opens your default browser with `xdg-open` and macOS with `open`. Without a desktop, set `WORKBENCH_NO_OPEN=1`.
 
-### Native Linux / experimental macOS
+**Update**: `git pull && bash install.sh`, then `aireins restart` when convenient (it interrupts running sessions). **Check without changing anything**: `bash install.sh --check`.
 
-Use the same `git clone` and `bash install.sh` commands. Native Linux needs Node ≥ 22.12, npm, `ss` (iproute2) and `rg`; macOS uses `lsof` instead of `ss` and needs `rg` (for example, `brew install ripgrep`). `aireins` opens `xdg-open` on Linux or `open` on macOS. Headless hosts can set `WORKBENCH_NO_OPEN=1`. No Windows tray, gateway, app window, directory picker or PowerShell is installed or offered on these platforms. Linux systemd deployment is optional; see [host setup](docs/host-connections.md).
-
-WSL2 is the maintainer's daily platform. Ubuntu CI is a required gate; macOS CI may fail while experimental. The maintainer has no Mac, so macOS is tested only in CI. macOS supports file browsing and preview, but file editing and folder Taildrop remain disabled until secure directory-fd operations are available. Ordinary file Taildrop is supported. Please report macOS results in an issue.
+**Platform differences**: native Linux and macOS have no tray, app window, Windows folder picker or PowerShell; the terminal uses the AIReins server process's `$SHELL` (an executable absolute path, listed in `/etc/shells` when that file exists), falling back to `/bin/zsh` and then bash on macOS, and to bash on Linux. On macOS you can browse and preview files but not edit them in place, and Taildrop sends single files but not folders. The author has no Mac and macOS is tested only in CI, so issue reports are very welcome.
 
 ## Remote access from your phone
 
-When Tailscale is installed and logged in on Windows, `install.sh` sets up remote access:
+Once the installer reports that the remote entry is set up and AIReins is running, on your phone:
 
-1. It writes `~/.workbench/remote.json` (only if missing) with your MagicDNS HTTPS address and your Tailscale login. The remote terminal is **off** by default.
-2. It installs a small Windows gateway plus `tailscale serve`, after one UAC prompt.
+1. Install Tailscale and log in with the same account to join your tailnet.
+2. Open `https://<your-computer>.<tailnet>.ts.net/` and choose "Add to Home Screen" to open it like an app.
 
-On native Linux and macOS, install and log in to Tailscale **on the same machine as AIReins**. The installer only creates a missing `remote.json` with `terminal: false` and prints the command for you to run; it never changes Tailscale Serve configuration:
+Notes:
 
-```bash
-tailscale serve --bg http://127.0.0.1:8793
-```
-
-Use the port printed by the installer if your existing configuration differs. On macOS the app CLI at `/Applications/Tailscale.app/Contents/MacOS/Tailscale` is a fallback when `tailscale` is absent from PATH. Serve forwards directly to the remote loopback listener; no Windows gateway is needed. Host/Origin checks and the Tailscale login allowlist are identical on all platforms. Remote terminal access requires an explicit `terminal: true` opt-in.
-
-Open `https://<your-computer>.<tailnet>.ts.net/` on your phone and add it to the home screen. Details and troubleshooting: [deploy/windows/REMOTE.md](deploy/windows/REMOTE.md). If your browser uses a system proxy, add `*.ts.net` to its bypass list.
+- Only the Tailscale logins listed in `allowedLogins` in `remote.json` get in. The Host/Origin and identity checks on the remote entry are identical on all three platforms.
+- The remote terminal is off by default; to enable it, set `"terminal": true` in `remote.json` and run `aireins restart`.
+- If AIReins was already running when you installed, run `aireins restart` once so the new remote configuration takes effect.
+- If your browser uses a system proxy, add `*.ts.net` to its bypass list.
+- Details and troubleshooting: [deploy/windows/REMOTE.md](deploy/windows/REMOTE.md) and [docs/host-connections.md](docs/host-connections.md).
 
 ## Configuration
 
-AIReins keeps its data in `~/.workbench`. `WORKBENCH_HOME` moves the server's data directory and the native POSIX remote installer's config directory. WSL installation, `aireins` logs and snapshots retain their existing paths. It does not change the three CLIs' global settings, except the Claude Remote Control default when you toggle it in AIReins.
+AIReins keeps its data in `~/.workbench`. `WORKBENCH_HOME` moves the server's data directory and the native POSIX remote installer's config directory. WSL installation, `aireins` logs and snapshots retain their existing paths. It never changes the three CLIs' settings on its own; only when you toggle the Claude Remote Control default or a Claude plugin in AIReins is that saved to the matching native config (plugins through the official `claude plugin enable/disable`).
 
 Environment variables:
 
@@ -194,16 +235,27 @@ Machine-specific options go in `~/.workbench/prefs.json`. They are not shown in 
 | Key | Effect |
 |---|---|
 | `shutdownCommand` | Absolute path of a command that schedules a shutdown (about 60 s) when run without arguments and cancels it with `abort`. When set, a Shut down item appears in Settings. |
-| `claudeCodeEntrypoint` | Set to `"claude-vscode"` to start Claude sessions with the VS Code extension's entrypoint identity. |
+| `claudeCodeEntrypoint` | Set to `"claude-vscode"` to start Claude sessions with the VS Code extension's entrypoint identity, so new sessions appear in the `claude --resume` and VS Code extension history lists (without it they resume only by session ID). |
 | `directoryBrowserHome` | Where the directory browser's Home button goes. Defaults to `$HOME`. |
 
 Remote access is configured in `~/.workbench/remote.json`; see [server/README.md](server/README.md#访问控制).
 
 ## Optional integrations
 
-- **delegate**: the dispatch view also shows runs written by an external `delegate` tool to `~/.cache/delegate`. Without it, the view shows native sub-agents only.
+- **delegate**: the dispatch view also shows runs written by an external `delegate` tool to `~/.cache/delegate` (see [How I use it](#how-i-use-it-dispatching-work)). Without it, the view shows native sub-agents only.
+- **AI-Usage**: [ai-usage](https://github.com/yxhuang/ai-usage) is a separate local tool that reads the credentials already on your machine and shows the subscription quota of all three agents. Install and start it as its README describes (default `127.0.0.1:8788`), create `~/.workbench/pages/ai-usage/manifest.json` and restart AIReins; the AI-Usage button at the bottom of the sidebar then opens it inside AIReins (`proxy: true` makes it reachable from your phone too):
+
+  ```json
+  {"id":"ai-usage","name":"AI-Usage","icon":"📊","type":"iframe","url":"http://127.0.0.1:8788","proxy":true}
+  ```
+
+- **Quick links**: put your links in `~/.workbench/pages/links.json`; reload the page or reopen Quick links to see them. `group` groups them:
+
+  ```json
+  {"links":[{"name":"GitHub","url":"https://github.com","icon":"🐙","group":"Daily"},{"name":"Notes","url":"obsidian://open?vault=notes","icon":"📝","group":"Daily"}]}
+  ```
 - **Notifications**: Feishu (Lark) webhook via `~/.workbench/notify.json`. More channels are planned.
-- **Pages**: small extension pages and launcher links in `~/.workbench/pages/`. See [server/README.md](server/README.md).
+- **Pages**: each subfolder of `~/.workbench/pages/` is one extension page (fields in [server/README.md](server/README.md#pages-扩展页面)).
 
 ## Development
 

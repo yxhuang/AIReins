@@ -14,6 +14,7 @@ import {
   isTerminalCopyKey,
   createTermTitlebarGesture,
   terminalShellOptions,
+  terminalShellLabel,
   TERM_ACTIVE_STORAGE_KEY,
   TERM_SHORTCUT_KEYS,
   buildTerminalWsUrl,
@@ -118,16 +119,17 @@ function writeSavedActiveTerminalId(id: string | null): void {
  * xterm 实例、WS 连接与服务端 PTY 全部保留。标签条列出服务端全部未退出终端
  * （当前激活的已退出终端也保留，看输出与退出码）；「＋」新建当前 kind 的终端。
  * 切标签 = detach 旧的 + attach 新的（服务端回放 scrollback）；刷新后优先重连
- * localStorage 记的激活 id，其次第一个未退出终端，都没有就新建 bash。
+ * localStorage 记的激活 id，其次第一个未退出终端，都没有就新建缺省 shell。
  */
 export function TerminalPanel({ open, onClose }: { open: boolean; onClose: () => void }) {
   const powershell = useStore(value => value.meta?.capabilities.powershell === true);
-  const shellOptions = terminalShellOptions(powershell);
+  const defaultShell = useStore(value => value.meta?.terminalShell ?? "bash");
   const hostRef = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useSidePanelWidth();
   const [maximized, setMaximized] = useState(false);
   const [titlebarHidden, setTitlebarHidden] = useState(false);
   const [info, setInfo] = useState<TerminalInfo | null>(null);
+  const shellOptions = terminalShellOptions(powershell, info?.kind === "bash" ? terminalShellLabel(info) : defaultShell);
   /** 服务端注册表快照（含已退出记录）；标签条按 buildTermTabs 过滤 */
   const [terminals, setTerminals] = useState<TerminalInfo[]>([]);
   const terminalsRef = useRef<TerminalInfo[]>([]);
@@ -657,7 +659,7 @@ export function TerminalPanel({ open, onClose }: { open: boolean; onClose: () =>
             })}
           </div>
           <button type="button" className="term-tab-new" aria-label={t("ui.TerminalPanel.new_terminal")}
-            title={t("ui.TerminalPanel.new_terminal_2", { p0: (info?.kind === "powershell" ? "PowerShell" : "bash") })} disabled={switching || killBusy || confirmKill}
+            title={t("ui.TerminalPanel.new_terminal_2", { shell: (info?.kind === "powershell" ? terminalShellLabel(info) : defaultShell) })} disabled={switching || killBusy || confirmKill}
             onClick={() => void runtimeRef.current?.createNew(info?.kind ?? "bash")}>
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="M12 4v16M4 12h16" /></svg>
           </button>

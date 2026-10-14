@@ -672,7 +672,7 @@ const dictionary: Record<string, string> = {
   "ui.TerminalPanel.message": "{p0} {p1}",
   "ui.TerminalPanel.remove_exited_tab": "Remove exited tab",
   "ui.TerminalPanel.end_terminal_confirmation_required": "End terminal (confirmation required)",
-  "ui.TerminalPanel.new_terminal_2": "New {p0} terminal",
+  "ui.TerminalPanel.new_terminal_2": "New {shell} terminal",
   "ui.TerminalPanel.restore_terminal_window": "Restore terminal window",
   "ui.TerminalPanel.maximize_terminal_window": "Maximize terminal window",
   "ui.TerminalPanel.maximize_terminal_window_while_keeping_the_left": "Maximize terminal window while keeping the left sidebar",

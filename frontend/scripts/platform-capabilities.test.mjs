@@ -7,11 +7,15 @@ import { store } from '../src/store.ts';
 import { DirectoryBrowser } from '../src/components/DirectoryBrowser.tsx';
 import { TaildropMenu } from '../src/components/TaildropMenu.tsx';
 import { FilePanel } from '../src/components/FilePanel.tsx';
-import { terminalShellOptions } from '../src/terminal.ts';
+import { buildTermTabs, terminalShellLabel, terminalShellOptions } from '../src/terminal.ts';
 import { normalizeDirectoryPath, directoryBreadcrumbs } from '../src/directory-path.ts';
 import { resolveLocalFileLink } from '../src/file-preview.ts';
 globalThis.React = React;
 globalThis.window = { location: { hash: "#/" }, innerWidth: 1280 };
+assert.equal(terminalShellLabel({ kind: 'bash', shell: '/bin/zsh' }), 'zsh');
+assert.equal(terminalShellLabel({ kind: 'powershell', shell: '/mnt/c/Program Files/PowerShell/7/pwsh.exe' }), 'PowerShell');
+const shellTerm = id => ({ id, cwd: '/', kind: 'bash', shell: '/bin/zsh', cols: 80, rows: 24, createdAt: '', exited: false, exitCode: null });
+assert.deepEqual(buildTermTabs([shellTerm('a'), shellTerm('b')], 'a').map(tab => tab.label), ['zsh 1', 'zsh 2']);
 const original = store.meta;
 const originalPreview = store.filePreview;
 try {
@@ -24,6 +28,7 @@ try {
     assert.equal(html.includes('>WSL</button>'), host === 'wsl');
     assert.equal(html.includes('>主目录</button>'), host !== 'wsl');
     assert.deepEqual(terminalShellOptions(caps.powershell).map(item => item.value), host === 'wsl' ? ['bash', 'powershell'] : ['bash']);
+    assert.deepEqual(terminalShellOptions(caps.powershell, host === 'wsl' ? 'bash' : 'zsh').map(item => item.label), host === 'wsl' ? ['bash', 'PowerShell'] : ['zsh']);
     assert.equal(normalizeDirectoryPath('C:\\Users\\user', caps.windowsPaths), host === 'wsl' ? '/mnt/c/Users/user' : 'C:\\Users\\user');
     assert.equal(directoryBreadcrumbs('/mnt/c/work', caps.windowsPaths)[0].label, host === 'wsl' ? 'C:' : '/');
     assert.equal(resolveLocalFileLink('C:\\Users\\user', '/home/user', caps.windowsPaths), host === 'wsl' ? '/mnt/c/Users/user' : null);
@@ -37,6 +42,6 @@ try {
   assert.ok(!panel.includes('aria-label="发送到设备"'));
   assert.ok(!panel.includes('aria-label="保存"'));
   const terminal = readFileSync(new URL('../src/components/TerminalPanel.tsx', import.meta.url), 'utf8');
-  assert.match(terminal, /terminalShellOptions\(powershell\)/); assert.match(terminal, /options=\{shellOptions\}/);
+  assert.match(terminal, /terminalShellOptions\(powershell,/); assert.match(terminal, /options=\{shellOptions\}/);
 } finally { store.meta = original; store.filePreview = originalPreview; }
 console.log('✅ 三平台目录入口、路径转换、shell选项与禁用发送入口');

@@ -123,7 +123,7 @@ webhook 地址就是密钥：文件权限设为 600，也不要写进日志或�
 
 | 能力字段 | WSL2 | 原生 Linux | macOS 实验性 |
 |---|---|---|---|
-| `terminal` | 本机开；远程须显式开启 | 同左，默认 bash | 同左，默认 bash |
+| `terminal` | 本机开；远程须显式开启，默认 bash | 同左，默认用户登录 shell | 同左，默认用户登录 shell（回退 zsh） |
 | `windowsDirectoryPicker` | 本机且 PowerShell 7 存在 | false | false |
 | `appWindow` | 本机且 Windows Chrome 存在 | false | false |
 | `powerOff` | 可执行 `prefs.shutdownCommand` 配置后开启 | 同左 | 同左 |
@@ -135,13 +135,15 @@ webhook 地址就是密钥：文件权限设为 600，也不要写进日志或�
 | `windowsTray` | 本机 true，远程 false | false | false |
 | `remoteGateway` | true（Windows 网关拓扑） | false（Serve 直连） | false（Serve 直连） |
 
-能力是 UI 提示，服务端继续独立验证每个接口的权限与参数。关机不引入平台默认命令，仍按本机 prefs 显式配置（无参数排定约 60 秒后关机，`abort` 取消），公开默认关闭，WSL 已有配置不变。三家 CLI 会话、历史、文件浏览/预览、原生文件检索都使用现有 POSIX 路径；`rg` 为安装依赖。默认登录交互 shell 保留 `bash -l -i`，Windows shell 不接受任意可执行路径。
+能力是 UI 提示，服务端继续独立验证每个接口的权限与参数。关机不引入平台默认命令，仍按本机 prefs 显式配置（无参数排定约 60 秒后关机，`abort` 取消），公开默认关闭，WSL 已有配置不变。三家 CLI 会话、历史、文件浏览/预览、原生文件检索都使用现有 POSIX 路径；`rg` 为安装依赖。WSL 保留 `bash -l -i`；原生 Linux/macOS 的 shell 选择见「终端」，客户端不接受任意可执行路径。
 
 Linux/WSL 文件读取和目录操作保持 `/proc` fd 锚定。macOS 文件预览/下载/普通文件发送在授权 realpath 上以 `NOFOLLOW|NONBLOCK` 打开，并在再次授权检查后比较路径与 fd 的 dev/ino；由于 Node 没有可用的 BSD openat 目录锚定 API，文件保存和目录打包按能力隐藏，后端也拒绝。不会用普通路径 rename/cwd 替换目录 fd 以降低原有安全保证。
 
 Tailscale 优先 PATH；WSL 保留 Windows CLI 回退，macOS 回退 `/Applications/Tailscale.app/Contents/MacOS/Tailscale`，原生 Linux 不探测或调用 `tailscale.exe`。Linux/WSL worker 继续保存内核 boot ID/start ticks；macOS 使用 `sysctl kern.bootsessionuuid/kern.boottime` 和 BSD `ps`。BSD 的秒级启动时间不用于判定存活 PID 复用：仅不同 boot UUID 或 PID 与所属组明确 ESRCH 才授予恢复资格，EPERM/未知状态保守阻止恢复。三平台 worker 都使用 POSIX detached 进程组。
 
-原生 Linux/macOS 上 Tailscale 和 AIReins 位于同一主机：`tailscale serve --bg http://127.0.0.1:<remote.port>` 直接进入远程监听。安装器只读 Tailscale 状态、生成缺失的 `remote.json`（权限 600、`terminal:false`）并打印命令；不改变 Serve，也不覆盖已有或无效配置。入口仍绑定 `127.0.0.1`，`remotePolicy` 的 Host、写操作/WS 的完整 Origin，以及 Serve 注入的 Tailscale 登录白名单检查不变。禁止 Funnel；本机伪造身份头不属于远程认证，因为本机进程本来拥有本机入口权限。
+原生 Linux/macOS 上 Tailscale 和 AIReins 位于同一主机：`tailscale serve --bg http://127.0.0.1:<remote.port>` 直接进入远程监听。安装器读取 Tailscale 状态并生成缺失的 `remote.json`（权限 600、`terminal:false`），已有或无效文件不覆盖。有有效配置且 Tailscale 已登录运行时，先读 `tailscale serve status --json`：没有 Serve 配置就自动执行上述命令并打印远程地址；HTTPS 根路径已指向同一目标就报告已配置，不改动；其他配置（含 TCP、前台 Serve、Services、Funnel）保留并打印现状和手动命令。权限失败不重试，提示用户自行执行 `sudo tailscale set --operator="$USER"` 后重跑 `bash install.sh`，脚本不执行 sudo。`--check` 全程只读。入口仍绑定 `127.0.0.1`，`remotePolicy` 的 Host、写操作/WS 的完整 Origin，以及 Serve 注入的 Tailscale 登录白名单检查不变。禁止 Funnel；本机伪造身份头不属于远程认证，因为本机进程本来拥有本机入口权限。
+
+macOS 安装时若已安装 Homebrew、stdin/stdout 都是 TTY，缺失或版本不足的 Node（≥22.12）与缺失的 ripgrep 会合并询问一次 `[Y/n]`，确认后执行 `brew install` 并重新检测。拒绝、无 Homebrew、非 TTY 或 `--check` 时只打印手动提示；不自动安装 Homebrew。Linux/WSL 的 apt/NodeSource 修复仍只打印命令，需要 sudo 的操作由用户执行。
 
 ## REST
 
@@ -400,10 +402,10 @@ Codex 的 `session` 缺失时，从 `stderr.log` 前 8KB 的 `session id: <uuid>
 REST 沿用 `{code,msg,data,request_id}` 信封：
 
 - `GET /api/terminals` → `data: {terminals: TerminalInfo[]}`。
-- `POST /api/terminals`，body `{cwd?: string, shell?: "bash"|"powershell", cols: number, rows: number}` → `data: TerminalInfo`。`cwd` 缺省或不存在时回退到 server 的 `defaultCwd`；shell 是白名单（不收路径），缺省 `bash`，bash 以登录交互模式（`bash -l -i`）启动，powershell 的 cwd 只在 `/mnt/<盘符>` 下沿用，否则进 Windows 用户目录；继承 server 环境。`cols` 限 1–500，`rows` 限 1–300，均须为整数。
+- `POST /api/terminals`，body `{cwd?: string, shell?: "bash"|"powershell", cols: number, rows: number}` → `data: TerminalInfo`。`cwd` 缺省或不存在时回退到 server 的 `defaultCwd`；shell 是白名单（不收路径），缺省及旧客户端的 `"bash"` 都表示本机 Unix 缺省 shell。WSL 固定 `bash -l -i`；原生 Linux/macOS 取服务进程 `$SHELL`，须绝对路径、可执行且列在 `/etc/shells`（文件不存在时仅检查前两项；读取失败不放行）。无效时 macOS 先退到可执行的 `/bin/zsh`，再退 `bash`；Linux 退 `bash`。zsh/bash 参数为 `-l -i`，其他 shell 保守只传 `-l`。powershell 仅 WSL 可用，cwd 只在 `/mnt/<盘符>` 下沿用，否则进 Windows 用户目录；继承 server 环境。`cols` 限 1–500，`rows` 限 1–300，均须为整数。
 - `POST /api/terminals/:id/kill` → `data: {ok: true}`。只结束进程，不删除文件；退出记录保留到 server 重启。
 
-`TerminalInfo = {id:string, cwd:string, shell:string, cols:number, rows:number, createdAt:string, exited:boolean, exitCode:number|null}`。
+`TerminalInfo = {id:string, cwd:string, kind:"bash"|"powershell", shell:string, cols:number, rows:number, createdAt:string, exited:boolean, exitCode:number|null}`。`shell` 是实际启动的程序；`GET /api/meta.data.terminalShell` 是缺省 Unix shell 的文件名（如 `zsh`）。前端标签取 `TerminalInfo.shell` 文件名，滑块随当前实际 shell 显示，新建提示取 meta 的缺省名；WSL 保留 bash / PowerShell。旧后端省略 meta 字段时回退 bash。
 
 `/ws/terminal` 是独立的 JSON 文本帧通道，一个连接可订阅多个终端。上行 `{type:"attach",terminalId}` 后，服务端依次发送 `{type:"attached",terminalId,omitted}`、`{type:"data",terminalId,data}`（当前全部回放），随后推送实时 `{type:"data",terminalId,data}`。重复 attach 同一 id 会重新回放。**回放帧会剥掉 OSC 4/10/11/12 颜色查询与 CSI DA 与 DSR/CPR（5n/6n/?6n）询问序列**（`stripReplayQueries`）：查询无视觉效果，但重放时 xterm 会重新应答，应答字节进 PTY 输入被 shell 回显成垃圾；实时推送不剥。PTY 输出 CPR 询问（`ESC[6n`）时若没有任何订阅者，服务端代答 `ESC[1;1R`：WSL 拉起的 Windows 程序（ConPTY）启动即询问并阻塞到收到应答，远程高延迟下 attach 晚于这一刻、回放又剥掉询问，PowerShell 会永远空白；有订阅者时仍由前端 xterm 应答。每终端只保留最近 256KB 输出，`omitted` 为此前丢弃的字节数。上行还支持 `{type:"input",terminalId,data}` 和 `{type:"resize",terminalId,cols,rows}`。进程退出发送 `{type:"exit",terminalId,exitCode}`；未知 id、已退出或参数无效发送 `{type:"error",terminalId?,message}`。连接断开仅解除订阅，不结束 PTY。
 

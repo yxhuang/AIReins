@@ -2,7 +2,7 @@
 
 AIReins: one Node process (`server/`) plus a Vite/React page (`frontend/`) that drives Claude Code, Codex and Kimi Code through their official CLIs, for one person on their own computer and tailnet.
 
-If `.work-orders/HANDOFF.md` exists (a local, untracked file), read it first: it holds the maintainer's current state and open tasks.
+If `HANDOFF.md` exists at the repository root (a local, untracked file), read it first: it holds the maintainer's current state and open tasks.
 
 ## Sources of truth
 

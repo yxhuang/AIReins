@@ -4,7 +4,7 @@ import { createReadStream, statSync } from "node:fs";
 import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import { join, resolve } from "node:path";
+import { basename, join, resolve } from "node:path";
 import type { Duplex } from "node:stream";
 import { fileURLToPath } from "node:url";
 import { acceptsGzip, compressResponse } from "./response-compression.js";
@@ -32,7 +32,7 @@ import { cleanStorage, getStorageStats, StorageInputError, validateStorageCleanI
 import { parseMcpAction, parseSideQuestion, parseTaskId } from "./session-menu.js";
 import { preflightSnapshot, SnapshotCwdError } from "./snapshot.js";
 import { InvalidEventPageCursor } from "./event-pages.js";
-import { TerminalError, TerminalRegistry, terminalEnabled, type TerminalEvent } from "./terminals.js";
+import { TerminalError, TerminalRegistry, resolveShell, terminalEnabled, type TerminalEvent } from "./terminals.js";
 import { IMAGE_MENTION_MIME_TYPES, resolveUploadFile, saveUpload, UploadError } from "./uploads.js";
 import {
   AGENTS,
@@ -408,6 +408,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
         ...meta,
         hostName: getServerHostName(REMOTE_CONFIG?.origin),
         platform,
+        terminalShell: basename(resolveShell(undefined).file),
         capabilities: getPlatformCapabilities({ local: policy.kind === "local", remoteTerminal: REMOTE_CONFIG?.terminal,
           chrome: appWindowEnabled(policy, APP_CHROME), picker: windowsPickerEnabled(policy.kind === "local"),
           powerOff: powerOffEnabled(prefs.shutdownCommand) }),

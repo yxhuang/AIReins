@@ -232,6 +232,8 @@ export interface MetaInfo {
   homeDir?: string;
   cliVersions: Record<AgentKind, string>;
   platform?: "wsl" | "linux" | "darwin" | "unsupported";
+  /** 服务端缺省 Unix shell 的名称；旧后端省略时回退 bash。 */
+  terminalShell?: string;
   capabilities: { terminal: boolean; windowsDirectoryPicker?: boolean; appWindow?: boolean; powerOff?: boolean;
     windowsPaths?: boolean; powershell?: boolean; fileEdit?: boolean; taildrop?: boolean; folderTaildrop?: boolean;
     windowsTray?: boolean; remoteGateway?: boolean };

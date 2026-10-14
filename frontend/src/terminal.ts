@@ -187,7 +187,7 @@ export function buildTermTabs(terminals: TerminalInfo[], activeId: string | null
   for (const t of visible) totals.set(t.kind, (totals.get(t.kind) ?? 0) + 1);
   const seen = new Map<ShellKind, number>();
   return visible.map((t) => {
-    const base = t.kind === "powershell" ? "PowerShell" : "bash";
+    const base = terminalShellLabel(t);
     const n = (seen.get(t.kind) ?? 0) + 1;
     seen.set(t.kind, n);
     const label = (totals.get(t.kind) ?? 0) > 1 ? `${base} ${n}` : base;
@@ -260,7 +260,12 @@ export function createTermTitlebarGesture(options: {
   };
 }
 
+/** Unix 标签取服务端实际程序名；Windows shell 保留统一显示名。 */
+export function terminalShellLabel(info: Pick<TerminalInfo, "kind" | "shell">): string {
+  return info.kind === "powershell" ? "PowerShell" : info.shell.split("/").pop() || "bash";
+}
+
 /** 只有后端确认的 Windows shell 才进入选择器。 */
-export function terminalShellOptions(powershell: boolean): Array<{ value: ShellKind; label: string }> {
-  return [{ value: "bash", label: "bash" }, ...(powershell ? [{ value: "powershell" as const, label: "PowerShell" }] : [])];
+export function terminalShellOptions(powershell: boolean, defaultShell = "bash"): Array<{ value: ShellKind; label: string }> {
+  return [{ value: "bash", label: defaultShell }, ...(powershell ? [{ value: "powershell" as const, label: "PowerShell" }] : [])];
 }

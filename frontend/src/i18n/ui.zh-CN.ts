@@ -672,7 +672,7 @@ const dictionary: Record<string, string> = {
   "ui.TerminalPanel.message": "{p0} {p1}",
   "ui.TerminalPanel.remove_exited_tab": "移除已退出标签",
   "ui.TerminalPanel.end_terminal_confirmation_required": "结束终端（需确认）",
-  "ui.TerminalPanel.new_terminal_2": "新建 {p0} 终端",
+  "ui.TerminalPanel.new_terminal_2": "新建 {shell} 终端",
   "ui.TerminalPanel.restore_terminal_window": "还原终端窗口",
   "ui.TerminalPanel.maximize_terminal_window": "最大化终端窗口",
   "ui.TerminalPanel.maximize_terminal_window_while_keeping_the_left": "最大化终端窗口（保留左侧栏）",

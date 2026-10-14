@@ -1,8 +1,8 @@
-import { statSync } from "node:fs";
-import { resolve } from "node:path";
+import { readFileSync, statSync } from "node:fs";
+import { basename, isAbsolute, resolve } from "node:path";
 import { spawn, type IPty } from "@lydell/node-pty";
 import type { AccessPolicy, RemoteConfig } from "./access.js";
-import { platform, findPowerShell, type WorkbenchPlatform } from "./platform.js";
+import { executableExists, platform, findPowerShell, type WorkbenchPlatform } from "./platform.js";
 import { ulid } from "./ulid.js";
 
 export const MAX_SCROLLBACK_BYTES = 256 * 1024;
@@ -73,8 +73,25 @@ function validateTerminalSize(cols: unknown, rows: unknown): { cols: number; row
 }
 
 /** 只认白名单种类，不接受路径——远程入口也会调到这里。 */
-export function resolveShell(kind: unknown, exists: (path: string) => boolean = fileExists, host: WorkbenchPlatform = platform): { kind: ShellKind; file: string; args: string[] } {
-  if (kind === undefined || kind === "bash") return { kind: "bash", file: "bash", args: ["-l", "-i"] };
+export function resolveShell(kind: unknown, exists: (path: string) => boolean = fileExists, host: WorkbenchPlatform = platform,
+  { env = process.env, executable = executableExists, readShells = () => readFileSync("/etc/shells", "utf8") }:
+  { env?: NodeJS.ProcessEnv; executable?: (path: string) => boolean; readShells?: () => string } = {},
+): { kind: ShellKind; file: string; args: string[] } {
+  // bash 保留为 Unix 终端的白名单标识，旧客户端也使用本机缺省 shell。
+  if (kind === undefined || kind === "bash") {
+    let file = "bash";
+    if (host === "darwin" || host === "linux") {
+      const candidate = env.SHELL;
+      let allowed = false;
+      if (candidate && isAbsolute(candidate) && executable(candidate)) {
+        try { allowed = readShells().split(/\r?\n/).some(line => line.split("#")[0]!.trim() === candidate); }
+        catch (error) { allowed = (error as NodeJS.ErrnoException).code === "ENOENT"; }
+      }
+      if (allowed) file = candidate!;
+      else if (host === "darwin" && executable("/bin/zsh")) file = "/bin/zsh";
+    }
+    return { kind: "bash", file, args: ["bash", "zsh"].includes(basename(file)) ? ["-l", "-i"] : ["-l"] };
+  }
   if (kind !== "powershell") throw new TerminalError("invalid", "shell 只能是 bash 或 powershell");
   const file = findPowerShell(host, exists);
   if (!file) throw new TerminalError("invalid", "本机没有找到 PowerShell");
@@ -111,6 +128,7 @@ export class TerminalRegistry {
   constructor(
     private readonly defaultCwd: string,
     private readonly spawnPty: typeof spawn = spawn,
+    private readonly shellResolver: typeof resolveShell = resolveShell,
   ) {}
 
   list(): TerminalInfo[] {
@@ -128,7 +146,7 @@ export class TerminalRegistry {
     if (input.cwd !== undefined && typeof input.cwd !== "string") {
       throw new TerminalError("invalid", "cwd 必须是字符串");
     }
-    const { kind, file: shell, args } = resolveShell(input.shell);
+    const { kind, file: shell, args } = this.shellResolver(input.shell);
     const requested = this.existingDirectory(input.cwd);
     // PowerShell 不跟 WSL 目录：当前在 Windows 目录就用它，否则进 Windows 用户目录
     const cwd = kind === "powershell"

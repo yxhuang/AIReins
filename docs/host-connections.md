@@ -14,13 +14,15 @@
 
 `aireins` 安装到 `~/.local/bin`；macOS 通常需将其加入 `~/.zshrc` 的 PATH。WSL 下仍安装 Windows 托盘与快捷方式，任务栏固定需手动操作。WSL 的 Windows Tailscale 已登录时生成缺失 `~/.workbench/remote.json`（MagicDNS origin、登录白名单、8793、权限 600、`terminal:false`）；已有配置不覆盖，登录任务缺失仍按原流程经 UAC 安装网关/Serve。Windows 登录启动参考 [REMOTE.md](../deploy/windows/REMOTE.md)。
 
-原生 Linux/macOS 上须在同一台主机安装并登录 Tailscale。安装器仅读 `tailscale status --json`，生成缺失的 `${WORKBENCH_HOME:-~/.workbench}/remote.json`，保留已有或无效文件；不会改用户 Tailscale 配置，只打印需要自行执行的命令：
+原生 Linux/macOS 上须在同一台主机安装并登录 Tailscale。安装器读取 `tailscale status --json`，生成缺失的 `${WORKBENCH_HOME:-~/.workbench}/remote.json`，保留已有或无效文件。有有效配置且 Tailscale 已登录运行时，再读 `tailscale serve status --json`：未配置任何 Serve 就自动启用并打印远程地址；HTTPS 根路径已指向相同目标就报告已配置，不改动；已有其他 Serve（含 TCP、前台模式、Services、Funnel）时不覆盖，打印现状与下面的手动命令：
 
 ```bash
 tailscale serve --bg http://127.0.0.1:8793
 ```
 
-端口按 remote.json/安装器打印值替换。macOS PATH 未找到 CLI 时回退 `/Applications/Tailscale.app/Contents/MacOS/Tailscale`；命令打印该实际路径。没有网关，Serve 直接转发本机远程监听，仍只绑定 loopback，完整 Host/Origin、Tailscale 登录白名单和禁止 Funnel 的安全边界不变。
+端口按 remote.json/安装器打印值替换。Serve 读取或启用因权限失败时，提示用户自行运行 `sudo tailscale set --operator="$USER"` 后重跑 `bash install.sh`；脚本不执行 sudo，也不重试失败命令。macOS PATH 未找到 CLI 时回退 `/Applications/Tailscale.app/Contents/MacOS/Tailscale`；命令打印该实际路径。没有网关，Serve 直接转发本机远程监听，仍只绑定 loopback，完整 Host/Origin、Tailscale 登录白名单和禁止 Funnel 的安全边界不变。
+
+macOS 缺失/版本不足的 Node 与缺失的 ripgrep：若已有 Homebrew 且 stdin/stdout 都是 TTY，安装器合并询问一次 `[Y/n]`，确认后 `brew install` 并重新体检；无 Homebrew、非 TTY、拒绝或 `--check` 时保留手动提示。Linux/WSL 的 apt/NodeSource 命令仍须用户自行执行。安装器不安装或登录三家 CLI/Tailscale，不自动改 PATH 或启用 systemd。
 
 `git pull` 后重跑即可更新；`bash install.sh --check` 只读体检，不安装或写配置。新配置遇到正在运行的 AIReins 时只提示择时 `aireins restart`，不自动重启。远程终端新配置默认关闭，要启用须显式 `terminal:true`；已有 true 保留。CLI 登录/配置和工作目录属于目标机器，不由 clone 复制。系统代理须绕过 `*.ts.net`。
 

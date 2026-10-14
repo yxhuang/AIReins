@@ -200,10 +200,12 @@ M1 就能满足「随时可以使用 terminal」。M2 之前刷新页面会断�
 REST（沿用现有 `{code, msg, data}` 包装）：
 
 - `GET /api/terminals` → `data: { terminals: TerminalInfo[] }`
-- `POST /api/terminals`，body `{ cwd?: string, shell?: "bash" | "powershell", cols: number, rows: number }` → `data: TerminalInfo`。cwd 缺省或不存在时用 server 的 defaultCwd；可选 `shell: "bash" | "powershell"`（白名单，不收路径；缺省 bash）：bash 以登录交互 shell（`bash -l -i`）启动；powershell 的 cwd 只在 `/mnt/<盘符>` 下才沿用，否则用 Windows 用户目录（从 WSL 追加的 Windows PATH 里取 `/mnt/c/Users/<名>`，取不到用 `/mnt/c`）；powershell 优先 `/mnt/c/Program Files/PowerShell/7/pwsh.exe`，没有则 Windows PowerShell 5.1，参数 `-NoLogo`。`TerminalInfo` 带 `kind`。
+- `POST /api/terminals`，body `{ cwd?: string, shell?: "bash" | "powershell", cols: number, rows: number }` → `data: TerminalInfo`。cwd 缺省或不存在时用 server 的 defaultCwd；可选 `shell: "bash" | "powershell"`（白名单，不收路径；缺省和旧客户端 `"bash"` 均表示本机 Unix 缺省 shell，选择规则见本节「平台兼容」）。powershell 的 cwd 只在 `/mnt/<盘符>` 下才沿用，否则用 Windows 用户目录（从 WSL 追加的 Windows PATH 里取 `/mnt/c/Users/<名>`，取不到用 `/mnt/c`）；powershell 优先 `/mnt/c/Program Files/PowerShell/7/pwsh.exe`，没有则 Windows PowerShell 5.1，参数 `-NoLogo`。`TerminalInfo` 带 `kind`。
 - `POST /api/terminals/:id/kill` → `data: { ok: true }`。结束进程，不是删文件；不用 DELETE 动词。
 
 `TerminalInfo = { id: string, cwd: string, kind: "bash" | "powershell", shell: string, cols: number, rows: number, createdAt: string, exited: boolean, exitCode: number | null }`
+
+`shell` 为实际启动的程序；`GET /api/meta` 的 `data.terminalShell: string` 给出本机 Unix 缺省 shell 的文件名（如 `zsh`），旧后端省略时前端回退 bash。标签用 `TerminalInfo.shell` 文件名；滑块取当前 Unix 终端实际名字，无当前 Unix 终端时取 meta；新建提示取 meta（PowerShell 仍固定显示 PowerShell）。
 
 WS `/ws/terminal`（与 `/ws` 同一套 Host / Origin / Tailscale 身份检查；能力位为 false 时拒绝升级），全部 JSON 文本帧（PTY 输出本就是 UTF-8 字符串，不再做二进制分帧，偏离 §3 原建议，换实现简单）：
 
@@ -218,9 +220,9 @@ WS `/ws/terminal`（与 `/ws` 同一套 Host / Origin / Tailscale 身份检查�
 
 - 标签条列出注册表全部未退出终端，外加当前激活的已退出终端（看输出与退出码）；同种 shell 多个时按注册表顺序全体编号（bash 1 / bash 2）；已退出标签切走后从条上消失。
 - 仍是**单 xterm 实例**：切标签 = detach 旧的 + attach 新的，屏幕先 reset 再写回放（沿用 §9 重复 attach 语义）；后台终端的 PTY 与 scrollback 不受影响。
-- 激活终端 id 存 localStorage `workbench-term-active`（按设备）；刷新/重进面板优先重连它，已退出或不存在回落第一个未退出终端，都没有新建 bash。
-- 标题栏保留原 `Segmented.term-shells` bash / PowerShell 滑块，value 跟随激活标签的 kind。点另一侧优先切到本面板内最近激活过的该 kind 存活终端；没有激活记录则选注册表第一个该 kind 存活终端；都没有才新建，cwd 规则与「＋」一致。
-- 「＋」像 Chrome 一样紧跟最后一个标签（标签列表按内容定宽，标签用 `width:128px`，放不下时收缩到 72px 并横向滚动，「＋」始终可见），一键新建当前激活标签同 kind 的终端；没有激活标签时新建 bash。cwd 仍优先跟随当前所看会话，否则用默认 cwd；不弹 shell 菜单。
+- 激活终端 id 存 localStorage `workbench-term-active`（按设备）；刷新/重进面板优先重连它，已退出或不存在回落第一个未退出终端，都没有新建本机缺省 shell。
+- 标题栏保留原 `Segmented.term-shells` Unix shell / PowerShell 滑块，Unix 一侧显示实际名字（如 zsh；WSL 仍 bash），value 跟随激活标签的 kind。点另一侧优先切到本面板内最近激活过的该 kind 存活终端；没有激活记录则选注册表第一个该 kind 存活终端；都没有才新建，cwd 规则与「＋」一致。
+- 「＋」像 Chrome 一样紧跟最后一个标签（标签列表按内容定宽，标签用 `width:128px`，放不下时收缩到 72px 并横向滚动，「＋」始终可见），一键新建当前激活标签同 kind 的终端；没有激活标签时新建本机缺省 shell。cwd 仍优先跟随当前所看会话，否则用默认 cwd；不弹 shell 菜单。
 - 最大化 / 还原按钮靠标签条右端（`margin-left:auto`），与「＋」图标均为 22px。文件面板标签行同样布局，右端是「隐藏文件」开关。最大化仅铺满 `.workspace`（主会话 + 终端区域），保留左侧栏；主会话保持挂载，终端重新 fit 并同步 PTY 尺寸，还原沿用之前的分栏宽度。窄屏已铺满，不显示此按钮。
 - Bash / PowerShell 均支持 `Ctrl+V`、`Ctrl+Shift+V`（Mac 为 `Cmd+V`）：绕过 xterm 键盘控制序列，交给浏览器原生 paste 事件与 xterm 粘贴处理。终端内容区右键直接粘贴，移动端保留快捷键栏的「粘贴」按钮；右键 / 按钮读剪贴板被拒绝或不可用时弹出输入框，手动粘贴后确认。粘贴沿用 xterm 的换行归一与 bracketed paste。
 - 标签默认宽度为 128px，可继续收缩，触控标签仍保留 116px 最小宽度和 44px 点击目标。最大化按钮在窄屏及无悬停的触控设备上隐藏，覆盖手机横屏。
@@ -230,4 +232,4 @@ WS `/ws/terminal`（与 `/ws` 同一套 Host / Origin / Tailscale 身份检查�
 
 ### 平台兼容（2026-10-12，§9 契约补充）
 
-WSL2、原生 Linux 与 macOS（实验性）的缺省 shell 仍是 `bash -l -i`。只有 `/api/meta.capabilities.powershell:true` 才显示 PowerShell 选择；Windows pwsh/PowerShell 路径仅 WSL 可解析，其他平台即便有同名 `/mnt` 目录也拒绝这个 shell 种类。远程终端仍由 `terminal` 能力与 remote.json 显式开启控制，所有 Host/Origin、Tailscale 身份检查及终端隔离不变。
+WSL2 的缺省 shell 保留 `bash -l -i`，不跟 `$SHELL`。原生 Linux 与 macOS（实验性）取服务进程 `$SHELL`，须为绝对路径、可执行且列在 `/etc/shells`；仅当文件不存在时省略名单检查，读取失败不放行。无效时 macOS 先退到可执行 `/bin/zsh`，再退 `bash`；Linux 退 `bash`。zsh/bash 用 `-l -i`，其他 shell 保守只传 `-l`。只有 `/api/meta.capabilities.powershell:true` 才显示 PowerShell 选择；Windows pwsh/PowerShell 路径仅 WSL 可解析，其他平台即便有同名 `/mnt` 目录也拒绝这个 shell 种类。客户端仍只能传白名单种类，旧 `shell:"bash"` 继续可用。远程终端仍由 `terminal` 能力与 remote.json 显式开启控制，所有 Host/Origin、Tailscale 身份检查及终端隔离不变。

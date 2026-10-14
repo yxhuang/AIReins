@@ -43,12 +43,12 @@ const fakeSpawn = ((file: string, args: string[] | string, options: Parameters<t
   ptys.push(pty);
   return pty as unknown as Pty;
 }) as typeof spawn;
-const registry = new TerminalRegistry(process.cwd(), fakeSpawn);
+const registry = new TerminalRegistry(process.cwd(), fakeSpawn, kind => resolveShell(kind, undefined, "wsl", { env: { SHELL: "/bin/zsh" } }));
 const created = registry.create({ cwd: "/path/that/does/not/exist", cols: 80, rows: 24 });
 assert.match(created.id, /^term_[0-9A-HJKMNP-TV-Z]{26}$/);
 assert.equal(created.cwd, process.cwd(), "不存在的 cwd 回退到 defaultCwd");
 assert.equal(created.kind, "bash", "省略 shell 默认 bash");
-assert.equal(spawned?.file, "bash", "选 bash 就跑 bash，不跟 $SHELL");
+assert.equal(spawned?.file, "bash", "WSL 选 bash 就跑 bash，不跟 $SHELL");
 assert.deepEqual(spawned?.args, ["-l", "-i"]);
 assert.equal(spawned?.options.cwd, process.cwd());
 assert.equal(spawned?.options.env, process.env);
@@ -106,6 +106,37 @@ assert.deepEqual(resolveShell("powershell", (path) => path.endsWith("powershell.
 }, "没有 pwsh 7 时退到 Windows PowerShell");
 assert.equal(resolveShell("powershell", () => true, "wsl").file, "/mnt/c/Program Files/PowerShell/7/pwsh.exe", "优先 pwsh 7");
 assert.throws(() => resolveShell("powershell", () => false, "wsl"), /没有找到 PowerShell/);
+const shellEnv = {
+  env: { SHELL: "/opt/homebrew/bin/zsh" },
+  executable: (path: string) => ["/opt/homebrew/bin/zsh", "/bin/zsh", "/bin/bash", "/usr/bin/fish"].includes(path),
+  readShells: () => "# Login shells\n/bin/bash\n/bin/zsh\n/opt/homebrew/bin/zsh\n/usr/bin/fish\n",
+};
+assert.deepEqual(resolveShell(undefined, undefined, "darwin", shellEnv), { kind: "bash", file: "/opt/homebrew/bin/zsh", args: ["-l", "-i"] });
+assert.deepEqual(resolveShell("bash", undefined, "darwin", shellEnv), resolveShell(undefined, undefined, "darwin", shellEnv), "旧客户端的 bash 标识仍可用");
+assert.deepEqual(resolveShell(undefined, undefined, "linux", { ...shellEnv, env: { SHELL: "/bin/bash" } }), { kind: "bash", file: "/bin/bash", args: ["-l", "-i"] });
+assert.equal(resolveShell(undefined, undefined, "darwin", { ...shellEnv, readShells: () => "/bin/bash\n" }).file, "/bin/zsh", "$SHELL 未列在 /etc/shells 时 macOS 回退 zsh");
+for (const SHELL of [undefined, "zsh", "/no/such/shell"]) {
+  assert.equal(resolveShell(undefined, undefined, "darwin", { ...shellEnv, env: { SHELL } }).file, "/bin/zsh");
+  assert.equal(resolveShell(undefined, undefined, "linux", { ...shellEnv, env: { SHELL } }).file, "bash");
+}
+assert.equal(resolveShell(undefined, undefined, "darwin", { ...shellEnv, executable: () => false }).file, "bash", "zsh 不可执行时再退 bash");
+assert.equal(resolveShell(undefined, undefined, "linux", { ...shellEnv, readShells: () => "" }).file, "bash", "Linux 不接受未登记的 SHELL");
+assert.equal(resolveShell(undefined, undefined, "linux", { ...shellEnv, readShells: () => { throw Object.assign(new Error(), { code: "ENOENT" }); } }).file, shellEnv.env.SHELL, "/etc/shells 不存在时仅检查绝对路径可执行");
+assert.equal(resolveShell(undefined, undefined, "linux", { ...shellEnv, readShells: () => { throw Object.assign(new Error(), { code: "EACCES" }); } }).file, "bash", "读取失败不能当不存在放行");
+assert.deepEqual(resolveShell(undefined, undefined, "linux", { ...shellEnv, env: { SHELL: "/usr/bin/fish" } }).args, ["-l"], "其他 shell 仅传登录参数");
+assert.deepEqual(resolveShell(undefined, undefined, "wsl", shellEnv), { kind: "bash", file: "bash", args: ["-l", "-i"] }, "WSL 始终忽略 SHELL");
+for (const host of ["linux", "darwin"] as const) {
+  assert.throws(() => resolveShell(shellEnv.env.SHELL, undefined, host, shellEnv), /shell 只能是/, "客户端不能传 shell 路径");
+  assert.throws(() => resolveShell("powershell", () => true, host, shellEnv), /没有找到 PowerShell/);
+  let nativeSpawn: { file: string; args: string[] | string } | undefined;
+  const nativeRegistry = new TerminalRegistry(process.cwd(), ((file, args) => {
+    nativeSpawn = { file, args };
+    return new FakePty() as unknown as Pty;
+  }) as typeof spawn, kind => resolveShell(kind, undefined, host, shellEnv));
+  assert.equal(nativeRegistry.create({ shell: "bash", cols: 80, rows: 24 }).shell, shellEnv.env.SHELL);
+  assert.deepEqual(nativeSpawn, { file: shellEnv.env.SHELL, args: ["-l", "-i"] });
+  nativeRegistry.shutdown();
+}
 assert.deepEqual(["/mnt/c", "/mnt/d/work", "/mnt/cdrom", "/home/me", "/mnt"].map(isWindowsMount), [true, true, false, false, false]);
 assert.equal(windowsHome("/usr/bin:/mnt/c/Users/user/AppData/Local/Microsoft/WindowsApps:/mnt/c/WINDOWS", () => true), "/mnt/c/Users/user");
 assert.equal(windowsHome("/usr/bin:/mnt/c/WINDOWS", () => true), "/mnt/c", "PATH 里没有用户目录退 /mnt/c");
@@ -196,7 +227,7 @@ await writeFile(join(testHome, "remote.json"), JSON.stringify({
 }));
 const child = spawnChild(process.execPath, ["--import", "tsx", join(serverDir, "index.ts")], {
   cwd: fileURLToPath(new URL("..", import.meta.url)),
-  env: { ...process.env, WORKBENCH_HOME: testHome, WORKBENCH_PORT: String(localPort) },
+  env: { ...process.env, HOME: testHome, SHELL: "/bin/bash", WORKBENCH_HOME: testHome, WORKBENCH_PORT: String(localPort) },
   stdio: ["ignore", "pipe", "pipe"],
 });
 child.stderr.setEncoding("utf8");
@@ -230,6 +261,7 @@ try {
   }
   const meta = await httpCall("GET", "/api/meta");
   assert.equal(meta.status, 200);
+  assert.equal(meta.data.data.terminalShell, "bash");
   assert.equal(meta.data.data.capabilities.terminal, false);
   for (const [method, path] of [["GET", "/api/terminals"], ["POST", "/api/terminals"], ["POST", "/api/terminals/term_missing/kill"]]) {
     const response = await httpCall(method, path);

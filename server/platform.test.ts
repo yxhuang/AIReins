@@ -22,7 +22,7 @@ for (const host of ["linux", "darwin"] as const) {
   assert.equal(findPowerShell(host, () => true), undefined);
   assert.equal(windowsPickerAvailable(true, host, () => true), false);
   assert.throws(() => resolveShell("powershell", () => true, host), /PowerShell/);
-  assert.deepEqual(resolveShell(undefined, () => false, host), { kind: "bash", file: "bash", args: ["-l", "-i"] });
+  assert.deepEqual(resolveShell(undefined, () => false, host, { env: {}, executable: () => false }), { kind: "bash", file: "bash", args: ["-l", "-i"] }, "无可用登录 shell 时回退 bash");
   // Serve 直连 loopback 使用相同策略：缺身份、错账号、错 Host/Origin 与 WS 全部拒绝。
   const policy = remotePolicy({ port: 18893, origin: "https://pc.example.ts.net", allowedLogins: ["alice@example.test"] });
   const headers = { host: "127.0.0.1:18893", origin: "https://pc.example.ts.net", "tailscale-user-login": "alice@example.test" };
