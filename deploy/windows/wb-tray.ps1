@@ -39,6 +39,7 @@ public static class WbNative {
     [DllImport("user32.dll", CharSet=CharSet.Unicode)]
     private static extern int GetClassName(IntPtr h, StringBuilder text, int count);
     [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr h);
+    [DllImport("user32.dll")] public static extern bool IsZoomed(IntPtr h);
     [DllImport("user32.dll")] public static extern bool IsWindow(IntPtr h);
     [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);
     [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT rect);
@@ -365,7 +366,7 @@ function Test-WindowOnTop([IntPtr]$Window) {
 function Get-WindowState([IntPtr[]]$Windows) {
     $foreground = [WbNative]::GetForegroundWindow()
     $parts = foreach ($window in $Windows) {
-        "hwnd=$window v=$([int][WbNative]::IsWindowVisible($window)) min=$([int][WbNative]::IsIconic($window)) top=$([int](Test-WindowOnTop $window)) fg=$([int]($window -eq $foreground))"
+        "hwnd=$window v=$([int][WbNative]::IsWindowVisible($window)) min=$([int][WbNative]::IsIconic($window)) max=$([int][WbNative]::IsZoomed($window)) top=$([int](Test-WindowOnTop $window)) fg=$([int]($window -eq $foreground))"
     }
     if (-not $parts) { return 'no window' }
     return ($parts -join '; ')
@@ -645,7 +646,8 @@ try {
         # 转交而非自己抬窗：tray.log 10-03 证实备用实例对隐藏窗口的 SW_SHOW + SetForegroundWindow
         # 从未生效（8 次全败，窗口保持 v=0；owner 同样的调用 6 次全成），且它的补显示看门狗
         # 会把用户刚收进托盘的窗口重新放出来。显示、还原、抬前台、无窗口时重开全由 owner 执行。
-        $target = [WbNative]::FindWindowEx([IntPtr](-3), [IntPtr]::Zero, $null, "Workbench.Tray.Show.$Distro.$Port")
+        # 类名必须传 [NullString]::Value：PowerShell 把 $null 转成 "" 传给 string 参数，按空类名永远找不到。
+        $target = [WbNative]::FindWindowEx([IntPtr](-3), [IntPtr]::Zero, [NullString]::Value, "Workbench.Tray.Show.$Distro.$Port")
         $forwarded = $false
         if ($target -ne [IntPtr]::Zero) {
             # 本进程因任务栏/快捷方式点击拿到前台权限；放行给 owner，它抬窗时才能抢到前台。

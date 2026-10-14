@@ -43,3 +43,10 @@ for (const title of [
 ]) {
   test(`rejects: ${title}`, () => assert.ok(!regex.test(title)));
 }
+
+// PowerShell passes $null to a .NET string parameter as "", so FindWindowEx would look for an empty class name.
+test('FindWindowEx call passes a real null class name', () => {
+  const call = source.match(/\[WbNative\]::FindWindowEx\(([^\n]*)\)/);
+  assert.ok(call, 'wb-tray.ps1 must call FindWindowEx');
+  assert.match(call[1], /\[NullString\]::Value/);
+});
