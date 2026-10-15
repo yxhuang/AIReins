@@ -68,13 +68,13 @@ t('菜单渲染：图标/快捷键/分隔线/删除；已置顶显示取消置�
 });
 t('行渲染：分区顺序与空闲点隐藏，⋮ 保持独立按钮和标题 aria', () => {
   const savedStorage = globalThis.localStorage;
-  globalThis.localStorage = { getItem: () => null, setItem() {}, removeItem() {} }; // 无存档 → 默认折叠
-  const saved = { sessions: store.sessions, now: store.now, currentId: store.currentId, sessionGroups: store.sessionGroups, pendingCount: store.pendingCount, historyOpen: store.historyOpen, currentPageId: store.currentPageId };
+  globalThis.localStorage = { getItem: () => "[]", setItem() {}, removeItem() {} }; // 存档里全部展开过，「更早」仍按每次打开折叠
+  const saved = { sidebarEarlierOpen: store.sidebarEarlierOpen, sessions: store.sessions, now: store.now, currentId: store.currentId, sessionGroups: store.sessionGroups, pendingCount: store.pendingCount, historyOpen: store.historyOpen, currentPageId: store.currentPageId };
   try {
-    Object.assign(store, { now, currentId: null, sessionGroups: [{ id: 'g', name: '项目', createdAt: '2026-10-01' }], sessions: [session('wait'), session('pin', 400000000, 'dead', { pinned: true }), session('group', 400000000, 'idle', { groupId: 'g' }), session('fresh'), session('old', 7200001)], pendingCount: id => id === 'wait' ? 1 : 0, historyOpen: false, currentPageId: null });
+    Object.assign(store, { sidebarEarlierOpen: false, now, currentId: null, sessionGroups: [{ id: 'g', name: '项目', createdAt: '2026-10-01' }], sessions: [session('wait'), session('pin', 400000000, 'dead', { pinned: true }), session('group', 400000000, 'idle', { groupId: 'g' }), session('fresh'), session('old', 7200001)], pendingCount: id => id === 'wait' ? 1 : 0, historyOpen: false, currentPageId: null });
     const html = renderToStaticMarkup(React.createElement(Sidebar, { collapsed: false, onToggle() {}, newOpen: false, onNewOpenChange() {} }));
     const order = ['等待处理', '置顶', '项目', '进行中', '更早'].map(x => html.indexOf(x)); assert.ok(order.every((x, i) => x >= 0 && (!i || x > order[i - 1])));
-    assert.ok(/aria-expanded="true" aria-controls="time-section-进行中"/.test(html) && /aria-expanded="false" aria-controls="time-section-更早"/.test(html), '默认只折叠「更早」');
+    assert.ok(/aria-expanded="true" aria-controls="time-section-进行中"/.test(html) && /aria-expanded="false" aria-controls="time-section-更早"/.test(html), '「更早」不记住展开，其余分区按存档');
     assert.equal((html.match(/status-idle/g) ?? []).length, 1); assert.ok(html.includes('aria-label="会话 fresh 的操作"')); assert.ok(html.includes('aria-label="项目 的分组操作"'));
   } finally { Object.assign(store, saved); globalThis.localStorage = savedStorage; }
 });

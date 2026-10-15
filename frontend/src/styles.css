@@ -763,9 +763,29 @@ body.resizing {
 
 .new-field input.mono { font-family: var(--font-mono); }
 
-.cwd-input-row { display: flex; gap: 6px; min-width: 0; }
-.cwd-input-row input { flex: 1; min-width: 0; }
-.cwd-input-row .btn { flex: 0 0 auto; }
+/* 新建表单内嵌目录浏览：桌面整块最高 40dvh，列表高度另由 Sidebar.tsx 按剩余空间限定（用户 10-16） */
+.new-cwd .dir-contents { flex: 0 1 auto; gap: 8px; }
+@media (min-width: 721px) { .new-cwd .dir-contents { max-height: 40dvh; } }
+.new-cwd .dir-entry { padding: 4px 10px; }
+/* 圆钮高度跟随同行 WSL/Windows，不撑高导航行 */
+.new-cwd .dir-nav-up { align-self: stretch; width: auto; height: auto; padding: 0 6px; border-radius: 999px; }
+.new-cwd .dir-nav-up svg { width: 18px; height: 18px; }
+@media (pointer: coarse) { .new-cwd .dir-nav-up { padding: 0 13px; } }
+.new-cwd .dir-nav { flex-wrap: wrap; }
+.new-cwd .dir-nav .btn { white-space: nowrap; }
+.new-form > .btn-primary { padding-block: 4px; }
+.new-cwd .dir-list { min-height: 58px; }
+/* 新建表单地址栏收紧：矮一档、层级间距更小，同宽显示更长路径；触屏仍按 44px 规则 */
+@media not (pointer: coarse) {
+  .new-cwd .dir-address-path { min-height: 32px; }
+  .new-cwd .dir-address-crumbs { padding-left: 2px; }
+  .new-cwd .dir-address-crumbs button { min-height: 26px; padding: 2px 3px; }
+  .new-cwd .dir-address-separator { padding: 0 1px; }
+  .new-cwd .dir-windows-picker { flex-basis: 32px; }
+  .new-cwd .dir-windows-picker svg { width: 20px; height: 20px; }
+  .new-cwd .dir-recent-toggle { flex-basis: 28px; }
+}
+.new-form .composer-box textarea { min-height: 0; line-height: 1.5; }
 
 /* 工作目录浏览器：中性与冷色令牌，独立于审批闸门。 */
 .dir-overlay {
@@ -918,6 +938,8 @@ body.resizing {
   .dir-windows-picker { flex-basis: 49px; }
   .dir-recent-option { min-height: 44px; }
   .dir-sort { min-height: 36px; }
+  /* 触屏上最近目录的路径放大一档（桌面 12px） */
+  .dir-recent-option { font-size: 14px; }
 }
 
 .new-error {
@@ -3202,6 +3224,8 @@ body.resizing {
     container: sidebar-new / inline-size;
   }
   .app:not(.sidebar-collapsed) .sidebar { width: var(--sidebar-width, 304px); }
+  /* 新建表单打开时临时拉到拖动上限（默认宽 ×1.5），关闭后回到 --sidebar-width（用户 10-16） */
+  .app:not(.sidebar-collapsed) .sidebar.sidebar-new-open { width: max(var(--sidebar-width, 304px), calc(var(--sidebar-default-width, 304px) * 1.5)); }
   .app:not(.sidebar-collapsed) .sidebar.sidebar-page-open { width: var(--sidebar-width, min(calc(var(--sidebar-default-width, 304px) * 1.5), 36vw)); }
   /* 嵌入页布局宽 --ai-usage-width，显示宽再乘 --ai-usage-zoom；21px 是现有侧栏两侧 padding 与右边框，仍随字号缩放。 */
   .app:not(.sidebar-collapsed) .sidebar.sidebar-page-open:has(#sidebar-page-ai-usage) {

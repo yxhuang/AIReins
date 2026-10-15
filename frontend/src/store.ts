@@ -141,6 +141,8 @@ export class Store {
   historyCwdFilter = "";
   historySelection: HistorySession | null = null;
   historyRevision = 0;
+  /** 侧栏「更早」分区只在本次页面内展开，刷新后重新折叠（用户 10-15）。 */
+  sidebarEarlierOpen = false;
   dispatchesOpen = false;
   termOpen = false;
   filesOpen = false;
@@ -253,6 +255,11 @@ export class Store {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
   };
+
+  toggleSidebarEarlier(): void {
+    this.sidebarEarlierOpen = !this.sidebarEarlierOpen;
+    this.notify();
+  }
 
   private notify(): void {
     if (this.streamFrame !== undefined) {

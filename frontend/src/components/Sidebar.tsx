@@ -15,7 +15,7 @@ import { SettingsMenu } from "./SettingsMenu";
 import { HostSwitcher } from "./HostSwitcher";
 import { ConfigPills, type MenuGroup } from "./ConfigMenu";
 import { configOptionsForModel, modelConfigPatch, newSessionConfig, pillText } from "../config-view";
-import { DirectoryBrowser } from "./DirectoryBrowser";
+import { DirectoryContents } from "./DirectoryBrowser";
 import { normalizeDirectoryPath } from "../directory-path";
 import { HistoryView } from "./HistoryView";
 import { PageView } from "./PageView";
@@ -91,8 +91,8 @@ export function Sidebar({ collapsed, onToggle, newOpen, onNewOpenChange, returnT
   const sessionRecords = useStore(selectSessions);
   const sessionGroups = useStore((value) => value.sessionGroups);
   const [collapsedGroups, toggleGroup] = usePersistedSet("workbench-collapsed-session-groups", []);
-  // 时间分区默认只折叠「更早」（用户 10-03）
-  const [collapsedSections, toggleSection] = usePersistedSet("workbench-collapsed-time-sections", [dictionaries["zh-CN"]["ui.Sidebar.earlier"]!]);
+  const [collapsedSections, toggleSection] = usePersistedSet("workbench-collapsed-time-sections", []);
+  const earlierOpen = useStore((value) => value.sidebarEarlierOpen);
   const now = useStore(selectNow);
   const currentId = useStore(selectCurrentId);
   const panelOpen = useStore((value) => value.historyOpen || value.currentPageId !== null);
@@ -176,7 +176,7 @@ export function Sidebar({ collapsed, onToggle, newOpen, onNewOpenChange, returnT
   );
 
   return (
-    <aside className={`sidebar${pageOpen && !collapsed ? " sidebar-page-open" : ""}`} ref={sidebarRef}>
+    <aside className={`sidebar${pageOpen && !collapsed ? " sidebar-page-open" : ""}${newOpen && !collapsed ? " sidebar-new-open" : ""}`} ref={sidebarRef}>
       <div className="sidebar-head">
         <HostSwitcher />
         {/* Chrome --app 窗口和主屏幕 PWA 没有地址栏和刷新键 */}
@@ -257,10 +257,11 @@ export function Sidebar({ collapsed, onToggle, newOpen, onNewOpenChange, returnT
                 // Keep the legacy stored labels stable when the interface language changes.
                 const key = ["core.084", "core.085", "core.086"].find(key => t(key) === section.label);
                 const storageKey = key ? dictionaries["zh-CN"][key]! : section.label;
-                const folded = collapsedSections.has(storageKey);
+                const earlier = key === "core.086";
+                const folded = earlier ? !earlierOpen : collapsedSections.has(storageKey);
                 return <li className="sidebar-time-section" key={section.label}>
                   <button type="button" className="sidebar-section-toggle" aria-expanded={!folded}
-                    aria-controls={`time-section-${section.label}`} onClick={() => toggleSection(storageKey)}>
+                    aria-controls={`time-section-${section.label}`} onClick={() => earlier ? store.toggleSidebarEarlier() : toggleSection(storageKey)}>
                     <span>{section.label}</span>
                     <svg className={`sidebar-section-chevron${folded ? " collapsed" : ""}`} width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.25" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg>
                   </button>
@@ -1030,32 +1031,52 @@ function NewSessionForm({ onDone, initialCwd }: { onDone: () => void; initialCwd
   // 会话列表可能在表单挂载后才到；保留该订阅以触发 cwd 三级回退的补填 effect。
   useStore(selectSessions);
   const [agent, setAgent] = useState<AgentKind>("claude");
-  const [cwd, setCwdState] = useState(() => initialCwd ?? pickInitialCwd());
-  // 用户动过 cwd 输入框后不再自动预填（含故意清空）
+  // startPath 只是内嵌浏览器的起点；cwd 跟随浏览器当前目录
+  const [startPath, setStartPath] = useState(() => initialCwd ?? pickInitialCwd());
+  const [cwd, setCwd] = useState(startPath);
+  // 用户在浏览器里点过/按过键后不再自动改起点
   const cwdTouched = useRef(false);
-  const setCwd = (value: string) => {
-    cwdTouched.current = true;
-    setCwdState(value);
-  };
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [browseOpen, setBrowseOpen] = useState(false);
-  const browseButtonRef = useRef<HTMLButtonElement>(null);
   const submitBtnRef = useRef<HTMLButtonElement>(null);
+  const formRef = useRef<HTMLFormElement>(null);
+  // 桌面「创建并进入」最低到侧栏一半高处（用户 10-16）；手机表单可占满列表区（用户 10-17）。
+  // 目录列表按剩余空间限高，最少留两行
+  useEffect(() => {
+    const form = formRef.current;
+    const sidebar = form?.closest<HTMLElement>(".sidebar");
+    const area = form?.closest<HTMLElement>(".sidebar-session-area");
+    if (!form || !sidebar || !area || typeof ResizeObserver === "undefined") return;
+    const mobile = window.matchMedia("(max-width: 720px)");
+    const fit = () => {
+      const list = form.querySelector<HTMLElement>(".dir-list");
+      if (!list) return;
+      const box = sidebar.getBoundingClientRect();
+      const formBox = form.getBoundingClientRect();
+      const bottom = mobile.matches ? area.getBoundingClientRect().bottom - 8 : box.top + box.height / 2;
+      const rest = formBox.height - list.getBoundingClientRect().height;
+      list.style.maxHeight = `${Math.max(58, bottom - formBox.top - rest)}px`;
+    };
+    const observer = new ResizeObserver(fit);
+    observer.observe(sidebar);
+    observer.observe(form);
+    mobile.addEventListener("change", fit);
+    return () => { observer.disconnect(); mobile.removeEventListener("change", fit); };
+  }, []);
   // 三个配置下拉的已选值；"" = 跟随配置（不传该字段）。切 agent 时整体重置。
   const [configSel, setConfigSel] = useState<Partial<Record<ConfigOptionId, string>>>(() => newSessionConfig("claude"));
   const options = meta?.drivers[agent]?.options ?? [];
 
   useEffect(() => {
-    if (initialCwd && !cwdTouched.current) setCwdState(initialCwd);
+    if (initialCwd && !cwdTouched.current) setStartPath(initialCwd);
   }, [initialCwd]);
 
-  // meta/会话列表可能晚于表单挂载到达：用户未动手且仍为空时补一次预填
+  // meta/会话列表可能晚于表单挂载到达：用户未动手且起点仍为空时补一次预填
   useEffect(() => {
-    if (cwdTouched.current || cwd) return;
+    if (cwdTouched.current || startPath) return;
     const next = pickInitialCwd();
-    if (next) setCwdState(next);
+    if (next) setStartPath(next);
   });
 
   const submit = async () => {
@@ -1093,6 +1114,7 @@ function NewSessionForm({ onDone, initialCwd }: { onDone: () => void; initialCwd
 
   return (
     <form
+      ref={formRef}
       className="new-form"
       onSubmit={(e) => {
         e.preventDefault();
@@ -1115,30 +1137,18 @@ function NewSessionForm({ onDone, initialCwd }: { onDone: () => void; initialCwd
           </button>
         ))}
       </div>
-      <div className="new-field">
-        <label htmlFor="new-session-cwd">{meta?.capabilities.windowsPaths ? t("ui.Sidebar.working_directory_windows_linux_path") : t("ui.Sidebar.working_directory")}</label>
-        <p className="new-hint">{meta?.capabilities.windowsPaths ? t("ui.Sidebar.paste_a_windows_folder_path_to_convert") : t("ui.Sidebar.paste_a_local_folder_path_or_choose")}</p>
-        <div className="cwd-input-row">
-          <input
-            id="new-session-cwd"
-            type="text"
-            value={cwd}
-            onChange={(e) => setCwd(e.target.value)}
-            placeholder={t("ui.Sidebar.c_users_or_home_you_project")}
-            className="mono"
-            required
-          />
-          <button ref={browseButtonRef} type="button" className="btn" onClick={() => setBrowseOpen(true)}>{t("ui.Sidebar.browse")}</button>
-        </div>
+      <div className="new-field new-cwd" onPointerDownCapture={() => { cwdTouched.current = true; }} onKeyDownCapture={() => { cwdTouched.current = true; }}>
+        <p className="new-hint">{t("ui.Sidebar.paste_directory")}</p>
+        <DirectoryContents initialPath={startPath} includeFiles={false} allowWindowsPicker upIcon onPathChange={setCwd} onPathLost={() => setCwd("")} onSelectFile={() => {}} />
       </div>
       {/* 首条消息 + 配置胶囊：与会话输入框同一形态（胶囊直接显示当前值，点开选） */}
       <div className="composer-box">
         <textarea
           value={message}
           onChange={(e) => setMessage(e.target.value)}
-          rows={2}
+          rows={1}
           aria-label={t("ui.Sidebar.first_message_optional")}
-          placeholder={t("ui.Sidebar.first_message_optional_sent_to_the_agent")}
+          placeholder={t("ui.Sidebar.first_message_optional")}
         />
         <div className="cfg-bar">
           <NewConfigPills options={options} selected={configSel} onChange={setConfigSel} />
@@ -1156,14 +1166,6 @@ function NewSessionForm({ onDone, initialCwd }: { onDone: () => void; initialCwd
       </button>
       {/* 禁用原因不只靠 title tooltip：直接写在按钮下方 */}
       {!cwd.trim() && <p className="new-hint">{t("ui.Sidebar.enter_a_working_directory_first")}</p>}
-      {browseOpen && (
-        <DirectoryBrowser
-          initialPath={cwd}
-          allowWindowsPicker
-          onSelect={(path) => { setCwd(path); setBrowseOpen(false); requestAnimationFrame(() => browseButtonRef.current?.focus()); }}
-          onClose={() => { setBrowseOpen(false); requestAnimationFrame(() => browseButtonRef.current?.focus()); }}
-        />
-      )}
     </form>
   );
 }

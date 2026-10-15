@@ -8,9 +8,10 @@ import { renderToStaticMarkup } from "react-dom/server";
 globalThis.React = React;
 globalThis.WebSocket = { CONNECTING: 0, OPEN: 1, CLOSING: 2, CLOSED: 3 };
 globalThis.window = { location: { hash: "#/", href: "http://127.0.0.1:8790/" }, innerWidth: 1280, addEventListener() {} };
-// 这里验证的是列表筛选，不是折叠：时间分区全部展开（默认会折叠「更早」）
+// 这里验证的是列表筛选，不是折叠：时间分区全部展开（「更早」每次打开默认折叠）
 globalThis.localStorage = { getItem: (key) => key === "workbench-collapsed-time-sections" ? "[]" : null, setItem() {}, removeItem() {} };
 const { store, Store } = await import("../src/store.ts");
+store.sidebarEarlierOpen = true;
 const { App } = await import("../src/App.tsx");
 const { Sidebar } = await import("../src/components/Sidebar.tsx");
 const { PanelActions } = await import("../src/components/PanelActions.tsx");

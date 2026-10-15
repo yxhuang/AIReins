@@ -499,12 +499,16 @@ await t("历史选定目录后点左上角新建：手机切列表可见表单�
     const form = treeFind(tree, node => node.type?.name === "NewSessionForm");
     let formProps = form.props;
     const renderForm = componentFixture(() => form.type(formProps));
-    const cwdInput = () => treeFind(renderForm(), node => node.props?.id === "new-session-cwd");
-    assert.equal(cwdInput().props.value, "/a/b");
-    cwdInput().props.onChange({ target: { value: "/manual" } });
+    const browser = () => treeFind(renderForm(), node => node.type?.name === "DirectoryContents");
+    assert.equal(browser().props.initialPath, "/a/b");
+    treeFind(renderForm(), node => node.props?.className === "new-field new-cwd").props.onPointerDownCapture();
+    browser().props.onPathChange("/manual");
     formProps = { ...formProps, initialCwd: "/other" };
     renderForm(); renderForm.flushEffects();
-    assert.equal(cwdInput().props.value, "/manual");
+    assert.equal(browser().props.initialPath, "/a/b", "用户动过浏览器后不再改起点");
+    assert.equal(treeFind(renderForm(), node => node.type === "button" && node.props?.type === "submit").props.disabled, false);
+    browser().props.onPathLost();
+    assert.equal(treeFind(renderForm(), node => node.type === "button" && node.props?.type === "submit").props.disabled, true, "导航失败不沿用上一个目录");
     renderForm.dispose();
   }
   store.meta = oldMeta;

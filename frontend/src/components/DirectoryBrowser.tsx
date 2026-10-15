@@ -82,7 +82,7 @@ export function DirectoryBrowser({ initialPath, onSelect, onClose, mode = "dir",
 }
 
 /** 弹窗与右侧面板共用导航、请求和列表；宿主决定点击文件后的行为。 */
-export function DirectoryContents({ initialPath, includeFiles, onSelectFile, onEntryMenu, onSelectDirectory, allowWindowsPicker = false, onPathChange, onBrowseHistory, navigationHistory, registerBrowserBack, navTarget, afterLocation, showHidden = true }: {
+export function DirectoryContents({ initialPath, includeFiles, onSelectFile, onEntryMenu, onSelectDirectory, allowWindowsPicker = false, onPathChange, onPathLost, onBrowseHistory, navigationHistory, registerBrowserBack, navTarget, afterLocation, showHidden = true, upIcon = false }: {
   initialPath: string;
   includeFiles: boolean;
   onSelectFile: (path: string, name: string) => void;
@@ -91,6 +91,8 @@ export function DirectoryContents({ initialPath, includeFiles, onSelectFile, onE
   onSelectDirectory?: (path: string) => void;
   allowWindowsPicker?: boolean;
   onPathChange?: (path: string) => void;
+  /** 导航失败、列表被清空时调用（新建表单借此不沿用上一个目录）。 */
+  onPathLost?: () => void;
   onBrowseHistory?: (path: string) => void;
   navigationHistory?: RefObject<string[]>;
   registerBrowserBack?: (back: () => boolean) => () => void;
@@ -100,6 +102,8 @@ export function DirectoryContents({ initialPath, includeFiles, onSelectFile, onE
   afterLocation?: ReactNode;
   /** 文件表格是否列出 . 开头的条目（服务端 files=1 时总会返回）。 */
   showHidden?: boolean;
+  /** 内联导航的「上一级」用文件面板同款圆形箭头钮（新建表单）。 */
+  upIcon?: boolean;
 }) {
   const [listing, setListing] = useState<DirectoryListing | null>(null);
   const tableListing = useMemo(() => !listing || showHidden ? listing : {
@@ -184,7 +188,7 @@ export function DirectoryContents({ initialPath, includeFiles, onSelectFile, onE
           setError(homeCause instanceof Error ? homeCause.message : String(homeCause));
         }
       } else {
-        if (!back) setListing(null);
+        if (!back) { setListing(null); onPathLost?.(); }
         setError(message);
       }
     } finally {
@@ -318,7 +322,8 @@ export function DirectoryContents({ initialPath, includeFiles, onSelectFile, onE
         </div>
         {afterLocation}
         {navTarget === undefined ? <div className="dir-nav">
-          <button className="btn" type="button" title={t("ui.DirectoryBrowser.go_to_the_parent_of_the_current")} disabled={!listing?.parent || busy} onClick={goUp}>{t("ui.DirectoryBrowser.parent_directory")}</button>
+          {upIcon ? <button className="file-nav-btn file-nav-icon dir-nav-up" type="button" aria-label={t("ui.DirectoryBrowser.parent_directory")} title={t("ui.DirectoryBrowser.go_to_the_parent_of_the_current")} disabled={!listing?.parent || busy} onClick={goUp}><NavIcon d="M12 19V5 M5 12l7-7 7 7" /></button>
+            : <button className="btn" type="button" title={t("ui.DirectoryBrowser.go_to_the_parent_of_the_current")} disabled={!listing?.parent || busy} onClick={goUp}>{t("ui.DirectoryBrowser.parent_directory")}</button>}
           <button className="btn" type="button" title={windowsPaths ? t("ui.DirectoryBrowser.open_the_wsl_home_directory") : t("ui.DirectoryBrowser.open_the_home_directory")} disabled={busy} onClick={() => void load()}>{windowsPaths ? "WSL" : t("ui.DirectoryBrowser.home_directory")}</button>
           {windowsPaths && <button className="btn" type="button" title={t("ui.DirectoryBrowser.open_the_most_recent_windows_directory")} disabled={busy} onClick={openWindows}>Windows</button>}
         </div> : navTarget && createPortal(<>
