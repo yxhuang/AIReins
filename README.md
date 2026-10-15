@@ -194,6 +194,14 @@ AIReins listens on `http://127.0.0.1:8790` (change it with `WORKBENCH_PORT`). On
 
 **Platform differences**: native Linux and macOS have no tray, app window, Windows folder picker or PowerShell; the terminal uses the AIReins server process's `$SHELL` (an executable absolute path, listed in `/etc/shells` when that file exists), falling back to `/bin/zsh` and then bash on macOS, and to bash on Linux. On macOS you can browse and preview files but not edit them in place, and Taildrop sends single files but not folders. The author has no Mac and macOS is tested only in CI, so issue reports are very welcome.
 
+### Recommended companion: ai-usage
+
+[ai-usage](https://github.com/yxhuang/ai-usage) is an independent local quota panel for Claude, Codex and Kimi. We strongly recommend installing it alongside AIReins: seeing each provider's remaining quota and reset windows in the sidebar helps you plan which agent to use. It requires Python 3.11+ and [uv](https://docs.astral.sh/uv/).
+
+With both input and output connected to a terminal, `bash install.sh` asks whether to install and connect ai-usage; Enter accepts. Non-interactive runs skip it. Use `bash install.sh --with-ai-usage` to opt in explicitly or `--without-ai-usage` to skip; both flags can be combined with `--check` for a read-only status report. A recognized service with an existing manifest does not prompt again.
+
+On Linux/WSL, the installer uses ai-usage's own user-level systemd deployment when uv and user systemd are available. On macOS, start it manually from its checkout with `uv sync` followed by `uv run python -m server.launch`, then rerun `bash install.sh --with-ai-usage`. Connection uses the existing extension-page mechanism and preserves existing manifests; if AIReins is already running, choose when to run `aireins restart` to show the sidebar page, as restarting interrupts all sessions. See [extension pages](server/README.md#pages-扩展页面) for manual connection.
+
 ## Remote access from your phone
 
 Once the installer reports that the remote entry is set up and AIReins is running, on your phone:

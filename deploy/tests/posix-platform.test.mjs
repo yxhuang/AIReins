@@ -88,9 +88,10 @@ const checkInstaller = (path, os, release, distro = '', locale = { LC_ALL: 'zh_C
   assert.equal(checked.status, 0, checked.stderr + checked.stdout);
   return checked.stdout.replace(/remote probe stubbed: .*\n/, 'remote probe stubbed\n');
 };
-// 除命令改名和新增的命令链接体检外，中文版保留 HEAD 的既有输出。
+// 除命令改名、命令链接体检和可选 ai-usage 体检外，中文版保留 HEAD 的既有输出。
 const withoutCliCheck = output => output
   .replace(/^.*~\/\.local\/bin\/aireins.*\n/gm, '')
+  .replace(/^.*ai-usage.*\n/gm, '')
   .replace(/成功 \d+ 项，⚠ \d+ 项，❌ \d+ 项。/, '成功 / 警告 / 错误统计');
 assert.equal(withoutCliCheck(checkInstaller(afterInstaller, 'Linux', '6.6-microsoft-standard', 'ubuntu')),
   withoutCliCheck(checkInstaller(beforeInstaller, 'Linux', '6.6-microsoft-standard', 'ubuntu')

@@ -196,6 +196,14 @@ AIReins 监听 `http://127.0.0.1:8790`（可用 `WORKBENCH_PORT` 修改）。Win
 
 **平台差异**：原生 Linux 和 macOS 没有托盘、应用窗口、Windows 目录选择窗口和 PowerShell；终端用 AIReins 服务进程的 `$SHELL`（须是可执行的绝对路径，且在 `/etc/shells` 存在时列于其中）；不合格时 macOS 依次退回 `/bin/zsh`、bash，Linux 退回 bash。macOS 暂时只能浏览和预览文件，不能就地编辑，也不能用 Taildrop 发文件夹（单个文件可以）。作者没有 Mac，macOS 只在 CI 里测过，欢迎在 issue 里反馈。
 
+### 推荐搭配：ai-usage
+
+[ai-usage](https://github.com/yxhuang/ai-usage) 是独立的本地额度面板，显示 Claude、Codex 和 Kimi 的用量与重置窗口。强烈推荐一并安装：在 AIReins 侧栏查看剩余额度，更容易安排接下来使用哪个 Agent。它需要 Python 3.11+ 和 [uv](https://docs.astral.sh/uv/)。
+
+stdin 和 stdout 都连接终端时，`bash install.sh` 会询问是否安装并接入 ai-usage，回车即同意；非交互运行默认跳过。用 `bash install.sh --with-ai-usage` 明确接入，或用 `--without-ai-usage` 跳过；两个标志都能与 `--check` 组合，只读报告状态。已有 manifest 且服务可识别时不再询问。
+
+Linux/WSL 在 uv 与用户级 systemd 可用时调用 ai-usage 自带部署脚本；macOS 在其检出目录手工运行 `uv sync`，再运行 `uv run python -m server.launch`，然后重跑 `bash install.sh --with-ai-usage` 接入。接入沿用扩展页面机制，保留已有 manifest；AIReins 已运行时，由你择时执行 `aireins restart` 让侧栏出现，重启会中断所有会话。手工接入见[扩展页面说明](server/README.md#pages-扩展页面)。
+
 ## 手机远程
 
 安装器报告远程入口配置成功、AIReins 也在运行后，在手机上：

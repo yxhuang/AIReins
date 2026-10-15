@@ -628,6 +628,8 @@ worker 的 `processId` 原本就持久化；新启动的 POSIX worker 使用独�
 
 用户目录 `${workbenchHome}/pages`（默认 `~/.workbench/pages`）的每个直接子目录代表一个页面，子目录内必须有 `manifest.json`。server 仅在启动时扫描一次；增删或修改 manifest 后需重启，不做热插拔、沙箱或版本管理。单个 manifest 缺失、JSON 语法错误、字段无效或 `id` 重复时，该页面会被跳过并记录一条 warn 日志，不影响 server 启动。
 
+`bash install.sh --with-ai-usage` 在确认本机 ai-usage 的 `/api/summary` 响应形状后，生成缺失的 `${WORKBENCH_HOME:-$HOME/.workbench}/pages/ai-usage/manifest.json`（回环地址、`proxy: true`、`maxWidth: "33%"`），已有文件一律保留；安装器在冒烟启动前完成接入，AIReins 已运行时只提示择时 `aireins restart`，重启会中断所有会话。
+
 例如在 `~/.workbench/pages/example/manifest.json` 放入下列配置；仓库不附带个人页面。`WORKBENCH_HOME` 可覆盖整个用户数据目录，代码调用仍可显式传入扫描根目录。
 
 ```json
@@ -650,7 +652,7 @@ interface IframePageManifest {
 }
 ```
 
-`GET /api/pages` 的 `data` 为 `{pages: IframePageManifest[]}`，字段就是上述已校验的 manifest 字段。例如首个页面 `ai-usage` 指向 `http://127.0.0.1:8788`。它不是常驻服务：未按需启动时整页不可达；未开启系统代理时页面本身仍可能可达，但部分数据卡片会报错。因此健康接口只判断目标服务是否响应，不能判断数据是否完整。
+`GET /api/pages` 的 `data` 为 `{pages: IframePageManifest[]}`，字段就是上述已校验的 manifest 字段。例如页面 `ai-usage` 默认指向 `http://127.0.0.1:8788`，也可用其配置端口。它可通过用户级 systemd 常驻运行；服务未启动时整页不可达，所需网络连接不可用时页面本身仍可能可达，但部分数据卡片会报错。因此健康接口只判断目标服务是否响应，不能判断数据是否完整。
 
 `GET /api/pages/:id/health` 最多等待 2 秒，`data` 形状为：
 
