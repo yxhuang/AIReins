@@ -59,7 +59,7 @@ export function modalKeyDown(event: ReactKeyboardEvent, dialog: HTMLElement | nu
     return;
   }
   if (event.key !== "Tab") return;
-  const focusables = dialog?.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled)');
+  const focusables = dialog?.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), a[href], summary');
   if (!focusables?.length) { event.preventDefault(); dialog?.focus(); return; }
   const first = focusables.item(0);
   const last = focusables.item(focusables.length - 1);

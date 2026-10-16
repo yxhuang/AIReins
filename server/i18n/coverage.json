@@ -1,7 +1,7 @@
 {
-  "templates": 481,
-  "coveredSourceSites": 571,
-  "errorSourceSites": 433,
+  "templates": 484,
+  "coveredSourceSites": 574,
+  "errorSourceSites": 436,
   "sources": [
     {
       "file": "server/access.ts",
@@ -1217,667 +1217,667 @@
     },
     {
       "file": "server/index.ts",
-      "line": 110,
+      "line": 111,
       "key": "server.message184",
       "category": "Error"
     },
     {
       "file": "server/index.ts",
-      "line": 220,
+      "line": 236,
       "key": "server.message186",
       "category": "reason"
     },
     {
       "file": "server/index.ts",
-      "line": 245,
+      "line": 261,
       "key": "server.message167",
       "category": "msg"
     },
     {
       "file": "server/index.ts",
-      "line": 272,
+      "line": 288,
       "key": "server.message187",
       "category": "message"
     },
     {
       "file": "server/index.ts",
-      "line": 278,
+      "line": 294,
       "key": "server.message188",
       "category": "Error"
     },
     {
       "file": "server/index.ts",
-      "line": 281,
+      "line": 297,
       "key": "server.message189",
       "category": "message"
     },
     {
       "file": "server/index.ts",
-      "line": 286,
+      "line": 302,
       "key": "server.message190",
       "category": "message"
     },
     {
       "file": "server/index.ts",
-      "line": 305,
+      "line": 321,
       "key": "server.message191",
       "category": "TerminalError"
     },
     {
       "file": "server/index.ts",
-      "line": 417,
+      "line": 434,
       "key": "server.message013",
       "category": "ApiError"
     },
     {
       "file": "server/index.ts",
-      "line": 434,
+      "line": 451,
       "key": "server.message192",
       "category": "WorkFileError"
     },
     {
       "file": "server/index.ts",
-      "line": 436,
+      "line": 453,
       "key": "server.message193",
       "category": "WorkFileError"
     },
     {
       "file": "server/index.ts",
-      "line": 438,
+      "line": 455,
       "key": "server.message194",
       "category": "WorkFileError"
     },
     {
       "file": "server/index.ts",
-      "line": 489,
+      "line": 506,
       "key": "server.message184",
       "category": "ApiError"
     },
     {
       "file": "server/index.ts",
-      "line": 499,
+      "line": 516,
       "key": "server.message195",
       "category": "ApiError"
     },
     {
       "file": "server/index.ts",
-      "line": 516,
+      "line": 533,
       "key": "server.message196",
       "category": "ApiError"
     },
     {
       "file": "server/index.ts",
-      "line": 518,
+      "line": 535,
       "key": "server.message195",
       "category": "ApiError"
     },
     {
       "file": "server/index.ts",
-      "line": 531,
+      "line": 548,
       "key": "server.message197",
       "category": "ApiError"
     },
     {
       "file": "server/index.ts",
-      "line": 543,
+      "line": 560,
       "key": "server.message198",
       "category": "WorkFileError"
     },
     {
       "file": "server/index.ts",
-      "line": 545,
+      "line": 562,
       "key": "server.message193",
       "category": "WorkFileError"
     },
     {
       "file": "server/index.ts",
-      "line": 547,
+      "line": 564,
       "key": "server.message194",
       "category": "WorkFileError"
     },
     {
       "file": "server/index.ts",
-      "line": 554,
+      "line": 571,
       "key": "server.message199",
       "category": "WorkFileError"
     },
     {
       "file": "server/index.ts",
-      "line": 593,
+      "line": 610,
       "key": "server.message167",
       "category": "ApiError"
     },
     {
       "file": "server/index.ts",
-      "line": 593,
+      "line": 610,
       "key": "server.message003",
       "category": "ApiError"
     },
     {
       "file": "server/index.ts",
-      "line": 595,
+      "line": 612,
       "key": "server.message200",
       "category": "ApiError"
     },
     {
       "file": "server/index.ts",
-      "line": 604,
+      "line": 621,
       "key": "server.message201",
       "category": "ApiError"
     },
     {
       "file": "server/index.ts",
-      "line": 619,
+      "line": 636,
       "key": "server.message202",
       "category": "DispatchQueryError"
     },
     {
       "file": "server/index.ts",
-      "line": 638,
+      "line": 655,
       "key": "server.message203",
       "category": "ApiError"
     },
     {
       "file": "server/index.ts",
-      "line": 641,
+      "line": 658,
       "key": "server.message203",
-      "category": "ApiError"
-    },
-    {
-      "file": "server/index.ts",
-      "line": 648,
-      "key": "server.message204",
-      "category": "ApiError"
-    },
-    {
-      "file": "server/index.ts",
-      "line": 662,
-      "key": "server.message195",
       "category": "ApiError"
     },
     {
       "file": "server/index.ts",
       "line": 665,
+      "key": "server.message204",
+      "category": "ApiError"
+    },
+    {
+      "file": "server/index.ts",
+      "line": 686,
+      "key": "server.message195",
+      "category": "ApiError"
+    },
+    {
+      "file": "server/index.ts",
+      "line": 689,
       "key": "server.message205",
       "category": "ApiError"
     },
     {
       "file": "server/index.ts",
-      "line": 675,
+      "line": 703,
       "key": "server.message195",
       "category": "ApiError"
     },
     {
       "file": "server/index.ts",
-      "line": 679,
+      "line": 707,
       "key": "server.message025",
       "category": "ApiError"
     },
     {
       "file": "server/index.ts",
-      "line": 695,
+      "line": 723,
       "key": "server.message206",
       "category": "ApiError"
     },
     {
       "file": "server/index.ts",
-      "line": 749,
+      "line": 777,
       "key": "server.message207",
       "category": "ApiError"
     },
     {
       "file": "server/index.ts",
-      "line": 754,
+      "line": 782,
       "key": "server.message167",
       "category": "ApiError"
     },
     {
       "file": "server/index.ts",
-      "line": 761,
+      "line": 789,
       "key": "server.message163",
       "category": "ApiError"
     },
     {
       "file": "server/index.ts",
-      "line": 765,
+      "line": 793,
       "key": "server.message167",
       "category": "ApiError"
     },
     {
       "file": "server/index.ts",
-      "line": 773,
+      "line": 801,
       "key": "server.message167",
       "category": "ApiError"
     },
     {
       "file": "server/index.ts",
-      "line": 783,
+      "line": 811,
       "key": "server.message167",
       "category": "ApiError"
     },
     {
       "file": "server/index.ts",
-      "line": 788,
+      "line": 816,
       "key": "server.message167",
       "category": "ApiError"
     },
     {
       "file": "server/index.ts",
-      "line": 795,
+      "line": 823,
       "key": "server.message167",
       "category": "ApiError"
     },
     {
       "file": "server/index.ts",
-      "line": 804,
+      "line": 832,
       "key": "server.message167",
       "category": "ApiError"
     },
     {
       "file": "server/index.ts",
-      "line": 808,
+      "line": 836,
       "key": "server.message208",
       "category": "Error"
     },
     {
       "file": "server/index.ts",
-      "line": 829,
+      "line": 857,
       "key": "server.message167",
       "category": "ApiError"
     },
     {
       "file": "server/index.ts",
-      "line": 838,
+      "line": 866,
       "key": "server.message167",
       "category": "ApiError"
     },
     {
       "file": "server/index.ts",
-      "line": 841,
+      "line": 869,
       "key": "server.message195",
       "category": "ApiError"
     },
     {
       "file": "server/index.ts",
-      "line": 845,
+      "line": 873,
       "key": "server.message209",
       "category": "ApiError"
     },
     {
       "file": "server/index.ts",
-      "line": 854,
+      "line": 882,
       "key": "server.message167",
       "category": "ApiError"
     },
     {
       "file": "server/index.ts",
-      "line": 865,
+      "line": 893,
       "key": "server.message210",
       "category": "ApiError"
     },
     {
       "file": "server/index.ts",
-      "line": 874,
+      "line": 902,
       "key": "server.message167",
       "category": "ApiError"
     },
     {
       "file": "server/index.ts",
-      "line": 880,
+      "line": 908,
       "key": "server.message167",
       "category": "ApiError"
     },
     {
       "file": "server/index.ts",
-      "line": 884,
+      "line": 912,
       "key": "server.message211",
       "category": "ApiError"
     },
     {
       "file": "server/index.ts",
-      "line": 887,
+      "line": 915,
       "key": "server.message212",
       "category": "ApiError"
     },
     {
       "file": "server/index.ts",
-      "line": 895,
+      "line": 923,
       "key": "server.message167",
       "category": "ApiError"
     },
     {
       "file": "server/index.ts",
-      "line": 905,
+      "line": 933,
       "key": "server.message213",
       "category": "ApiError"
     },
     {
       "file": "server/index.ts",
-      "line": 914,
+      "line": 942,
       "key": "server.message214",
       "category": "ApiError"
     },
     {
       "file": "server/index.ts",
-      "line": 918,
+      "line": 946,
       "key": "server.message215",
       "category": "ApiError"
     },
     {
       "file": "server/index.ts",
-      "line": 920,
+      "line": 948,
       "key": "server.message206",
       "category": "ApiError"
     },
     {
       "file": "server/index.ts",
-      "line": 955,
+      "line": 983,
       "key": "server.message186",
       "category": "ApiError"
     },
     {
       "file": "server/index.ts",
-      "line": 973,
+      "line": 1001,
       "key": "server.message216",
       "category": "msg"
     },
     {
       "file": "server/index.ts",
-      "line": 982,
+      "line": 1010,
       "key": "server.message217",
       "category": "msg"
     },
     {
       "file": "server/index.ts",
-      "line": 987,
+      "line": 1015,
       "key": "server.message218",
       "category": "Error"
     },
     {
       "file": "server/index.ts",
-      "line": 990,
+      "line": 1018,
       "key": "server.message219",
       "category": "Error"
     },
     {
       "file": "server/index.ts",
-      "line": 996,
+      "line": 1024,
       "key": "server.message220",
       "category": "Error"
     },
     {
       "file": "server/index.ts",
-      "line": 999,
+      "line": 1027,
       "key": "server.message221",
       "category": "Error"
     },
     {
       "file": "server/index.ts",
-      "line": 1002,
+      "line": 1030,
       "key": "server.message222",
       "category": "Error"
     },
     {
       "file": "server/index.ts",
-      "line": 1016,
+      "line": 1044,
       "key": "server.message223",
       "category": "Error"
     },
     {
       "file": "server/index.ts",
-      "line": 1019,
+      "line": 1047,
       "key": "server.message224",
       "category": "Error"
     },
     {
       "file": "server/index.ts",
-      "line": 1036,
+      "line": 1064,
       "key": "server.message225",
       "category": "Error"
     },
     {
       "file": "server/index.ts",
-      "line": 1040,
+      "line": 1068,
       "key": "server.message226",
       "category": "Error"
     },
     {
       "file": "server/index.ts",
-      "line": 1044,
+      "line": 1072,
       "key": "server.message227",
       "category": "Error"
     },
     {
       "file": "server/index.ts",
-      "line": 1047,
+      "line": 1075,
       "key": "server.message228",
       "category": "Error"
     },
     {
       "file": "server/index.ts",
-      "line": 1065,
+      "line": 1093,
       "key": "server.message229",
       "category": "ApiError"
     },
     {
       "file": "server/index.ts",
-      "line": 1081,
+      "line": 1109,
       "key": "server.message230",
       "category": "ApiError"
     },
     {
       "file": "server/index.ts",
-      "line": 1082,
+      "line": 1110,
       "key": "server.message231",
       "category": "ApiError"
     },
     {
       "file": "server/index.ts",
-      "line": 1083,
+      "line": 1111,
       "key": "server.message232",
       "category": "ApiError"
     },
     {
       "file": "server/index.ts",
-      "line": 1087,
+      "line": 1115,
       "key": "server.message233",
       "category": "ApiError"
     },
     {
       "file": "server/index.ts",
-      "line": 1100,
+      "line": 1128,
       "key": "server.message234",
       "category": "ApiError"
     },
     {
       "file": "server/index.ts",
-      "line": 1109,
+      "line": 1137,
       "key": "server.message235",
       "category": "ApiError"
     },
     {
       "file": "server/index.ts",
-      "line": 1112,
+      "line": 1140,
       "key": "server.message236",
       "category": "ApiError"
     },
     {
       "file": "server/index.ts",
-      "line": 1118,
+      "line": 1146,
       "key": "server.message237",
       "category": "ApiError"
     },
     {
       "file": "server/index.ts",
-      "line": 1127,
+      "line": 1155,
       "key": "server.message238",
       "category": "ApiError"
     },
     {
       "file": "server/index.ts",
-      "line": 1167,
+      "line": 1195,
       "key": "server.message239",
       "category": "ApiError"
     },
     {
       "file": "server/index.ts",
-      "line": 1167,
+      "line": 1195,
       "key": "server.message240",
       "category": "ApiError"
     },
     {
       "file": "server/index.ts",
-      "line": 1174,
+      "line": 1202,
       "key": "server.message241",
       "category": "ApiError"
     },
     {
       "file": "server/index.ts",
-      "line": 1179,
+      "line": 1207,
       "key": "server.message195",
       "category": "ApiError"
     },
     {
       "file": "server/index.ts",
-      "line": 1182,
+      "line": 1210,
       "key": "server.message202",
       "category": "ApiError"
     },
     {
       "file": "server/index.ts",
-      "line": 1184,
+      "line": 1212,
       "key": "server.message242",
       "category": "ApiError"
     },
     {
       "file": "server/index.ts",
-      "line": 1186,
+      "line": 1214,
       "key": "server.message243",
       "category": "ApiError"
     },
     {
       "file": "server/index.ts",
-      "line": 1188,
+      "line": 1216,
       "key": "server.message244",
       "category": "ApiError"
     },
     {
       "file": "server/index.ts",
-      "line": 1189,
+      "line": 1217,
       "key": "server.message245",
       "category": "ApiError"
     },
     {
       "file": "server/index.ts",
-      "line": 1190,
+      "line": 1218,
       "key": "server.message246",
       "category": "ApiError"
     },
     {
       "file": "server/index.ts",
-      "line": 1193,
+      "line": 1221,
       "key": "server.message247",
       "category": "ApiError"
     },
     {
       "file": "server/index.ts",
-      "line": 1198,
+      "line": 1226,
       "key": "server.message248",
       "category": "ApiError"
     },
     {
       "file": "server/index.ts",
-      "line": 1206,
+      "line": 1234,
       "key": "server.message195",
       "category": "ApiError"
     },
     {
       "file": "server/index.ts",
-      "line": 1209,
+      "line": 1237,
       "key": "server.message242",
       "category": "ApiError"
     },
     {
       "file": "server/index.ts",
-      "line": 1215,
+      "line": 1243,
       "key": "server.message249",
       "category": "ApiError"
     },
     {
       "file": "server/index.ts",
-      "line": 1220,
+      "line": 1248,
       "key": "server.message250",
       "category": "ApiError"
     },
     {
       "file": "server/index.ts",
-      "line": 1223,
+      "line": 1251,
       "key": "server.message251",
       "category": "ApiError"
     },
     {
       "file": "server/index.ts",
-      "line": 1231,
+      "line": 1259,
       "key": "server.message252",
       "category": "ApiError"
     },
     {
       "file": "server/index.ts",
-      "line": 1236,
+      "line": 1264,
       "key": "server.message253",
       "category": "ApiError"
     },
     {
       "file": "server/index.ts",
-      "line": 1239,
+      "line": 1267,
       "key": "server.message254",
       "category": "ApiError"
     },
     {
       "file": "server/index.ts",
-      "line": 1242,
+      "line": 1270,
       "key": "server.message255",
       "category": "ApiError"
     },
     {
       "file": "server/index.ts",
-      "line": 1250,
+      "line": 1278,
       "key": "server.message256",
       "category": "ApiError"
     },
     {
       "file": "server/index.ts",
-      "line": 1253,
+      "line": 1281,
       "key": "server.message257",
       "category": "ApiError"
     },
     {
       "file": "server/index.ts",
-      "line": 1257,
+      "line": 1285,
       "key": "server.message258",
       "category": "ApiError"
     },
     {
       "file": "server/index.ts",
-      "line": 1261,
+      "line": 1289,
       "key": "server.message259",
       "category": "ApiError"
     },
     {
       "file": "server/index.ts",
-      "line": 1264,
+      "line": 1292,
       "key": "server.message260",
       "category": "ApiError"
     },
     {
       "file": "server/index.ts",
-      "line": 1267,
+      "line": 1295,
       "key": "server.message261",
       "category": "ApiError"
     },
     {
       "file": "server/index.ts",
-      "line": 1271,
+      "line": 1299,
       "key": "server.message262",
       "category": "ApiError"
     },
@@ -3428,6 +3428,24 @@
       "line": 278,
       "key": "server.message500",
       "category": "WorkFileError"
+    },
+    {
+      "file": "server/index.ts",
+      "line": 680,
+      "key": "server.codexResetAckId",
+      "category": "ApiError"
+    },
+    {
+      "file": "server/index.ts",
+      "line": 692,
+      "key": "server.codexResetWatchBoolean",
+      "category": "ApiError"
+    },
+    {
+      "file": "server/codex-resets.ts",
+      "line": 263,
+      "key": "server.codexResetAckSaveFailed",
+      "category": "Error"
     }
   ],
   "excluded": [
@@ -3475,19 +3493,19 @@
     },
     {
       "file": "server/index.ts",
-      "line": 68,
+      "line": 69,
       "text": "remote.json 无效，远程入口未开启",
       "reason": "日志或启动诊断，不发送到前端"
     },
     {
       "file": "server/index.ts",
-      "line": 77,
+      "line": 78,
       "text": "WORKBENCH_PORT 必须是 1 到 65535 的整数",
       "reason": "日志或启动诊断，不发送到前端"
     },
     {
       "file": "server/index.ts",
-      "line": 179,
+      "line": 195,
       "text": "notify.json 无效，闸门提醒未开启",
       "reason": "日志或启动诊断，不发送到前端"
     },
@@ -3767,6 +3785,48 @@
       "line": 16,
       "text": "用法：node server/scripts/ws-demo.mjs <sessionId> [--message 文本] [--auto-allow] [--until-complete] [--after seq]",
       "reason": "独立 WebSocket 演示 CLI 的用法提示，不在服务端运行时导入，不发送给前端。"
+    },
+    {
+      "file": "server/codex-resets.ts",
+      "line": 122,
+      "text": "预告{p0}",
+      "reason": "Tibo 文字推送为中文公告，沿用中文来源及 [AIReins] 前缀；不是按浏览器语言切换的界面文案。"
+    },
+    {
+      "file": "server/codex-resets.ts",
+      "line": 122,
+      "text": "重置卡",
+      "reason": "Tibo 文字推送为中文公告，沿用中文来源及 [AIReins] 前缀；不是按浏览器语言切换的界面文案。"
+    },
+    {
+      "file": "server/codex-resets.ts",
+      "line": 122,
+      "text": "额度重置",
+      "reason": "Tibo 文字推送为中文公告，沿用中文来源及 [AIReins] 前缀；不是按浏览器语言切换的界面文案。"
+    },
+    {
+      "file": "server/codex-resets.ts",
+      "line": 122,
+      "text": "重置卡已发放",
+      "reason": "Tibo 文字推送为中文公告，沿用中文来源及 [AIReins] 前缀；不是按浏览器语言切换的界面文案。"
+    },
+    {
+      "file": "server/codex-resets.ts",
+      "line": 122,
+      "text": "已确认重置",
+      "reason": "Tibo 文字推送为中文公告，沿用中文来源及 [AIReins] 前缀；不是按浏览器语言切换的界面文案。"
+    },
+    {
+      "file": "server/codex-resets.ts",
+      "line": 123,
+      "text": "{p0}（推算）",
+      "reason": "Tibo 文字推送为中文公告，沿用中文来源及 [AIReins] 前缀；不是按浏览器语言切换的界面文案。"
+    },
+    {
+      "file": "server/codex-resets.ts",
+      "line": 125,
+      "text": "[AIReins] Tibo {p0}{p1}{p2}{p3}\n数据来源 AIHOT {p4}",
+      "reason": "Tibo 文字推送为中文公告，沿用中文来源及 [AIReins] 前缀；不是按浏览器语言切换的界面文案。"
     }
   ]
 }

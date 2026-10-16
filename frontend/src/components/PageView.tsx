@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { PageHealth, PageManifest } from "../types";
 import { fetchPageHealth } from "../api";
 import { isLoopbackUrl, pageRenderMode, pageSrc } from "../pages";
+import { CodexResetCard } from "./CodexResets";
 import { PageIcon } from "./Sidebar";
 
 type CheckState =
@@ -85,45 +86,11 @@ export function PageView({ page, sidebar = false, onCollapse }: {
     };
   }, [sidebar, onCollapse, state, src]);
 
-  // 侧栏里的同源页面（AI 用量等）只比一屏略高时整页微缩放下，不为十几 px 出滚动条（用户 10-02，手机桌面一致）。
-  // 每次先复位再量自然高度；最多缩到 0.85，再高就照常滚动。跨源页取不到 document，跳过。
-  useEffect(() => {
-    const frame = frameRef.current;
-    if (!sidebar || !frame) return;
-    let inner: ResizeObserver | null = null;
-    let fitted: HTMLElement | null = null; // 只复位自己设过的 zoom，不动页面原有行内样式
-    const unfit = () => { if (fitted) fitted.style.zoom = ""; fitted = null; };
-    const fit = () => {
-      unfit();
-      let root: HTMLElement | undefined;
-      try { root = frame.contentDocument?.documentElement; } catch { return; }
-      const view = frame.contentWindow;
-      if (!root || !view || root.style.zoom) return;
-      const ratio = view.innerHeight / root.scrollHeight;
-      if (ratio < 1 && ratio >= 0.85) { root.style.zoom = String(Math.floor(ratio * 1000) / 1000); fitted = root; }
-    };
-    // 页面数据异步渲染，高度在 load 之后才定：观察页内 body（用页内的 ResizeObserver）
-    const attach = () => {
-      inner?.disconnect();
-      inner = null;
-      fit();
-      try {
-        const view = frame.contentWindow as (Window & typeof globalThis) | null;
-        const body = frame.contentDocument?.body;
-        if (view && body && "ResizeObserver" in view) { inner = new view.ResizeObserver(fit); inner.observe(body); }
-      } catch { /* 跨源 */ }
-    };
-    const outer = new ResizeObserver(fit);
-    frame.addEventListener("load", attach);
-    outer.observe(frame);
-    attach();
-    return () => { frame.removeEventListener("load", attach); outer.disconnect(); inner?.disconnect(); unfit(); };
-  }, [sidebar, state, src]);
-
   // 手机经 Tailscale 打开时，127.0.0.1 指的是手机自己：这类页面只能在电脑上用。
   if (!page.proxy && !isLoopbackUrl(window.location.href) && isLoopbackUrl(page.url)) {
     return (
       <div className={viewClass}>
+        {page.id === "ai-usage" && <CodexResetCard />}
         <div className="page-fallback">
           <h2 className="page-fallback-title">
             <PageIcon icon={page.icon} />
@@ -142,6 +109,7 @@ export function PageView({ page, sidebar = false, onCollapse }: {
     if (mode === "blocked") {
       return (
         <div className={viewClass}>
+          {page.id === "ai-usage" && <CodexResetCard />}
           <div className="page-fallback">
             <h2 className="page-fallback-title">
               <PageIcon icon={page.icon} />
@@ -173,6 +141,7 @@ export function PageView({ page, sidebar = false, onCollapse }: {
       return (
         // maxWidth 由后端按简单 CSS 长度校验过；窄面板拉满宽屏反而难看
         <div className={viewClass} style={!sidebar && page.maxWidth ? { maxWidth: page.maxWidth } : undefined}>
+          {page.id === "ai-usage" && <CodexResetCard />}
           <div className="page-toolbar">
             <span className="page-toolbar-title">
               <PageIcon icon={page.icon} />
@@ -194,6 +163,7 @@ export function PageView({ page, sidebar = false, onCollapse }: {
   // 降级面板：检查中 / 健康接口失败 / reachable:false
   return (
     <div className={viewClass}>
+      {page.id === "ai-usage" && <CodexResetCard />}
       <div className="page-fallback">
         <h2 className="page-fallback-title">
           <PageIcon icon={page.icon} />

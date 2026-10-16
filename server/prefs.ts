@@ -9,6 +9,8 @@ export interface WorkbenchPrefs {
   retentionDays: number;
   /** 本机配置：绝对路径；无参数排定 60 秒后关机，abort 取消。 */
   shutdownCommand?: string;
+  /** Tibo 额度重置公开监控；省略等同关闭。 */
+  codexResetWatch?: boolean;
   /** 省略时使用 Claude CLI 默认入口身份。 */
   claudeCodeEntrypoint?: "claude-vscode";
   /** 目录浏览器主目录；省略时使用 $HOME。 */
@@ -49,6 +51,7 @@ export function loadPrefs(): WorkbenchPrefs {
     return {
       idleReleaseMinutes: isValidIdleReleaseMinutes(idle) ? idle : DEFAULT_PREFS.idleReleaseMinutes,
       retentionDays: isValidRetentionDays(retention) ? retention : DEFAULT_PREFS.retentionDays,
+      ...(typeof record?.codexResetWatch === "boolean" ? { codexResetWatch: record.codexResetWatch } : {}),
       ...(validPath(record?.shutdownCommand) ? { shutdownCommand: record!.shutdownCommand as string } : {}),
       ...(record?.claudeCodeEntrypoint === "claude-vscode" ? { claudeCodeEntrypoint: "claude-vscode" as const } : {}),
       ...(validPath(record?.directoryBrowserHome) ? { directoryBrowserHome: record!.directoryBrowserHome as string } : {}),

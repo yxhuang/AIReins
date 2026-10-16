@@ -13,6 +13,7 @@ import { sessionTitle } from "./format";
 import { store, type Store } from "./store";
 import { shallowEqual, useStore } from "./useStore";
 import { workbenchWindowTitle } from "./host-connections";
+import { CodexResetDialog } from "./components/CodexResets";
 import { BrandMark } from "./components/HostSwitcher";
 
 const selectCurrentSession = (value: Store) =>
@@ -98,6 +99,7 @@ export function App() {
     <div
       className={`app${collapsed ? " sidebar-collapsed" : ""}${hasMain ? " has-main" : ""}${termOpen || dispatchesOpen || filesOpen ? " term-open" : ""}`}
     >
+      <CodexResetDialog />
       <Sidebar
         collapsed={collapsed}
         onToggle={() => {

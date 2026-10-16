@@ -19,6 +19,8 @@ import type {
 } from "./types";
 import { createSession, deleteSession, fetchCommands, fetchEarlierEvents, fetchFiles, fetchMeta, fetchPages, fetchSessions, fetchSnapshot, releaseSession, type CreateSessionInput } from "./api";
 import { createSessionGroup, deleteSessionGroup, fetchSessionGroups, patchSession, renameSessionGroup } from "./api";
+import type { CodexResetStatus } from "../../server/codex-resets";
+import { fetchCodexResets, ackCodexReset } from "./api";
 import { fetchWorkFile, saveWorkFile } from "./api";
 import { sessionTitle } from "../../shared/session-title";
 import { extractMentionTokens, stripMentionCandidates } from "./mentions";
@@ -133,6 +135,8 @@ export class Store {
   currentId: string | null = null;
   /** 扩展页面列表（仅 type:"iframe"；未知类型进 skippedPages）与当前打开的页面 id */
   pages: PageManifest[] = [];
+  codexResets: CodexResetStatus | null = null;
+  private codexResetsVersion = 0;
   skippedPages: SkippedPage[] = [];
   currentPageId: string | null = null;
   /** 侧栏面板：historyOpen 与 currentPageId 互斥，保留右侧当前会话。 */
@@ -947,6 +951,21 @@ export class Store {
     this.notify();
   }
 
+  async refreshCodexResets(): Promise<void> {
+    const version = ++this.codexResetsVersion;
+    try {
+      const data = await fetchCodexResets();
+      if (version !== this.codexResetsVersion) return;
+      this.codexResets = data;
+      this.notify();
+    } catch { /* 旧后端/断网保留快照，重连时重取。 */ }
+  }
+
+  async ackCodexReset(id: string): Promise<void> {
+    await ackCodexReset(id);
+    await this.refreshCodexResets();
+  }
+
   session(id: string): SessionRecord | undefined {
     return this.sessions.find((s) => s.id === id);
   }
@@ -1220,6 +1239,7 @@ export class Store {
     socket.addEventListener("open", () => {
       if (this.socket !== socket) return; // 已被 reconnectNow 换掉的旧连接
       this.wsState = "open";
+      void this.refreshCodexResets();
       this.reconnectDelay = 1000;
       const reconnected = this.hasOpenedSocket;
       this.hasOpenedSocket = true;
@@ -1268,6 +1288,13 @@ export class Store {
 
   private handleFrame(frame: Record<string, unknown>): void {
     const type = String(frame.type ?? "");
+    if (type === "codex_resets_updated") {
+      if (!frame.data || typeof frame.data !== "object") return;
+      this.codexResetsVersion++;
+      this.codexResets = frame.data as CodexResetStatus;
+      this.notify();
+      return;
+    }
     if (type === "session_organization_updated") {
       if (!Array.isArray(frame.sessions) || !Array.isArray(frame.groups)) return;
       this.organizationVersion++;

@@ -437,3 +437,10 @@ export function fetchHistoryMessages(
     `/api/history/${encodeURIComponent(agent)}/${encodeURIComponent(nativeSessionId)}/messages${query ? `?${query}` : ""}`,
   );
 }
+
+export function fetchCodexResets(): Promise<import("../../server/codex-resets").CodexResetStatus> {
+  return call("/api/codex-resets");
+}
+export function ackCodexReset(id: string): Promise<unknown> {
+  return call("/api/codex-resets/ack", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id }) });
+}

@@ -358,6 +358,7 @@ export function PageIcon({ icon }: { icon: string }) {
 function PageNav({ collapsed, onPrepare, onClose }: PanelNavProps) {
   const pages = useStore((value) => value.pages);
   const skippedPages = useStore((value) => value.skippedPages);
+  const resetPending = useStore((value) => !!value.codexResets?.enabled && value.codexResets.pending.length > 0);
   const currentPageId = useStore((value) => value.currentPageId);
   const [desktop, setDesktop] = useState(false);
   useEffect(() => {
@@ -387,6 +388,7 @@ function PageNav({ collapsed, onPrepare, onClose }: PanelNavProps) {
           {currentPageId === page.id ? <span className="page-icon" aria-hidden="true">
             <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 5l-7 7 7 7" /></svg>
           </span> : <PageIcon icon={page.icon} />}
+          {page.id === "ai-usage" && resetPending && <span className="codex-reset-dot" role="img" aria-label={t("ui.CodexResets.pending")} />}
           {!collapsed && <span className="page-nav-name">{currentPageId === page.id ? t("ui.Sidebar.back") : page.id === "ai-usage" ? t("ui.Sidebar.allowance") : page.name}</span>}
         </button>
         } />

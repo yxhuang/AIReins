@@ -1,4 +1,7 @@
 const messages: Record<string, string> = {
+  "server.codexResetAckSaveFailed": "重置提醒确认未能保存，请重试",
+  "server.codexResetAckId": "id 必须是非空字符串（最多 256 字符）",
+  "server.codexResetWatchBoolean": "codexResetWatch 必须是布尔值",
   "server.message000": "Host 不在{p0}白名单：{p1}",
   "server.message001": "本机",
   "server.message002": "远程",

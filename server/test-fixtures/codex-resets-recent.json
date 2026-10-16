@@ -1,0 +1,302 @@
+{
+  "schemaVersion": 1,
+  "timezone": "Asia/Shanghai",
+  "checkedAt": "2026-10-15T23:30:24.303+08:00",
+  "events": [
+    {
+      "id": "reset-2110595484180214059-1-1",
+      "type": "direct_reset",
+      "label": "全员重置",
+      "displayLabel": "重置（形式未明确）",
+      "presentation": {
+        "status": "confirmed",
+        "scopeKnown": false,
+        "scopeLabel": null,
+        "kindExplicit": false,
+        "timeInferred": false,
+        "audienceZh": null,
+        "productsZh": null
+      },
+      "estimate": null,
+      "status": "confirmed",
+      "title": "Tibo 确认重置",
+      "scope": "",
+      "createdAt": "2026-10-15T12:55:51.000+08:00",
+      "updatedAt": "2026-10-15T12:55:51.000+08:00",
+      "confirmedAt": "2026-10-15T12:55:51.000+08:00",
+      "occurredOn": null,
+      "confirmationBasis": "source_post",
+      "schedule": null,
+      "posts": [
+        {
+          "id": "2110618732666257557",
+          "publishedAt": "2026-10-15T14:28:13.000+08:00",
+          "stage": "确认完成",
+          "text": "搞定收工",
+          "originalText": "Done and dusted",
+          "fullText": "搞定收工",
+          "fullOriginalText": "Done and dusted",
+          "context": [
+            {
+              "id": "2110595554036400151",
+              "author": "thsottiaux",
+              "relation": "quote",
+              "text": "将在接下来 2 小时内落地",
+              "originalText": "Landing within the next 2 hours",
+              "url": "https://x.com/i/status/2110595554036400151"
+            }
+          ],
+          "url": "https://x.com/thsottiaux/status/2110618732666257557"
+        },
+        {
+          "id": "2110595554036400151",
+          "publishedAt": "2026-10-15T12:56:07.000+08:00",
+          "stage": "进展",
+          "text": "将在接下来 2 小时内落地",
+          "originalText": "Landing within the next 2 hours",
+          "fullText": "将在接下来 2 小时内落地",
+          "fullOriginalText": "Landing within the next 2 hours",
+          "context": [
+            {
+              "id": "2110595484180214059",
+              "author": "thsottiaux",
+              "relation": "reply",
+              "text": "关于我的重置按钮丢了的报道，实在言过其实了\n\n第 10 天/ 重置",
+              "originalText": "The reports of my reset button being lost are greatly exaggerated\n\nDay 10/ Reset",
+              "url": "https://x.com/i/status/2110595484180214059"
+            }
+          ],
+          "url": "https://x.com/thsottiaux/status/2110595554036400151"
+        },
+        {
+          "id": "2110595484180214059",
+          "publishedAt": "2026-10-15T12:55:51.000+08:00",
+          "stage": "确认完成",
+          "text": "第 10 天/ 重置",
+          "originalText": "Day 10/ Reset",
+          "fullText": "关于我的重置按钮丢了的报道，实在是言过其实了\n\n第 10 天/ 重置",
+          "fullOriginalText": "The reports of my reset button being lost are greatly exaggerated\n\nDay 10/ Reset",
+          "context": [],
+          "url": "https://x.com/thsottiaux/status/2110595484180214059"
+        }
+      ],
+      "url": "https://aihot.news/codex-reset"
+    },
+    {
+      "id": "reset-2109812216212099456-1-1",
+      "type": "direct_reset",
+      "label": "全员重置",
+      "displayLabel": "重置（形式未明确）",
+      "presentation": {
+        "status": "confirmed",
+        "scopeKnown": false,
+        "scopeLabel": null,
+        "kindExplicit": false,
+        "timeInferred": false,
+        "audienceZh": null,
+        "productsZh": null
+      },
+      "estimate": null,
+      "status": "confirmed",
+      "title": "Tibo 确认重置",
+      "scope": "",
+      "createdAt": "2026-10-13T09:03:25.000+08:00",
+      "updatedAt": "2026-10-13T13:06:06.000+08:00",
+      "confirmedAt": "2026-10-13T13:06:06.000+08:00",
+      "occurredOn": null,
+      "confirmationBasis": "source_post",
+      "schedule": {
+        "precision": "deadline",
+        "from": "2026-10-13T15:00:00.000+08:00",
+        "through": "2026-10-13T15:00:00.000+08:00",
+        "label": "北京时间预计 10月13日 15:00 前"
+      },
+      "posts": [
+        {
+          "id": "2109873287853707513",
+          "publishedAt": "2026-10-13T13:06:06.000+08:00",
+          "stage": "确认完成",
+          "text": "你的重置要配点什么小菜？已经完成了。",
+          "originalText": "What would you like with your side of reset? It's done.",
+          "fullText": "你的重置要配点什么小菜？已经完成了。",
+          "fullOriginalText": "What would you like with your side of reset? It's done.",
+          "context": [
+            {
+              "id": "2109812360596865224",
+              "author": "thsottiaux",
+              "relation": "quote",
+              "text": "全球重置将在太平洋时间今天结束前落地。玩得开心",
+              "originalText": "Global reset landing by EOD PST time. Enjoy",
+              "url": "https://x.com/i/status/2109812360596865224"
+            }
+          ],
+          "url": "https://x.com/thsottiaux/status/2109873287853707513"
+        },
+        {
+          "id": "2109812360596865224",
+          "publishedAt": "2026-10-13T09:03:59.000+08:00",
+          "stage": "预告",
+          "text": "全球重置将在太平洋时间今天结束前落地。玩得开心",
+          "originalText": "Global reset landing by EOD PST time. Enjoy",
+          "fullText": "全球重置将在太平洋时间今天结束前落地。玩得开心",
+          "fullOriginalText": "Global reset landing by EOD PST time. Enjoy",
+          "context": [
+            {
+              "id": "2109812216212099456",
+              "author": "thsottiaux",
+              "relation": "reply",
+              "text": "第 8 天/ 重置",
+              "originalText": "Day 8/ Reset",
+              "url": "https://x.com/i/status/2109812216212099456"
+            }
+          ],
+          "url": "https://x.com/thsottiaux/status/2109812360596865224"
+        },
+        {
+          "id": "2109812216212099456",
+          "publishedAt": "2026-10-13T09:03:25.000+08:00",
+          "stage": "预告",
+          "text": "第8天/ 重置",
+          "originalText": "Day 8/ Reset",
+          "fullText": "第8天/ 重置",
+          "fullOriginalText": "Day 8/ Reset",
+          "context": [],
+          "url": "https://x.com/thsottiaux/status/2109812216212099456"
+        }
+      ],
+      "url": "https://aihot.news/codex-reset"
+    }
+  ],
+  "activities": [
+    {
+      "id": "2110618732666257557",
+      "publishedAt": "2026-10-15T14:28:13.000+08:00",
+      "eventIds": [
+        "reset-2110595484180214059-1-1"
+      ],
+      "kind": "event_update",
+      "text": "搞定收工",
+      "originalText": "Done and dusted",
+      "context": [
+        {
+          "id": "2110595554036400151",
+          "author": "thsottiaux",
+          "relation": "quote",
+          "text": "将在接下来 2 小时内落地",
+          "originalText": "Landing within the next 2 hours",
+          "url": "https://x.com/i/status/2110595554036400151"
+        }
+      ],
+      "statusChanged": true,
+      "action": "confirm",
+      "url": "https://x.com/thsottiaux/status/2110618732666257557"
+    },
+    {
+      "id": "2110595554036400151",
+      "publishedAt": "2026-10-15T12:56:07.000+08:00",
+      "eventIds": [
+        "reset-2110595484180214059-1-1"
+      ],
+      "kind": "event_update",
+      "text": "将在接下来 2 小时内落地",
+      "originalText": "Landing within the next 2 hours",
+      "context": [
+        {
+          "id": "2110595484180214059",
+          "author": "thsottiaux",
+          "relation": "reply",
+          "text": "关于我的重置按钮丢了的报道，实在言过其实了\n\n第 10 天/ 重置",
+          "originalText": "The reports of my reset button being lost are greatly exaggerated\n\nDay 10/ Reset",
+          "url": "https://x.com/i/status/2110595484180214059"
+        }
+      ],
+      "statusChanged": true,
+      "action": null,
+      "url": "https://x.com/thsottiaux/status/2110595554036400151"
+    },
+    {
+      "id": "2110595484180214059",
+      "publishedAt": "2026-10-15T12:55:51.000+08:00",
+      "eventIds": [
+        "reset-2110595484180214059-1-1"
+      ],
+      "kind": "event_update",
+      "text": "关于我的重置按钮丢了的报道，实在是言过其实了\n\n第 10 天/ 重置",
+      "originalText": "The reports of my reset button being lost are greatly exaggerated\n\nDay 10/ Reset",
+      "context": [],
+      "statusChanged": true,
+      "action": "confirm",
+      "url": "https://x.com/thsottiaux/status/2110595484180214059"
+    },
+    {
+      "id": "2109873287853707513",
+      "publishedAt": "2026-10-13T13:06:06.000+08:00",
+      "eventIds": [
+        "reset-2109812216212099456-1-1"
+      ],
+      "kind": "event_update",
+      "text": "你的重置要配点什么小菜？已经完成了。",
+      "originalText": "What would you like with your side of reset? It's done.",
+      "context": [
+        {
+          "id": "2109812360596865224",
+          "author": "thsottiaux",
+          "relation": "quote",
+          "text": "全球重置将在太平洋时间今天结束前落地。玩得开心",
+          "originalText": "Global reset landing by EOD PST time. Enjoy",
+          "url": "https://x.com/i/status/2109812360596865224"
+        }
+      ],
+      "statusChanged": true,
+      "action": "confirm",
+      "url": "https://x.com/thsottiaux/status/2109873287853707513"
+    },
+    {
+      "id": "2109812360596865224",
+      "publishedAt": "2026-10-13T09:03:59.000+08:00",
+      "eventIds": [
+        "reset-2109812216212099456-1-1"
+      ],
+      "kind": "event_update",
+      "text": "全球重置将在太平洋时间今天结束前落地。玩得开心",
+      "originalText": "Global reset landing by EOD PST time. Enjoy",
+      "context": [
+        {
+          "id": "2109812216212099456",
+          "author": "thsottiaux",
+          "relation": "reply",
+          "text": "第 8 天/ 重置",
+          "originalText": "Day 8/ Reset",
+          "url": "https://x.com/i/status/2109812216212099456"
+        }
+      ],
+      "statusChanged": true,
+      "action": "announce",
+      "url": "https://x.com/thsottiaux/status/2109812360596865224"
+    },
+    {
+      "id": "2109812216212099456",
+      "publishedAt": "2026-10-13T09:03:25.000+08:00",
+      "eventIds": [
+        "reset-2109812216212099456-1-1"
+      ],
+      "kind": "event_update",
+      "text": "第8天/ 重置",
+      "originalText": "Day 8/ Reset",
+      "context": [],
+      "statusChanged": true,
+      "action": "announce",
+      "url": "https://x.com/thsottiaux/status/2109812216212099456"
+    }
+  ],
+  "monitor": {
+    "status": "healthy",
+    "lastAttemptAt": "2026-10-15T23:30:24.303+08:00",
+    "lastCollectedAt": "2026-10-15T23:30:24.303+08:00",
+    "lastVerifiedAt": "2026-10-15T23:30:24.303+08:00",
+    "heldWindowCount": 0,
+    "pendingCount": 0,
+    "reviewCount": 0
+  },
+  "outage": null
+}

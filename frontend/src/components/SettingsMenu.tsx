@@ -95,6 +95,7 @@ const SESSIONS_GROUP: SettingGroup = {
       label: t("ui.SettingsMenu.remote_control_on_by_default"),
       options: [],
     },
+    { id: "codex-reset-watch", label: t("ui.CodexResets.watch"), options: [] },
     {
       id: "idle-release",
       label: t("ui.SettingsMenu.release_idle_workers_after_minutes"),
@@ -138,6 +139,10 @@ export function SettingsMenu() {
   const [scaleChoice, setScaleChoice] = useState<FontScaleChoice>(readFontScaleChoice);
   const [bodySize, setBodySize] = useState(readBodyFontSize);
   const [termSize, setTermSize] = useState(() => Math.round(readTermFontSize()));
+  const watchEnabled = useStore(value => value.codexResets?.enabled === true);
+  const [watchSaving, setWatchSaving] = useState(false);
+  const [watchError, setWatchError] = useState("");
+  const watchPending = useRef(false);
   const [idleRelease, setIdleRelease] = useState("30");
   const [rcStartup, setRcStartup] = useState<boolean | null>(null);
   const [rcSaving, setRcSaving] = useState(false);
@@ -355,6 +360,19 @@ export function SettingsMenu() {
     savePrefs({ idleReleaseMinutes: Number(value) }).catch(() => setIdleRelease(previous));
   };
 
+  const toggleResetWatch = async () => {
+    if (watchPending.current) return;
+    watchPending.current = true;
+    setWatchSaving(true);
+    setWatchError("");
+    try {
+      const prefs = await fetchPrefs();
+      await savePrefs({ ...prefs, codexResetWatch: !watchEnabled });
+      await store.refreshCodexResets();
+    } catch (error) { setWatchError(error instanceof Error ? error.message : String(error)); }
+    finally { watchPending.current = false; setWatchSaving(false); }
+  };
+
   const toggleRcStartup = async () => {
     if (rcStartup === null || rcPending.current) return;
     rcPending.current = true;
@@ -418,7 +436,20 @@ export function SettingsMenu() {
     <section className={`settings-group settings-group-${group.id}`} key={group.id}>
       <h3 className="settings-group-title">{group.label}</h3>
       {group.items.map((item) => (
-        item.id === "remote-control-startup" ? (
+        item.id === "codex-reset-watch" ? (
+          <div className="settings-item" key={item.id}>
+            <div className="settings-row">
+              <span className="settings-item-label" id="settings-reset-watch">{item.label}</span>
+              <button type="button" role="switch" className="settings-switch" aria-checked={watchEnabled}
+                aria-labelledby="settings-reset-watch" aria-describedby="settings-reset-hint" disabled={watchSaving}
+                onClick={() => void toggleResetWatch()}>
+                <span className={`slash-switch${watchEnabled ? " on" : ""}`} aria-hidden="true" />
+              </button>
+            </div>
+            <span className="settings-hint" id="settings-reset-hint">{t("ui.CodexResets.watch_hint")}</span>
+            {watchError && <span className="new-error" role="alert">{watchError}</span>}
+          </div>
+        ) : item.id === "remote-control-startup" ? (
           <div className="settings-item" key={item.id}>
             <div className="settings-row">
               <span className="settings-item-label" id={`settings-item-${item.id}`}>{item.label}</span>

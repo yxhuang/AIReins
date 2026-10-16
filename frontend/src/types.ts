@@ -434,5 +434,6 @@ export interface ApiEnvelope<T> {
 
 /** GET/PUT /api/prefs 的服务端偏好；idleReleaseMinutes 为 0 表示关闭空闲自动释放。 */
 export interface WorkbenchPrefs {
+  codexResetWatch?: boolean;
   idleReleaseMinutes: number;
 }

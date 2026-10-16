@@ -21,6 +21,7 @@ import { NativeDeleteError } from "./native-session-delete.js";
 import { getMeta, getServerHostName, SERVER_VERSION } from "./meta.js";
 import { appWindowEnabled, findWindowsChrome, openAppWindow, AppWindowError } from "./app-window.js";
 import { getTaildropTargets, getTailscalePeers, sendTaildrop, TaildropError } from "./tailscale-peers.js";
+import { createCodexResetWatch } from "./codex-resets.js";
 import { busySessionCount, createPowerOff, powerOffEnabled } from "./power-off.js";
 import { feishuSender, GateNotifier, larkCliSender, loadNotifyConfig, type NotifyConfig } from "./notify.js";
 import { checkPageHealth, proxyPage, readLinks, scanPages } from "./pages.js";
@@ -167,6 +168,21 @@ manager.onEvent((event) => {
   for (const client of clients) sendEvent(client, event);
 });
 manager.onOrganizationUpdated((frame) => sendOrganizationUpdate(clients, frame));
+
+// 独立于会话订阅的全局控制帧；通知沿用 notify.json 中现有发送器。
+const codexResets = createCodexResetWatch({
+  path: join(workbenchHome, "codex-resets.json"),
+  enabled: prefs.codexResetWatch === true,
+  onChange: () => {
+    const frame = { type: "codex_resets_updated", data: codexResets.status() };
+    for (const client of clients) sendWs(client, frame);
+  },
+  send: async (text) => {
+    const config = loadNotifyConfig(join(workbenchHome, "notify.json"));
+    if (config) await (config.feishuWebhook ? feishuSender(config.feishuWebhook) : larkCliSender(config.larkUserId!))(text);
+  },
+});
+codexResets.start();
 
 startNotifier();
 
@@ -362,6 +378,7 @@ async function shutdown(signal: string): Promise<void> {
   log("info", "workbench server stopping", { signal });
   clearInterval(heartbeat);
   clearInterval(idleReleaseSweep);
+  codexResets.stop();
   try {
     for (const client of clients) client.socket.close(1001, "server shutdown");
     for (const socket of terminalClients.keys()) socket.close(1001, "server shutdown");
@@ -655,6 +672,13 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       await respond(response, 200, 0, "success", { pages }, requestId);
     } else if (method === "GET" && url.pathname === "/api/links") {
       await respond(response, 200, 0, "success", { links: readLinks() }, requestId);
+    } else if (url.pathname === "/api/codex-resets" && method === "GET") {
+      await respond(response, 200, 0, "success", codexResets.status(), requestId);
+    } else if (url.pathname === "/api/codex-resets/ack" && method === "POST") {
+      const input = await readJson(request);
+      const id = (input as Record<string, unknown> | null)?.id;
+      if (typeof id !== "string" || !id || id.length > 256) throw new ApiError(400, 40065, "id 必须是非空字符串（最多 256 字符）");
+      await respond(response, 200, 0, "success", codexResets.ack(id), requestId);
     } else if (url.pathname === "/api/prefs" && method === "GET") {
       await respond(response, 200, 0, "success", { ...prefs }, requestId);
     } else if (url.pathname === "/api/prefs" && method === "PUT") {
@@ -664,8 +688,12 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       if (!isValidIdleReleaseMinutes(idleReleaseMinutes)) {
         throw new ApiError(400, 40062, "idleReleaseMinutes 必须是 0 到 1440 的整数");
       }
-      prefs = { ...prefs, idleReleaseMinutes };
-      savePrefs(prefs);
+      const watch = (input as Record<string, unknown>).codexResetWatch;
+      if (watch !== undefined && typeof watch !== "boolean") throw new ApiError(400, 40065, "codexResetWatch 必须是布尔值");
+      const nextPrefs = { ...prefs, idleReleaseMinutes, ...(watch !== undefined ? { codexResetWatch: watch } : {}) };
+      savePrefs(nextPrefs);
+      prefs = nextPrefs;
+      codexResets.setEnabled(prefs.codexResetWatch === true);
       await respond(response, 200, 0, "success", { ...prefs }, requestId);
     } else if (url.pathname === "/api/claude/settings" && (method === "GET" || method === "PUT")) {
       let enabled: boolean | undefined;

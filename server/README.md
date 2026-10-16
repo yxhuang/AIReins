@@ -1063,3 +1063,18 @@ Codex 输入框 `$` 在光标 token 处打开名称+描述面板，支持过滤�
 只接受空闲或已结束、无后台任务/审批/续接的Codex/Kimi会话；校验原生ID、历史目录与文件身份，阻止并发操作和同ID续接，等待worker停止并确认退出，Codex再调用 `codex delete --force <UUID>`（30秒超时，无shell插值）。Kimi通过独立短生命周期ACP进程初始化，核验 `agentCapabilities.sessionCapabilities.delete`，调用 `session/delete`（20秒超时）；遵循 `KIMI_CODE_HOME`，历史读取根目录不一致时拒绝操作。正式CLI负责原生历史及索引，服务端确认Codex原生文件或Kimi整个会话目录已不存在后才移除AIReins记录与独占附件；共用附件沿用引用保护。返回 `nativeTranscriptPreserved:false`。原生失败保留AIReins记录，Claude不提供菜单入口，后端明确拒绝，不调用项目purge或工作树rm；Kimi能力缺失或RPC失败保留AIReins记录。
 
 隔离CLI、HTTP及UI证据见 `.work-orders/2026-10-05-permanent-session-delete/REPORT.md`。真实CLI隔离测试不涉及用户历史；生产后端尚未重启。
+
+## Tibo / Codex 重置提醒
+
+本机 `prefs.json` 的 `codexResetWatch` 为布尔值，默认 `false`；可在设置菜单开启。关闭时不请求外部服务、不显示未读提醒，不修改三家 CLI 的全局配置。开启后仅轮询 AIHOT 的公开近 7 天接口 `https://aihot.news/api/v1/codex-resets/recent`，固定每 10 分钟一次，超时 15 秒，使用 ETag / `If-None-Match`；304 保留现有快照并刷新最后成功时间。不访问受完整历史限流的 `/api/v1/codex-resets`。429 / 5xx 优先采用 `Retry-After`（秒数或 HTTP 日期，至少间隔 10 分钟），缺失/无效时指数退避，最长 1 小时；其他失败也退避。请求、JSON、持久化和通知失败只记不含响应正文的 warn，不阻断服务。`schemaVersion !== 1` 时跳过该响应。
+
+首次成功只建立基线。后续仅 `kind=event_update` 且 `action=announce|confirm` 的帖子触发提醒，按 activity id 去重，同帖关联多个事件仍只提醒一次；`related`、`amend` 不提醒。已被本轮全部关联事件的确认取代的 announce，以及超过 24 小时或发布时间缺失/非法的活动，只记 seen，不弹窗、不推送。中文正文优先取关联事件同 id 的 post，再取 activity 的 `text` / `fullText`；无中文时仅使用事件标题和原帖链接，不自动翻译。已配置 `notify.json` 时复用现有飞书或 lark-cli 发送器，文字保持 `[AIReins]` 前缀，附原帖及 AIHOT 来源链接；不使用审批通知的延迟/冷却规则。
+
+本机 `~/.workbench/codex-resets.json`（随 `WORKBENCH_HOME`）用 `.tmp` + rename 原子写、权限 `0600`，保存基线、seen/ack、ETag、最后成功时间、故障起点及精简快照。seen/ack 各最多 2000 个 id、事件最多 100 条、活动最多 1000 条、未读最多 100 条；恢复时再次容错校验。重启保留卡片、未读和去重状态，关闭功能也保留本地数据。
+
+同现有 `/api/*` 的访问控制：
+
+- `GET /api/codex-resets`：`{enabled,lastSuccessAt,stale,monitor,pending,recent,alerts}`。`pending` 是 `status=announced` 的事件，`recent` 按更新时间取最近 5 条；`alerts` 最新优先，包含活动及关联 `events`。`stale` 表示 AIHOT monitor 非 healthy、outage 非空或本机连续失败超过 1 小时。关闭时 `pending` / `alerts` 为空。
+- `POST /api/codex-resets/ack {id}`：幂等标记已读。新的快照/提醒、ack 或开关变化通过全局 WS 控制帧 `{type:"codex_resets_updated",data:状态快照}` 同步所有页面；前端连接/重连也拉取一次。任一端 ack 后其他端同步关闭该提醒。
+
+UI 在额度页 iframe 上方显示 AIReins 自己的重置信息卡；数据仅供提醒，额度数值仍由原有 AI-Usage 提供。每个展示位置保留「数据来源 AIHOT」链接到 <https://aihot.news/codex-reset>。此公开 API 限个人非商业使用，须保留来源信息。

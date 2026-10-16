@@ -1,0 +1,79 @@
+{
+  "schemaVersion": 1,
+  "timezone": "Asia/Shanghai",
+  "checkedAt": "2026-10-15T23:30:24.303+08:00",
+  "events": [
+    {
+      "id": "reset-2093801758665715784-1-1",
+      "type": "direct_reset",
+      "label": "全员重置",
+      "displayLabel": "额度重置",
+      "presentation": {
+        "status": "likely_completed",
+        "scopeKnown": true,
+        "scopeLabel": "paid users",
+        "kindExplicit": true,
+        "timeInferred": false,
+        "audienceZh": "所有付费用户",
+        "productsZh": "Codex、ChatGPT Work"
+      },
+      "estimate": {
+        "from": "2026-08-30T05:30:00.000+08:00",
+        "through": "2026-08-30T08:30:00.000+08:00",
+        "basis": "model",
+        "label": "北京时间 8月30日 05:30–08:30",
+        "reason": "模型推算：本条给出 2:30pm PST 的落地时间，帖子发出时已近 13:43，按以往重置常有数小时延迟，故留出至下午稍晚的窗口。"
+      },
+      "status": "announced",
+      "title": "额度应已重置",
+      "scope": "",
+      "createdAt": "2026-08-30T04:43:34.000+08:00",
+      "updatedAt": "2026-08-30T04:43:53.000+08:00",
+      "confirmedAt": null,
+      "occurredOn": null,
+      "confirmationBasis": null,
+      "schedule": {
+        "precision": "window",
+        "from": "2026-08-30T05:30:00.000+08:00",
+        "through": "2026-08-30T06:30:00.000+08:00",
+        "label": "北京时间预计 8月30日 05:30–06:30"
+      },
+      "posts": [
+        {
+          "id": "2093801838504186008",
+          "publishedAt": "2026-08-30T04:43:53.000+08:00",
+          "stage": "预告",
+          "text": "将于 2:30pm PST 落地。",
+          "originalText": "Landing 2:30pm PST",
+          "fullText": null,
+          "fullOriginalText": null,
+          "context": [],
+          "url": "https://x.com/thsottiaux/status/2093801838504186008"
+        },
+        {
+          "id": "2093801758665715784",
+          "publishedAt": "2026-08-30T04:43:34.000+08:00",
+          "stage": "预告",
+          "text": "我们正在为 Codex 和 ChatGPT Work 的所有付费用户重置用量。……不用说，我们正在重置用量额度，希望你们度过一个非常愉快的周六！",
+          "originalText": "We are reseting usage for all paid users of Codex and ChatGPT Work.",
+          "fullText": null,
+          "fullOriginalText": null,
+          "context": [],
+          "url": "https://x.com/thsottiaux/status/2093801758665715784"
+        }
+      ],
+      "url": "https://aihot.news/codex-reset"
+    }
+  ],
+  "activities": [],
+  "monitor": {
+    "status": "healthy",
+    "lastAttemptAt": "2026-10-15T23:30:24.303+08:00",
+    "lastCollectedAt": "2026-10-15T23:30:24.303+08:00",
+    "lastVerifiedAt": "2026-10-15T23:30:24.303+08:00",
+    "heldWindowCount": 0,
+    "pendingCount": 0,
+    "reviewCount": 0
+  },
+  "outage": null
+}
