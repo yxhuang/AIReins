@@ -766,9 +766,8 @@ body.resizing {
 
 .new-field input.mono { font-family: var(--font-mono); }
 
-/* 新建表单内嵌目录浏览：桌面整块最高 40dvh，列表高度另由 Sidebar.tsx 按剩余空间限定（用户 10-16） */
+/* 新建表单内嵌目录浏览：列表高度由 Sidebar.tsx 按剩余空间限定（到侧栏一半处，最少 6 行；用户 10-16） */
 .new-cwd .dir-contents { flex: 0 1 auto; gap: 8px; }
-@media (min-width: 721px) { .new-cwd .dir-contents { max-height: 40dvh; } }
 .new-cwd .dir-entry { padding: 4px 10px; }
 /* 圆钮高度跟随同行 WSL/Windows，不撑高导航行 */
 .new-cwd .dir-nav-up { align-self: stretch; width: auto; height: auto; padding: 0 6px; border-radius: 999px; }

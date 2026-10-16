@@ -1044,7 +1044,7 @@ function NewSessionForm({ onDone, initialCwd }: { onDone: () => void; initialCwd
   const submitBtnRef = useRef<HTMLButtonElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
   // 桌面「创建并进入」最低到侧栏一半高处（用户 10-16）；手机表单可占满列表区（用户 10-17）。
-  // 目录列表按剩余空间限高，最少留两行
+  // 目录列表按剩余空间限高，最少留 6 行：笔记本等矮屏上一半处只够两行，此时表单越过一半（用户 10-16）
   useEffect(() => {
     const form = formRef.current;
     const sidebar = form?.closest<HTMLElement>(".sidebar");
@@ -1058,7 +1058,9 @@ function NewSessionForm({ onDone, initialCwd }: { onDone: () => void; initialCwd
       const formBox = form.getBoundingClientRect();
       const bottom = mobile.matches ? area.getBoundingClientRect().bottom - 8 : box.top + box.height / 2;
       const rest = formBox.height - list.getBoundingClientRect().height;
-      list.style.maxHeight = `${Math.max(58, bottom - formBox.top - rest)}px`;
+      const row = list.querySelector<HTMLElement>(".dir-entry")?.getBoundingClientRect().height || 29;
+      const floor = Math.max(58, row * 6 + 2);
+      list.style.maxHeight = `${Math.max(floor, bottom - formBox.top - rest)}px`;
     };
     const observer = new ResizeObserver(fit);
     observer.observe(sidebar);
