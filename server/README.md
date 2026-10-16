@@ -620,7 +620,7 @@ worker 的 `processId` 原本就持久化；新启动的 POSIX worker 使用独�
 
 ## `pages/` 扩展页面
 
-`GET /api/links` 返回 `data: {links: [{name, url, icon?, group?}]}`，与 `/api/pages` 共用请求前置的访问控制。每次请求现读用户目录 `${workbenchHome}/pages/links.json`（默认 `~/.workbench/pages/links.json`），改文件后刷新页面或重新打开「直达」即可生效；新增接口本身需重启 AIReins。文件缺失返回空列表；坏 JSON、非法顶层返回空列表并 warn，非法条目逐条跳过并 warn，不导致接口 500。`name`、`url` 为必填非空字符串，`icon`、`group` 为可选非空字符串；支持 http/https 和 `vscode://`、`obsidian://` 等显式 URL scheme，拒绝 `javascript:`、`data:`、`vbscript:`、`file:`、`blob:`、`filesystem:`、`about:` 和含控制字符或未编码空格的 URL。根目录文件不参与 `scanPages` 的子目录扫描。
+`GET /api/links` 返回 `data: {links: [{name, url, icon?, group?}]}`，与 `/api/pages` 共用请求前置的访问控制。每次请求现读并合并两处：仓库 `pages/links.json`（随 git 同步的共享菜单）在前，用户目录 `${workbenchHome}/pages/links.json`（默认 `~/.workbench/pages/links.json`，本机追加）在后，同一 `url` 以本机条目原位覆盖；改文件后刷新页面或重新打开「直达」即可生效；新增接口本身需重启 AIReins。任一处文件缺失按该处为空；坏 JSON、非法顶层按该处为空并 warn（另一处照常返回），非法条目逐条跳过并 warn，不导致接口 500。`name`、`url` 为必填非空字符串，`icon`、`group` 为可选非空字符串；支持 http/https 和 `vscode://`、`obsidian://` 等显式 URL scheme，拒绝 `javascript:`、`data:`、`vbscript:`、`file:`、`blob:`、`filesystem:`、`about:` 和含控制字符或未编码空格的 URL。根目录文件不参与 `scanPages` 的子目录扫描。
 
 ```json
 {"links":[{"name":"示例网站","url":"https://example.com","icon":"🌐","group":"参考"}]}

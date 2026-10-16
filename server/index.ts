@@ -24,7 +24,7 @@ import { getTaildropTargets, getTailscalePeers, sendTaildrop, TaildropError } fr
 import { createCodexResetWatch } from "./codex-resets.js";
 import { busySessionCount, createPowerOff, powerOffEnabled } from "./power-off.js";
 import { feishuSender, GateNotifier, larkCliSender, loadNotifyConfig, type NotifyConfig } from "./notify.js";
-import { checkPageHealth, proxyPage, readLinks, scanPages } from "./pages.js";
+import { checkPageHealth, proxyPage, readLauncherLinks, scanPages } from "./pages.js";
 import { pruneStorage, workbenchHome } from "./persistence.js";
 import { isValidIdleReleaseMinutes, loadPrefs, savePrefs, type WorkbenchPrefs } from "./prefs.js";
 import { readClaudeStartupSettings, writeClaudeStartupSettings } from "./claude-settings.js";
@@ -671,7 +671,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
     } else if (method === "GET" && url.pathname === "/api/pages") {
       await respond(response, 200, 0, "success", { pages }, requestId);
     } else if (method === "GET" && url.pathname === "/api/links") {
-      await respond(response, 200, 0, "success", { links: readLinks() }, requestId);
+      await respond(response, 200, 0, "success", { links: readLauncherLinks() }, requestId);
     } else if (url.pathname === "/api/codex-resets" && method === "GET") {
       await respond(response, 200, 0, "success", codexResets.status(), requestId);
     } else if (url.pathname === "/api/codex-resets/ack" && method === "POST") {

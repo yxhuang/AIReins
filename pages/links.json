@@ -1,0 +1,7 @@
+{
+  "links": [
+    {"name": "Tibo (X)", "url": "https://x.com/thsottiaux?lang=en", "icon": "𝕏", "group": "关注"},
+    {"name": "AIHOT", "url": "https://aihot.news/", "icon": "🔥", "group": "关注"},
+    {"name": "LLM ranking", "url": "https://artificialanalysis.ai/#intelligence", "icon": "📈", "group": "参考"}
+  ]
+}

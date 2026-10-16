@@ -112,7 +112,7 @@ AI 越来越能干，能自己读代码、改文件、跑命令，一口气做�
 | **中途掌控** | 上下文用量圆环；打断；Claude Code 与 Codex 支持运行中插话改方向和旁路追问，Kimi 运行中的消息排到当前回合结束后发送 |
 | **原生历史** | 搜索、按目录筛选三家 CLI 的原生历史并续接；在 AIReins 开的会话，在 CLI 和 VS Code 扩展里也能续接（Claude 会话要出现在历史列表里需设 `claudeCodeEntrypoint`），反过来也一样（Codex 同一线程同一时间只能有一个客户端写入，转到别处续接前先在 AIReins 里释放） |
 | **派单树** | 子代理与委派任务按父子树展开，派单流程图实时显示状态，桌面和手机都能看 |
-| **直达与扩展页** | 「直达」菜单读 `~/.workbench/pages/links.json` 里你自己的链接；扩展页可嵌入 [AI-Usage](https://github.com/yxhuang/ai-usage) 等本地小工具 |
+| **直达与扩展页** | 「直达」菜单合并仓库 `pages/links.json`（随 git 在各机器间同步）与本机 `~/.workbench/pages/links.json` 的链接；扩展页可嵌入 [AI-Usage](https://github.com/yxhuang/ai-usage) 等本地小工具 |
 | **整台电脑** | 文件面板浏览任意可读目录，带 Git 状态与标签页；在家目录、Windows 盘符和会话目录里预览 Markdown、代码、图片、PDF，就地编辑 UTF-8 文本文件（超过 4 MiB 先确认再加载，上限 32 MiB）；多标签终端（远程入口默认关闭，需显式开启） |
 | **手机与发送** | 手机布局可加到主屏当 App；Taildrop 把文件或文件夹（打包 zip）发到你在线的设备 |
 | **多台电脑** | 列出 tailnet 里的其他电脑，一键添加，在一个菜单里切换到它们的 AIReins |
@@ -259,7 +259,7 @@ AIReins 把数据保存在 `~/.workbench`。`WORKBENCH_HOME` 可以移动服务�
   {"id":"ai-usage","name":"AI-Usage","icon":"📊","type":"iframe","url":"http://127.0.0.1:8788","proxy":true}
   ```
 
-- **直达链接**：在 `~/.workbench/pages/links.json` 写入你的链接，刷新页面或重新打开「直达」即生效，`group` 用来分组：
+- **直达链接**：各机器共用的链接写进仓库 `pages/links.json`（随 git 同步），只在本机用的写进 `~/.workbench/pages/links.json`，同一 URL 以本机为准；刷新页面或重新打开「直达」即生效，`group` 用来分组：
 
   ```json
   {"links":[{"name":"GitHub","url":"https://github.com","icon":"🐙","group":"常用"},{"name":"笔记","url":"obsidian://open?vault=notes","icon":"📝","group":"常用"}]}

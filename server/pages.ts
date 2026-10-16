@@ -2,11 +2,13 @@ import { readdirSync, readFileSync } from "node:fs";
 import { pipeline } from "node:stream";
 import { request as httpRequest, type IncomingMessage, type OutgoingHttpHeaders, type ServerResponse } from "node:http";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { performance } from "node:perf_hooks";
 import { log } from "./logger.js";
 import { workbenchHome } from "./persistence.js";
 
 const DEFAULT_PAGES_ROOT = join(workbenchHome, "pages");
+const REPO_PAGES_ROOT = fileURLToPath(new URL("../pages", import.meta.url));
 const PAGE_ID_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const EMOJI_PATTERN = /\p{Extended_Pictographic}/u;
 const PAGE_HEALTH_TIMEOUT_MS = 2_000;
@@ -60,6 +62,17 @@ export function readLinks(root = DEFAULT_PAGES_ROOT): LauncherLink[] {
     } catch (error) {
       log("warn", "invalid link skipped", { path, index, reason: errorMessage(error) });
     }
+  }
+  return links;
+}
+
+/** 直达菜单：仓库 pages/links.json 随 git 在各机器间同步，用户目录的 links.json 是本机追加；同一 URL 以本机条目为准。 */
+export function readLauncherLinks(repoRoot = REPO_PAGES_ROOT, localRoot = DEFAULT_PAGES_ROOT): LauncherLink[] {
+  const links = readLinks(repoRoot);
+  for (const link of readLinks(localRoot)) {
+    const index = links.findIndex((item) => item.url === link.url);
+    if (index >= 0) links[index] = link;
+    else links.push(link);
   }
   return links;
 }

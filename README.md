@@ -110,7 +110,7 @@ A browser on the same computer connects to `127.0.0.1` directly. Other devices j
 | **Control mid-run** | Context-usage ring; interrupt; Claude Code and Codex also let you steer a running turn and ask side questions, while Kimi queues messages until the current turn ends |
 | **Native history** | Search and filter the three CLIs' native history by folder and resume sessions; sessions started in AIReins resume in the CLIs and the VS Code extension (Claude sessions appear in the history lists only with `claudeCodeEntrypoint` set), and the other way round (a Codex thread allows one writer at a time, so release it in AIReins before resuming elsewhere) |
 | **Dispatch tree** | Sub-agents and delegated runs as a parent/child tree, with a live dispatch flow chart, on desktop and phone |
-| **Quick links and pages** | The Quick links menu reads your own links from `~/.workbench/pages/links.json`; extension pages can embed local tools such as [AI-Usage](https://github.com/yxhuang/ai-usage) |
+| **Quick links and pages** | The Quick links menu merges the repository `pages/links.json` (synced across machines by git) with this machine's `~/.workbench/pages/links.json`; extension pages can embed local tools such as [AI-Usage](https://github.com/yxhuang/ai-usage) |
 | **The whole computer** | File panel for any readable folder, with Git status and tabs; inside your home folder, Windows drives and the session folder, preview Markdown, code, images and PDF and edit UTF-8 text in place (files over 4 MiB load after a confirmation, up to 32 MiB); multi-tab terminal (off on the remote entry until you enable it) |
 | **Phone and Taildrop** | Phone layout installable as a home-screen app; send files or folders (zipped) to your online Taildrop devices |
 | **Several computers** | Lists the other computers on your tailnet; add one with a click and switch between their AIReins instances from one menu |
@@ -257,7 +257,7 @@ Remote access is configured in `~/.workbench/remote.json`; see [server/README.md
   {"id":"ai-usage","name":"AI-Usage","icon":"📊","type":"iframe","url":"http://127.0.0.1:8788","proxy":true}
   ```
 
-- **Quick links**: put your links in `~/.workbench/pages/links.json`; reload the page or reopen Quick links to see them. `group` groups them:
+- **Quick links**: put links shared by all your machines in the repository `pages/links.json` (synced by git) and machine-only links in `~/.workbench/pages/links.json`; for the same URL the local entry wins. Reload the page or reopen Quick links to see them. `group` groups them:
 
   ```json
   {"links":[{"name":"GitHub","url":"https://github.com","icon":"🐙","group":"Daily"},{"name":"Notes","url":"obsidian://open?vault=notes","icon":"📝","group":"Daily"}]}
