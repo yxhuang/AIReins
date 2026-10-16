@@ -3784,6 +3784,14 @@ body.resizing {
   .app {
     padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
   }
+  /* 输入框聚焦时键盘盖住底部横条，iOS 仍报底部安全区，只剩输入框与键盘间的空白，聚焦期间收起 */
+  .app:has(.composer textarea:focus) { padding-bottom: 0; }
+  .app:has(.composer textarea:focus) .composer { padding-bottom: 4px; }
+  /* 键盘打开时 .app 正好铺满可视视口（main.tsx 同步），输入框底边贴住键盘上方的系统条 */
+  html[data-keyboard] .app {
+    position: fixed; left: 0; right: 0;
+    top: var(--keyboard-vv-top); height: var(--keyboard-vv-height); padding-bottom: 0;
+  }
   /* 主屏幕 PWA 里紧贴状态栏显得挤，顶部再多让 8px（浏览器里不加） */
   @media (display-mode: standalone) {
     .app { padding-top: calc(env(safe-area-inset-top) + 2px); }
