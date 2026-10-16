@@ -316,10 +316,11 @@ export function fetchSessionInfo(id: string, kind: SessionInfoKind, signal?: Abo
   return call<unknown>(`/api/sessions/${encodeURIComponent(id)}/info/${kind}`, { signal: signal ? AbortSignal.any([signal, timeout]) : timeout });
 }
 
-export function manageSessionMcp(id: string, action: "toggle" | "reconnect", serverName: string, enabled?: boolean): Promise<unknown> {
+export type SessionMcpAction = "toggle" | "reconnect" | "authenticate" | "oauth_callback";
+export function manageSessionMcp(id: string, action: SessionMcpAction, serverName: string, enabled?: boolean, callbackUrl?: string): Promise<unknown> {
   return call(`/api/sessions/${encodeURIComponent(id)}/mcp`, {
     method: "POST", headers: { "content-type": "application/json" },
-    body: JSON.stringify({ action, serverName, ...(enabled === undefined ? {} : { enabled }) }),
+    body: JSON.stringify({ action, serverName, ...(enabled === undefined ? {} : { enabled }), ...(callbackUrl === undefined ? {} : { callbackUrl }) }),
     signal: AbortSignal.timeout(80_000),
   });
 }

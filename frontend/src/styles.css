@@ -4235,9 +4235,7 @@ body.resizing {
   .dispatch-executors:has(> .dispatch-node:not(.idle)) > .idle { order: -2; margin-right: auto; }
   .dispatch-executors:has(> .dispatch-node:not(.idle)) > .idle ~ .idle { margin-right: 0; margin-left: auto; }
 }
-@media (prefers-reduced-motion: reduce) {
-  .dispatch-wire.flow { animation: none; stroke-dasharray: none; stroke-dashoffset: 0; }
-}
+/* 流动虚线开销很小，不跟随系统“减少动画”设置（用户 2026-10-16 定）。 */
 
 /* 派单详情/历史：复用消息时间线，字号下限 16px；身份色仅取现有令牌。 */
 .dispatch-job-link { display: block; width: 100%; border: 0; background: transparent; color: var(--text); text-align: left; padding: 4px; font: inherit; cursor: pointer; border-radius: var(--radius); }

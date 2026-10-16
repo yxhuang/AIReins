@@ -1,7 +1,7 @@
 import { t } from "../i18n";
 import { useEffect, useRef, useState } from "react";
 import type { SessionRecord } from "../types";
-import { fetchClaudeCapabilities, fetchSessionInfo, manageSessionMcp, setSessionPlugin, setSessionThinking, type SessionInfoKind } from "../api";
+import { fetchClaudeCapabilities, fetchSessionInfo, manageSessionMcp, setSessionPlugin, setSessionThinking, type SessionInfoKind, type SessionMcpAction } from "../api";
 import { ClaudeMenuPanel, SettingsFileLinks, ClaudeTasksDialog } from "./ClaudeMenuPanels";
 import { compactTokens } from "../format";
 import { store, type Store } from "../store";
@@ -174,12 +174,14 @@ export function SlashMenu({ session, commandsSupported, onBrowseCommands, onSide
   );
 }
 
-function InfoDialog({ session, kind, onClose }: { session: SessionRecord; kind: SessionInfoKind; onClose: () => void }) {
+export function InfoDialog({ session, kind, onClose }: { session: SessionRecord; kind: SessionInfoKind; onClose: () => void }) {
   const [data, setData] = useState<unknown>(undefined);
   const [error, setError] = useState<string | null>(null);
   const [pendingPlugin, setPendingPlugin] = useState<string | null>(null);
   const [pluginNotice, setPluginNotice] = useState<string | null>(null);
   const [pendingServer, setPendingServer] = useState<string | null>(null);
+  const [oauth, setOauth] = useState<Rec | null>(null);
+  const [callbackUrl, setCallbackUrl] = useState("");
   const mcpPending = useRef(false);
   const pluginPending = useRef(false);
   const aliveRef = useRef(true);
@@ -231,7 +233,7 @@ function InfoDialog({ session, kind, onClose }: { session: SessionRecord; kind: 
     }
   };
 
-  const updateMcp = async (action: "toggle" | "reconnect" | "refresh", server: Rec = {}) => {
+  const updateMcp = async (action: SessionMcpAction | "refresh", server: Rec = {}) => {
     if (mcpPending.current) return;
     mcpPending.current = true;
     setPendingServer(str(server.name) || "refresh");
@@ -239,11 +241,19 @@ function InfoDialog({ session, kind, onClose }: { session: SessionRecord; kind: 
     setPluginNotice(null);
     try {
       const result = action === "refresh" ? await fetchSessionInfo(session.id, "mcp")
-        : await manageSessionMcp(session.id, action, str(server.name), action === "toggle" ? server.status === "disabled" : undefined);
+        : await manageSessionMcp(session.id, action, str(server.name), action === "toggle" ? server.status === "disabled" : undefined,
+          action === "oauth_callback" ? callbackUrl : undefined);
       if (!aliveRef.current) return;
       setData(result);
-      const refreshError = str(rec(result).refreshError);
-      if (refreshError) setError(t("ui.SlashMenu.the_action_succeeded_but_reading_its_status", { p0: (refreshError) }));
+      const outcome = rec(result);
+      const actionError = str(outcome.actionError);
+      const refreshError = str(outcome.refreshError);
+      if (outcome.auth) { setOauth({ ...rec(outcome.auth), serverName: server.name }); setCallbackUrl(""); }
+      else if (!refreshError && oauth && ((!actionError && action === "oauth_callback")
+        || arr(outcome.mcpServers).some(s => s.name === oauth.serverName && ["connected", "disabled"].includes(str(s.status))))) {
+        setOauth(null); setCallbackUrl("");
+      }
+      if (actionError || refreshError) setError([actionError, refreshError ? t("ui.SlashMenu.status_refresh_failed", { error: refreshError }) : ""].filter(Boolean).join("\n"));
       else setPluginNotice(action === "refresh" ? t("ui.SlashMenu.server_status_refreshed") : t("ui.SlashMenu.action_completed_the_connection_may_still_be"));
     } catch (e) {
       if (aliveRef.current) setError(e instanceof Error ? e.message : String(e));
@@ -271,13 +281,14 @@ function InfoDialog({ session, kind, onClose }: { session: SessionRecord; kind: 
           {pluginNotice && <p className="new-hint" role="status">{pluginNotice}</p>}
           {kind === "mcp" && <>
             <p className="new-hint">{t("ui.SlashMenu.toggles_and_reconnect_apply_to_this_session")}</p>
-            <button type="button" className="btn" disabled={pendingServer !== null || data === undefined}
+            <button type="button" className="btn" disabled={pendingServer !== null || (data === undefined && !error)}
               onClick={() => void updateMcp("refresh")}>{t("ui.SlashMenu.refresh_status")}</button>
           </>}
           {data !== undefined && ["hooks", "permissions", "sandbox", "skills", "output"].includes(kind)
             && <SettingsFileLinks files={rec(data).settingsFiles} hooks={kind === "hooks"} />}
           {data === undefined ? (!error && <p className="new-hint">{t("ui.common.reading")}</p>)
             : <InfoBody kind={kind} data={data} onTogglePlugin={togglePlugin} pendingPlugin={pendingPlugin}
+                oauth={oauth} callbackUrl={callbackUrl} onCallbackUrl={setCallbackUrl} cwd={session.cwd}
                 onMcpAction={updateMcp} pendingServer={pendingServer} mcpLockReason={session.status === "starting" ? t("ui.SlashMenu.available_after_startup") : (session.pendingGateCount ?? 0) > 0 ? t("ui.SlashMenu.available_after_approval") : session.status === "dead" ? t("ui.SlashMenu.session_ended") : ""} />}
         </div>
       </div>
@@ -292,14 +303,18 @@ const str = (v: unknown) => (typeof v === "string" ? v : "");
 const pluginKey = (p: Rec) => `${str(p.id)}:${str(p.scope)}`;
 const pluginEnabled = (p: Rec) => p.enabled === true;
 
-function InfoBody({ kind, data, onTogglePlugin, pendingPlugin, onMcpAction, pendingServer, mcpLockReason }: {
+function InfoBody({ kind, data, onTogglePlugin, pendingPlugin, onMcpAction, pendingServer, mcpLockReason, oauth, callbackUrl, onCallbackUrl, cwd }: {
   kind: SessionInfoKind;
   data: unknown;
   onTogglePlugin: (plugin: Rec) => void;
   pendingPlugin: string | null;
-  onMcpAction: (action: "toggle" | "reconnect", server: Rec) => void;
+  onMcpAction: (action: SessionMcpAction, server: Rec) => void;
   pendingServer: string | null;
   mcpLockReason: string;
+  oauth: Rec | null;
+  callbackUrl: string;
+  onCallbackUrl: (url: string) => void;
+  cwd: string;
 }) {
   const d = rec(data);
   if (kind === "mcp") {
@@ -308,6 +323,10 @@ function InfoBody({ kind, data, onTogglePlugin, pendingPlugin, onMcpAction, pend
     return <>{servers.map((s) => {
       const config = rec(s.config);
       const tools = arr(s.tools);
+      const auth = oauth?.serverName === s.name ? oauth : null;
+      const authUrl = str(auth?.authUrl);
+      const locked = pendingServer !== null || Boolean(mcpLockReason) || Boolean(d.refreshError);
+      const loginCommand = `claude mcp login '${str(s.name).replaceAll("'", "'\\''")}'`;
       return (
         <div className="info-row" key={str(s.name)}>
           <div className="info-row-head">
@@ -320,15 +339,31 @@ function InfoBody({ kind, data, onTogglePlugin, pendingPlugin, onMcpAction, pend
           <div className="info-meta mono">{str(config.url) || [str(config.command), ...(Array.isArray(config.args) ? config.args.map(String) : [])].join(" ")}</div>
           <div className="info-actions">
             <button type="button" className="btn slash-toggle" role="switch" aria-checked={s.status !== "disabled"}
-              aria-label={t("ui.SlashMenu.toggle_mcp", { p0: (str(s.name)) })} disabled={pendingServer !== null || Boolean(mcpLockReason)}
+              aria-label={t("ui.SlashMenu.toggle_mcp", { p0: (str(s.name)) })} disabled={locked}
               onClick={() => onMcpAction("toggle", s)}>
               <span>{pendingServer === str(s.name) ? t("ui.SlashMenu.processing") : s.status === "disabled" ? t("ui.SlashMenu.disabled") : t("ui.SlashMenu.enabled")}</span>
               <span className={`slash-switch${s.status !== "disabled" ? " on" : ""}`} aria-hidden="true" />
             </button>
-            <button type="button" className="btn" disabled={pendingServer !== null || Boolean(mcpLockReason) || s.status === "disabled"}
+            <button type="button" className="btn" disabled={locked || s.status === "disabled"}
               onClick={() => onMcpAction("reconnect", s)}>{t("ui.SlashMenu.reconnect")}</button>
             {mcpLockReason && <span className="info-meta">{mcpLockReason}</span>}
           </div>
+          {(s.status === "needs-auth" || auth) && <>
+            <p className="new-hint">{t("ui.SlashMenu.oauth_hint")}</p>
+            <button type="button" className="btn" disabled={locked} onClick={() => onMcpAction("authenticate", s)}>{t("ui.SlashMenu.authenticate")}</button>
+            {/^https?:\/\//i.test(authUrl) && <div className="new-field">
+              <a href={authUrl} target="_blank" rel="noopener noreferrer">{t("ui.SlashMenu.open_auth_link")}</a>
+              <input aria-label={t("ui.SlashMenu.auth_link")} readOnly value={authUrl} onFocus={e => e.currentTarget.select()} />
+            </div>}
+            {auth?.callbackExpected === true && <div className="info-actions">
+              <label className="new-field">{t("ui.SlashMenu.callback_url")}<input type="url" value={callbackUrl} autoComplete="off"
+                onChange={e => onCallbackUrl(e.target.value)} /></label>
+              <button type="button" className="btn" disabled={locked || !callbackUrl.trim()}
+                onClick={() => onMcpAction("oauth_callback", s)}>{t("ui.SlashMenu.submit_callback")}</button>
+            </div>}
+            <p className="new-hint">{t("ui.SlashMenu.oauth_fallback", { cwd })}</p>
+            <label className="new-field">{t("ui.SlashMenu.login_command")}<input readOnly value={loginCommand} onFocus={e => e.currentTarget.select()} /></label>
+          </>}
         </div>
       );
     })}</>;

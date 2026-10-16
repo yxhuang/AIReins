@@ -873,7 +873,7 @@ export class ClaudeDriver extends BaseDriver {
       signal?.addEventListener("abort", abort, { once: true });
     });
     try {
-      return await withTimeout(result, subtype === "side_question" ? 60_000 : ["reload_plugins", "mcp_reconnect", "mcp_toggle"].includes(subtype) ? 30_000 : 15_000, `Claude ${subtype}`);
+      return await withTimeout(result, subtype === "side_question" ? 60_000 : ["reload_plugins", "mcp_reconnect", "mcp_toggle", "mcp_authenticate", "mcp_oauth_callback_url"].includes(subtype) ? 30_000 : 15_000, `Claude ${subtype}`);
     } catch (error) {
       if (subtype === "side_question" && !signal?.aborted) this.cancelControl(requestId);
       throw error;
@@ -899,14 +899,23 @@ export class ClaudeDriver extends BaseDriver {
   async manageMcp(action: McpAction): Promise<unknown> {
     const listing = await this.queryInfo("mcp_status") as { mcpServers?: { name: string }[] } | undefined;
     if (!listing?.mcpServers?.some(server => server.name === action.serverName)) throw new Error("MCP 服务器不在当前会话列表中");
-    await this.requestControl(action.action === "toggle"
-      ? { subtype: "mcp_toggle", serverName: action.serverName, enabled: action.enabled }
-      : { subtype: "mcp_reconnect", serverName: action.serverName });
+    let auth: unknown;
+    let actionError: string | undefined;
     try {
-      return await this.queryInfo("mcp_status");
+      if (action.action === "authenticate") auth = await this.requestControl({ subtype: "mcp_authenticate", serverName: action.serverName });
+      else if (action.action === "oauth_callback") await this.requestControl({ subtype: "mcp_oauth_callback_url", serverName: action.serverName, callbackUrl: action.callbackUrl });
+      else await this.requestControl(action.action === "toggle"
+        ? { subtype: "mcp_toggle", serverName: action.serverName, enabled: action.enabled }
+        : { subtype: "mcp_reconnect", serverName: action.serverName });
     } catch (error) {
-      // 操作已经成功；读回失败不能让界面误以为操作没发生并反复重试。
-      return { ...listing, refreshError: error instanceof Error ? error.message : String(error) };
+      // CLI 启用时可先改变状态再报 needs-auth；错误不能跳过读回。
+      actionError = error instanceof Error ? error.message : String(error);
+    }
+    const outcome = { ...(auth ? { auth } : {}), ...(actionError ? { actionError } : {}) };
+    try {
+      return { ...await this.queryInfo("mcp_status") as object, ...outcome };
+    } catch (error) {
+      return { ...listing, ...outcome, refreshError: error instanceof Error ? error.message : String(error) };
     }
   }
 

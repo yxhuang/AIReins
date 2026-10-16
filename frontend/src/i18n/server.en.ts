@@ -390,7 +390,7 @@ const messages: Record<string, string> = {
   "server.message404": "history must contain question and response",
   "server.message405": "taskId must be a nonempty task ID",
   "server.message406": "serverName must be a nonempty server name",
-  "server.message407": "action must be toggle (with boolean enabled) or reconnect",
+  "server.message407": "Invalid MCP action or parameters",
   "server.message408": "User settings",
   "server.message409": "Project settings",
   "server.message410": "Project local settings",

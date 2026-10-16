@@ -767,3 +767,23 @@ MCP 初始 `mcp_status` 为 connected。wire 的第 13（0 起点）项为 strea
 side_question 前主回复已完成，回包前另有 `system/control_request_progress {request_id:"probe-8",status:"started"}`，随后只回控制答案，没有 assistant/user/result 主线消息。AIReins 抑制侧问的控制进度、忽略迟到控制响应，HTTP 断开或超时取消请求。并发主回复侧问、实际取消效果尚未用真实模型探针覆盖，已做打桩回归，主会话补验。
 
 不存在的 task ID 也返回 success/{}，所以 AIReins 必须先校验会话 backgroundTasks 名单，且不能根据 success 伪造任务已消失；真实后台任务停止需临时实例补验。
+
+
+## 15. Claude MCP needs-auth 与 OAuth 控制（2026-10-16，CLI 2.1.300）
+
+调查本机 ELF 中嵌入的 SDK JS（不是臆测请求名）：`mcpAuthenticate(serverName, redirectUri?)` 调用 `mcp_authenticate`；`mcpSubmitOAuthCallbackUrl(serverName, callbackUrl)` 调用 `mcp_oauth_callback_url`。本机 VSCode 扩展 2.1.290 的 `extension.js` 中同名 SDK 方法一致；没有另行安装 Agent SDK。CLI handler 给 `performMCPOAuthFlow` 指定 `skipBrowserOpen:true`，可先返回链接并在后台等待 OAuth；手动回调接受 code/error，验证 state，再等待 token 交换。以下**实发**结果来自临时 HOME / CLAUDE_CONFIG_DIR、本地 loopback 假 OAuth/MCP 服务，无真实登录、无模型请求、无浏览器、无 tencent-docs 请求。
+
+| 请求 | 实际回应（公共封套同 §11） |
+| --- | --- |
+| `mcp_status`，临时用户配置中 `disabledMcpServers:["fixture"]` | success，`{mcpServers:[{name:"fixture",status:"disabled",config:{type:"http",url:"http://127.0.0.1:<port>/mcp"},scope:"user",source:"user"}]}` |
+| `mcp_toggle {serverName:"fixture",enabled:false}` | success，无 payload |
+| `mcp_toggle {serverName:"fixture",enabled:true}` | **error**，`error:"Server status: needs-auth"` |
+| 紧接着 `mcp_status` | success，同一服务器已为 `status:"needs-auth"`；错误不代表状态未变 |
+| `mcp_authenticate {serverName:"fixture"}` | success，`{authUrl:"http://127.0.0.1:<port>/authorize?…",requiresUserAction:true,callbackExpected:true,redirectScheme:"localhost",state:"<fixture-state>",callbackPort:<port>}`；假服务观察到 metadata discovery 与 client registration，无浏览器请求 |
+| `mcp_oauth_callback_url {serverName:"fixture",callbackUrl:"http://localhost:<port>/callback?code=fixture-code&state=<fixture-state>"}` | success，无 payload；假服务观察到 token POST |
+
+证据临时路径：`/tmp/aireins-mcp-probe-eY4x0B/wire.ndjson`、`/tmp/aireins-mcp-probe-zLvKkK/wire.ndjson`；摘要 `/tmp/aireins-mcp-probe2.log`、`/tmp/aireins-mcp-probe3.log`，只含假凭据。这些文件不随仓库提交。初次探针的配置放错路径，未发现服务器；改为 `CLAUDE_CONFIG_DIR/.claude.json` 后得到上述结果。
+
+**验证界限**：没有复现用户真实 SessionStart hook 的首次打开时序；隔离配置的 disabled 初始状态正确。实际 CLI 的授权链接和手动回调已验证，后续重连未成功验证：假 MCP 夹具先误把 JSON-RPC `id:0` 当通知导致超时，修正后又把 HTTP GET 空 body 当 JSON 导致夹具退出；按连续失败限制停止该探针路径，未继续重试。已确认本次启动的 CLI PID 均已退出。当前会话重连后工具列表更新由独立 driver / HTTP / 前端夹具回归覆盖，不宣称 tencent-docs 实服授权或浏览器验收通过。
+
+AIReins 仅开放上述白名单操作；错误与读回状态同时返回，旧 CLI 的 unsupported error 不隐藏，面板始终保留终端 `claude mcp login '<name>'` 兜底（同 cwd 授权后回到当前 worker 重连）。授权/回调响应不写 transcript 或全局配置；CLI 自己保存 OAuth 凭据。未使用 `mcp_clear_auth`，未提供任意控制协议转发。

@@ -2,7 +2,7 @@ import { vscodeFileUri } from "./platform.js";
 import { homedir } from "node:os";
 import { isAbsolute, join } from "node:path";
 
-export type McpAction = { action: "toggle"; serverName: string; enabled: boolean } | { action: "reconnect"; serverName: string };
+export type McpAction = { action: "toggle"; serverName: string; enabled: boolean } | { action: "reconnect" | "authenticate"; serverName: string } | { action: "oauth_callback"; serverName: string; callbackUrl: string };
 
 /** sideId：Codex 侧聊线程归属（上次回复返回的值），续问时带回；Claude 忽略。 */
 export interface SideQuestionInput { question: string; history?: { question: string; response: string }[]; sideId?: string }
@@ -50,8 +50,16 @@ export function parseMcpAction(input: unknown): McpAction {
   if (body.action === "toggle" && typeof body.enabled === "boolean") {
     return { action: "toggle", serverName: body.serverName, enabled: body.enabled };
   }
-  if (body.action === "reconnect") return { action: "reconnect", serverName: body.serverName };
-  throw new Error("action 必须为 toggle（enabled 为布尔值）或 reconnect");
+  if (body.action === "reconnect" || body.action === "authenticate") return { action: body.action, serverName: body.serverName };
+  if (body.action === "oauth_callback" && typeof body.callbackUrl === "string" && body.callbackUrl.length <= 16384 && !/[\x00-\x1f]/.test(body.callbackUrl)) {
+    try {
+      const url = new URL(body.callbackUrl);
+      if (["http:", "https:"].includes(url.protocol) && (url.searchParams.has("code") || url.searchParams.has("error"))) {
+        return { action: "oauth_callback", serverName: body.serverName, callbackUrl: body.callbackUrl };
+      }
+    } catch { /* 非法回调 URL 统一按参数错误处理；OAuth state 由 CLI 校验。 */ }
+  }
+  throw new Error("MCP action 或参数不合法");
 }
 
 /** 与续接按钮相同的协议打开方式；不会在服务器上启动编辑器。 */

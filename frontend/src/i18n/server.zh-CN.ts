@@ -390,7 +390,7 @@ const messages: Record<string, string> = {
   "server.message404": "history 必须包含 question 和 response",
   "server.message405": "taskId 必须为非空任务 ID",
   "server.message406": "serverName 必须是非空服务器名称",
-  "server.message407": "action 必须为 toggle（enabled 为布尔值）或 reconnect",
+  "server.message407": "MCP action 或参数不合法",
   "server.message408": "用户设置",
   "server.message409": "项目设置",
   "server.message410": "项目本地设置",

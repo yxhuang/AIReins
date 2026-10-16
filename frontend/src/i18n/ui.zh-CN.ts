@@ -1,5 +1,14 @@
 // Interface copy. Keep keys aligned with the other locale.
 const dictionary: Record<string, string> = {
+  "ui.SlashMenu.authenticate": "授权",
+  "ui.SlashMenu.oauth_hint": "此服务器已启用，但需要授权。点击「授权」获取链接；授权后点「重连」，再「刷新状态」。在其他设备授权时，若跳转到 localhost 后打不开页面，复制地址栏的完整回调 URL 并在下方提交，然后重连。",
+  "ui.SlashMenu.open_auth_link": "打开授权链接",
+  "ui.SlashMenu.auth_link": "授权链接（可选择复制）",
+  "ui.SlashMenu.callback_url": "完整回调 URL",
+  "ui.SlashMenu.submit_callback": "提交回调 URL",
+  "ui.SlashMenu.login_command": "终端授权命令（可选择复制）",
+  "ui.SlashMenu.oauth_fallback": "若当前 Claude CLI 不支持面板授权或授权失败，请在 {product} 所在电脑的终端进入 {cwd}，执行下方命令并完成授权，然后回到此面板点「重连」和「刷新状态」。服务器若未启用，先打开开关。",
+  "ui.SlashMenu.status_refresh_failed": "读取最新状态失败，当前列表可能过时；请刷新状态后再操作：{error}",
   "ui.CodexResets.watch": "Tibo 额度重置提醒",
   "ui.CodexResets.watch_hint": "每 10 分钟查询 AIHOT；所有页面同步提醒，默认关闭。",
   "ui.CodexResets.pending": "有已预告未确认的重置",

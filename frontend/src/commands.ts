@@ -99,9 +99,10 @@ const SIDE_COMMANDS: Record<string, CommandInfo[]> = {
   ],
 };
 
-/** 命令表补上侧问命令（CLI 已列出同名项时以 AIReins 版本为准）。 */
+/** 命令表补上侧问与 Claude MCP 面板命令（同名项以 AIReins 版本为准）。 */
 export function withSideCommands(agent: string, commands: CommandInfo[]): CommandInfo[] {
-  const side = SIDE_COMMANDS[agent] ?? [];
+  const side = [...(SIDE_COMMANDS[agent] ?? []), ...(agent === "claude"
+    ? [{ name: "mcp", description: t("ui.SlashMenu.mcp_servers"), source: "claude" as const }] : [])];
   return side.length ? [...side, ...commands.filter((cmd) => !side.some((s) => s.name === cmd.name))] : commands;
 }
 

@@ -593,13 +593,13 @@
     },
     {
       "file": "server/drivers/claude.ts",
-      "line": 918,
+      "line": 927,
       "key": "server.message089",
       "category": "Error"
     },
     {
       "file": "server/drivers/claude.ts",
-      "line": 919,
+      "line": 928,
       "key": "server.message090",
       "category": "Error"
     },
@@ -1949,139 +1949,139 @@
     },
     {
       "file": "server/pages.ts",
-      "line": 114,
+      "line": 127,
       "key": "server.message282",
       "category": "Error"
     },
     {
       "file": "server/pages.ts",
-      "line": 136,
+      "line": 149,
       "key": "server.message283",
       "category": "embedReason"
     },
     {
       "file": "server/pages.ts",
-      "line": 138,
+      "line": 151,
       "key": "server.message284",
       "category": "embedReason"
     },
     {
       "file": "server/pages.ts",
-      "line": 140,
+      "line": 153,
       "key": "server.message285",
       "category": "embedReason"
     },
     {
       "file": "server/pages.ts",
-      "line": 146,
+      "line": 159,
       "key": "server.message286",
       "category": "embedReason"
     },
     {
       "file": "server/pages.ts",
-      "line": 151,
+      "line": 164,
       "key": "server.message287",
       "category": "embedReason"
     },
     {
       "file": "server/pages.ts",
-      "line": 154,
+      "line": 167,
       "key": "server.message288",
       "category": "embedReason"
     },
     {
       "file": "server/pages.ts",
-      "line": 156,
+      "line": 169,
       "key": "server.message289",
       "category": "embedReason"
     },
     {
       "file": "server/pages.ts",
-      "line": 158,
+      "line": 171,
       "key": "server.message290",
       "category": "embedReason"
     },
     {
       "file": "server/pages.ts",
-      "line": 240,
+      "line": 253,
       "key": "server.message291",
       "category": "Error"
     },
     {
       "file": "server/pages.ts",
-      "line": 244,
+      "line": 257,
       "key": "server.message292",
       "category": "Error"
     },
     {
       "file": "server/pages.ts",
-      "line": 247,
+      "line": 260,
       "key": "server.message293",
       "category": "Error"
     },
     {
       "file": "server/pages.ts",
-      "line": 248,
+      "line": 261,
       "key": "server.message294",
       "category": "Error"
     },
     {
       "file": "server/pages.ts",
-      "line": 259,
+      "line": 272,
       "key": "server.message295",
       "category": "Error"
     },
     {
       "file": "server/pages.ts",
-      "line": 263,
+      "line": 276,
       "key": "server.message296",
       "category": "Error"
     },
     {
       "file": "server/pages.ts",
-      "line": 284,
+      "line": 297,
       "key": "server.message297",
       "category": "Error"
     },
     {
       "file": "server/pages.ts",
-      "line": 290,
+      "line": 303,
       "key": "server.message298",
       "category": "Error"
     },
     {
       "file": "server/pages.ts",
-      "line": 300,
+      "line": 313,
       "key": "server.message299",
       "category": "Error"
     },
     {
       "file": "server/pages.ts",
-      "line": 303,
+      "line": 316,
       "key": "server.message300",
       "category": "Error"
     },
     {
       "file": "server/pages.ts",
-      "line": 317,
+      "line": 330,
       "key": "server.message301",
       "category": "other"
     },
     {
       "file": "server/pages.ts",
-      "line": 325,
+      "line": 338,
       "key": "server.message302",
       "category": "other"
     },
     {
       "file": "server/pages.ts",
-      "line": 326,
+      "line": 339,
       "key": "server.message303",
       "category": "other"
     },
     {
       "file": "server/pages.ts",
-      "line": 327,
+      "line": 340,
       "key": "server.message304",
       "category": "other"
     },
@@ -2849,25 +2849,25 @@
     },
     {
       "file": "server/session-menu.ts",
-      "line": 54,
+      "line": 62,
       "key": "server.message407",
       "category": "Error"
     },
     {
       "file": "server/session-menu.ts",
-      "line": 62,
+      "line": 70,
       "key": "server.message408",
       "category": "label"
     },
     {
       "file": "server/session-menu.ts",
-      "line": 63,
+      "line": 71,
       "key": "server.message409",
       "category": "label"
     },
     {
       "file": "server/session-menu.ts",
-      "line": 64,
+      "line": 72,
       "key": "server.message410",
       "category": "label"
     },

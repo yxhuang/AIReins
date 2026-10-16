@@ -536,14 +536,15 @@ t("组内保持命令表原顺序", () => {
   assert.deepEqual(names(filterCommands(TABLE, "com", [])).slice(0, 2), ["compact", "commit"]);
 });
 
-t("侧问命令：Claude /btw，Codex /side 与 /btw；同名 CLI 项去重，Kimi 不加", () => {
-  assert.deepEqual(names(withSideCommands("claude", [cmd("btw", "CLI"), cmd("compact", "x")])), ["btw", "compact"]);
+t("客户端命令：Claude /btw 与 /mcp，Codex /side 与 /btw；同名 CLI 项去重，Kimi 不加", () => {
+  assert.deepEqual(names(withSideCommands("claude", [cmd("btw", "CLI"), cmd("mcp", "CLI"), cmd("compact", "x")])), ["btw", "mcp", "compact"]);
   assert.equal(withSideCommands("claude", [cmd("btw", "CLI")])[0].argHint, "问题");
   assert.deepEqual(names(withSideCommands("codex", TABLE)).slice(0, 2), ["side", "btw"]);
   assert.deepEqual(names(withSideCommands("kimi", TABLE)), names(TABLE));
   assert.equal(parseSideCommand("claude", "/btw  这是什么？\n第二行 "), "这是什么？\n第二行");
   assert.equal(parseSideCommand("claude", "/btw"), "");
   assert.equal(parseSideCommand("claude", "/side 问题"), null);
+  assert.equal(parseSideCommand("claude", "/mcp"), null);
   assert.equal(parseSideCommand("codex", "/side 问题"), "问题");
   assert.equal(parseSideCommand("codex", "/btw"), "");
   assert.equal(parseSideCommand("codex", "/btwx 问题"), null);

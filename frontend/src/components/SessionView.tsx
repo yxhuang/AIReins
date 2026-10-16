@@ -19,7 +19,7 @@ import { ResumedHistory } from "./ResumedHistory";
 import { ClockIcon, ConfigPills, PlusIcon, SendIcon, StopIcon, type MenuGroup, type MenuItem } from "./ConfigMenu";
 import { DirectoryBrowser } from "./DirectoryBrowser";
 import { insertFileMention, planFileMention } from "./FilePanel";
-import { SlashMenu } from "./SlashMenu";
+import { InfoDialog, SlashMenu } from "./SlashMenu";
 import { SideQuestionDialog } from "./ClaudeMenuPanels";
 import { AgentIcon, VSCodeIcon } from "./AgentIcon";
 import { SessionDispatchBadge, SessionDispatchLink, useSessionDispatches } from "./SessionDispatchLink";
@@ -712,7 +712,7 @@ export function restoreComposerInput(currentText: string, attachments: Attachmen
   return { text: restored.text, attachments: [...attachments, ...added] };
 }
 
-function Composer({ session, dead, errored }: { session: SessionRecord; dead: boolean; errored: boolean }) {
+export function Composer({ session, dead, errored }: { session: SessionRecord; dead: boolean; errored: boolean }) {
   const meta = useStore(selectMeta);
   const selectCommands = useCallback(
     (value: Store) => value.commands.get(session.id),
@@ -744,6 +744,7 @@ function Composer({ session, dead, errored }: { session: SessionRecord; dead: bo
   const [codexResult, setCodexResult] = useState<CodexCommandResult | null>(null);
   // /btw、/side 侧问面板（question 为输入框带入的首问，可为空）
   const [sideQuestion, setSideQuestion] = useState<{ question: string } | null>(null);
+  const [mcpOpen, setMcpOpen] = useState(false);
   const codexBusy = useRef(false);
   const closeCodexResult = useCallback(() => setCodexResult(null), []);
   const listRef = useRef<HTMLDivElement>(null);
@@ -1112,6 +1113,11 @@ function Composer({ session, dead, errored }: { session: SessionRecord; dead: bo
   };
 
   const confirm = (cmd: CommandInfo, fillOnly: boolean) => {
+    if (!fillOnly && session.agent === "claude" && cmd.name === "mcp") {
+      noteCommandUsed(session.agent, cmd.name);
+      setText(""); setDismissed(false); setMcpOpen(true);
+      return;
+    }
     if (!fillOnly && parseSideCommand(session.agent, `/${cmd.name}`) !== null) {
       // 侧问命令：补全面板里回车直接打开空面板（Tab 仍只填充，便于接着写问题）
       noteCommandUsed(session.agent, cmd.name);
@@ -1151,6 +1157,11 @@ function Composer({ session, dead, errored }: { session: SessionRecord; dead: bo
     const trimmed = text.trim();
     if (dead) return;
     if (!trimmed && readyMentions.length === 0) return;
+    if (session.agent === "claude" && trimmed === "/mcp") {
+      noteCommandUsed(session.agent, "mcp");
+      setText(""); setDismissed(false); setMcpOpen(true);
+      return;
+    }
     const side = parseSideCommand(session.agent, trimmed);
     if (side !== null) {
       // 侧问不进主对话：打开面板直接提问，附件条留在输入框
@@ -1428,6 +1439,7 @@ function Composer({ session, dead, errored }: { session: SessionRecord; dead: bo
         </div>
       )}
       {codexResult && <CodexCommandPanel result={codexResult} onClose={closeCodexResult} />}
+      {mcpOpen && <InfoDialog session={session} kind="mcp" onClose={() => { setMcpOpen(false); textareaRef.current?.focus(); }} />}
       {sideQuestion && <SideQuestionDialog sessionId={session.id} agent={session.agent} initialQuestion={sideQuestion.question}
         onClose={() => { setSideQuestion(null); textareaRef.current?.focus(); }} />}
       {session.agent === "kimi" && session.status === "running" && (

@@ -460,7 +460,7 @@ await t('派单与主区并列，当前会话仍有输入框；主页仍可打�
   assert.ok(!css.includes('dispatch-intro'));
   assert.match(css, /--agent-copilot:\s+light-dark\(#8053C8, #B69AEB\)/);
   assert.match(css, /@container dispatch \(min-width: 720px\)/);
-  assert.match(css, /\.dispatch-wire.flow \{ animation: none; stroke-dasharray: none/);
+  assert.doesNotMatch(css, /\.dispatch-wire\.flow \{ animation: none/); // 不跟随系统减少动画（用户 2026-10-16 定）
   assert.match(css, /\.app.term-open \.main \{\s*display: none/);
   assert.match(css, /\.workspace.term-open \.term-panel \{[\s\S]*?width: auto !important/);
 });

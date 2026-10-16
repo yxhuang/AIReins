@@ -104,6 +104,8 @@ node frontend/scripts/smoke-ws.mjs  # 需后端；会创建测试会话、批准
 ### 命令菜单
 
 - Claude「/」按扩展分成「上下文 / 模型 / 自定义 / 设置 / 支持」；「管理插件」「MCP 服务器」放在自定义，副标题直接说明可启停/重载/重连。MCP 和插件均为 `role="switch"`；MCP 回复中可操作，启动或审批时在控件旁说明原因，操作后读回。Thinking 放在模型组，默认开启、会话保存，点后保持菜单展开；失败就地提示。Fast 通过能力接口读取原生 `supportsFastMode`，只在支持时显示，点击发用户命令 `/fast`。见 [SlashMenu.tsx](src/components/SlashMenu.tsx)。
+- Claude `/mcp` 由前端接管：补全回车、整行发送和 Tab 填充后发送都打开与菜单相同的 MCP 面板，不进入模型对话；附件留在输入框，显式带参数的原生命令仍走原路径。补全覆盖 CLI 的同名条目并去掉参数提示。
+- MCP 开关取当前 `mcp_status`：disabled 为关闭，needs-auth 为已启用但待授权。启停/重连失败也使用服务端读回的最新列表，错误就地显示；若读回失败则锁住管理控件，仅允许刷新，初次查询失败同样可以重试刷新。needs-auth 行提供「授权」、可打开/选择复制的链接及完整回调 URL 输入（用于手机/远端 localhost 回调无法访问时），CLI 自己验证 OAuth state。手动回调提交成功后点「重连/刷新状态」；不支持控制请求或授权失败时，在宿主同一工作目录执行可选择复制的 `claude mcp login '<name>'`，完成后回面板启用（若关闭）、重连和刷新。不主动打开浏览器；OAuth 链接和回调只保存在面板内存。见 [SlashMenu.tsx](src/components/SlashMenu.tsx)；交互回归 `npm run test:claude-mcp`。
 - `/tasks` 面板消费实时 `session.backgroundTasks`；停止前确认，控制成功不提前移除任务，等 CLI 元数据更新。侧问面板（Claude `/btw`、Codex `/side` 及别名 `/btw`）不进入 store 主事件流，只在组件内保存历史（最多传 20 轮），支持取消，关闭会取消请求并清空问答；synthetic/null 不加入历史。输入框打 `/` 即可补全这几个命令（`withSideCommands` 补进命令表，同名 CLI 项去重），整行「/btw 问题」发送时被 `parseSideCommand` 拦下、不发主对话，带问题打开面板并立即提问（延后一拍，StrictMode 不重复）；补全面板里对侧问命令按 Enter 直接打开空面板，Tab 只填充。Claude 的「/」菜单 `/btw` 入口打开同一面板（Codex 菜单无此入口）。Codex 请求上限 320 秒（服务端回合 300 秒），Claude 80 秒。见 [ClaudeMenuPanels.tsx](src/components/ClaudeMenuPanels.tsx)、[commands.ts](src/commands.ts)。
 - 配置文件链接只提供 VSCode 路径，不启动编辑器或写文件，部分设置需续接生效。Thinking 的 0/31999 控制覆盖由后端在 worker 初始化时重发，不写 `~/.claude/settings.json`。新增界面字号沿用 12/13/14/15 阶梯（触屏输入至少 16px），复用现有冷色 switch；布局须兼容浏览器最小字号 14px。
 - 导出使用原生 `export_conversation` 文本，可复制/下载，不把前端事件窗口当完整存档；Rewind 尚未接入。面板渲染见 [ClaudeMenuPanels.tsx](src/components/ClaudeMenuPanels.tsx)。

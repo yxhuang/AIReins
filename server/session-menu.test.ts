@@ -18,6 +18,13 @@ assert.equal(menuFileUri("/bad\npath", "Ubuntu"), null);
 assert.equal(menuSettingsFiles("/project", "/config")[0].path, "/config/settings.json");
 assert.deepEqual(withMenuFileUris([{ path: "relative" }, null])[0], { path: "relative", uri: null });
 
+assert.deepEqual(parseMcpAction({ action: "authenticate", serverName: "fixture" }), { action: "authenticate", serverName: "fixture" });
+assert.deepEqual(parseMcpAction({ action: "oauth_callback", serverName: "fixture", callbackUrl: "http://localhost:123/callback?code=fixture&state=s" }),
+  { action: "oauth_callback", serverName: "fixture", callbackUrl: "http://localhost:123/callback?code=fixture&state=s" });
+for (const callbackUrl of ["javascript:alert(1)", "https://example.test/", "http://localhost/callback?code=x\n", "x".repeat(17000), null]) {
+  assert.throws(() => parseMcpAction({ action: "oauth_callback", serverName: "fixture", callbackUrl }));
+}
+
 const root = await mkdtemp(join(tmpdir(), "wb-session-menu-"));
 process.env.WORKBENCH_HOME = join(root, "wb");
 process.env.WORKBENCH_CLAUDE_HISTORY_DIR = join(root, "native");
@@ -95,11 +102,29 @@ try {
   const rejectedUnknown = assert.rejects(unknown, /不在当前会话列表/);
   receive({ mcpServers: [{ name: "fixture" }] }); await rejectedUnknown;
   assert.equal(sent.at(-1)!.request.subtype, "mcp_status");
-  const failed = driver.manageMcp({ action: "reconnect", serverName: "fixture" });
-  const rejected = assert.rejects(failed, /reconnect failed/);
-  receive({ mcpServers: [{ name: "fixture" }] }); await tick();
-  assert.deepEqual(sent.at(-1)!.request, { subtype: "mcp_reconnect", serverName: "fixture" });
-  receive(null, "reconnect failed"); await rejected;
+  const failed = driver.manageMcp({ action: "toggle", serverName: "fixture", enabled: true });
+  receive({ mcpServers: [{ name: "fixture", status: "disabled" }] }); await tick();
+  assert.deepEqual(sent.at(-1)!.request, { subtype: "mcp_toggle", serverName: "fixture", enabled: true });
+  receive(null, "Server status: needs-auth"); await tick();
+  assert.deepEqual(sent.at(-1)!.request, { subtype: "mcp_status" }, "操作错误也必须读回，CLI 可能已经改变状态");
+  receive({ mcpServers: [{ name: "fixture", status: "needs-auth" }] });
+  assert.deepEqual(await failed, { mcpServers: [{ name: "fixture", status: "needs-auth" }], actionError: "Server status: needs-auth" });
+  const auth = driver.manageMcp({ action: "authenticate", serverName: "fixture" });
+  receive({ mcpServers: [{ name: "fixture", status: "needs-auth" }] }); await tick();
+  assert.deepEqual(sent.at(-1)!.request, { subtype: "mcp_authenticate", serverName: "fixture" });
+  receive({ authUrl: "https://oauth.example/authorize?state=s", requiresUserAction: true, callbackExpected: true }); await tick();
+  receive({ mcpServers: [{ name: "fixture", status: "needs-auth" }] });
+  assert.deepEqual((await auth as any).auth, { authUrl: "https://oauth.example/authorize?state=s", requiresUserAction: true, callbackExpected: true });
+  const callback = driver.manageMcp({ action: "oauth_callback", serverName: "fixture", callbackUrl: "http://localhost:123/callback?code=x&state=s" });
+  receive({ mcpServers: [{ name: "fixture", status: "needs-auth" }] }); await tick();
+  assert.deepEqual(sent.at(-1)!.request, { subtype: "mcp_oauth_callback_url", serverName: "fixture", callbackUrl: "http://localhost:123/callback?code=x&state=s" });
+  receive(undefined); await tick(); receive({ mcpServers: [{ name: "fixture", status: "needs-auth" }] });
+  await callback;
+  // 回调完成后由用户重连，工具表随 mcp_status 更新。
+  const connected = driver.manageMcp({ action: "reconnect", serverName: "fixture" });
+  receive({ mcpServers: [{ name: "fixture", status: "needs-auth" }] }); await tick(); receive(undefined); await tick();
+  receive({ mcpServers: [{ name: "fixture", status: "connected", tools: [{ name: "fixture_tool" }] }] });
+  assert.equal((await connected as any).mcpServers[0].tools[0].name, "fixture_tool");
   const stale = driver.manageMcp({ action: "reconnect", serverName: "fixture" });
   receive({ mcpServers: [{ name: "fixture" }] }); await tick(); receive({}); await tick(); receive(null, "refresh failed");
   assert.equal((await stale as { refreshError: string }).refreshError, "refresh failed");

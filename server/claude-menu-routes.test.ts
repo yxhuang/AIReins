@@ -12,13 +12,17 @@ const wire = join(root, "wire.ndjson");
 writeFileSync(join(bin, "claude"), `#!${process.execPath}
 const {createInterface}=require('node:readline'); const {appendFileSync}=require('node:fs');
 if(process.argv.includes('--version')) { console.log('2.1.285'); process.exit(0); }
-const out=m=>console.log(JSON.stringify(m));
+const out=m=>console.log(JSON.stringify(m)); let mcpStatus='needs-auth';
 createInterface({input:process.stdin}).on('line',line=>{const m=JSON.parse(line); appendFileSync(${JSON.stringify(wire)},line+'\\n'); if(m.type!=='control_request')return;
 const success=response=>out({type:'control_response',response:{subtype:'success',request_id:m.request_id,response}});
 if(m.request.subtype==='initialize')success({commands:[],models:[{value:'haiku'},{value:'opus',supportsFastMode:true}]});
 else if(m.request.subtype==='side_question'){out({type:'system',subtype:'control_request_progress',request_id:m.request_id,status:'started'}); if(m.request.question!=='cancel')success({response:'4',synthetic:false});}
 else if(m.request.subtype==='set_max_thinking_tokens'){success({});out({type:'system',subtype:'background_tasks_changed',tasks:[{task_id:'fixture-task',task_type:'shell',description:'Fixture task'}]});}
 else if(m.request.subtype==='stop_task'){success({});out({type:'system',subtype:'background_tasks_changed',tasks:[]});}
+else if(m.request.subtype==='mcp_status')success({mcpServers:[{name:'fixture',status:mcpStatus,config:{type:'http',url:'https://mcp.example/mcp'},scope:'user',source:'user',...(mcpStatus==='connected'?{tools:[{name:'fixture_tool'}]}:{})}]});
+else if(m.request.subtype==='mcp_authenticate')success({authUrl:'https://oauth.example/authorize?state=s',requiresUserAction:true,callbackExpected:true});
+else if(m.request.subtype==='mcp_oauth_callback_url')success();
+else if(m.request.subtype==='mcp_reconnect'){mcpStatus='connected';success();}
 else success({}); });
 `, { mode: 0o755 });
 for (const name of ["codex", "kimi"]) writeFileSync(join(bin, name), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
@@ -54,7 +58,17 @@ try {
   assert.equal((await api(`${base}/side-question`, "POST", { question: " " })).envelope.code, 40069);
   assert.equal((await api(`${base}/tasks/stop`, "POST", { taskId: "unknown" })).envelope.code, 40069);
   assert.equal((await api(`${base}/tasks/stop`, "POST", { taskId: "fixture-task" })).envelope.data.stopped, true);
+  const auth = await api(`${base}/mcp`, "POST", { action: "authenticate", serverName: "fixture" });
+  assert.equal(auth.status, 200); assert.equal(auth.envelope.data.auth.authUrl, "https://oauth.example/authorize?state=s");
+  assert.equal((await api(`${base}/mcp`, "POST", { action: "authenticate", serverName: "unknown" })).envelope.code, 40066);
+  assert.equal((await api(`${base}/mcp`, "POST", { action: "oauth_callback", serverName: "fixture", callbackUrl: "javascript:bad" })).envelope.code, 40066);
+  const callbackUrl = "http://localhost:123/callback?code=fixture&state=s";
+  assert.equal((await api(`${base}/mcp`, "POST", { action: "oauth_callback", serverName: "fixture", callbackUrl })).envelope.code, 0);
+  const connected = await api(`${base}/mcp`, "POST", { action: "reconnect", serverName: "fixture" });
+  assert.equal(connected.envelope.data.mcpServers[0].tools[0].name, "fixture_tool");
   const frames = readFileSync(wire, "utf8").trim().split("\n").map(line => JSON.parse(line));
+  assert(frames.some(frame => frame.request?.subtype === "mcp_oauth_callback_url" && frame.request.callbackUrl === callbackUrl));
+  assert.equal(frames.some(frame => frame.request?.serverName === "unknown"), false);
   assert(frames.some(frame => frame.request?.subtype === "stop_task" && frame.request.task_id === "fixture-task"));
   assert.equal(frames.some(frame => frame.request?.task_id === "unknown"), false);
   const before = (await api(`${base}/snapshot`)).envelope.data.seq;

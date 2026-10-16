@@ -1,5 +1,14 @@
 // Interface copy. Keep keys aligned with the other locale.
 const dictionary: Record<string, string> = {
+  "ui.SlashMenu.authenticate": "Authenticate",
+  "ui.SlashMenu.oauth_hint": "This server is enabled but needs authentication. Click Authenticate to get a link, then Reconnect and Refresh status. If authorization on another device ends on an unreachable localhost page, copy its full callback URL, submit it below, then reconnect.",
+  "ui.SlashMenu.open_auth_link": "Open authorization link",
+  "ui.SlashMenu.auth_link": "Authorization link (select to copy)",
+  "ui.SlashMenu.callback_url": "Full callback URL",
+  "ui.SlashMenu.submit_callback": "Submit callback URL",
+  "ui.SlashMenu.login_command": "Terminal authentication command (select to copy)",
+  "ui.SlashMenu.oauth_fallback": "If this Claude CLI does not support panel authentication or authorization fails, open a terminal on the {product} host in {cwd}, run the command below, complete authorization, then return here and click Reconnect and Refresh status. Turn the server on first if disabled.",
+  "ui.SlashMenu.status_refresh_failed": "Could not read the latest status; this list may be stale. Refresh status before taking another action: {error}",
   "ui.CodexResets.watch": "Tibo reset alerts",
   "ui.CodexResets.watch_hint": "Check AIHOT every 10 minutes and sync alerts across pages. Off by default.",
   "ui.CodexResets.pending": "An announced reset is awaiting confirmation",
