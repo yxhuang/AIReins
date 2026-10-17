@@ -16,7 +16,7 @@ const launcher = join(installerRepo, 'bin/aireins');
 const calls = join(fixture, 'launcher-calls');
 writeFileSync(launcher, `#!/bin/sh
 PLATFORM=linux
-[ -n "\${BASH_SOURCE:-}" ] && return 0
+[ "\${BASH_SOURCE:-$0}" != "$0" ] && return 0
 printf '%s\\n' "$*" >> ${quote(calls)}
 [ "$1" = status ] || exit 99
 printf 'Running (PID 12345)\\n'
