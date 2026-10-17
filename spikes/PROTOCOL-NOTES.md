@@ -52,12 +52,12 @@ ACP initialize 的客户端能力字段为 `clientCapabilities: { elicitation: {
 
 `in` 表示 CLI → spike，`out` 表示 spike → CLI；无法解析为 JSON 的行在 `raw` 中保留为字符串。capture 采用追加写，既包含最终成功运行，也保留了协议探索中的失败运行，便于复盘分岔。
 
-最终成功运行的定位信息：
+最终成功运行的定位示例（会话、线程、回合及请求 ID 已一致替换为合成值，含后文报文）：
 
 | CLI | 会话/线程 ID | 原生会话落盘路径 |
 | --- | --- | --- |
-| Claude | `00000000-0000-4000-8000-000000000065` | `/home/user/.claude/projects/-home-user-projects-workbench/00000000-0000-4000-8000-000000000065.jsonl` |
-| Codex | `00000000-0000-4000-8000-000000000066` | `/home/user/.codex/sessions/2026/08/21/rollout-2026-08-21T16-32-27-00000000-0000-4000-8000-000000000066.jsonl` |
+| Claude | `00000028-0000-4000-8000-000000000028` | `/home/user/.claude/projects/-home-user-projects-workbench/00000028-0000-4000-8000-000000000028.jsonl` |
+| Codex | `01900014-0000-7000-8000-000000000014` | `/home/user/.codex/sessions/2026/08/21/rollout-2026-08-21T16-32-27-01900014-0000-7000-8000-000000000014.jsonl` |
 | Kimi | `session_00000000-0000-4000-8000-000000000001` | `/home/user/.kimi-code/sessions/wd_workbench_0123456789ab/session_00000000-0000-4000-8000-000000000001/` |
 
 ## 1. Claude stream-json
@@ -102,7 +102,7 @@ client → CLI：`user`、`control_response`。
 ```json
 {
   "type": "control_request",
-  "request_id": "00000000-0000-4000-8000-000000000067",
+  "request_id": "00000031-0000-4000-8000-000000000031",
   "request": {
     "subtype": "can_use_tool",
     "tool_name": "Write",
@@ -127,7 +127,7 @@ client → CLI：`user`、`control_response`。
   "type": "control_response",
   "response": {
     "subtype": "success",
-    "request_id": "00000000-0000-4000-8000-000000000067",
+    "request_id": "00000031-0000-4000-8000-000000000031",
     "response": {
       "behavior": "allow",
       "updatedInput": {
@@ -148,8 +148,8 @@ client → CLI：`user`、`control_response`。
 任务书预期删除 `CLAUDE_CODE_ENTRYPOINT` 可让会话按普通 CLI 身份落盘；实测否定了这个假设。最终 session jsonl 的早期记录为：
 
 ```json
-{"type":"attachment","userType":"external","entrypoint":"sdk-cli","cwd":"/home/user/projects/workbench","sessionId":"00000000-0000-4000-8000-000000000065","version":"2.1.238"}
-{"type":"user","permissionMode":"default","promptSource":"sdk","userType":"external","entrypoint":"sdk-cli","sessionId":"00000000-0000-4000-8000-000000000065"}
+{"type":"attachment","userType":"external","entrypoint":"sdk-cli","cwd":"/home/user/projects/workbench","sessionId":"00000028-0000-4000-8000-000000000028","version":"2.1.238"}
+{"type":"user","permissionMode":"default","promptSource":"sdk","userType":"external","entrypoint":"sdk-cli","sessionId":"00000028-0000-4000-8000-000000000028"}
 ```
 
 早期行没有 `source` 字段。主会话另做了两组独立对照：
@@ -166,7 +166,7 @@ client → CLI：`user`、`control_response`。
 ```json
 {
   "type":"result",
-  "session_id":"00000000-0000-4000-8000-000000000065",
+  "session_id":"00000028-0000-4000-8000-000000000028",
   "usage":{
     "input_tokens":34,
     "cache_creation_input_tokens":1214,
@@ -200,7 +200,7 @@ client → CLI：`user`、`control_response`。
 - 原生 ephemeral 跳过 LiveThread 持久化和 state DB（`path:null`，不物化 sessions）；TUI 对启动和回合各设30秒上限，响应≤8KiB，取消时 interrupt，结束后 unsubscribe。AIReins 用全过程30秒、清理每步1秒。[session.rs:1007-1010,1111-1114](https://github.com/openai/codex/blob/rust-v0.160.0/codex-rs/core/src/session/session.rs#L1007-L1010)、[temporary_structured_request.rs:210-341](https://github.com/openai/codex/blob/rust-v0.160.0/codex-rs/tui/src/temporary_structured_request.rs#L210-L341)。unsubscribe 是脱订阅，原生按自身卸载生命周期回收内存，不是磁盘删除操作。
 - 自动结果写回前 `thread/read(includeTurns:false)` 复核无名，再 `thread/name/set`，由 `thread/name/updated.threadName` 同步。[event_dispatch.rs:2702-2716](https://github.com/openai/codex/blob/rust-v0.160.0/codex-rs/tui/src/app/event_dispatch.rs#L2702-L2716)。同一 app-server 调用 thread manager 修改 metadata，不另起进程 resume 主线程，也不碰单写者锁文件；原生 writer 由 [writer_lock.rs:17-80](https://github.com/openai/codex/blob/rust-v0.160.0/codex-rs/rollout/src/writer_lock.rs#L17-L80) 管理。read/name-set 不是原子 compare-and-set；AIReins 手动标题在本进程取消待结果，显示优先级始终 customTitle 在先。
 
-隔离验证：真实 app-server + `/tmp` 独立 CODEX_HOME + loopback 假 Responses 服务运行3次（没有账户/凭据/收费模型），第2、3次全通过；第1次已生成写回，仅测试误把省略 `tools` 判为应返回空数组。样例“修复登录超时”，模型 `gpt-5.6-luna/low` 为本地 fixture，3次实际额外额度/token均0。核对辅助请求无 tools、临时 path=null、不在原生 thread/list 或 sessions 文件、收到主线程 name/updated、已 unsubscribe 和退出本次进程。最终证据 `/tmp/wb-title-native-fixture-IUeOT6/trace.json`，可复跑 `.work-orders/2026-10-05-codex-auto-title/app-server-fixture.mjs`。这不是收费模型或生产页面实测。
+隔离验证：真实 app-server + `/tmp` 独立 CODEX_HOME + loopback 假 Responses 服务运行3次（没有账户/凭据/收费模型），第2、3次全通过；第1次已生成写回，仅测试误把省略 `tools` 判为应返回空数组。样例“修复登录超时”，模型 `gpt-5.6-luna/low` 为本地 fixture，3次实际额外额度/token均0。核对辅助请求无 tools、临时 path=null、不在原生 thread/list 或 sessions 文件、收到主线程 name/updated、已 unsubscribe 和退出本次进程。验证脚本未随仓库公开。这不是收费模型或生产页面实测。
 
 ### 启动、握手与回合
 
@@ -216,7 +216,7 @@ codex app-server --stdio
 {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"clientInfo":{"name":"workbench-spike","title":"Workbench M0","version":"0.0.0"},"capabilities":null}}
 {"jsonrpc":"2.0","method":"initialized","params":{}}
 {"jsonrpc":"2.0","id":2,"method":"thread/start","params":{"cwd":"/home/user/projects/workbench","approvalPolicy":"untrusted","sandbox":"workspace-write","ephemeral":false}}
-{"jsonrpc":"2.0","id":3,"method":"turn/start","params":{"threadId":"00000000-0000-4000-8000-000000000066","input":[{"type":"text","text":"…","text_elements":[]}],"approvalPolicy":"untrusted","sandboxPolicy":{"type":"workspaceWrite","writableRoots":[],"networkAccess":false,"excludeTmpdirEnvVar":false,"excludeSlashTmp":false}}}
+{"jsonrpc":"2.0","id":3,"method":"turn/start","params":{"threadId":"01900014-0000-7000-8000-000000000014","input":[{"type":"text","text":"…","text_elements":[]}],"approvalPolicy":"untrusted","sandboxPolicy":{"type":"workspaceWrite","writableRoots":[],"networkAccess":false,"excludeTmpdirEnvVar":false,"excludeSlashTmp":false}}}
 ```
 
 当前服务接受 client 带 `jsonrpc:"2.0"` 的对象，但其返回/通知实际省略 `jsonrpc`；driver 应宽容两种信封。`initialize` 只能调用一次，随后发送无 id 的 `initialized` 通知。
@@ -255,9 +255,9 @@ app-server → client 请求/通知：
   "method":"item/commandExecution/requestApproval",
   "id":0,
   "params":{
-    "threadId":"00000000-0000-4000-8000-000000000066",
-    "turnId":"00000000-0000-4000-8000-000000000068",
-    "itemId":"exec-00000000-0000-4000-8000-000000000069",
+    "threadId":"01900014-0000-7000-8000-000000000014",
+    "turnId":"01900015-0000-7000-8000-000000000015",
+    "itemId":"exec-00000033-0000-4000-8000-000000000033",
     "startedAtMs":1787301156726,
     "environmentId":"local",
     "command":"/bin/bash -lc \"printf 'CODEX_APPROVED\\\\n' > spikes/sandbox/codex-approved.txt\"",
@@ -293,19 +293,19 @@ app-server → client 请求/通知：
 续接现有会话的真实请求：
 
 ```json
-{"jsonrpc":"2.0","id":4,"method":"thread/resume","params":{"threadId":"00000000-0000-4000-8000-000000000066","cwd":"/home/user/projects/workbench"}}
+{"jsonrpc":"2.0","id":4,"method":"thread/resume","params":{"threadId":"01900014-0000-7000-8000-000000000014","cwd":"/home/user/projects/workbench"}}
 ```
 
 完成后用：
 
 ```json
-{"jsonrpc":"2.0","id":5,"method":"thread/unsubscribe","params":{"threadId":"00000000-0000-4000-8000-000000000066"}}
+{"jsonrpc":"2.0","id":5,"method":"thread/unsubscribe","params":{"threadId":"01900014-0000-7000-8000-000000000014"}}
 ```
 
 `thread/start` 返回的 `thread.path` 即 rollout 路径，并返回 `source:"vscode"`。rollout 首行实值：
 
 ```json
-{"type":"session_meta","payload":{"id":"00000000-0000-4000-8000-000000000066","cwd":"/home/user/projects/workbench","originator":"workbench-spike","cli_version":"0.148.0","source":"vscode"}}
+{"type":"session_meta","payload":{"id":"01900014-0000-7000-8000-000000000014","cwd":"/home/user/projects/workbench","originator":"workbench-spike","cli_version":"0.148.0","source":"vscode"}}
 ```
 
 调查结论：`source:"vscode"` **不是从当前 VSCODE 环境变量继承，也不由 `initialize.clientInfo` 决定**。当前 `codex app-server` 这个 umbrella 子命令把 session source 固定成 `VSCode`；`codex app-server --help` 没有 `--session-source`，也没有可用的环境变量或 initialize 字段覆盖它。单独构建/安装的 `codex-app-server` 二进制入口有 `--session-source`，但本机 PATH 没有该独立命令，且不属于本项目要求的原生 `codex app-server` 调用面。
@@ -323,8 +323,8 @@ app-server → client 请求/通知：
 {
   "method":"thread/tokenUsage/updated",
   "params":{
-    "threadId":"00000000-0000-4000-8000-000000000066",
-    "turnId":"00000000-0000-4000-8000-000000000068",
+    "threadId":"01900014-0000-7000-8000-000000000014",
+    "turnId":"01900015-0000-7000-8000-000000000015",
     "tokenUsage":{
       "total":{"totalTokens":52136,"inputTokens":51981,"cachedInputTokens":36352,"cacheWriteInputTokens":0,"outputTokens":155,"reasoningOutputTokens":77},
       "last":{"totalTokens":26099,"inputTokens":26094,"cachedInputTokens":25344,"cacheWriteInputTokens":0,"outputTokens":5,"reasoningOutputTokens":0},
@@ -537,7 +537,7 @@ Kimi 这里不是 input/output 分项，而是上下文已用量 `used` 与总�
 
 ## 7. kimi 2.1.1 工具调用字段（2026-09-28 抓包）
 
-来源：`spikes/kimi-tools-capture.ts`（探针脚本已删除，见 git 历史）→ 原始抓包 `kimi-tools.ndjson`（未随仓库公开）。七步工具任务（读/搜/列/改/写/跑命令/抓取），沙箱 cwd，权限一律自动批准。结论：**`kind` / `locations` / `rawInput` 确实存在**，但出现时机分阶段。
+来源：`spikes/kimi-tools-capture.ts`（探针脚本未随仓库公开）→ 原始抓包 `kimi-tools.ndjson`（未随仓库公开）。七步工具任务（读/搜/列/改/写/跑命令/抓取），沙箱 cwd，权限一律自动批准。结论：**`kind` / `locations` / `rawInput` 确实存在**，但出现时机分阶段。
 
 **初始 `tool_call`**：只有短名 title + kind + 空 content，**无 locations、无 rawInput**：
 
@@ -588,14 +588,14 @@ Kimi 这里不是 input/output 分项，而是上下文已用量 `used` 与总�
 
 **系统提示快照让跨宿主续接不破缓存**。续接时 CLI 按 jsonl 里的 `prompt_snapshot` / `deferred_tools_record` 附件重放上次的系统提示和工具表，之后的变化只以 `deferred_tools_delta` / `agent_listing_delta` / `mcp_instructions_delta` 追加在对话尾部，所以 VSCode 与 AIReins 追加提示不同也不动前缀。VSCode 扩展在 initialize 里显式传 `systemPromptSnapshot: true` 并把「VSCode Extension Context」作为 `appendSystemPrompt`；AIReins 的 initialize 不带这两个字段，快照开关走默认值（开），同样生效。VSCode 独有工具（`FetchInboxMessage` / `ReadNotifications` / `SendUserFile`）也是 delta，不破缓存。
 - 真实会话 00000205（VSCode ↔ AIReins 来回切）：4 轮 0 次意外失效，切换轮 read 57169 / write 737、read 57906 / write 649。
-- scratch 实测（haiku，模拟 VSCode 宿主 = 扩展自带二进制 + 同参数同 env + 同 initialize，`/tmp/.../scratchpad/smoke/host.mjs`）：对照组 c745eec9 同宿主关→开两次，3 轮 0 失效（read 21894 → 45283 → 46450）；切换组 be402171「宿主 → AIReins 续接 → 宿主 → AIReins（走 replaceWorker）→ 宿主」5 轮 0 失效（read 21894 → 45108 → 46171 → 46540 → 46630）。
+- scratch 实测（haiku，模拟 VSCode 宿主 = 扩展自带二进制 + 同参数同 env + 同 initialize，`/tmp/.../scratchpad/smoke/host.mjs`）：对照组 00000201 同宿主关→开两次，3 轮 0 失效（read 21894 → 45283 → 46450）；切换组 00000202「宿主 → AIReins 续接 → 宿主 → AIReins（走 replaceWorker）→ 宿主」5 轮 0 失效（read 21894 → 45108 → 46171 → 46540 → 46630）。
 - 模拟宿主写入的用户条目 `turnOrigin` 是 `sdk`，真实 VSCode 面板是 `human`；来源字段不影响缓存，只影响防分叉 hook 提示里的「来源」文字。
 
 **缓存按组织隔离**。另有约 21–22.5k 的全局静态 CC 前缀跨组织共享。00000206 #46（2026-09-23 23:31，read 21134 / write 162204，前一轮 read 176033）就是换账号后组织缓存全丢、只命中全局前缀，不是 AIReins 的问题。
 
 **CLI 自带破缓存诊断**：开调试（env `DEBUG` / `DEBUG_SDK` 或 `--debug`）时，调试日志里会有 `[PROMPT CACHE]` 行和原因。日志路径取 `CLAUDE_CODE_DEBUG_LOGS_DIR`（按文件路径用），未设时写 `~/.claude/debug/<sessionId>.txt`。
 
-**续接时的模型**：不带 `--model` 续接时，CLI 恢复该会话最后一条助手消息的模型；显式 `--model` / `ANTHROPIC_MODEL` 优先（`-p` stream-json 实测 d35fb1d6；模拟宿主 c745eec9 续接两次都不带 `--model`，仍是 haiku）。所以 AIReins 续接不传 `--model`，与原生「关掉再打开」一致；首个 `system/init` 到达之前，界面可能先显示配置默认值。
+**续接时的模型**：不带 `--model` 续接时，CLI 恢复该会话最后一条助手消息的模型；显式 `--model` / `ANTHROPIC_MODEL` 优先（`-p` stream-json 实测 00000203；模拟宿主 00000201 续接两次都不带 `--model`，仍是 haiku）。所以 AIReins 续接不传 `--model`，与原生「关掉再打开」一致；首个 `system/init` 到达之前，界面可能先显示配置默认值。
 
 **AIReins worker 与 VSCode 对齐的 env**：`CLAUDE_CODE_ENTRYPOINT=claude-vscode`、`CLAUDE_CODE_ENABLE_TASKS=0`（与 VSCode 一样用 TodoWrite，不用 Task* 工具，AIReins 渲染已核对）、`MCP_CONNECTION_NONBLOCKING=true`，另删掉从 VSCode 终端继承来的 `CLAUDE_CODE_SSE_PORT`，并设 `CC_FORK_GUARD=0`（见下）。不对齐的两项：`CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING` 只打开 SDK 模式的文件备份（给 rewind 用，AIReins 没有这个功能）；`CLAUDE_CODE_SDK_READS_SESSION_STATE=1` 是 Agent SDK 自动补上的宿主标志。这两项都不进 prompt 和工具表，上面的切换组宿主设了、AIReins 没设，照样 0 失效。
 
@@ -607,12 +607,12 @@ Kimi 这里不是 input/output 分项，而是上下文已用量 `used` 与总�
 - 双进程实测（scratch，haiku）：A 空闲，B `--resume` 写一轮，A 再发被拦；A 重开后放行。`-p` 模式下排队消息逐条出队、各走一轮，不误拦。
 - AIReins 自己在发送前会从磁盘刷新（`refreshBeforeSend`），所以 worker 设 `CC_FORK_GUARD=0` 关掉这个 hook。
 
-**Remote Control 与缓存**。b583f2f4（2026-09-29，CLI 2.1.281，opus）第 2、3 轮 read 都只有 22555（只命中全局前缀），各重写约 35k。当时 AIReins transcript 显示两轮之间 RC 被关掉又重开（04:49:27 disconnecting → 04:49:33 connected，bridge 会话从 `cse_01FVA…` 换成 `cse_01JBJ…`，jsonl 第 30–32 行）。AIReins 在这期间只转发了 RC 开关，没有动 prompt；三轮都由同一个 worker 进程发出，所以这是 CLI 内部的行为，不是 AIReins 的问题。2.1.284 在 scratch 复现（00000207，haiku，临时 AIReins 18790）：
+**Remote Control 与缓存**。00000204（2026-09-29，CLI 2.1.281，opus）第 2、3 轮 read 都只有 22555（只命中全局前缀），各重写约 35k。当时 AIReins transcript 显示两轮之间 RC 被关掉又重开（04:49:27 disconnecting → 04:49:33 connected，bridge 会话从 `cse_01DE0…` 换成 `cse_01DE1…`，jsonl 第 30–32 行）。AIReins 在这期间只转发了 RC 开关，没有动 prompt；三轮都由同一个 worker 进程发出，所以这是 CLI 内部的行为，不是 AIReins 的问题。2.1.284 在 scratch 复现（00000207，haiku，临时 AIReins 18790）：
 - RC 一直连着，手机隔 34 分钟发两轮（`turnOrigin:human`）：read 44502 / write 1257、read 45759 / write 81。RC 新增的 `FetchInboxMessage` / `ReadNotifications` / `SendUserFile` 和 claude.ai MCP 都以 `deferred_tools_delta` 追加在尾部。
 - RC 关→开（bridge 换成新会话）后，AIReins 发两轮：read 45840 / write 81、read 45921 / write 81。
 - 接着手机往新 bridge 发一轮：read 46002 / write 81。
 - 全程 0 次意外失效，调试日志里没有 `[PROMPT CACHE]` 行。
-结论：当前版本 RC 不破缓存，b583f2f4 那次只在 2.1.281 上出现过（没有旧版本可复测，opus 与 haiku 的差别也没排除）。用户 2026-09-30 决定 RC 保持按 `remoteControlAtStartup` 自动开启；之后用 `cache-audit --since` 定期扫一遍。
+结论：当前版本 RC 不破缓存，00000204 那次只在 2.1.281 上出现过（没有旧版本可复测，opus 与 haiku 的差别也没排除）。用户 2026-09-30 决定 RC 保持按 `remoteControlAtStartup` 自动开启；之后用 `cache-audit --since` 定期扫一遍。
 - 同一进程收到的手机消息照样触发 UserPromptSubmit / Stop，并带 `prompt_id`（探针实测），所以防分叉 hook 不会误拦 RC 消息。
 
 ## 9. Codex turn/start 图片输入（0.159.2 schema 核对，2026-09-30）
@@ -664,7 +664,7 @@ CLI `/config` 的 `Te(e)`（binary 字节 215603696）在选 `"false"` 时执行
 
 > 本节提到的 `scratch/…`、`.work-orders/…` 是本地文件，2026-10-02 已清出工作区，归档在本地备份中，未随仓库公开。
 
-调查源为 `~/.vscode-server/extensions/anthropic.claude-code-2.1.286-linux-x64/{webview/index.js,extension.js}`；本机 CLI `2.1.285`。`scratch/slash-ext/extension-actions.txt` 保存菜单注册片段，`extension-protocol.txt` / `extension-related.txt` 保存 SDK/宿主实现片段。完整条目判定表在 `.work-orders/2026-10-01-slash-ext-report.md`。以下均走本地无头 stream-json，无新增 npm 依赖。
+调查源为 `~/.vscode-server/extensions/anthropic.claude-code-2.1.286-linux-x64/{webview/index.js,extension.js}`；本机 CLI `2.1.285`。`scratch/slash-ext/extension-actions.txt` 保存菜单注册片段，`extension-protocol.txt` / `extension-related.txt` 保存 SDK/宿主实现片段。完整条目判定表为本地归档。以下均走本地无头 stream-json，无新增 npm 依赖。
 
 请求公共封套为 `{type:"control_request",request_id:"<uuid>",request:{subtype,…}}`。成功回应公共封套为 `{type:"control_response",response:{subtype:"success",request_id:"<uuid>",response?:<payload>}}`；MCP 开关/重连成功实测没有 `response` 字段，不能把空 payload 判为失败。
 

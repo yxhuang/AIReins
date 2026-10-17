@@ -188,7 +188,7 @@ macOS 安装时若已安装 Homebrew、stdin/stdout 都是 TTY，缺失或版本
 
 原生标题通过 driver metadata 的 `nativeTitle` 同步，折叠空白、最多200字符，非字符串、空串与重复通知忽略；注册表持久化，并复用 `session_organization_updated` 控制帧同步所有页面，不推进 seq 或活动时间。显示优先级为手动 `customTitle` → `nativeTitle` → 首条输入。原生标题晚于列表/快照请求到达时，客户端保留更新后的标题和较新的运行状态。Codex 读取新建/续接响应的 `thread.name` 并接收 `thread/name/updated.threadName`；Kimi 接收 `session_info_update.title`。Claude 接收人工标题通知，并按当前 cwd 和原生 UUID 精确定位 `.jsonl`，只读尾部最多256KiB的 `ai-title.aiTitle`；首轮结果后短期监听该文件的变化，75ms防抖，找到标题立即关闭，最多30秒，进程停止/退出也关闭，不轮询。超过监听窗口的标题留待下轮读取。Kimi ACP 未开放概括接口，其原生标题可能仍为首条输入。
 
-AIReins 新建的 Codex 会话在首个 `item/completed.userMessage` 后、没有手动或原生标题时，复用 0.160.0 TUI 的自动标题流程，最多尝试一次。它在主会话现有 app-server 内另建 `ephemeral:true, threadSource:"thread_title"` 的只读线程，使用 TUI 原 prompt（整体≤960 UTF-8 bytes）、JSON schema 与标题归一化（≤36 Unicode 字符）。OpenAI provider + ChatGPT 登录 + 模型目录支持时用 `gpt-5.6-luna / low`，否则沿用当前模型和原生配置档位；这是额外的一次原生模型请求。禁用工具、MCP、plugins、hooks、skills 注入、环境访问和委派；辅助通知与审批请求不进入主 transcript、用量、状态、会话列表或派单树。生成全过程上限30秒，失败静默、不重试；取消/超时只中断辅助回合，再 unsubscribe（各最多1秒），晚到的辅助线程也立即 unsubscribe。手动改名取消生成，写回前再读主线程名称；已有名称不覆盖。写回仅通过拥有主线程的同一 app-server 的 `thread/name/set`，不另起 writer，不直接修改原生文件或全局配置。ephemeral 线程不物化到 `~/.codex/sessions`。源码出处与隔离验证见 `.work-orders/2026-10-05-codex-auto-title/REPORT.md`、`spikes/PROTOCOL-NOTES.md`。
+AIReins 新建的 Codex 会话在首个 `item/completed.userMessage` 后、没有手动或原生标题时，复用 0.160.0 TUI 的自动标题流程，最多尝试一次。它在主会话现有 app-server 内另建 `ephemeral:true, threadSource:"thread_title"` 的只读线程，使用 TUI 原 prompt（整体≤960 UTF-8 bytes）、JSON schema 与标题归一化（≤36 Unicode 字符）。OpenAI provider + ChatGPT 登录 + 模型目录支持时用 `gpt-5.6-luna / low`，否则沿用当前模型和原生配置档位；这是额外的一次原生模型请求。禁用工具、MCP、plugins、hooks、skills 注入、环境访问和委派；辅助通知与审批请求不进入主 transcript、用量、状态、会话列表或派单树。生成全过程上限30秒，失败静默、不重试；取消/超时只中断辅助回合，再 unsubscribe（各最多1秒），晚到的辅助线程也立即 unsubscribe。手动改名取消生成，写回前再读主线程名称；已有名称不覆盖。写回仅通过拥有主线程的同一 app-server 的 `thread/name/set`，不另起 writer，不直接修改原生文件或全局配置。ephemeral 线程不物化到 `~/.codex/sessions`。源码出处见 `spikes/PROTOCOL-NOTES.md`。
 - `GET /api/project-order` → `{paths}`；`POST /api/project-order/move` 只接受 `{path,before}` 或 `{path,after}`，所有路径须为列表内已有的绝对路径、≤4096 字符，未知字段或无效目标 400 / 40070，响应 `{paths}`。在完整顺序上移动，其他目录相对位置不变，包括侧栏暂时不可见的目录。服务端独占写入 `project-order.json`（用户数据目录，由 `WORKBENCH_HOME` 覆盖），tmp+rename 原子写、权限 0600，最多 500 项、超出丢末尾。文件不存在时用全部会话 cwd 按每目录最新 `createdAt` 倒序生成；新建会话首次出现的目录登记在最前，已有目录不自动移动。路径与前端共用 lexical 规范化（重复 `/`、`.`、`..`、非根尾 `/`，保留大小写）。每次组织变化广播 WS 控制帧 `session_organization_updated {sessions, projectOrder}`（无 seq、不受会话订阅过滤）。手建分组接口已删除；不读取或改写旧 `session-groups.json`。启动清理 `pruneStorage` 仍保护 pinned 与旧记录的 `groupId`，其余逻辑忽略旧字段。部署后需刷新电脑与手机所有已打开页面，旧页面不兼容新帧。
 - `GET /api/sessions/:id/info/:kind`：输入框「/」菜单的只读查看，仅 Claude 会话。kind 为 `mcp` / `hooks` / `permissions` / `context`，分别转发 control_request `mcp_status` / `get_hooks_listing` / `list_permission_rules` / `get_context_usage`；`plugins` 没有对应 control_request，与 VSCode 扩展同样在会话 cwd 下跑 `claude plugin list --json`，`data` 为 `{plugins:[{id,version,scope,enabled,projectEnabled,installPath,…}]}`，不需要 worker（dead 会话也可查）；其余`data` 是 CLI 的 response 原样（`context` 只保留 categories、totalTokens、maxTokens、percentage、model、autoCompactThreshold、isAutoCompactEnabled，原样约 50KB）。已释放会话按 `ensureWorker` 先拉起；dead、非 Claude、未知 kind 或 CLI 报错返回 400 / 40063，15 秒超时。返回结构见 `spikes/PROTOCOL-NOTES.md` §10。
 - `GET /api/prefs` / `PUT /api/prefs`：服务端偏好，当前只有 `idleReleaseMinutes`（整数 0–1440 分钟，0 = 关闭空闲自动释放；校验失败 400）
@@ -202,7 +202,7 @@ AIReins 新建的 Codex 会话在首个 `item/completed.userMessage` 后、没�
 - `output` 先 `initialize` 获取 `available_output_styles`，再 `get_settings` 刷新磁盘设置，返回 `{outputStyle,availableStyles,settingsFiles}`，两次请求各 15 秒、前端总上限 40 秒。仅返回样式字段，不暴露整个 settings（可能含环境变量）。
 - `settings` 直接返回 `{settingsFiles:[{source,label,path,uri}]}`，无需 worker，dead 会话也可打开；三个范围为用户、项目、项目本地。用户路径尊重 `CLAUDE_CONFIG_DIR`，默认 `~/.claude/settings.json`。hooks/permissions/skills/sandbox/memory/output 查看也附带 `settingsFiles`；memory/instructions 的文件及目录行附带 `uri`。
 - `uri` 仅为协议链接：WSL 返回 `vscode://vscode-remote/wsl+<distro>/<encoded-path>`，原生 Linux/macOS 返回 `vscode://file/<encoded-path>`；路径分段编码，非绝对路径或控制字符返回 null。后端不启动 VSCode，不写 settings；文件可以尚未创建。Hooks 等在编辑器保存后重新打开面板查看，某些配置需下次续接。插件/策略提供的 Hooks 仍按原来源展示，不伪装成用户 settings 中的条目。
-- 新菜单只用于 Claude；Rewind 没有接入：虽然协议有 `rewind_files {user_message_id,dry_run}`，当前 worker 未启用 SDK 文件检查点且 AIReins 事件没有原生用户 UUID，实测 `canRewind:false,error:"File rewinding is not enabled."`，无法提供可信的文件/消息预览。扩展的会话回退另走宿主 fork + resume 截点，不能直接移植。调查表与冒烟证据为本地归档（`.work-orders/2026-10-01-slash-ext-report.md`、`scratch/slash-ext/`），未随仓库公开。
+- 新菜单只用于 Claude；Rewind 没有接入：虽然协议有 `rewind_files {user_message_id,dry_run}`，当前 worker 未启用 SDK 文件检查点且 AIReins 事件没有原生用户 UUID，实测 `canRewind:false,error:"File rewinding is not enabled."`，无法提供可信的文件/消息预览。扩展的会话回退另走宿主 fork + resume 截点，不能直接移植。调查表与冒烟证据未随仓库保留。
 - `GET /api/sessions/:id/files?q=<关键词>&limit=<默认50>`：在会话 `cwd` 内检索可引用的普通文件
 - `DELETE /api/sessions/:id`：停止 worker；删注册表条目，并删 AIReins 自己的副本（transcript、未被引用的附件）；三家原生记录不动。响应的 `transcriptsDeleted:true` 仅指 AIReins 副本，`workbenchTranscriptPreserved:false`、`nativeTranscriptPreserved:true` 如实报告；续接/检查中的移除返回 400 / 40063，IO 错误仍返回 500。
 - `GET /api/history`：只读列出三家 CLI 自己保存的所有来源会话；没有用户消息的会话隐藏，`empty` 单独计数（分页为本页扫描计数），`skipped` 记录损坏/不可读候选。命中 delegate 元数据的条目附带 `dispatch:{runId,name}`，UUID 和 `session_...` 原样匹配；派单映射只读全部目录的 `run.json`/旧 `meta.json`，缓存 30 秒。
@@ -571,7 +571,7 @@ Claude 跳过 meta/sidechain，按 assistant 内容块顺序输出文字与 `too
 {
   "agent": "claude",
   "cwd": "/home/user/projects/workbench",
-  "resumeSessionId": "00000000-0000-4000-8000-000000000040"
+  "resumeSessionId": "00000030-0000-4000-8000-000000000030"
 }
 ```
 
@@ -611,10 +611,10 @@ worker 的 `processId` 原本就持久化；新启动的 POSIX worker 使用独�
 
 ```json
 {
-  "nativeSessionId": "00000000-0000-4000-8000-000000000040",
+  "nativeSessionId": "00000030-0000-4000-8000-000000000030",
   "resumedFrom": {
     "agent": "claude",
-    "nativeSessionId": "00000000-0000-4000-8000-000000000040"
+    "nativeSessionId": "00000030-0000-4000-8000-000000000030"
   }
 }
 ```
@@ -881,24 +881,24 @@ node server/scripts/verify-snapshot.mjs '<sessionId>' --probe-message "只回复
 
 实测日期：2026-08-21；Node `v22.23.1`，Claude Code `2.1.238`，Codex CLI `0.148.0`，Kimi Code CLI `0.38.0`。
 
-- [x] **1. 三家并行且不串线。** 同一 server 中同时保持 Claude `01J00000000000000000000041`、Codex `01J00000000000000000000042`、Kimi `01J00000000000000000000043` 三个 worker。三份 snapshot/NDJSON 分别为 25、10、90 条；验证脚本确认每条 `sessionId`、`agentId` 正确且各自 `seq` 从 1 连续递增。
+- [x] **1. 三家并行且不串线。** 以下实测记录的会话、线程及回合 ID 均已替换为合成值。同一 server 中同时保持 Claude `01HF7YAT000000000000000001`、Codex `01HF7YAT000000000000000003`、Kimi `01HF7YAT000000000000000002` 三个 worker。三份 snapshot/NDJSON 分别为 25、10、90 条；验证脚本确认每条 `sessionId`、`agentId` 正确且各自 `seq` 从 1 连续递增。
 - [x] **2. 三家真实审批闭环。** Claude 收到 `control_request`，透传 `permissionSuggestions` 后写入 `claude-m1-1787304100.txt`；Codex 收到带数值 `id` 的 `item/commandExecution/requestApproval` 后写入 `codex-m1-1787304200.txt`；Kimi 先收到标准 `session/request_permission`，随后再次收到 `gate:"terminal/create", finalGate:true`，第二次批准后才写入 `kimi-m1-1787304200.txt`。三个文件内容均逐字校验成功。
 - [x] **3. 重启不接管旧进程（2026-08-21 的旧行为）。** 记录三个 worker PID `105 / 225 / 224` 后终止 server；`ps -p 105,224,225` 无输出。当时重启后三个会话全为 `dead`、没有 `processId`；2026-10-03 起符合上述安全条件的异常退出记录改为 `idle`+`released`，仍不接管旧进程。
 - [x] **4. transcript + snapshot/seq 恢复。** `verify-snapshot.mjs` 对三份全量 snapshot 与磁盘 NDJSON 逐事件比较通过；Claude 以 snapshot `seq=20` 建立 WS，收到的首条增量为 `seq=21`，该轮结束于 `seq=25`。
 - [x] **5. curl 全流程与 Node WS（10-01 前的旧行为）。** `curl` 已实测 `/api/meta`、会话创建/列表/详情/snapshot/DELETE/错误信封；`ws-demo.mjs` 使用 Node 22 内置 `WebSocket` 完成发消息、两类审批回传和 turn 收尾。DELETE 当时实测停止 worker、移除注册表条目，并保留 AIReins transcript；代码没有调用任何原生 transcript 删除 API。
 - [x] **6. TypeScript。** `npx tsc --noEmit` 退出码 0。
-- [x] **7. 三家自定义 config 真正生效。** Claude `01J00000000000000000000044` 用 `haiku / low / manual` 启动，首轮 session 被 `system/init` 更新为实际模型 `claude-haiku-4-5-20251001`，回复 `CLAUDE_CONFIG_FINAL_OK`；Codex `01J00000000000000000000045` 的原生 rollout `turn_context` 为 `gpt-5.4-mini / low / on-request`，回复 `CODEX_CONFIG_FINAL_OK`；Kimi `01J00000000000000000000046` 的 `session/new` 后配置为 `kimi-code/k3-256k / low / yolo`，并标记 `riskyMode:true`。
+- [x] **7. 三家自定义 config 真正生效。** Claude `01HF7YAT000000000000000004` 用 `haiku / low / manual` 启动，首轮 session 被 `system/init` 更新为实际模型 `claude-haiku-4-5-20251001`，回复 `CLAUDE_CONFIG_FINAL_OK`；Codex `01HF7YAT000000000000000005` 的原生 rollout `turn_context` 为 `gpt-5.4-mini / low / on-request`，回复 `CODEX_CONFIG_FINAL_OK`；Kimi `01HF7YAT000000000000000006` 的 `session/new` 后配置为 `kimi-code/k3-256k / low / yolo`，并标记 `riskyMode:true`。
 - [x] **8. meta schema 来自预期事实源。** 隔离实例的 `GET /api/meta` 返回三家各 3 项；Codex 模型实时来自 `model/list`，有效默认值来自 `config/read(cwd)`；Kimi 的 source 为 `Kimi ACP session/new.configOptions`，模型列表包含本机 Kimi 当时实际报告的 4 项，而不是后端静态常量。
 - [x] **9. 活修改与不可改拒绝。** Kimi 经 WS 一次改为 `kimi-code/k3 / high / plan`，收到 `config_updated` 后再收到 ack；Claude `acceptEdits → manual` 两次均即时成功，且 `manual` 已正确映射到控制协议的 `default`。尝试活改 Claude model 收到 `claude.model 只能在建会话时设置`。Codex 活改为 `gpt-5.4 / medium / never` 后，事件标记 `effectiveFrom:"next_turn"`，下一轮原生 `turn_context` 三项逐一吻合。
 - [x] **10. 历史验证：yolo 不能绕过最终闸门（已于 2026-10-03 改为遵循原生模式）。** Kimi 会话在 `yolo` 下请求 Shell 写入 `config-yolo-gate-final-1787317200.txt`，AIReins 仍发出 `gate:"terminal/create", finalGate:true`；拒绝后 turn 正常收尾，`existsSync` 实测目标文件为 `false`。
-- [x] **11. 不传 config 回归。** Claude `01J00000000000000000000047`、Codex `01J00000000000000000000048`、Kimi `01J00000000000000000000049` 均不传 config 建会话并完成一轮；分别回复 `CLAUDE_DEFAULT_FINAL_OK / CODEX_DEFAULT_FINAL_OK / KIMI_DEFAULT_FINAL_OK`，模式保持 `manual / untrusted / default`，均为 `riskyMode:false`。
-- [x] **12. 有效默认 effort 与 rollout 对齐。** 本机 Codex `config/read` 返回 `gpt-5.6-sol / xhigh`。不传 config 的会话 `01J00000000000000000000050` 在 schema、创建响应、snapshot 中均报告 `xhigh`，原生 rollout `00000000-0000-4000-8000-000000000051` 的 `effort` 与 `collaboration_mode.settings.reasoning_effort` 也均为 `xhigh`。显式传 `effort:low` 的会话 `01J00000000000000000000052` 报告 `low`，原生 rollout `00000000-0000-4000-8000-000000000053` 同样为 `low`。
-- [x] **13. Claude/Kimi 默认值复核。** Claude `01J00000000000000000000054` 初始 model/effort 为 `null/null`，首轮 init 后 model 更新为实际 `claude-opus-5`，init 没有 effort 字段，故 effort 继续诚实保留 `null`；permissionMode 为 driver 强制的 `manual`。Kimi `01J00000000000000000000055` 的 `session/new.configOptions` 与 session 均为 `kimi-code/k3 / high / default`，且仍无条件实际设置 `default`，没有回落到机器 yolo。
-- [x] **14. 命令枚举与发送。** 新 Kimi 会话 `01J00000000000000000000056` 的 commands API 返回 51 条，`compact.argHint` 与原始 ACP 更新一致；WS 结构化发送 `help` 后，agent 返回以 `Available commands:` 开头的原生命令表。Claude 会话 `01J00000000000000000000057` 返回 102 条，含 `compact` 和用户自定义 doctor/skill 命令。Codex 会话返回 `[]`，且结构化 `compact` 被后端以“不支持斜杠命令”拒绝。
+- [x] **11. 不传 config 回归。** Claude `01HF7YAT000000000000000007`、Codex `01HF7YAT000000000000000008`、Kimi `01HF7YAT000000000000000009` 均不传 config 建会话并完成一轮；分别回复 `CLAUDE_DEFAULT_FINAL_OK / CODEX_DEFAULT_FINAL_OK / KIMI_DEFAULT_FINAL_OK`，模式保持 `manual / untrusted / default`，均为 `riskyMode:false`。
+- [x] **12. 有效默认 effort 与 rollout 对齐。** 本机 Codex `config/read` 返回 `gpt-5.6-sol / xhigh`。不传 config 的会话 `01HF7YAT00000000000000000C` 在 schema、创建响应、snapshot 中均报告 `xhigh`，原生 rollout `01900016-0000-7000-8000-000000000016` 的 `effort` 与 `collaboration_mode.settings.reasoning_effort` 也均为 `xhigh`。显式传 `effort:low` 的会话 `01HF7YAT00000000000000000D` 报告 `low`，原生 rollout `01900017-0000-7000-8000-000000000017` 同样为 `low`。
+- [x] **13. Claude/Kimi 默认值复核。** Claude `01HF7YAT00000000000000000A` 初始 model/effort 为 `null/null`，首轮 init 后 model 更新为实际 `claude-opus-5`，init 没有 effort 字段，故 effort 继续诚实保留 `null`；permissionMode 为 driver 强制的 `manual`。Kimi `01HF7YAT00000000000000000B` 的 `session/new.configOptions` 与 session 均为 `kimi-code/k3 / high / default`，且仍无条件实际设置 `default`，没有回落到机器 yolo。
+- [x] **14. 命令枚举与发送。** 新 Kimi 会话 `01HF7YAT00000000000000000E` 的 commands API 返回 51 条，`compact.argHint` 与原始 ACP 更新一致；WS 结构化发送 `help` 后，agent 返回以 `Available commands:` 开头的原生命令表。Claude 会话 `01HF7YAT00000000000000000F` 返回 102 条，含 `compact` 和用户自定义 doctor/skill 命令。Codex 会话返回 `[]`，且结构化 `compact` 被后端以“不支持斜杠命令”拒绝。
 - [x] **15. 三家文件引用。** 同一个真实文件 `server/test-sandbox/mention-fixture.txt` 分别经 Claude `document`、Codex `mention`、Kimi ACP `resource` 发入；三者都实际读出 `WORKBENCH_MENTION_FIXTURE_7F3A9C21`。Codex 使用相对路径标记后首个只读命令就直接读取正确文件，不再搜索 basename。
 - [x] **16. 新能力位与类型检查。** 隔离实例 `/api/meta` 返回 Claude `commands:true, mentions:true`、Codex `false,true`、Kimi `true,true`；`npm run typecheck` 退出码 0。
-- [x] **17. WS 并发归因与 null 清除。** Codex 会话 `01J00000000000000000000058` 并发发送合法 `effort:low` 与非法 effort，ack/error 分别原样回显 `cfg-valid-low / cfg-invalid` 且 `action` 都是 `set_config`。随后 `effort:null` 的事件立即从覆盖值回报为 `config/read(cwd)` 的 `xhigh`；下一轮确认事件为 `effectiveFrom:"current_turn"`，原生 rollout 的同一 turn `00000000-0000-4000-8000-000000000059` 也确认为 `gpt-5.6-sol / xhigh`。
-- [x] **18. Codex 实际生效回执。** 同一会话活改为 `gpt-5.4 / low` 后先收到 `next_turn`，下一轮收到带 `appliedFields:["model","effort"]`、`effectiveConfig` 和原生 `turnId` 的 `current_turn` 事件；原生 turn `00000000-0000-4000-8000-000000000060` 的 `turn_context` 与 `collaboration_mode.settings` 均逐项为 `gpt-5.4 / low`。
+- [x] **17. WS 并发归因与 null 清除。** Codex 会话 `01HF7YAT00000000000000000G` 并发发送合法 `effort:low` 与非法 effort，ack/error 分别原样回显 `cfg-valid-low / cfg-invalid` 且 `action` 都是 `set_config`。随后 `effort:null` 的事件立即从覆盖值回报为 `config/read(cwd)` 的 `xhigh`；下一轮确认事件为 `effectiveFrom:"current_turn"`，原生 rollout 的同一 turn `01900018-0000-7000-8000-000000000018` 也确认为 `gpt-5.6-sol / xhigh`。
+- [x] **18. Codex 实际生效回执。** 同一会话活改为 `gpt-5.4 / low` 后先收到 `next_turn`，下一轮收到带 `appliedFields:["model","effort"]`、`effectiveConfig` 和原生 `turnId` 的 `current_turn` 事件；原生 turn `01900019-0000-7000-8000-000000000019` 的 `turn_context` 与 `collaboration_mode.settings` 均逐项为 `gpt-5.4 / low`。
 - [x] **19. 文件检索与逃逸边界。** 隔离实例 `q=server&limit=10` 返回 10 条有序相对路径；空查询返回 60 条且无 `.git / node_modules`；已被 `.gitignore` 命中的 `mention-fixture.txt` 返回空数组。实际请求 `q=../../../etc/passwd` 返回 HTTP 400/code `40020`；模块实测还拒绝 cwd 外 POSIX/Windows 绝对路径，允许指向 cwd 内普通文件的符号链接，并跳过指向 `/etc/passwd` 的逃逸链接。
 - [x] **20. 本轮范围与类型检查。** `npm run typecheck` 与 `git diff --check` 均退出码 0；Kimi 启动时无条件 `applyConfigOption("permissionMode", requestedConfig.permissionMode ?? "default")` 及三类审批/最终闸门代码均未修改。
 
@@ -954,7 +954,7 @@ node server/scripts/verify-snapshot.mjs '<sessionId>' --probe-message "只回复
 
 Codex 输入框 `$` 在光标 token 处打开名称+描述面板，支持过滤、上下键、Enter/Tab 插入、Esc 关闭；IME 组合期间不触发。选中插入 `$name `，文本保留，后端按真实 `skills/list` 的启用清单附加 `{type:"skill",name,path}` 到 `turn/start.input`；不接受客户端提供 skill 文件路径、不读取/嵌入 skill 内容、不写 skills 配置。重复提及去重，同名不同文件报错而不猜路径；禁用 skill 不主动附加。列表来源覆盖用户、仓库与系统的实际发现结果；读取错误在面板提示并可在 `/skills` 查看。
 
-不接 `/init`、undo/revert、`/diff`、`/prompts:<name>`、thread/shellCommand 或 MCP 配置改写：写文件/不可逆、无直接对应方法、TUI 本地能力，或超出本单可逆能力范围。详情与真实报文见 `spikes/PROTOCOL-NOTES.md` §12（工单报告为本地归档，未随仓库公开）。生效需要后端重启（本单不执行 aireins restart）；前端重新 build 后由静态文件服务读取。
+不接 `/init`、undo/revert、`/diff`、`/prompts:<name>`、thread/shellCommand 或 MCP 配置改写：写文件/不可逆、无直接对应方法、TUI 本地能力，或超出本单可逆能力范围。详情与真实报文见 `spikes/PROTOCOL-NOTES.md` §12（工单报告为本地归档，未随仓库公开）。生效需要后端重启；前端重新 build 后由静态文件服务读取。
 
 
 ### 性能接口契约（P0 / P1）
@@ -983,7 +983,7 @@ Codex 输入框 `$` 在光标 token 处打开名称+描述面板，支持过滤�
 - 从 `payload.parent_thread_id` 或 `source.subagent.thread_spawn.parent_thread_id` 建关系，昵称/角色也支持两种位置。按父线程递归；`depth` 是相对本派单的深度，`parentThreadId` 保留真实直接父线程。循环、无关线程不挂入树。
 - 原生目录只读。默认 `~/.codex/sessions`，夹具复用 `WORKBENCH_CODEX_HISTORY_DIR`。仅枚举派单 `startedAt` 的本地/UTC 日期前后一天目录；目录名时区与元数据时区跨午夜可能不同，不递归扫描全历史。跨多日之后才创建的子线程超出本契约扫描窗口。
 - 每文件只解析首行 `session_meta`（上限 64 KiB）及最后 64 KiB，跳过窗口首残行、尾部未换行记录、坏行和非普通/软链文件。文件解析结果（含空结果）按路径 + mtime + size 缓存，最多 4096 项；缓存命中仍重新判断新鲜度，无磁盘缓存写入。
-- 真实 0.159.2 样本 `rollout-2026-10-01T01-30-52-00000000-0000-4000-8000-000000000061.jsonl`：Carver 的父线程是 `00000000-0000-4000-8000-000000000062`，事件为 `task_started → item_completed/token_count → task_complete`。`item_completed` 只是条目完成，不能判回合结束。
+- 真实 0.159.2 样本 `rollout-2026-10-01T01-30-52-0190001e-0000-7000-8000-00000000001e.jsonl`：Carver 的父线程是 `0190001d-0000-7000-8000-00000000001d`，事件为 `task_started → item_completed/token_count → task_complete`。`item_completed` 只是条目完成，不能判回合结束。
 - 顺序处理尾部事件：`task_complete` 判 `finished`；兼容 `turn_aborted`（已停）和 assistant `final_answer`/`final`。更晚的 `task_started`/用户消息/推理/工具调用恢复活跃。只有活跃证据且 mtime 在 5 分钟内才判 `running`；无生命周期证据或活跃文件陈旧判 `unknown`，不能由 mtime 推断完成。长工具无写入可能暂时为未知；回合完成不表示线程永久关闭。
 - `startedAt` 取元数据时间；`lastActivityAt` 取最后完整记录时间，缺失时用 mtime。`activity` 取最新助手动态或工具名，压缩空白并截 160 字符，前端只在运行态显示一行。子卡沿用 Codex 色与 SVG `.flow`，每层间距 84px（宽面板 130px），每行最多四个，超过后换行，子卡上限 150px、窄面板按剩余宽度收缩。没有子 agent 时维持原来两层。
 - 夹具回归：`server/dispatch-subagents.test.ts`；前端有/无子 agent、递归/状态/换行契约：`frontend/scripts/dispatch-flow.test.mjs`。浏览器的 440px 面板和 390px 手机截图由主会话验证。
@@ -1058,8 +1058,8 @@ Codex 输入框 `$` 在光标 token 处打开名称+描述面板，支持过滤�
 - 目录正则支持 `YYYYMMDD-HHMMSS-claude-<name>`，与 Codex/Kimi/Copilot 共用 run.json、列表、详情、日志、近 7 天历史和原生消息接口。`session` 使用 delegate 预设的 Claude UUID；执行端模型/effort 原样返回。
 - Codex/Kimi 父会话可只存在于 delegate 元数据；可选 `parent.title` 按原生 ID 定向定位已有历史文件，复用 `history.ts` 的标题解析，缺失返回 null。结果与空结果缓存 30 秒，不调用历史全量递归扫描。前端找不到标题时显示短 ID。
 - Claude 执行端自身的 `session` 纳入原生子代理候选，其子代理附带 `parent.runId` 指向该派单，继续归属外层 Codex/Kimi 主树。既有 Claude 主会话子代理扫描规则保持。
-- 回归：`server/dispatches-claude-runtime.test.ts` 使用伪造 run 目录和真实 Codex 父 ID，核对三棵主树、Claude 派单/子代理归属、标题、详情、消息与历史。持久机械冒烟夹具在 `.work-orders/2026-10-03-delegate-claude-runtime-trees/smoke/`。
-- server 改动尚未提交，需用户执行 `aireins restart` 后生效；当前服务未重启。Claude 真调用、续接与桌面/手机真机布局待用户确认。
+- 回归：`server/dispatches-claude-runtime.test.ts` 使用伪造 run 目录和合成 Codex 父 ID，核对三棵主树、Claude 派单/子代理归属、标题、详情、消息与历史。
+- Claude 真调用、续接与桌面/手机真机布局待用户确认。
 
 ## 单会话彻底删除（2026-10-05）
 
@@ -1067,7 +1067,7 @@ Codex 输入框 `$` 在光标 token 处打开名称+描述面板，支持过滤�
 
 只接受空闲或已结束、无后台任务/审批/续接的Codex/Kimi会话；校验原生ID、历史目录与文件身份，阻止并发操作和同ID续接，等待worker停止并确认退出，Codex再调用 `codex delete --force <UUID>`（30秒超时，无shell插值）。Kimi通过独立短生命周期ACP进程初始化，核验 `agentCapabilities.sessionCapabilities.delete`，调用 `session/delete`（20秒超时）；遵循 `KIMI_CODE_HOME`，历史读取根目录不一致时拒绝操作。正式CLI负责原生历史及索引，服务端确认Codex原生文件或Kimi整个会话目录已不存在后才移除AIReins记录与独占附件；共用附件沿用引用保护。返回 `nativeTranscriptPreserved:false`。原生失败保留AIReins记录，Claude不提供菜单入口，后端明确拒绝，不调用项目purge或工作树rm；Kimi能力缺失或RPC失败保留AIReins记录。
 
-隔离CLI、HTTP及UI证据见 `.work-orders/2026-10-05-permanent-session-delete/REPORT.md`。真实CLI隔离测试不涉及用户历史；生产后端尚未重启。
+真实CLI隔离测试不涉及用户历史。
 
 ## Tibo / Codex 重置提醒
 
@@ -1082,4 +1082,4 @@ Codex 输入框 `$` 在光标 token 处打开名称+描述面板，支持过滤�
 - `GET /api/codex-resets`：`{enabled,lastSuccessAt,stale,monitor,pending,recent,alerts}`。`pending` 是 `status=announced` 的事件，`recent` 按更新时间取最近 5 条；`alerts` 最新优先，包含活动及关联 `events`。`stale` 表示 AIHOT monitor 非 healthy、outage 非空或本机连续失败超过 1 小时。AIHOT monitor 的 `status` 取值见其页面：`healthy` 监控正常、`delayed` 检查有延迟、`attention` 监控需要处理、`unknown` 未知；`lastCollectedAt` 是上次读到帖子，`lastVerifiedAt` 是上次完整检查。`attention` 时新帖可能仍在采集，但完整检查停滞，提醒可能不全，因此仍算 stale，由前端按原因显示文案。关闭时 `pending` / `alerts` 为空。
 - `POST /api/codex-resets/ack {id}`：幂等标记已读。新的快照/提醒、ack 或开关变化通过全局 WS 控制帧 `{type:"codex_resets_updated",data:状态快照}` 同步所有页面；前端连接/重连也拉取一次。任一端 ack 后其他端同步关闭该提醒。
 
-UI 在额度页 iframe 上方显示 AIReins 自己的重置信息卡；数据仅供提醒，额度数值仍由原有 AI-Usage 提供。每个展示位置保留「数据来源 AIHOT」链接到 <https://aihot.news/codex-reset>。此公开 API 限个人非商业使用，须保留来源信息。
+UI 在额度页 iframe 下方（降级面板时在面板下方）显示 AIReins 自己的重置信息卡；数据仅供提醒，额度数值仍由原有 AI-Usage 提供。每个展示位置保留「数据来源 AIHOT」链接到 <https://aihot.news/codex-reset>。此公开 API 限个人非商业使用，须保留来源信息。

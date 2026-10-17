@@ -23,7 +23,7 @@ A change is done when all of these pass:
 npm test
 npm run test:hosts
 node deploy/windows/tests/install-remote.test.mjs
-npm run typecheck && npm run typecheck:frontend && npm run check:theme && npm run check:i18n
+npm run typecheck && npm run typecheck:frontend && npm run check:theme && npm run check:i18n && npm run check:privacy
 ```
 
 Keep interface copy in the paired dictionaries in `frontend/src/i18n/`; follow `TERMS.md` there. Register each justified literal exception in `frontend/scripts/check-i18n.mjs`.

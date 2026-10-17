@@ -30,7 +30,7 @@ function harness<T extends ClaudeDriver | KimiDriver>(Driver: new (options: Driv
   try {
     const project = join(root, "-tmp-native-title-fixture");
     mkdirSync(project);
-    const id = "00000000-0000-4000-8000-000000000064";
+    const id = "0000002f-0000-4000-8000-00000000002f";
     const path = join(project, `${id}.jsonl`);
     writeFileSync(path, JSON.stringify({ type: "user", message: { content: "x".repeat(300_000) } }) + "\n");
     appendFileSync(path, JSON.stringify({ type: "ai-title", aiTitle: "原生目录导航摘要", sessionId: id }) + "\n");

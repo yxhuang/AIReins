@@ -165,7 +165,7 @@ for (const [name, locale, body] of [
   assert.equal(manifest.maxWidth, '33%');
   assert.equal(manifest.proxy, true);
   assert.equal(typeof manifest.description, 'string');
-  assert(!/proxy client|\/home\/|\/tmp\//.test(manifest.description));
+  assert(!/\/home\/|\/tmp\//.test(manifest.description));
   assert.match(output, /aireins restart/);
   assert(!/^deploy$/m.test(valid.calls()), valid.calls());
   assert(!/^git /m.test(valid.calls()), valid.calls());

@@ -10,8 +10,8 @@ const { dispatchForests } = await import(new URL("../frontend/src/dispatch-flow.
 const root = await mkdtemp(join(tmpdir(), "wb-claude-runtime-"));
 const delegate = join(root, "delegate");
 const runId = "20261003-153931-claude-codex-parent-smoke";
-// Verified from the real 2026-10-03 15:39 Codex session metadata; no archive is required to run this test.
-const parentId = "00000000-0000-4000-8000-000000000063";
+// Synthetic Codex parent ID; all native history and delegate metadata are local fixtures.
+const parentId = "01900026-0000-7000-8000-000000000026";
 const fixtureRun = { schema: 1, agent: "claude", name: "codex-parent-smoke", cwd: "/fixture/delegate-claude",
   model: "opus", effort: "high", status: "OK", startedAt: "2026-10-03T07:39:31.298Z",
   endedAt: "2026-10-03T07:39:32.298Z", elapsed_s: 1, exit: 0, files: 0,
@@ -21,7 +21,7 @@ for (const [name, content] of Object.entries({ "run.json": JSON.stringify(fixtur
   "stdout.log": "OK\n", "last.txt": "OK\n", "summary.txt": `STATUS OK\nRESUME delegate claude --resume ${runId}\n` })) {
   await writeFile(join(delegate, runId, name), content);
 }
-assert.equal(fixtureRun.parent.sessionId, parentId, "fixture uses the real 2026-10-03 15:39 Codex parent ID");
+assert.equal(fixtureRun.parent.sessionId, parentId, "fixture preserves the synthetic Codex parent relationship");
 const claudeId = fixtureRun.session;
 const codex = join(root, "codex");
 const kimi = join(root, "kimi");

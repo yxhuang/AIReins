@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createServer } from "vite";
 
-const output = process.env.CODEX_RESETS_SHOTS ?? "/tmp/claude-1000/-home-user-dev-AIReins/00000000-0000-4000-8000-000000000013/scratchpad/codex-resets-shots";
+const output = process.env.CODEX_RESETS_SHOTS ?? join(tmpdir(), "aireins-codex-resets-shots");
 mkdirSync(output, { recursive: true });
 const profile = mkdtempSync(join(tmpdir(), "aireins-codex-resets-"));
 const cache = join(homedir(), ".cache/ms-playwright");

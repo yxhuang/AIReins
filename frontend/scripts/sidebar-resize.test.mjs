@@ -365,7 +365,7 @@ try {
   });
   const shotsA = join(output, "projects");
   mkdirSync(shotsA, { recursive: true });
-  const shotsC = fileURLToPath(new URL('../../.work-orders/2026-10-16-sidebar-projects/shots-d/', import.meta.url));
+  const shotsC = join(output, "shots-d");
   mkdirSync(shotsC, { recursive: true });
   const group = path => `.sidebar-project[data-project-path=${JSON.stringify(path)}]`;
   const visibleOrder = () => evaluate("[...document.querySelectorAll('.sidebar-project')].filter(node=>!node.closest('.sidebar-older-projects')).map(node=>node.dataset.projectPath)");
@@ -628,7 +628,7 @@ try {
     });
   }
   console.log(`阶段 A 截图：${shotsA}`);
-  const shotsD = fileURLToPath(new URL('../../.work-orders/2026-10-16-sidebar-projects/shots-d/', import.meta.url));
+  const shotsD = join(output, "shots-d");
   mkdirSync(shotsD, { recursive: true });
   const olderToggle = '.older-projects-toggle';
   const recentProject = group('/repo/many'), olderProject = group('/archive/batch');

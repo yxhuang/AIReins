@@ -1,10 +1,10 @@
 // 阶段 B 合成 API 浏览器检查；由 sidebar-resize.test.mjs 复用同一 Chromium/CDP 入口执行。
 import assert from 'node:assert/strict';
 import { mkdirSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 
-const defaultShots = fileURLToPath(new URL('../../.work-orders/2026-10-16-sidebar-projects/shots-c/', import.meta.url));
+const defaultShots = join(tmpdir(), 'aireins-new-session-shots');
 const fixture = (locale, theme, options = {}) => `
   const options=${JSON.stringify(options)};
   localStorage.setItem('workbench-language',${JSON.stringify(locale)});

@@ -10,7 +10,9 @@
 //   FIXTURES=1 改用 frontend/scripts/fixtures/tool-events/<agent>.ndjson 的真实事件（阶段 2 工具行验收）。
 const { chromium } = await import(process.env.PLAYWRIGHT ?? "playwright");
 import { readFileSync } from "node:fs";
-const out = process.argv[2] ?? "shots";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+const out = process.argv[2] ?? join(tmpdir(), "aireins-msg-display-shots");
 const base = process.env.BASE ?? "http://127.0.0.1:8790";
 const md = `## 改动摘要
 
@@ -64,8 +66,13 @@ function events(sid, agent) {
   return e;
 }
 const ids = { claude: "FAKECLAUDE000000000000000A", codex: "FAKECODEX0000000000000000B", kimi: "FAKEKIMI00000000000000000C" };
-const real = (await (await fetch(`${base}/api/sessions`)).json()).data.sessions[0];
-const record = (agent) => ({ ...real, id: ids[agent], agent, status: "idle", seq: 99, cwd: process.env.FIXTURES ? "/work/proj" : "/home/user/projects/workbench", transcriptPath: "/dev/null" });
+/** @returns {import("../src/types.ts").SessionRecord} */
+const record = (agent) => ({
+  id: ids[agent], agent, agentId: "main", status: "idle", seq: 99,
+  title: `Synthetic ${agent} session`, config: {}, riskyMode: false,
+  createdAt: "2026-09-28T13:00:00.000Z", lastActivityAt: "2026-09-28T13:01:00.000Z",
+  cwd: process.env.FIXTURES ? "/work/proj" : "/home/user/projects/workbench", transcriptPath: "/dev/null",
+});
 const browser = await chromium.launch();
 const report = [];
 // 三组视口：长图两组（整页高度，查横滚用）+ 真实桌面 1280×820 + 真实手机 390×844

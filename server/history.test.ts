@@ -341,7 +341,7 @@ assert.equal(codexTools[1].tool.name, "commandExecution");
 assert.equal(codexTools[1].tool.status, "error");
 assert.equal((codexTools[1].tool.input as { command: string }).command, "pwd");
 assert.equal(codexTools[2].tool.result, "done");
-// 真实 rollout 2026-10-01T09-50-29-00000000-0000-4000-8000-000000000019:72 的首条调用。
+// 合成 rollout 2026-10-01T09-50-29-01900022-0000-7000-8000-000000000022:72 的首条调用。
 // exec 保持现有 HistoryTool 字段形状；历史预览与派单详情在前端共用摘要器。
 const execInput = 'const results = await Promise.allSettled([tools.exec_command({cmd:"npm run -s typecheck",max_output_tokens:3000,yield_time_ms:1000})]); results.forEach(text);';
 const execTools = parse("codex", [
