@@ -19,6 +19,7 @@ for (const [buildFails, locale, failureCopy] of [[true, "zh_CN.UTF-8", /前端�
 if [[ "$TEST_BUILD_FAIL" == 1 ]]; then exit 1; fi
 mkdir -p frontend/dist
 echo '<script src="/assets/fixture.js"></script>' > frontend/dist/index.html`);
+  executable("uname", "echo Linux"); // The ss/setsid mocks below are the Linux branch; pin it on macOS runners too.
   executable("ss", `if [[ -f "$TEST_STARTED" ]]; then echo 'LISTEN 0 511 127.0.0.1:8877 0.0.0.0:* users:(("node",pid=123,fd=20))'; fi`);
   executable("setsid", `echo backend >> "$TEST_TRACE"; touch "$TEST_STARTED"`);
   const result = spawnSync("bash", [join(repo, "bin/aireins"), "start"], {
