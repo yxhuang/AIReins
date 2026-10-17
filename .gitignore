@@ -3,3 +3,4 @@ frontend/dist/
 scratch/
 __pycache__/
 .work-orders/
+HANDOFF.md
