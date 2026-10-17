@@ -121,14 +121,14 @@ A browser on the same computer connects to `127.0.0.1` directly. Other devices j
 
 | | AIReins | Orca | Claude Code Remote Control | Codex Remote |
 |---|---|---|---|---|
-| What you control remotely | The whole computer: sessions, any folder, files, terminal | Workspaces/worktrees, agent sessions, terminal, git | One Claude Code session | Codex tasks on a host |
+| What you control remotely | The whole computer: sessions, any folder, files, terminal | Workspaces/worktrees, agent sessions, terminal, git | Claude Code sessions (one per process, or several in server mode) | Codex tasks on a host |
 | Agents | Claude Code, Codex, Kimi | Many CLIs in a PTY | Claude Code | Codex |
 | Network path | Your tailnet only; no AIReins or AI-vendor relay (Tailscale may fall back to its encrypted DERP relays) | Orca relay (account) by default; LAN or Tailscale optional | Anthropic relay | OpenAI relay |
-| Phone client | Web app | iOS / Android apps (beta) | Claude app | ChatGPT app |
-| Runs as | One Node process + browser | Desktop app (must stay open) | Your terminal (must stay open) | Desktop app |
-| Best for | One person using one computer from anywhere | Running many agents in parallel worktrees | Quick check-ins on one session | Codex users in the ChatGPT app |
+| Phone client | Web app | iOS / Android apps (beta) | Claude app or claude.ai | ChatGPT app |
+| Runs as | One Node process + browser | Desktop app (must stay open) | A local `claude` process (must keep running) | Desktop app |
+| Best for | One person using one computer from anywhere | Running many agents in parallel worktrees | Continuing Claude Code sessions from the Claude app | Codex users in the ChatGPT app |
 
-<!-- Comparison facts collected 2026-10-12; re-check before each release. -->
+<!-- Comparison facts collected 2026-10-12, re-checked 2026-10-17; re-check before each release. -->
 
 ## Get started
 

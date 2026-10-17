@@ -123,14 +123,14 @@ AI 越来越能干，能自己读代码、改文件、跑命令，一口气做�
 
 | | AIReins | Orca | Claude Code Remote Control | Codex Remote |
 |---|---|---|---|---|
-| 远程控制的对象 | 整台电脑：会话、任意目录、文件、终端 | 工作区/worktree、代理会话、终端、git | 单个 Claude Code 会话 | 一台主机上的 Codex 任务 |
+| 远程控制的对象 | 整台电脑：会话、任意目录、文件、终端 | 工作区/worktree、代理会话、终端、git | Claude Code 会话（每个进程一个，server 模式可多个） | 一台主机上的 Codex 任务 |
 | 代理 | Claude Code、Codex、Kimi | 一个 PTY 中的多种 CLI | Claude Code | Codex |
 | 网络路径 | 仅你的 tailnet，无 AIReins 或 AI 厂商中转（Tailscale 直连不通时可能经其加密的 DERP 中继） | 默认走 Orca 中继（账号）；可选局域网或 Tailscale | Anthropic 中继 | OpenAI 中继 |
-| 手机客户端 | Web 应用 | iOS / Android 应用（beta） | Claude 应用 | ChatGPT 应用 |
-| 运行形态 | 一个 Node 进程 + 浏览器 | 桌面应用（必须保持打开） | 你的终端（必须保持打开） | 桌面应用 |
-| 适合 | 一个人从任何地方用自己的一台电脑 | 在并行 worktree 中跑多个代理 | 快速查看单个会话 | 在 ChatGPT 应用中的 Codex 用户 |
+| 手机客户端 | Web 应用 | iOS / Android 应用（beta） | Claude 应用或 claude.ai | ChatGPT 应用 |
+| 运行形态 | 一个 Node 进程 + 浏览器 | 桌面应用（必须保持打开） | 本机 `claude` 进程（必须保持运行） | 桌面应用 |
+| 适合 | 一个人从任何地方用自己的一台电脑 | 在并行 worktree 中跑多个代理 | 在 Claude 应用里接着用 Claude Code 会话 | 在 ChatGPT 应用中的 Codex 用户 |
 
-<!-- Comparison facts collected 2026-10-12; re-check before each release. -->
+<!-- Comparison facts collected 2026-10-12, re-checked 2026-10-17; re-check before each release. -->
 
 ## 跑起来
 
