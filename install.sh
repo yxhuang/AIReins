@@ -298,7 +298,7 @@ if [[ "$PLATFORM" == darwin && "${1:-}" != --check && -t 0 && -t 1 ]] && command
   fi
 fi
 if node_supported; then
-  ok "Node $node_version（≥ 22.12）" "Node $node_version (≥ 22.12)"
+  ok "Node ${node_version}（≥ 22.12）" "Node $node_version (≥ 22.12)"
 else
   fail "Node 未安装或版本过低（${node_version:-未安装}）；需要 ≥ 22.12。" "Node is missing or too old (${node_version:-not installed}); need ≥ 22.12."
   if [[ "$PLATFORM" == darwin ]]; then
@@ -338,7 +338,7 @@ for dep in python3 curl; do
     ok "$dep 已安装" "$dep installed"
   else
     if [[ "$PLATFORM" == darwin ]]; then warn "$dep 未安装（aireins status 使用它）；可自行安装。" "$dep is not installed (aireins status uses it); you may install it yourself."
-    else warn "$dep 未安装（aireins status 使用它）；可执行 sudo apt-get install -y $dep。" "$dep is not installed (aireins status uses it); you can run sudo apt-get install -y $dep."; fi
+    else warn "$dep 未安装（aireins status 使用它）；可执行 sudo apt-get install -y ${dep}。" "$dep is not installed (aireins status uses it); you can run sudo apt-get install -y $dep."; fi
   fi
 done
 cli_found=false
@@ -423,7 +423,7 @@ if [[ -d "$link" && ! -L "$link" ]]; then
 elif ln -sfn "$REPO/bin/aireins" "$link"; then
   ok "aireins → $REPO/bin/aireins"
 else
-  fail "无法安装 $link，请检查路径和权限。" "Cannot install $link; check the path and permissions."
+  fail "无法安装 ${link}，请检查路径和权限。" "Cannot install $link; check the path and permissions."
 fi
 for name in wb workbench; do
   link="$HOME/.local/bin/$name"
@@ -436,15 +436,15 @@ for name in wb workbench; do
     repo_bin="$(cd -P -- "$REPO/bin" && pwd)"
     if [[ "$old_target" == "$repo_bin/workbench" || "$old_target" == "$repo_bin/aireins" ]]; then
       if unlink "$link"; then
-        ok "已移除本仓库旧命令链接 $link；请使用 aireins。" "Removed this repository's old command link $link; use aireins."
+        ok "已移除本仓库旧命令链接 ${link}；请使用 aireins。" "Removed this repository's old command link $link; use aireins."
       else
-        fail "无法移除旧命令链接 $link，请检查路径和权限。" "Cannot remove the old command link $link; check the path and permissions."
+        fail "无法移除旧命令链接 ${link}，请检查路径和权限。" "Cannot remove the old command link $link; check the path and permissions."
       fi
     else
-      warn "保留 $link：不是本仓库的命令链接。" "Keeping $link: it is not this repository's command link."
+      warn "保留 ${link}：不是本仓库的命令链接。" "Keeping $link: it is not this repository's command link."
     fi
   elif [[ -e "$link" ]]; then
-    warn "保留 $link：不是本仓库的命令链接。" "Keeping $link: it is not this repository's command link."
+    warn "保留 ${link}：不是本仓库的命令链接。" "Keeping $link: it is not this repository's command link."
   fi
 done
 
@@ -543,7 +543,7 @@ if ! "$smoke_ready"; then
 fi
 if [[ -n "$started_pid" ]]; then
   current_status="$("$REPO/bin/aireins" status 2>&1 || true)"
-  if [[ "$current_status" == "运行中（PID $started_pid）"* || "$current_status" == "Running (PID $started_pid)"* ]]; then
+  if [[ "$current_status" == "运行中（PID ${started_pid}）"* || "$current_status" == "Running (PID $started_pid)"* ]]; then
     if "$REPO/bin/aireins" stop; then
       ok '已停止本次冒烟启动的服务' 'Stopped the service started by this smoke test'
     else
