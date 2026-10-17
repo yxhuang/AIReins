@@ -43,7 +43,7 @@ function fixture(name, options = {}) {
     writeFileSync(manifestPath, options.manifest);
   }
   writeFileSync(join(installerRepo, 'bin/aireins'), `#!/bin/sh
-if [ -n "\${BASH_SOURCE:-}" ]; then
+if [ "\${BASH_SOURCE:-$0}" != "$0" ]; then
   PLATFORM="\${TEST_PLATFORM:-linux}"
   port_pid() { [ "\${TEST_LISTENING:-false}" != true ] || printf '3456\\n'; }
   process_command() { printf 'python -m server.main\\n'; }
