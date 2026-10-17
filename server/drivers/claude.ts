@@ -293,6 +293,8 @@ export class ClaudeDriver extends BaseDriver {
       this.titleWatchTimeout = setTimeout(() => this.closeTitleWatcher(), 30_000);
       this.titleWatchTimeout.unref();
       this.readNativeTitle(); // Cover an append between the first read and watch registration.
+      // macOS FSEvents starts listening asynchronously after watch() returns; re-read once to cover that gap.
+      setTimeout(() => this.readNativeTitle(), 500).unref();
     } catch { /* Exact file absent: leave the next turn to retry, never scan other sessions. */ }
   }
 
