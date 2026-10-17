@@ -45,7 +45,7 @@ AIReins 是一个跑在你自己电脑上的 AI 工作台。它通过官方 CLI 
 - **历史统一看，进出都自由。** 三家的原生历史在一处搜索、按目录筛选、续接。会话本来就写在各家自己的历史里，随时可以回到 CLI、VS Code 扩展、Codex App 接着用，Claude 会话开了 Remote Control 还能在 Claude App 里连上。（Claude 会话要出现在 CLI 和 VS Code 的历史列表里，需在 `prefs.json` 设 `claudeCodeEntrypoint`，见[配置](#配置)；不设也能用 `claude --resume <会话 ID>` 续接。）
 - **文件和终端就在旁边。** 右侧栏是文件窗口（浏览任意目录、预览、就地编辑、看 Git 状态）和多标签终端：Linux 与 macOS 打开你的默认 shell（`$SHELL`），WSL 下是 bash，还能开 Windows PowerShell。
 - **派单拓扑实时看。** 让一家 AI 当指挥、把活派给其他家时，派单流程图实时显示谁派给了谁、跑到哪一步、成没成；子代理同样按父子树展开。
-- **直达与 AI 用量。** 「直达」菜单放你自己的常用链接（网页、`vscode://`、`obsidian://` 等，改一个 JSON 文件即可）；可选内嵌 [AI-Usage](https://github.com/yxhuang/ai-usage) 面板，三家订阅额度一页看清；有固定时间窗口的额度条上还标着这个窗口的时间已过去多少，用得比时间快还是慢一眼就知道。
+- **直达与 AI 用量。** 「直达」菜单放你自己的常用链接（网页、`vscode://`、`obsidian://` 等，改一个 JSON 文件即可）；可选内嵌 [AI-Usage](https://github.com/yxhuang/ai-usage) 面板，三家订阅额度一页看清；有固定时间窗口的额度条上还标着这个窗口的时间已过去多少，用得比时间快还是慢一眼就知道。设置里还能打开 Tibo 额度重置提醒（默认关闭）：每 10 分钟查询 [AIHOT](https://aihot.news/codex-reset) 收录的 Tibo 关于 Codex 额度重置的公告，所有打开的页面同步提醒，额度页底部列出详情。
 - **手机上也是整台电脑。** 经 Tailscale 连回，审批、看文件、开终端都能在手机上做。
 
 ## 看一眼
