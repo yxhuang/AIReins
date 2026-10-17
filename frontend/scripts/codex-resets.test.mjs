@@ -88,7 +88,7 @@ const fixtureScript = (locale) => `
   window.__writes = [];
   const fixtures = {
     '/api/meta': {defaultCwd:'/repo',capabilities:{terminal:false},drivers:Object.fromEntries(['claude','codex','kimi'].map(id=>[id,{configOptions:[],available:true}]))},
-    '/api/sessions': {sessions:[]}, '/api/project-order': {paths:[]},
+    '/api/sessions': {sessions:[]}, '/api/project-order': {paths:[]}, '/api/fs/dirs': {path:'/repo',parent:'/',dirs:[],files:[]},
     '/api/pages': {pages:[{id:'ai-usage',name:'AI-Usage',icon:'📊',type:'iframe',url:'about:blank'}]},
     '/api/pages/ai-usage/health': {reachable:true,embeddable:true,reason:'Synthetic iframe fixture',durationMs:1},
     '/api/history': {sessions:[],truncated:false,skipped:0,empty:0,discovered:0,durationMs:0},
@@ -225,7 +225,7 @@ try {
     await waitFor(first, "document.querySelector('.codex-reset-card') && !document.querySelector('.codex-reset-dialog')");
     await waitFor(first, "document.querySelector('.page-frame')?.getAttribute('src') === 'about:blank'");
     assert.equal(await evaluate(first, "document.querySelectorAll('.page-fallback').length"), 0, "卡片覆盖正常 iframe 路径");
-    assert.ok(await evaluate(first, "document.querySelector('.codex-reset-card').compareDocumentPosition(document.querySelector('.page-frame')) & Node.DOCUMENT_POSITION_FOLLOWING"), "卡片位于 iframe 上方");
+    assert.ok(await evaluate(first, "document.querySelector('.codex-reset-card').compareDocumentPosition(document.querySelector('.page-frame')) & Node.DOCUMENT_POSITION_PRECEDING"), "卡片位于 iframe 下方");
     assert.equal(await evaluate(first, "window.__writes.length"), before);
     assert.ok(await evaluate(second, "!!document.querySelector('.codex-reset-dialog')"), "另一页面保留未读弹窗");
   });

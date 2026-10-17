@@ -90,7 +90,6 @@ export function PageView({ page, sidebar = false, onCollapse }: {
   if (!page.proxy && !isLoopbackUrl(window.location.href) && isLoopbackUrl(page.url)) {
     return (
       <div className={viewClass}>
-        {page.id === "ai-usage" && <CodexResetCard />}
         <div className="page-fallback">
           <h2 className="page-fallback-title">
             <PageIcon icon={page.icon} />
@@ -98,6 +97,7 @@ export function PageView({ page, sidebar = false, onCollapse }: {
           </h2>
           <p className="page-fallback-info">{t("ui.PageView.this_page_points_to_a_local_computer_sentence", { p0: (page.url) })}</p>
         </div>
+        {page.id === "ai-usage" && <CodexResetCard />}
       </div>
     );
   }
@@ -109,7 +109,6 @@ export function PageView({ page, sidebar = false, onCollapse }: {
     if (mode === "blocked") {
       return (
         <div className={viewClass}>
-          {page.id === "ai-usage" && <CodexResetCard />}
           <div className="page-fallback">
             <h2 className="page-fallback-title">
               <PageIcon icon={page.icon} />
@@ -132,6 +131,7 @@ export function PageView({ page, sidebar = false, onCollapse }: {
               >{t("ui.PageView.check_again")}</button>
             </div>
           </div>
+          {page.id === "ai-usage" && <CodexResetCard />}
         </div>
       );
     }
@@ -141,7 +141,6 @@ export function PageView({ page, sidebar = false, onCollapse }: {
       return (
         // maxWidth 由后端按简单 CSS 长度校验过；窄面板拉满宽屏反而难看
         <div className={viewClass} style={!sidebar && page.maxWidth ? { maxWidth: page.maxWidth } : undefined}>
-          {page.id === "ai-usage" && <CodexResetCard />}
           <div className="page-toolbar">
             <span className="page-toolbar-title">
               <PageIcon icon={page.icon} />
@@ -154,6 +153,7 @@ export function PageView({ page, sidebar = false, onCollapse }: {
           </div>
           {/* 有意不加 sandbox：pages/ 里的页面（如 ai-usage）可能需要脚本/同源等完整能力，记录此决策 */}
           <iframe ref={frameRef} className="page-frame" src={src} title={page.name} loading="lazy" />
+          {page.id === "ai-usage" && <CodexResetCard />}
         </div>
       );
     }
@@ -163,7 +163,6 @@ export function PageView({ page, sidebar = false, onCollapse }: {
   // 降级面板：检查中 / 健康接口失败 / reachable:false
   return (
     <div className={viewClass}>
-      {page.id === "ai-usage" && <CodexResetCard />}
       <div className="page-fallback">
         <h2 className="page-fallback-title">
           <PageIcon icon={page.icon} />
@@ -191,6 +190,7 @@ export function PageView({ page, sidebar = false, onCollapse }: {
           <a className="page-open-blank" href={src} target="_blank" rel="noreferrer">{t("ui.common.open_in_a_new_tab")}</a>
         </div>
       </div>
+      {page.id === "ai-usage" && <CodexResetCard />}
     </div>
   );
 }

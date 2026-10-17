@@ -4418,7 +4418,7 @@ button:disabled { box-shadow: none !important; }
 .codex-reset-footer { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; border-top: 1px solid var(--border); padding-top: 12px; font-size: 12px; color: var(--text-faint); }
 .codex-reset-source { font-size: 12px; }
 .codex-reset-scope, .codex-reset-stale, .codex-reset-relative { font-size: 12px; color: var(--text-faint); }
-.codex-reset-card { flex: 0 0 auto; max-height: 45%; overflow: auto; background: var(--surface); border-bottom: 1px solid var(--border); padding: 14px 16px; font-size: 13px; overflow-wrap: anywhere; }
+.codex-reset-card { flex: 0 0 auto; max-height: 45%; overflow: auto; background: var(--surface); border-top: 1px solid var(--border); padding: 14px 16px; font-size: 13px; overflow-wrap: anywhere; }
 .codex-reset-card.has-pending { border-left: 3px solid var(--agent-codex); padding-left: 13px; }
 .codex-reset-card-event + .codex-reset-card-event { margin-top: 12px; }
 .codex-reset-card-heading { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 6px 12px; margin-bottom: 6px; }
