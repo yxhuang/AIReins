@@ -1049,7 +1049,7 @@ Codex 输入框 `$` 在光标 token 处打开名称+描述面板，支持过滤�
 ### 三家独立会话的派单关系（2026-10-03）
 
 - 图按主运行时分棵，Claude Code、Codex 和 Kimi 均可作为派单人；同运行时多个主会话在同一棵树逐行列标题，顺序为 Claude、Codex、Kimi。跨工具任务通过 `parent.runId` 或执行端 + 原生 `parent.sessionId` 连到实际父节点。原生子代理与外部工单可出现在同一条链中。
-- 三家 worker 带当前会话的 `WORKBENCH_PARENT_AGENT / WORKBENCH_PARENT_SESSION_ID`；Kimi ACP 的命令执行入口改用原生 session ID。agent-env 的 `delegate` 优先识别最近工单，再识别当前 AIReins 会话及该执行端原生 ID，避免把继承的上游环境误当父会话。Codex 的嵌套工单同时记录 run ID 与当前线程 ID，使 Luna 派单连回 Luna。
+- 三家 worker 带当前会话的 `WORKBENCH_PARENT_AGENT / WORKBENCH_PARENT_SESSION_ID`；Kimi ACP 的命令执行入口改用原生 session ID。外部 `delegate` 工具（可选，见 README）应优先识别最近工单，再识别当前 AIReins 会话及该执行端原生 ID，避免把继承的上游环境误当父会话。Codex 的嵌套工单同时记录 run ID 与当前线程 ID，使 Luna 派单连回 Luna。
 - 不回填旧工单的未知父会话，不从 cwd、模型或任务名猜测关系；旧记录已有父 ID 时仍可显示。没有 delegate 元数据的任意外部 CLI 调用，需要调用方另行提供明确关系。
 - 验证入口：`server/dispatches-multi-runtime.test.ts`、`server/dispatch-parent-env.test.ts`、`frontend/scripts/dispatch-flow.test.mjs`。
 

@@ -599,13 +599,13 @@ Kimi 这里不是 input/output 分项，而是上下文已用量 `used` 与总�
 
 **AIReins worker 与 VSCode 对齐的 env**：`CLAUDE_CODE_ENTRYPOINT=claude-vscode`、`CLAUDE_CODE_ENABLE_TASKS=0`（与 VSCode 一样用 TodoWrite，不用 Task* 工具，AIReins 渲染已核对）、`MCP_CONNECTION_NONBLOCKING=true`，另删掉从 VSCode 终端继承来的 `CLAUDE_CODE_SSE_PORT`，并设 `CC_FORK_GUARD=0`（见下）。不对齐的两项：`CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING` 只打开 SDK 模式的文件备份（给 rewind 用，AIReins 没有这个功能）；`CLAUDE_CODE_SDK_READS_SESSION_STATE=1` 是 Agent SDK 自动补上的宿主标志。这两项都不进 prompt 和工具表，上面的切换组宿主设了、AIReins 没设，照样 0 失效。
 
-**没有原生的「别的进程写过本会话」检测**。`~/.claude/sessions/<pid>.json` 活进程登记（pid、sessionId、procStart、kind、entrypoint、status）只被后台 agents 的「在别处打开」路径用。工单列的 `CLAUDE_CODE_RESUME_TOLERATES_CONTEXT_APPENDS`、`sessionMirror`、`CLAUDE_CODE_SDK_READS_SESSION_STATE` 都不做这件事。因此防分叉靠全局 hook `~/.claude/hooks/fork-guard.py`（SessionStart / UserPromptSubmit / Stop），相关 hook 事实：
+**没有原生的「别的进程写过本会话」检测**。`~/.claude/sessions/<pid>.json` 活进程登记（pid、sessionId、procStart、kind、entrypoint、status）只被后台 agents 的「在别处打开」路径用。工单列的 `CLAUDE_CODE_RESUME_TOLERATES_CONTEXT_APPENDS`、`sessionMirror`、`CLAUDE_CODE_SDK_READS_SESSION_STATE` 都不做这件事。要防分叉只能靠用户自己的全局 hook（SessionStart / UserPromptSubmit / Stop），相关 hook 事实：
 - hook 进程 env 有 `CLAUDE_PID`（发起 hook 的 claude 进程）和 `CLAUDE_CODE_SESSION_ID`；hook 的父进程是 `sh`。
 - UserPromptSubmit 触发时，本条用户消息**还没写进** jsonl；它的 `prompt_id` 等于 jsonl 的 `promptId`。
 - UserPromptSubmit 以 exit 2 退出时，stream-json 输出 `system/informational`（`prevent_continuation:true`，content 带 stderr），随后是 `num_turns:0` 的 result，不挂住。
 - `turnOrigin` 实见取值：`human`（VSCode / 终端 / 手机）、`sdk`（AIReins、`claude -p`）、`task_notification`、`peer`、`system`，以及缺失（中断续接提示）。hook 只把 `human` / `sdk` 当成人类消息。
 - 双进程实测（scratch，haiku）：A 空闲，B `--resume` 写一轮，A 再发被拦；A 重开后放行。`-p` 模式下排队消息逐条出队、各走一轮，不误拦。
-- AIReins 自己在发送前会从磁盘刷新（`refreshBeforeSend`），所以 worker 设 `CC_FORK_GUARD=0` 关掉这个 hook。
+- AIReins 自己在发送前会从磁盘刷新（`refreshBeforeSend`），worker 带 `WORKBENCH_WORKER=1`，这类防分叉 hook 可据此跳过 AIReins 发起的轮次。
 
 **Remote Control 与缓存**。00000204（2026-09-29，CLI 2.1.281，opus）第 2、3 轮 read 都只有 22555（只命中全局前缀），各重写约 35k。当时 AIReins transcript 显示两轮之间 RC 被关掉又重开（04:49:27 disconnecting → 04:49:33 connected，bridge 会话从 `cse_01DE0…` 换成 `cse_01DE1…`，jsonl 第 30–32 行）。AIReins 在这期间只转发了 RC 开关，没有动 prompt；三轮都由同一个 worker 进程发出，所以这是 CLI 内部的行为，不是 AIReins 的问题。2.1.284 在 scratch 复现（00000207，haiku，临时 AIReins 18790）：
 - RC 一直连着，手机隔 34 分钟发两轮（`turnOrigin:human`）：read 44502 / write 1257、read 45759 / write 81。RC 新增的 `FetchInboxMessage` / `ReadNotifications` / `SendUserFile` 和 claude.ai MCP 都以 `deferred_tools_delta` 追加在尾部。
@@ -694,7 +694,7 @@ Hooks 编辑在扩展实际通过 `claude edit-hook`（JSON stdin）后刷新 `g
 
 本机 `codex --version` = codex-cli 0.159.3。生成 JSON schema 于 `scratch/codex-commands/schema/`，关键依据为 v2/SkillsListParams、SkillsListResponse、TurnStartParams.definitions.UserInput、ThreadCompactStartParams、ReviewStartParams、ThreadReadParams、ListMcpServerStatusParams。官方 [app-server](https://learn.chatgpt.com/docs/app-server) 亦明确建议显式 skill input；只有 `$name` 文本也可触发模型查找，但可能增加延迟。本机 schema 不提供文档较新版本的 perCwdExtraUserRoots，本实现不发送该字段。
 
-探针：`skills/list {cwds:["/home/user/projects/workbench"],forceReload:true}` → `{data:[{cwd,skills:[{name,description,path,enabled,scope,interface?,dependencies?,shortDescription?,pluginId?}],errors:[{path,message}]}]}`。本机隔离 CODEX_HOME（仅状态目录迁移，读取原配置/skills）发现 62 项、25 项 enabled、0 errors，路径落在 ~/.codex/skills、~/.agents/skills 和 agent-env 的共享源。结果留存 `scratch/codex-commands/skills-list.json`；不将禁用项暴露给 picker。
+探针：`skills/list {cwds:["/home/user/projects/workbench"],forceReload:true}` → `{data:[{cwd,skills:[{name,description,path,enabled,scope,interface?,dependencies?,shortDescription?,pluginId?}],errors:[{path,message}]}]}`。本机隔离 CODEX_HOME（仅状态目录迁移，读取原配置/skills）发现 62 项、25 项 enabled、0 errors，路径落在 ~/.codex/skills、~/.agents/skills 和用户自己的共享 skills 源。结果留存 `scratch/codex-commands/skills-list.json`；不将禁用项暴露给 picker。
 
 ```json
 {"id":30,"method":"skills/list","params":{"cwds":["/project"],"forceReload":true}}
