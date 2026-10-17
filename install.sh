@@ -25,9 +25,10 @@ summary() {
   wb_is_zh || format='\nSucceeded: %s, warnings: %s, errors: %s.'
   printf "$format\n" "${#successes[@]}" "${#warnings[@]}" "${#errors[@]}"
   local item
-  for item in "${successes[@]}"; do printf '  ✅ %s\n' "$item"; done
-  for item in "${warnings[@]}"; do printf '  ⚠ %s\n' "$item"; done
-  for item in "${errors[@]}"; do printf '  ❌ %s\n' "$item"; done
+  # macOS 自带 bash 3.2 在 set -u 下展开空数组会报 unbound variable，用 ${a[@]+...} 兜住。
+  for item in ${successes[@]+"${successes[@]}"}; do printf '  ✅ %s\n' "$item"; done
+  for item in ${warnings[@]+"${warnings[@]}"}; do printf '  ⚠ %s\n' "$item"; done
+  for item in ${errors[@]+"${errors[@]}"}; do printf '  ❌ %s\n' "$item"; done
 }
 
 check=false
