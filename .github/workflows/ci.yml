@@ -27,6 +27,10 @@ jobs:
             sudo apt-get update
             sudo apt-get install -y ripgrep
           fi
+      # macOS 的 TMPDIR 经软链（/var → /private/var），会触发读文件处的 realpath 守卫；测试用真实路径。
+      - name: Resolve macOS TMPDIR
+        if: runner.os == 'macOS'
+        run: echo "TMPDIR=$(cd -P "$TMPDIR" && pwd)/" >> "$GITHUB_ENV"
       - run: npm ci
       - run: npm run build
       - run: npm test
