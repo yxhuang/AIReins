@@ -12,6 +12,9 @@ import { fileURLToPath } from "node:url";
 const home = await mkdtemp(join(tmpdir(), "workbench-app-window-"));
 const bin = join(home, "bin");
 await mkdir(bin);
+await mkdir(join(home, ".claude"));
+const claudeSettingsPath = join(home, ".claude", "settings.json");
+await writeFile(claudeSettingsPath, JSON.stringify({ model: " opus ", effortLevel: "high", env: { SECRET: "not in meta" } }));
 const shutdownCommand = join(bin, "power-command");
 await writeFile(shutdownCommand, "#!/bin/sh\nprintf '%s\\n' \"${1:-schedule}\" > \"$WORKBENCH_HOME/power-called\"\n", { mode: 0o700 });
 const localPrefs = { idleReleaseMinutes: 30, retentionDays: 30, shutdownCommand,
@@ -32,7 +35,7 @@ const port = await freePort(), remotePort = await freePort();
 const origin = "https://desk.tail1234.ts.net";
 await writeFile(join(home, "remote.json"), JSON.stringify({ port: remotePort, origin, allowedLogins: ["me"] }));
 const child = spawn(process.execPath, ["--import", "tsx", fileURLToPath(new URL("./index.ts", import.meta.url))], {
-  env: { ...process.env, WORKBENCH_NO_APP_WINDOW: "1", WORKBENCH_HOME: home, WORKBENCH_PORT: String(port), PATH: `${bin}:${process.env.PATH}` },
+  env: { ...process.env, HOME: home, WORKBENCH_NO_APP_WINDOW: "1", WORKBENCH_HOME: home, WORKBENCH_PORT: String(port), PATH: `${bin}:${process.env.PATH}` },
   stdio: ["ignore", "pipe", "pipe"],
 });
 const closed = once(child, "close");
@@ -59,6 +62,11 @@ try {
   const localBase = `http://127.0.0.1:${port}`, remoteBase = `http://127.0.0.1:${remotePort}`;
   const localMeta = () => fetch(`${localBase}/api/meta`, { signal: AbortSignal.timeout(10_000) }).then(res => res.json()) as Promise<any>;
   assert.equal((await localMeta()).data.capabilities.powerOff, true);
+  assert.deepEqual((await localMeta()).data.claudeDefaults, { model: "opus", effort: "high" });
+  await writeFile(claudeSettingsPath, JSON.stringify({ model: "sonnet", effortLevel: "low" }));
+  assert.deepEqual((await localMeta()).data.claudeDefaults, { model: "sonnet", effort: "low" }, "默认值不沿用 CLI 探测缓存");
+  await writeFile(claudeSettingsPath, "{ invalid");
+  assert.deepEqual((await localMeta()).data.claudeDefaults, { model: null, effort: null }, "坏配置不阻塞 API");
   const updated = await fetch(`${localBase}/api/prefs`, { method: "PUT", headers: { origin: localBase, "content-type": "application/json" },
     body: JSON.stringify({ idleReleaseMinutes: 15, shutdownCommand: "/untrusted" }) });
   assert.equal(updated.status, 200);

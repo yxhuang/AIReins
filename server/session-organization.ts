@@ -1,6 +1,6 @@
 import type { EventClient } from "./event-stream.js";
 import { sendWs } from "./event-stream.js";
-import type { SessionGroup, SessionRecord } from "./types.js";
+import type { SessionRecord } from "./types.js";
 
 export class SessionOrganizationError extends Error {
   constructor(message: string, readonly status = 400, readonly code = 40070) { super(message); }
@@ -9,7 +9,6 @@ export class SessionOrganizationError extends Error {
 export interface SessionOrganizationPatch {
   pinned?: boolean;
   customTitle?: string;
-  groupId?: string | null;
 }
 
 function objectFields(value: unknown, allowed: readonly string[]): Record<string, unknown> {
@@ -22,7 +21,7 @@ function objectFields(value: unknown, allowed: readonly string[]): Record<string
 }
 
 export function parseOrganizationPatch(value: unknown): SessionOrganizationPatch {
-  const fields = objectFields(value, ["pinned", "customTitle", "groupId"]);
+  const fields = objectFields(value, ["pinned", "customTitle"]);
   const patch: SessionOrganizationPatch = {};
   if (Object.hasOwn(fields, "pinned")) {
     if (typeof fields.pinned !== "boolean") throw new SessionOrganizationError("pinned 必须是布尔值");
@@ -33,27 +32,27 @@ export function parseOrganizationPatch(value: unknown): SessionOrganizationPatch
     patch.customTitle = fields.customTitle.trim();
     if ([...patch.customTitle].length > 200) throw new SessionOrganizationError("customTitle 不得超过 200 字符");
   }
-  if (Object.hasOwn(fields, "groupId")) {
-    if (fields.groupId !== null && (typeof fields.groupId !== "string" || !fields.groupId)) {
-      throw new SessionOrganizationError("groupId 必须是非空字符串或 null");
-    }
-    patch.groupId = fields.groupId as string | null;
-  }
   return patch;
 }
 
-export function parseGroupName(value: unknown): string {
-  const fields = objectFields(value, ["name"]);
-  if (typeof fields.name !== "string") throw new SessionOrganizationError("name 必须是字符串");
-  const name = fields.name.trim();
-  if (!name || [...name].length > 200) throw new SessionOrganizationError("分组名称须为 1 到 200 字符");
-  return name;
+export function parseProjectMove(value: unknown): { path: string; before?: string; after?: string } {
+  const fields = objectFields(value, ["path", "before", "after"]);
+  if (Object.hasOwn(fields, "before") === Object.hasOwn(fields, "after")) {
+    throw new SessionOrganizationError("before 与 after 必须且只能提供一个");
+  }
+  for (const key of ["path", Object.hasOwn(fields, "before") ? "before" : "after"]) {
+    const path = fields[key];
+    if (typeof path !== "string" || path.length > 4096 || !path.startsWith("/") || path.includes("\0")) {
+      throw new SessionOrganizationError("工作目录必须是 4096 字符以内的绝对路径");
+    }
+  }
+  return fields as { path: string; before?: string; after?: string };
 }
 
 export interface SessionOrganizationFrame {
   type: "session_organization_updated";
   sessions: SessionRecord[];
-  groups: SessionGroup[];
+  projectOrder: string[];
 }
 
 /** 组织信息属于列表控制帧，不能受会话订阅过滤，也不使用 transcript seq。 */

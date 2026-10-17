@@ -88,7 +88,7 @@ const fixtureScript = (locale) => `
   window.__writes = [];
   const fixtures = {
     '/api/meta': {defaultCwd:'/repo',capabilities:{terminal:false},drivers:Object.fromEntries(['claude','codex','kimi'].map(id=>[id,{configOptions:[],available:true}]))},
-    '/api/sessions': {sessions:[]}, '/api/session-groups': {groups:[]},
+    '/api/sessions': {sessions:[]}, '/api/project-order': {paths:[]},
     '/api/pages': {pages:[{id:'ai-usage',name:'AI-Usage',icon:'📊',type:'iframe',url:'about:blank'}]},
     '/api/pages/ai-usage/health': {reachable:true,embeddable:true,reason:'Synthetic iframe fixture',durationMs:1},
     '/api/history': {sessions:[],truncated:false,skipped:0,empty:0,discovered:0,durationMs:0},

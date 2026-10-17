@@ -29,6 +29,8 @@ const { Store, store } = await import("../src/store.ts");
 store.meta = { capabilities: { terminal: true, windowsPaths: true }, drivers: {} };
 const { HistoryRow, HistoryPreviewPane, HistoryView } = await import("../src/components/HistoryView.tsx");
 const { Sidebar } = await import("../src/components/Sidebar.tsx");
+const { App } = await import("../src/App.tsx");
+const { NewSessionForm } = await import("../src/components/NewSessionForm.tsx");
 const { FilePanel } = await import("../src/components/FilePanel.tsx");
 const { DirectoryBrowser, DirectoryContents } = await import("../src/components/DirectoryBrowser.tsx");
 
@@ -465,13 +467,12 @@ await t("文件面板当前浏览目录按钮触发历史共享筛选", () => {
   assert.equal(store.historyCwdFilter, "/browsed/child", "取成功浏览目录而非地址草稿");
 });
 
-await t("历史选定目录后点左上角新建：手机切列表可见表单，cwd 预填优先；手动改后不覆盖", () => {
+await t("历史目录新建：桌面/手机跳主页、预选目录并挂载主输入框", () => {
   const oldMeta = store.meta;
   const oldHistory = window.history;
   const oldLoad = store.ensureLoaded;
   store.ensureLoaded = async () => {};
   store.meta = { defaultCwd: "/fallback", drivers: {}, capabilities: {} };
-  let newOpen = false;
   for (const mobile of [false, true]) {
     window.location.hash = "#/session/previous";
     const entries = [{ state: null, hash: window.location.hash }];
@@ -484,38 +485,33 @@ await t("历史选定目录后点左上角新建：手机切列表可见表单�
     };
     window.matchMedia = () => ({ matches: mobile });
     store.currentId = "previous";
+    store.newSessionOpen = false;
     store.navigateHistory("/a/b");
-    let props = { collapsed: false, newOpen: false, onToggle() {}, onNewOpenChange(value) { newOpen = value; } };
-    const sidebar = componentFixture(() => Sidebar(props));
+    const sidebar = componentFixture(() => Sidebar({ collapsed: false, onToggle() {} }));
     assert.ok(!treeButtons(componentFixture(() => HistoryView())()).some(node => node.props.children === "在此目录新建会话"), "已并入左上角新建");
     treeButtons(sidebar()).find(node => node.props["aria-label"] === "新建会话").props.onClick();
-    assert.equal(newOpen, true);
+    assert.equal(window.location.hash, "#/new");
+    assert.equal(store.newSessionOpen, true);
     assert.equal(store.historyOpen, false);
-    if (mobile) assert.equal(store.currentId, null, "手机清掉主区才能看到表单");
-    props = { ...props, newOpen };
-    const tree = sidebar();
-    const area = treeFind(tree, node => node.props?.className === "sidebar-session-area");
-    assert.equal(area.props.inert, false);
-    const form = treeFind(tree, node => node.type?.name === "NewSessionForm");
-    let formProps = form.props;
-    const renderForm = componentFixture(() => form.type(formProps));
-    const browser = () => treeFind(renderForm(), node => node.type?.name === "DirectoryContents");
-    assert.equal(browser().props.initialPath, "/a/b");
-    treeFind(renderForm(), node => node.props?.className === "new-field new-cwd").props.onPointerDownCapture();
-    browser().props.onPathChange("/manual");
-    formProps = { ...formProps, initialCwd: "/other" };
-    renderForm(); renderForm.flushEffects();
-    assert.equal(browser().props.initialPath, "/a/b", "用户动过浏览器后不再改起点");
-    assert.equal(treeFind(renderForm(), node => node.type === "button" && node.props?.type === "submit").props.disabled, false);
-    browser().props.onPathLost();
-    assert.equal(treeFind(renderForm(), node => node.type === "button" && node.props?.type === "submit").props.disabled, true, "导航失败不沿用上一个目录");
-    renderForm.dispose();
+    assert.equal(store.currentId, null, "主页不保留当前会话选择");
+    assert.equal(store.newSessionCwd, "/a/b", "历史目录显式传给主页");
+    const app = componentFixture(() => App())();
+    assert.match(app.props.className, /(?:^| )has-main(?: |$)/, "手机CSS必须显示新建主区");
+    assert.ok(treeFind(app, node => node.type?.name === "NewSessionForm"), "主页挂载新建表单");
+    assert.equal(treeFind(sidebar(), node => node.type?.name === "NewSessionForm"), undefined, "侧栏不再内嵌表单");
+    store.historyOpen = true;
+    assert.doesNotMatch(componentFixture(() => App())().props.className, /(?:^| )has-main(?: |$)/, "新建页上打开历史列表时，手机仍显示侧栏面板");
+    store.historyOpen = false;
+    store.currentPageId = "synthetic-page";
+    assert.doesNotMatch(componentFixture(() => App())().props.className, /(?:^| )has-main(?: |$)/, "新建页上打开扩展页时，手机仍显示侧栏面板");
+    store.currentPageId = null;
   }
   store.meta = oldMeta;
   store.ensureLoaded = oldLoad;
   window.history = oldHistory;
   window.matchMedia = () => ({ matches: false });
   store.setHistoryCwdFilter("");
+  store.newSessionOpen = false;
 });
 
 await t("未完成扫描：14px 提示、重试沿 cursor 续扫，加载更多保留且不宣告空结果", async () => {
@@ -550,6 +546,165 @@ await t("已加载条目仍未完成扫描时不显示没有更多；完成后�
   assert.ok(!incomplete.includes("没有更多"));
   const empty = renderToStaticMarkup(historyViewFixture({ ...base, items: [], truncated: false })());
   assert.ok(empty.includes("没有匹配的历史会话"));
+});
+
+
+// 无 DOM 的真实主页组件交互；只替换会话 API/导航和浏览器存储，不代替截图验收。
+async function withNewForm({ saved = "", cwd, sessions = [], meta = { defaultCwd: "/meta", drivers: {}, capabilities: {} }, create } = {}, run) {
+  const fields = ["meta", "sessions", "newSessionCwd", "newSessionRequest", "create", "navigate", "setNewSessionCwd", "sendComposerInput", "commands"];
+  const previous = Object.fromEntries(fields.map(name => [name, store[name]]));
+  const storageDescriptor = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
+  const storage = new Map(saved ? [["workbench-last-cwd", saved]] : []);
+  Object.defineProperty(globalThis, "localStorage", { configurable: true, value: {
+    getItem: name => storage.get(name) ?? null,
+    setItem: (name, value) => storage.set(name, String(value)),
+  } });
+  const calls = [], navigations = [], sends = [];
+  Object.assign(store, { meta, sessions, newSessionCwd: cwd, newSessionRequest: 0, commands: new Map() });
+  store.create = async input => { calls.push(input); return create ? create(input) : { id: "created-home", cwd: input.cwd }; };
+  store.sendComposerInput = async (sessionId, text, mentions) => { sends.push({ sessionId, text, mentions }); return true; };
+  store.navigate = id => navigations.push(id);
+  store.setNewSessionCwd = path => { store.newSessionCwd = path; };
+  const render = componentFixture(() => NewSessionForm());
+  const update = () => {
+    render(); render.flushEffects();
+    render(); render.flushEffects();
+    return render();
+  };
+  const select = () => treeFind(update(), node => node.type === "select");
+  const textarea = () => treeFind(update(), node => node.type === "textarea");
+  const submit = () => treeFind(update(), node => node.props?.type === "submit");
+  const agent = kind => treeButtons(update()).find(node => node.props.className?.split(" ").includes(`agent-${kind}`));
+  try { await run({ render, update, select, textarea, submit, agent, storage, calls, sends, navigations }); }
+  finally {
+    render.dispose();
+    Object.assign(store, previous);
+    if (storageDescriptor) Object.defineProperty(globalThis, "localStorage", storageDescriptor);
+    else delete globalThis.localStorage;
+  }
+}
+const finishNewCreate = () => new Promise(resolve => setImmediate(resolve));
+
+await t("主页新建：Enter 空白创建后统一发送 trim 首条消息，保留目录与配置并导航", async () => {
+  await withNewForm({ cwd: " /project/child " }, async f => {
+    f.agent("codex").props.onClick();
+    const pills = treeFind(f.update(), node => node.type?.name === "NewConfigPills");
+    pills.props.onChange(previous => ({ ...previous, model: "chosen-model", effort: "high", sandboxMode: "" }));
+    f.textarea().props.onChange({ target: { value: "  第一条\n消息  " } });
+    let prevented = 0;
+    f.textarea().props.onKeyDown({ ...key("Enter"), preventDefault() { prevented++; } });
+    assert.equal(f.submit().props.disabled, true, "提交期间禁用重复创建");
+    f.textarea().props.onKeyDown(key("Enter"));
+    assert.equal(f.calls.length, 1);
+    await finishNewCreate();
+    assert.equal(prevented, 1);
+    assert.deepEqual(f.calls[0], {
+      snapshot: "skip", agent: "codex", cwd: "/project/child",
+      config: { permissionMode: "auto-review", model: "chosen-model", effort: "high" },
+    });
+    assert.equal(Object.hasOwn(f.calls[0], "initialMessage"), false, "创建接口不发送 initialMessage");
+    assert.deepEqual(f.sends, [{ sessionId: "created-home", text: "第一条\n消息", mentions: [] }], "首条消息走会话输入框同一发送入口");
+    assert.equal(f.storage.get("workbench-last-cwd"), "/project/child");
+    assert.deepEqual(f.navigations, ["created-home"]);
+    assert.equal(f.submit().props.disabled, false);
+  });
+});
+
+await t("主页新建：Shift+Enter/IME 不提交；空目录禁用且表单和键盘守卫均生效", async () => {
+  await withNewForm({ cwd: "/project" }, async f => {
+    for (const event of [
+      { ...key("Enter"), shiftKey: true },
+      { ...key("Enter"), nativeEvent: { isComposing: true } },
+      { ...key("Enter"), keyCode: 229 },
+    ]) f.textarea().props.onKeyDown(event);
+    await finishNewCreate();
+    assert.equal(f.calls.length, 0);
+  });
+  await withNewForm({ meta: { drivers: {}, capabilities: {} } }, async f => {
+    assert.equal(f.select().props.value, "");
+    assert.equal(f.submit().props.disabled, true);
+    assert.ok(treeFind(f.update(), node => node.props?.className === "new-hint"));
+    assert.ok(treeFind(f.update(), node => node.type === "option" && node.props.value === "").props.disabled);
+    f.update().props.onSubmit({ preventDefault() {} });
+    f.textarea().props.onKeyDown(key("Enter"));
+    await finishNewCreate();
+    assert.equal(f.calls.length, 0);
+  });
+});
+
+await t("主页新建：显式目录优先，其次 saved → 最近活动目录 → meta", async () => {
+  const sessions = [
+    { id: "old", cwd: "/older", lastActivityAt: "2026-10-15T00:00:00Z" },
+    { id: "latest", cwd: "/latest", lastActivityAt: "2026-10-17T00:00:00Z" },
+  ];
+  for (const [options, expected] of [
+    [{ cwd: "/explicit", saved: "/saved", sessions }, "/explicit"],
+    [{ saved: " /saved ", sessions }, "/saved"],
+    [{ sessions }, "/latest"],
+    [{}, "/meta"],
+  ]) await withNewForm(options, async f => {
+    assert.equal(f.select().props.value, expected);
+    assert.equal(store.newSessionCwd, expected, "初始化目录同步到导航状态");
+  });
+});
+
+await t("主页新建：晚到 meta/sessions 补填，用户选择不覆盖；显式重选保留消息和 agent/config", async () => {
+  for (const source of ["meta", "sessions"]) await withNewForm({ meta: null }, async f => {
+    assert.equal(f.select().props.value, "");
+    if (source === "meta") store.meta = { defaultCwd: "/late-meta", drivers: {}, capabilities: {} };
+    else store.sessions = [{ id: "late", cwd: "/late-session", lastActivityAt: "2026-10-17T00:00:00Z" }];
+    assert.equal(f.select().props.value, source === "meta" ? "/late-meta" : "/late-session");
+  });
+  await withNewForm({ cwd: "/initial", saved: "/saved-default" }, async f => {
+    f.select().props.onChange({ target: { value: "/manual" } });
+    f.agent("kimi").props.onClick();
+    f.textarea().props.onChange({ target: { value: "保留草稿" } });
+    store.meta = { defaultCwd: "/new-meta", drivers: {}, capabilities: {} };
+    store.sessions = [{ id: "late", cwd: "/new-session", lastActivityAt: "2026-10-17T00:00:00Z" }];
+    assert.equal(f.select().props.value, "/manual", "后来的缺省目录不覆盖手选");
+    for (const path of ["/explicit-again", "/explicit-repeat"]) {
+      store.newSessionCwd = path; store.newSessionRequest++;
+      assert.equal(f.select().props.value, path);
+      assert.equal(f.textarea().props.value, "保留草稿");
+      assert.equal(f.agent("kimi").props["aria-pressed"], true);
+      assert.deepEqual(treeFind(f.update(), node => node.type?.name === "NewConfigPills").props.selected, { permissionMode: "auto" });
+    }
+    store.newSessionCwd = undefined; store.newSessionRequest++;
+    assert.equal(f.select().props.value, "/saved-default", "通用新建重新走三级回退，不沿用上一显式或手动目录");
+    assert.equal(f.textarea().props.value, "保留草稿");
+    assert.equal(f.agent("kimi").props["aria-pressed"], true);
+  });
+});
+
+await t("主页新建：浏览仅打开 DirectoryBrowser，取消不变、确认才选择并同步目录", async () => {
+  await withNewForm({ cwd: "/initial" }, async f => {
+    const browser = () => treeFind(f.update(), node => node.type === DirectoryBrowser);
+    f.select().props.onChange({ target: { value: "__browse__" } });
+    assert.equal(f.select().props.value, "/initial");
+    assert.equal(browser().props.initialPath, "/initial");
+    assert.equal(browser().props.allowWindowsPicker, true);
+    browser().props.onClose();
+    assert.equal(browser(), undefined);
+    assert.equal(f.select().props.value, "/initial");
+    f.select().props.onChange({ target: { value: "__browse__" } });
+    browser().props.onSelect("/confirmed");
+    assert.equal(browser(), undefined);
+    assert.equal(f.select().props.value, "/confirmed");
+    assert.equal(store.newSessionCwd, "/confirmed");
+  });
+});
+
+await t("主页新建：创建失败显示错误、恢复提交且不写成功目录或导航", async () => {
+  await withNewForm({ cwd: "/project", saved: "/previous", create: async () => { throw new Error("创建被拒绝"); } }, async f => {
+    f.update().props.onSubmit({ preventDefault() {} });
+    assert.equal(f.submit().props.disabled, true);
+    await finishNewCreate();
+    assert.equal(treeFind(f.update(), node => node.props?.role === "alert").props.children, "创建被拒绝");
+    assert.equal(f.submit().props.disabled, false);
+    assert.equal(f.storage.get("workbench-last-cwd"), "/previous");
+    assert.deepEqual(f.navigations, []);
+    assert.deepEqual(f.sends, [], "创建失败不发送首条消息");
+  });
 });
 
 if (!process.exitCode) console.log(`✅ history 前端逻辑回归全过（${pass} 例）`);

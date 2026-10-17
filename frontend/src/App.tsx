@@ -1,8 +1,9 @@
 import { PRODUCT_NAME, t } from "./i18n";
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { isTerminalToggleKey } from "./terminal";
+import { NewSessionForm } from "./components/NewSessionForm";
 import { Sidebar } from "./components/Sidebar";
-import { PanelActions } from "./components/PanelActions";
+import { MobilePanelLauncher, PanelActions } from "./components/PanelActions";
 import { DispatchPanel } from "./components/DispatchPanel";
 import { FilePanel } from "./components/FilePanel";
 import { SessionView } from "./components/SessionView";
@@ -36,13 +37,13 @@ const selectAppUi = (value: Store) =>
     value.lastError,
     selectErrorContext(value),
     value.removalNotice,
+    value.newSessionOpen,
   ] as const;
 const selectPendingTotal = (value: Store) =>
   value.sessions.reduce((sum, session) => sum + value.pendingCount(session.id), 0);
 
 export function App() {
   const [collapsed, setCollapsed] = useState(false);
-  const [newOpen, setNewOpen] = useState(false);
   const [returnToSession, setReturnToSession] = useState(false);
   const usagePage = useStore((value) => value.pages.find((page) => page.id === "ai-usage"));
   // 终端面板：隐藏 = CSS display:none，组件一旦挂载就常驻（xterm 实例与 WS 连接不丢）
@@ -75,13 +76,13 @@ export function App() {
     return () => cancelAnimationFrame(raf);
   }, [termOpen]);
   const current = useStore(selectCurrentSession);
-  const [dispatchesOpen, historyOpen, currentPageId, historySelection, lastError, errorContext, removalNotice] = useStore(
+  const [dispatchesOpen, historyOpen, currentPageId, historySelection, lastError, errorContext, removalNotice, newSessionOpen] = useStore(
     selectAppUi,
     shallowEqual,
   );
   const pendingTotal = useStore(selectPendingTotal);
   // 手机主区是否有内容独立于右侧面板，关闭后回到原会话或主页。
-  const hasMain = Boolean(historySelection || (current && !historyOpen && !currentPageId));
+  const hasMain = Boolean(historySelection || ((newSessionOpen || current) && !historyOpen && !currentPageId));
   useEffect(() => {
     if (historyOpen || currentPageId) setCollapsed(false);
   }, [historyOpen, currentPageId]);
@@ -106,10 +107,8 @@ export function App() {
           if (!collapsed && (historyOpen || currentPageId)) store.closeSidebarPanel();
           setCollapsed((v) => !v);
         }}
-        newOpen={newOpen}
-        onNewOpenChange={setNewOpen}
         returnToSession={returnToSession}
-        mobileActions={hasMain ? undefined : <PanelActions />}
+        mobileActions={hasMain ? undefined : <MobilePanelLauncher />}
       />
       {/* 主会话保持挂载，三个面板互斥占用右侧位置；窄屏沿用终端全屏规则。 */}
       <div className={`workspace${termOpen || dispatchesOpen || filesOpen ? " term-open" : ""}`}>
@@ -126,7 +125,13 @@ export function App() {
             } }} />
           ) : (
             <section className="welcome-view">
-            <div className="view-panel-actions"><PanelActions /></div>
+            <div className="view-panel-actions">
+              <button type="button" className="btn mobile-round mobile-back new-session-back"
+                aria-label={t("ui.SessionView.back_to_session_list")} onClick={() => store.backFromSession()}>
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7" /></svg>
+              </button>
+              <PanelActions />
+            </div>
             <div className="empty-state">
               <h1 className="empty-logo" aria-label={PRODUCT_NAME}>
                 <span className="empty-logo-mark" aria-hidden="true"><BrandMark /></span>
@@ -134,15 +139,7 @@ export function App() {
                 <span className="empty-logo-name" aria-hidden="true">{PRODUCT_NAME}</span>
               </h1>
               <p>{t("core.001")}</p>
-              <button
-                type="button"
-                className="btn btn-primary"
-                onClick={() => {
-                  if (historyOpen || currentPageId) store.closeSidebarPanel();
-                  setCollapsed(false);
-                  setNewOpen(true);
-                }}
-              >{t("core.002")}</button>
+              <NewSessionForm />
             </div>
             </section>
           )}

@@ -158,6 +158,60 @@ await t("socket 非 OPEN：带附件发送返回 false 且零上行帧", async (
   assert.ok(s.lastError, "失败后未置 lastError 提示");
 });
 
+await t("新建首条本地发送 false：完整文本和 mentions 回填，按版本只消费一次", async () => {
+  const session = makeSession("s-new-restore");
+  stubFetch(session);
+  const s = new Store();
+  s.sessions = [session];
+  s.meta = { drivers: { kimi: { commands: true, mentions: true } } };
+  s.commands.set(session.id, [{ name: "help", description: "", source: "kimi" }]);
+  s.socket = { readyState: 3, send() { throw new Error("离线不得上行"); } };
+  const text = "/help 首条消息\n保留换行";
+  const mentions = [imageMention("/u/first.png", "first.png"), fileMention("/u/notes.md", "notes.md")];
+  const ok = await s.sendComposerInput(session.id, text, mentions);
+  assert.equal(ok, false);
+  s.restoreComposerSend(session.id, text, mentions);
+  assert.equal(s.getDraft(session.id), text, "会话输入框草稿应保留原文");
+  const request = s.sendTextRestore;
+  assert.equal(request.sessionId, session.id);
+  assert.deepEqual({ text: request.text, mentions: request.mentions }, { text, mentions });
+  assert.equal(s.consumeSendTextRestore(request.version - 1), null, "过期版本不能消费新请求");
+  assert.equal(s.sendTextRestore, request);
+  assert.deepEqual(s.consumeSendTextRestore(request.version), { text, mentions });
+  assert.equal(s.sendTextRestore, null);
+  assert.equal(s.consumeSendTextRestore(request.version), null, "同一恢复请求不可重复消费");
+  assert.equal(s.getDraft(session.id), text, "消费附件恢复请求不丢弃已恢复文字草稿");
+});
+
+await t("新建首条恢复不覆盖会话输入框已有草稿，也不发布附件替换请求", async () => {
+  const session = makeSession("s-new-existing-draft");
+  const s = new Store();
+  s.sessions = [session];
+  s.setDraft(session.id, "用户在发送间隙输入的新草稿");
+  const version = s.version;
+  s.restoreComposerSend(session.id, "被拒绝的首条消息", [imageMention("/u/old.png")]);
+  assert.equal(s.getDraft(session.id), "用户在发送间隙输入的新草稿");
+  assert.equal(s.sendTextRestore, null, "不覆盖已有草稿中的附件");
+  assert.equal(s.version, version, "没有恢复内容时不通知输入框替换");
+});
+
+await t("新建纯图片首条恢复允许空文本，新恢复版本不会被旧消费请求清掉", async () => {
+  const session = makeSession("s-new-image-only");
+  const s = new Store();
+  s.sessions = [session];
+  const first = [imageMention("/u/first.png")];
+  s.restoreComposerSend(session.id, "", first);
+  const staleVersion = s.sendTextRestore.version;
+  const mentions = [imageMention("/u/second.png")];
+  s.restoreComposerSend(session.id, "", mentions);
+  const currentVersion = s.sendTextRestore.version;
+  assert.ok(currentVersion > staleVersion);
+  assert.equal(s.getDraft(session.id), "");
+  assert.equal(s.consumeSendTextRestore(staleVersion), null);
+  assert.deepEqual(s.consumeSendTextRestore(currentVersion), { text: "", mentions });
+  assert.equal(s.consumeSendTextRestore(currentVersion), null);
+});
+
 // --- 无 mentions 能力位时 extraMentions 仍透出（UI 不会到此，但不静默吞掉用户附件） ---
 await t("mentions 能力位 false：不解析 @，extraMentions 截断后随文本上行", async () => {
   const session = makeSession("s-att-nocap");

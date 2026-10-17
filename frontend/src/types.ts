@@ -114,23 +114,15 @@ export interface AskQuestion {
   otherSupported?: boolean;
 }
 
-export interface SessionGroup {
-  id: string;
-  name: string;
-  createdAt: string;
-}
-
 export interface SessionOrganizationPatch {
   pinned?: boolean;
   customTitle?: string;
-  groupId?: string | null;
 }
 
 export interface SessionRecord {
   pinned?: boolean;
   customTitle?: string;
   nativeTitle?: string;
-  groupId?: string;
   title?: string;
   pendingGateCount?: number;
   /** tail 快照从全量事件重建的会话级状态，避免旧段尚未加载时丢失。 */
@@ -230,6 +222,8 @@ export interface MetaInfo {
   defaultCwd: string;
   /** 旧后端可省略；历史目录输入用来展开 ~。 */
   homeDir?: string;
+  /** 只读 Claude 用户 settings 的默认模型/档位；旧后端省略，未知值为 null。 */
+  claudeDefaults?: { model: string | null; effort: string | null };
   cliVersions: Record<AgentKind, string>;
   platform?: "wsl" | "linux" | "darwin" | "unsupported";
   /** 服务端缺省 Unix shell 的名称；旧后端省略时回退 bash。 */

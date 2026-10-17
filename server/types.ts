@@ -165,7 +165,6 @@ export interface SessionRecord {
   customTitle?: string;
   /** 原生 CLI 标题或其正式标题概括接口返回值；手动标题始终优先。 */
   nativeTitle?: string;
-  groupId?: string;
   /** Only tail snapshots carry reducers computed from the complete transcript. */
   snapshotState?: SessionSnapshotState;
   title?: string;
@@ -208,12 +207,6 @@ export interface SessionRecord {
   remoteControl?: RemoteControlState;
   /** 仅 Claude：worker 当前的后台任务；非空时会话虽 idle 仍在干活。不跨 worker 保留。 */
   backgroundTasks?: BackgroundTask[];
-}
-
-export interface SessionGroup {
-  id: string;
-  name: string;
-  createdAt: string;
 }
 
 export interface DriverCapabilities {

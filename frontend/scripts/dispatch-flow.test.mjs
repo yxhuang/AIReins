@@ -437,7 +437,7 @@ await t('终端与派单所有打开入口互斥，切详情不关闭面板或�
 });
 await t('派单与主区并列，当前会话仍有输入框；主页仍可打开并关闭', () => {
   store.ensureLoaded = async () => {};
-  store.sessions = [{ id: 'parent', agent: 'claude', cwd: '/repo', status: 'idle', createdAt: iso(now), title: '父会话', config: {} }];
+  store.sessions = [{ id: 'parent', agent: 'claude', cwd: '/repo', status: 'idle', createdAt: iso(now), lastActivityAt: iso(now), seq: 0, title: '父会话', config: {} }];
   store.navigate('parent'); store.navigateDispatches();
   const html = renderToStaticMarkup(React.createElement(App));
   const main = html.match(/<main class="main">([\s\S]*?)<\/main>/)[1];

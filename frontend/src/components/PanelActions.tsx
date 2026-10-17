@@ -1,5 +1,5 @@
 import { t } from "../i18n";
-import type { ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { store, type Store } from "../store";
 import { shallowEqual, useStore } from "../useStore";
 import { TerminalIcon } from "./TerminalIcon";
@@ -31,26 +31,55 @@ export function PanelActions({ dispatchRuns = [] }: { dispatchRuns?: readonly Di
     <button type="button" className="btn chrome-icon-btn" aria-label={t("ui.common.files")} aria-pressed={filesOpen} title={t("ui.PanelActions.browse_files")} onClick={() => store.setFilesOpen(!store.filesOpen)}>
       {folderIcon}
     </button>
-    {terminalCapable && <button type="button" className="btn chrome-icon-btn" aria-label={t("ui.common.terminal")} aria-pressed={termOpen} title={t("ui.PanelActions.terminal_ctrl_built_in_workspace_terminal_preserved")} onClick={() => store.setTerminalOpen(!store.termOpen)}>
-      <TerminalIcon />
-    </button>}
     <button type="button" className={`btn chrome-icon-btn${badge ? " has-dispatch-runs" : ""}`} style={badge ? { background: badge.fill } : undefined}
       aria-label={t("ui.common.dispatches")} aria-pressed={dispatchesOpen} title={badge ? t("ui.PanelActions.click_to_view_the_flow_click_again", { p0: (badge.label) }) : t("ui.PanelActions.dispatches_view_the_flow_click_again_to")} onClick={() => store.toggleDispatches()}>
       {dispatchIcon}
     </button>
+    {terminalCapable && <button type="button" className="btn chrome-icon-btn" aria-label={t("ui.common.terminal")} aria-pressed={termOpen} title={t("ui.PanelActions.terminal_ctrl_built_in_workspace_terminal_preserved")} onClick={() => store.setTerminalOpen(!store.termOpen)}>
+      <TerminalIcon />
+    </button>}
   </div>;
 }
 
 /** 手机会话顶栏只留「⋯」：同样三个开关以菜单项形式放进更多菜单（桌面由 CSS 隐藏）。 */
-export function PanelMenuItems({ onDone }: { onDone: () => void }) {
+export function PanelMenuItems({ onDone, files = true }: { onDone: () => void; files?: boolean }) {
   const [filesOpen, termOpen, dispatchesOpen, terminalCapable] = useStore(selectPanelState, shallowEqual);
   const item = (label: string, pressed: boolean, icon: ReactNode, toggle: () => void) =>
     <button type="button" className="btn session-more-item session-more-mobile" role="menuitemcheckbox" aria-checked={pressed} onClick={() => { onDone(); toggle(); }}>
       {icon} {label}
     </button>;
   return <>
-    {item(t("ui.common.files"), filesOpen, folderIcon, () => store.setFilesOpen(!store.filesOpen))}
-    {terminalCapable && item(t("ui.common.terminal"), termOpen, <TerminalIcon />, () => store.setTerminalOpen(!store.termOpen))}
+    {files && item(t("ui.common.files"), filesOpen, folderIcon, () => store.setFilesOpen(!store.filesOpen))}
     {item(t("ui.common.dispatches"), dispatchesOpen, dispatchIcon, () => store.toggleDispatches())}
+    {terminalCapable && item(t("ui.common.terminal"), termOpen, <TerminalIcon />, () => store.setTerminalOpen(!store.termOpen))}
   </>;
+}
+
+/** 手机列表页顶栏：文件保持大圆钮，派单与终端收进「⋯」，免得多出的搜索钮把三颗挤小（用户 10-17）。 */
+export function MobilePanelLauncher() {
+  const [filesOpen] = useStore(selectPanelState, shallowEqual);
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLSpanElement>(null);
+  const menuId = useId();
+  useEffect(() => {
+    if (!open) return;
+    const onKeyDown = (event: KeyboardEvent) => { if (event.key === "Escape") { event.preventDefault(); setOpen(false); } };
+    const onPointerDown = (event: PointerEvent) => { if (!rootRef.current?.contains(event.target as Node)) setOpen(false); };
+    document.addEventListener("keydown", onKeyDown);
+    document.addEventListener("pointerdown", onPointerDown);
+    return () => { document.removeEventListener("keydown", onKeyDown); document.removeEventListener("pointerdown", onPointerDown); };
+  }, [open]);
+  return <div className="panel-actions" role="group" aria-label={t("ui.PanelActions.side_panel")}>
+    <button type="button" className="btn chrome-icon-btn" aria-label={t("ui.common.files")} aria-pressed={filesOpen} title={t("ui.PanelActions.browse_files")} onClick={() => store.setFilesOpen(!store.filesOpen)}>
+      {folderIcon}
+    </button>
+    <span className="session-more" ref={rootRef}>
+      <button type="button" className="btn chrome-icon-btn session-more-trigger" aria-label={t("ui.common.more")} title={t("ui.common.more")} aria-haspopup="menu" aria-expanded={open} aria-controls={menuId} onClick={() => setOpen(value => !value)}>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="1.5" /><circle cx="12" cy="12" r="1.5" /><circle cx="19" cy="12" r="1.5" /></svg>
+      </button>
+      <div id={menuId} className="session-more-menu" role="menu" hidden={!open}>
+        <PanelMenuItems files={false} onDone={() => setOpen(false)} />
+      </div>
+    </span>
+  </div>;
 }

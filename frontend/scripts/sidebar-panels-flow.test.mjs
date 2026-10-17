@@ -8,10 +8,9 @@ import { renderToStaticMarkup } from "react-dom/server";
 globalThis.React = React;
 globalThis.WebSocket = { CONNECTING: 0, OPEN: 1, CLOSING: 2, CLOSED: 3 };
 globalThis.window = { location: { hash: "#/", href: "http://127.0.0.1:8790/" }, innerWidth: 1280, addEventListener() {} };
-// 这里验证的是列表筛选，不是折叠：时间分区全部展开（「更早」每次打开默认折叠）
-globalThis.localStorage = { getItem: (key) => key === "workbench-collapsed-time-sections" ? "[]" : null, setItem() {}, removeItem() {} };
+// 默认没有手动折叠记录；会话行筛选测试按需显式展开受测目录。
+globalThis.localStorage = { getItem: () => null, setItem() {}, removeItem() {} };
 const { store, Store } = await import("../src/store.ts");
-store.sidebarEarlierOpen = true;
 const { App } = await import("../src/App.tsx");
 const { Sidebar } = await import("../src/components/Sidebar.tsx");
 const { PanelActions } = await import("../src/components/PanelActions.tsx");
@@ -62,7 +61,7 @@ t("页面旧链接：健康检查加载态在侧栏，仅一个面板展开", ()
   assert.ok(!html.includes('class="page-nav-title">页面'));
   assert.ok(html.includes('class="sidebar sidebar-page-open"'), "页面面板添加桌面加宽标记");
   const collapsed = renderToStaticMarkup(React.createElement(Sidebar, {
-    collapsed: true, onToggle() {}, newOpen: false, onNewOpenChange() {},
+    collapsed: true, onToggle() {},
   }));
   assert.ok(!collapsed.includes("sidebar-page-open"), "页面路由下收起态不加宽");
 });
@@ -74,7 +73,7 @@ t("AI 用量打开后入口变后退，图标态也保留返回语义，收起�
   assert.ok(sidebarOf(html).includes('class="page-nav-name">后退</span>'));
   assert.ok(sidebarOf(html).includes('d="M15 5l-7 7 7 7"'));
   const collapsed = renderToStaticMarkup(React.createElement(Sidebar, {
-    collapsed: true, onToggle() {}, newOpen: false, onNewOpenChange() {},
+    collapsed: true, onToggle() {},
   }));
   assert.ok(collapsed.includes('aria-label="后退：收起AI 用量"'));
   store.closeSidebarPanel();
@@ -89,7 +88,7 @@ t("收起面板恢复会话列表；图标态保留历史/页面/设置/直达�
   assert.ok(!html.includes("sidebar-panel-expanded"));
   assert.ok(!html.includes("sidebar-page-open"), "收起面板移除加宽标记");
   const icons = renderToStaticMarkup(React.createElement(Sidebar, {
-    collapsed: true, onToggle() {}, newOpen: false, onNewOpenChange() {},
+    collapsed: true, onToggle() {},
   }));
   assert.ok(icons.includes('aria-label="历史会话"'));
   assert.ok(icons.includes('aria-label="AI 用量"'));
@@ -157,12 +156,12 @@ t("派单打开不替换主区历史预览，收起保留侧栏展开状态", ()
   assert.ok(!back.includes('aria-label="派单面板"'));
 });
 
-t("共用入口按文件/终端/派单排列，能力位控制终端，打开状态高亮", () => {
+t("共用入口按文件/派单/终端排列，能力位控制终端，打开状态高亮", () => {
   store.meta = { capabilities: { terminal: true }, drivers: {} };
   const renderActions = () => renderToStaticMarkup(React.createElement(PanelActions));
   let html = renderActions();
-  assert.ok(html.indexOf('aria-label="文件"') < html.indexOf('aria-label="终端"'));
-  assert.ok(html.indexOf('aria-label="终端"') < html.indexOf('aria-label="派单"'));
+  assert.ok(html.indexOf('aria-label="文件"') < html.indexOf('aria-label="派单"'));
+  assert.ok(html.indexOf('aria-label="派单"') < html.indexOf('aria-label="终端"'));
   assert.ok(html.includes('Ctrl+`'));
   assert.equal((html.match(/<button/g) ?? []).length, 3);
   assert.ok(!html.includes('page-nav-name'), "只有图标");
@@ -210,8 +209,14 @@ t("会话、欢迎页与历史预览均有同组入口；手机列表有顶部�
   assert.ok(mainOf(html).includes('class="welcome-view"'));
   assert.ok(mainOf(html).includes('class="panel-actions"'));
   // 手机列表页：面板开关并进侧栏顶栏同一行（桌面 CSS 隐藏）
-  assert.ok(sidebarOf(html).includes('class="mobile-panel-launcher"'));
-  assert.equal((html.match(/aria-label="派单"/g) ?? []).length, 2);
+  // 文件保持单独圆钮，派单与终端收进「⋯」菜单
+  const launcher = sidebarOf(html).match(/class="mobile-panel-launcher"[\s\S]*$/)?.[0];
+  assert.ok(launcher);
+  assert.ok(launcher.indexOf('aria-label="文件"') < launcher.indexOf('aria-label="更多"'));
+  const launcherMenu = launcher.match(/class="session-more-menu"[\s\S]*$/)[0];
+  for (const label of ["派单", "终端"]) assert.ok(launcherMenu.includes(label), label);
+  assert.ok(!launcherMenu.includes("文件"));
+  assert.equal((html.match(/aria-label="派单"/g) ?? []).length, 1);
   const item = { agent: "claude", nativeSessionId: "preview", cwd: "/repo", title: "历史标题", source: "interactive", lastActivityAt: "2026-10-01T00:00:00Z", filePath: "/history" };
   store.navigateHistory(); store.selectHistory(item);
   html = renderApp();
@@ -524,7 +529,7 @@ await asyncTest("复核4：删除来源会话后后退与收起不恢复失效 I
     getItem(key) { return saved.get(key) ?? null; }, setItem(key, value) { saved.set(key, value); }, removeItem(key) { saved.delete(key); },
   };
   globalThis.fetch = async (path) => ({ json: async () => ({ code: 0, data: path === "/api/sessions" ? { sessions: s.sessions } : {} }) });
-  s.sessions = ["session-a", "session-b"].map((id) => ({ id, agent: "claude", status: "idle", lastActivityAt: "2026-10-02T00:00:00Z" }));
+  s.sessions = ["session-a", "session-b"].map((id) => ({ id, agent: "claude", cwd: "/repo", status: "idle", lastActivityAt: new Date(s.now).toISOString() }));
   try {
     s.navigate("session-a"); s.navigatePage("ai-usage"); await s.remove("session-a");
     assert.equal(s.currentId, "session-b");
@@ -654,19 +659,22 @@ const sidebarSession = (id, age, status = "idle") => ({
   createdAt: new Date(recentNow - age).toISOString(),
   lastActivityAt: new Date(recentNow - age).toISOString(),
 });
-const withSidebarSessions = (sessions, fn, { currentId = null, pending = {} } = {}) => {
+const withSidebarSessions = (sessions, fn, { currentId = null, pending = {}, openProjects = [] } = {}) => {
   const previous = {
     sessions: store.sessions, now: store.now, currentId: store.currentId,
     historyOpen: store.historyOpen, currentPageId: store.currentPageId,
     pendingCount: store.pendingCount,
   };
+  const previousStorage = globalThis.localStorage;
+  if(openProjects.length) globalThis.localStorage = { ...previousStorage, getItem: key => key === "aireins-project-folds"
+    ? JSON.stringify(Object.fromEntries(openProjects.map(path => [path, "open"]))) : previousStorage.getItem(key) };
   Object.assign(store, { sessions, now: recentNow, currentId, historyOpen: false, currentPageId: null });
   store.pendingCount = (id) => pending[id] ?? 0;
   const render = () => renderToStaticMarkup(React.createElement(Sidebar, {
-    collapsed: false, onToggle() {}, newOpen: false, onNewOpenChange() {},
+    collapsed: false, onToggle() {},
   }));
   try { fn(render); }
-  finally { Object.assign(store, previous); }
+  finally { Object.assign(store, previous); globalThis.localStorage = previousStorage; }
 };
 
 t("主列表：72 小时内及恰好边界保留，超过 1ms 隐藏", () => {
@@ -679,7 +687,7 @@ t("主列表：72 小时内及恰好边界保留，超过 1ms 隐藏", () => {
     assert.ok(html.includes("sidebar-boundary"));
     assert.ok(!html.includes("sidebar-outside"));
     assert.ok(!html.includes("sidebar-old-error"));
-  });
+  }, { openProjects: ["/repo"] });
 });
 t("主列表：dead 即使最近活动或当前打开也不显示", () => {
   withSidebarSessions([sidebarSession("dead-recent", 1, "dead"), sidebarSession("dead-old", recentWindow + 1, "dead")], (render) => {
@@ -715,9 +723,9 @@ t("等待处理：旧会话未决闸门优先且不重复，异常 dead 未决�
       assert.equal((html.match(new RegExp(`<span class="row-title"[^>]*>sidebar-${id}</span>`, "g")) ?? []).length, 1);
       assert.ok(html.indexOf(`sidebar-${id}`) < html.indexOf("sidebar-recent"));
     }
-  }, { pending: { "old-gate": 1, "dead-gate": 1 }, currentId: "old-gate" });
+  }, { pending: { "old-gate": 1, "dead-gate": 1 }, currentId: "old-gate", openProjects: ["/repo"] });
 });
-t("主列表：当前旧会话切走后隐藏，时钟越过 72 小时边界自动筛掉", () => {
+t("主列表：当前旧会话切走后移出活跃候选，越过72h后目录进入默认收起的较早区", () => {
   withSidebarSessions([sidebarSession("old-current", recentWindow + 1), sidebarSession("boundary", recentWindow)], (render) => {
     assert.ok(render().includes("sidebar-old-current"));
     store.currentId = null;
@@ -726,8 +734,17 @@ t("主列表：当前旧会话切走后隐藏，时钟越过 72 小时边界自�
     store.now += 1;
     const html = render();
     assert.ok(!html.includes("sidebar-boundary"));
-    assert.ok(html.includes("最近 3 天没有会话"));
-  }, { currentId: "old-current" });
+    assert.ok(html.includes("较早的项目 · 1"));
+    assert.ok(/class="project-toggle older-projects-toggle" aria-expanded="false"/.test(html), "较早区默认收起");
+    assert.ok(!html.includes("最近 3 天没有会话"), "有较早目录时不宣告空列表");
+    const storage = globalThis.localStorage;
+    globalThis.localStorage = { ...storage, getItem: key => key === "aireins-older-projects-open" ? "1"
+      : key === "aireins-project-folds" ? "{}" : storage.getItem(key) };
+    const older = render();
+    assert.ok(older.includes('data-project-path="/repo"'), "展开较早区后原目录仍存在");
+    assert.ok(/aria-expanded="false" aria-controls="project-%2Frepo"/.test(older), "旧目录无手动记录时默认收起");
+    assert.ok(!older.includes("sidebar-boundary") && !older.includes("sidebar-old-current"), "旧会话行不因进入较早区自动展开");
+  }, { currentId: "old-current", openProjects: ["/repo"] });
 });
 t("侧栏：工作台会话折叠及其专用样式已移除，历史入口保留", () => {
   withSidebarSessions([sidebarSession("dead", 1, "dead")], (render) => {
@@ -773,6 +790,7 @@ t("历史打开：主列表外 released / dead 会话保留打开入口与现有
 });
 
 await import('./sidebar-menu.test.mjs');
+await import('./aireins-sidebar-projects.test.mjs');
 
 if (!process.exitCode) console.log(`✅ sidebar panels 回归全过（${pass} 例）`);
 process.exit(process.exitCode ?? 0);

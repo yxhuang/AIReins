@@ -27,7 +27,7 @@ import { feishuSender, GateNotifier, larkCliSender, loadNotifyConfig, type Notif
 import { checkPageHealth, proxyPage, readLauncherLinks, scanPages } from "./pages.js";
 import { pruneStorage, workbenchHome } from "./persistence.js";
 import { isValidIdleReleaseMinutes, loadPrefs, savePrefs, type WorkbenchPrefs } from "./prefs.js";
-import { readClaudeStartupSettings, writeClaudeStartupSettings } from "./claude-settings.js";
+import { readClaudeDefaultSettings, readClaudeStartupSettings, writeClaudeStartupSettings } from "./claude-settings.js";
 import { SessionBusyError, SessionManager } from "./session-manager.js";
 import { cleanStorage, getStorageStats, StorageInputError, validateStorageCleanInput } from "./storage.js";
 import { parseMcpAction, parseSideQuestion, parseTaskId } from "./session-menu.js";
@@ -423,6 +423,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       const meta = await getMeta();
       await respond(response, 200, 0, "success", {
         ...meta,
+        claudeDefaults: readClaudeDefaultSettings(),
         hostName: getServerHostName(REMOTE_CONFIG?.origin),
         platform,
         terminalShell: basename(resolveShell(undefined).file),
@@ -716,7 +717,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       }
     } else if (method === "GET" && url.pathname === "/api/sessions") {
       await respond(response, 200, 0, "success", { sessions: manager.list() }, requestId);
-    } else if (url.pathname === "/api/session-groups" || /^\/api\/session-groups\/[^/]+$/.test(url.pathname)
+    } else if (url.pathname === "/api/project-order" || url.pathname === "/api/project-order/move"
       || (method === "PATCH" && /^\/api\/sessions\/[^/]+$/.test(url.pathname))) {
       const body = method === "POST" || method === "PATCH" ? await readJson(request) : undefined;
       const result = organizationRoute(manager, method, url.pathname, body);

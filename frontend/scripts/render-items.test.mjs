@@ -18,6 +18,7 @@ const {
   withSideCommands,
   parseSideCommand,
 } = await import("../src/commands.ts");
+const { newSessionCommands } = await import("../src/new-session-input.ts");
 
 let pass = 0;
 const t = (name, fn) => { try { fn(); pass++; } catch (e) { console.error(`❌ ${name}\n   ${e.message}`); process.exitCode = 1; } };
@@ -32,6 +33,54 @@ const ev = (seq, type, payload = {}) => ({
 });
 const cmd = (name, description = "") => ({ name, description, source: "claude" });
 const names = (list) => list.map((c) => c.name);
+const commandSession = (id, agent, cwd, day) => ({ id, agent, cwd, lastActivityAt: `2026-10-${day}T00:00:00.000Z` });
+
+t("新建命令：同目录优先于更新的其他目录，且不借用其他 agent", () => {
+  const sessions = Object.freeze([
+    commandSession("same", "claude", "/repo", "10"),
+    commandSession("elsewhere", "claude", "/elsewhere", "17"),
+    commandSession("other-agent", "kimi", "/repo", "18"),
+  ]);
+  const tables = new Map(sessions.map(session => [session.id, [cmd(session.id)]]));
+  assert.deepEqual(names(newSessionCommands("claude", "/repo", sessions, tables)), ["same"]);
+  assert.deepEqual(sessions.map(session => session.id), ["same", "elsewhere", "other-agent"], "选择候选不重排 store.sessions");
+});
+
+t("新建命令：同目录中取最近的可用命令表，盘符目录按现有入口规范化", () => {
+  const sessions = [commandSession("old", "claude", "/mnt/c/repo", "10"), commandSession("new", "claude", "/mnt/c/repo", "17")];
+  const tables = new Map([["old", [cmd("old-skill")]], ["new", [cmd("new-skill")]]]);
+  assert.deepEqual(names(newSessionCommands("claude", '"C:\\repo"', sessions, tables)), ["new-skill"]);
+});
+
+t("新建命令：无同目录表时取同 agent 最近非空表，无可用表返回空", () => {
+  const sessions = [
+    commandSession("same-empty", "kimi", "/repo", "18"),
+    commandSession("older", "kimi", "/older", "10"),
+    commandSession("recent", "kimi", "/recent", "17"),
+    commandSession("unloaded", "kimi", "/repo", "19"),
+    commandSession("claude", "claude", "/repo", "20"),
+  ];
+  const tables = new Map([["same-empty", []], ["older", [cmd("older")]], ["recent", [cmd("recent")]], ["claude", [cmd("wrong-agent")]]]);
+  assert.deepEqual(names(newSessionCommands("kimi", "/repo", sessions, tables)), ["recent"]);
+  assert.deepEqual(newSessionCommands("codex", "/repo", sessions, tables), []);
+  assert.deepEqual(newSessionCommands("kimi", "/repo", sessions, new Map()), []);
+  assert.deepEqual(newSessionCommands("kimi", "/repo", [], tables), []);
+});
+
+t("新建命令：Claude/Kimi 排除依赖现有会话的操作，保留文本命令", () => {
+  const sessionActions = ["status", "tasks", "compact", "context", "clear", "cost", "usage", "resume", "rewind", "export", "exit", "quit", "btw", "side", "mcp", "model", "permissions", "config", "settings", "thinking", "fast"];
+  const commands = [...sessionActions.map(name => cmd(name)), cmd("help"), cmd("review"), cmd("project-skill")];
+  for (const agent of ["claude", "kimi"]) {
+    assert.deepEqual(names(newSessionCommands(agent, "/repo", [commandSession("source", agent, "/repo", "17")], new Map([["source", commands]]))), ["help", "review", "project-skill"]);
+  }
+});
+
+t("新建命令：Codex 只保留 review 文本入口，不暴露 AIReins 会话动作", () => {
+  const sessions = [commandSession("source", "codex", "/repo", "17")];
+  const commands = [cmd("status"), cmd("review"), cmd("compact"), cmd("diff"), cmd("rename"), cmd("help"), cmd("resume"), cmd("unknown")];
+  assert.deepEqual(names(newSessionCommands("codex", "/repo", sessions, new Map([["source", commands]]))), ["review"]);
+  assert.deepEqual(newSessionCommands("codex", "/repo", sessions, new Map([["source", [cmd("status")]]])), []);
+});
 
 t("渲染层过滤已知无信息量 raw，不拆开文本；未知 method 仍可见", () => {
   for (const [agent, methods] of [

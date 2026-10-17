@@ -10,6 +10,8 @@
 | 续接 | Resume | 继续同一个原生会话 |
 | 工作台 | Workspace / {product} | 通用区域用 Workspace；产品名称用 `{product}` |
 | 工作目录 | Working directory | cwd 的面向用户名称 |
+| 项目 | Project | 主页新建选择器，选择该会话的工作目录 |
+| 较早的项目 | Older projects | 侧栏末尾没有近 3 天候选会话的目录折叠区 |
 | 派单 | Dispatch | 独立执行的任务；列表 Dispatches |
 | 派单人 | Dispatcher | 派出任务的会话或执行方 |
 | 派单原文 | Dispatch prompt | 发给执行端的任务全文 |
@@ -19,7 +21,6 @@
 | 交付摘要 | Delivery summary | 完成后的任务交付摘要 |
 | 置顶 | Pin | 操作；分区标题 Pinned |
 | 取消置顶 | Unpin | 取消操作 |
-| 分组 | Group | 用户整理会话的分组 |
 | 主机 | Host | 本机或远程电脑 |
 | 本机 | Local | 当前电脑的本地入口 |
 | 远程入口 | Remote access | Tailscale 访问入口 |

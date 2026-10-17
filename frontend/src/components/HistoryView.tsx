@@ -59,6 +59,7 @@ type ListPhase = "loading" | "ready" | "error";
 export function HistoryView() {
   const historyRevision = useStore(value => value.historyRevision);
   const cwdFilter = useStore(value => value.historyCwdFilter);
+  const searchRequest = useStore(value => value.historySearchRequest);
   const windowsPicker = useStore(value => value.meta?.capabilities?.windowsDirectoryPicker === true);
   const importedSessionKeys = useStore(selectImportedSessionKeys, shallowEqual);
   const now = useStore(selectHistoryNow);
@@ -86,6 +87,21 @@ export function HistoryView() {
   const inputRef = useRef<HTMLInputElement>(null);
   const pickerGen = useRef(0);
   useEffect(() => () => { pickerGen.current += 1; }, []);
+
+  const applySearchInput = (input: string, submitDirectory = false) => {
+    if (submitDirectory && isHistoryDirectoryInput(input)) {
+      store.setHistoryCwdFilter(input);
+      setQInput("");
+      setQ("");
+      setDirectoryOpen(false);
+      setDirectoryError(null);
+      inputRef.current?.focus();
+    } else setQInput(input);
+  };
+  useEffect(() => {
+    const input = store.consumeHistorySearch();
+    if (input !== undefined) applySearchInput(input, true);
+  }, [searchRequest]);
 
   const selectDirectory = (path: string) => {
     store.setHistoryCwdFilter(path);
@@ -245,12 +261,12 @@ export function HistoryView() {
               <button type="button" className="icon-btn" aria-label={t("ui.HistoryView.clear_directory_filter")} onClick={() => store.setHistoryCwdFilter("")}>×</button>
             </span>}
             <input ref={inputRef} type="search" value={qInput}
-              onChange={(e) => setQInput(e.target.value)}
+              onChange={(e) => applySearchInput(e.target.value)}
               onKeyDown={(e) => {
                 if (e.nativeEvent.isComposing) return;
                 if (e.key === "Enter" && isHistoryDirectoryInput(qInput)) {
                   e.preventDefault();
-                  selectDirectory(qInput);
+                  applySearchInput(qInput, true);
                 } else if (e.key === "Backspace" && !qInput && cwdFilter) {
                   e.preventDefault();
                   store.setHistoryCwdFilter("");

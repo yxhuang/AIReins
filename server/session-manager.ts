@@ -1,3 +1,4 @@
+import { normalizeProjectPath } from "../shared/project-path.js";
 import { fallbackTitleMetadata } from "./i18n/messages.js";
 import { platform, vscodeFileUri, type Platform } from "./platform.js";
 import { sessionTitle } from "../shared/session-title.js";
@@ -28,12 +29,13 @@ import {
   releaseTranscriptCache,
   deleteSessionFiles,
   loadRegistry,
-  loadSessionGroups,
+  loadProjectOrder,
+  PROJECT_ORDER_LIMIT,
   readTranscript,
   readTranscriptState,
   compactClaudeTranscripts,
   saveRegistry,
-  saveSessionGroups,
+  saveProjectOrder,
   transcriptPathFor,
 } from "./persistence.js";
 import { createSnapshotIfNeeded } from "./snapshot.js";
@@ -49,7 +51,6 @@ import type {
   QuestionAnswers,
   SessionConfig,
   SessionRecord,
-  SessionGroup,
   SessionStatus,
   RemoteControlState,
   UnifiedCommand,
@@ -62,7 +63,7 @@ import { parseCodexCommand } from "./codex-commands.js";
 import type { EventPage } from "./event-pages.js";
 import { captureWorkerIdentity, oldWorkerGone, readSystemBootTime } from "./worker-process.js";
 import { hasTerminalWorkerEvidence, rebootProvesWorkerGone } from "./session-recovery.js";
-import { parseGroupName, parseOrganizationPatch, SessionOrganizationError, type SessionOrganizationFrame } from "./session-organization.js";
+import { parseProjectMove, parseOrganizationPatch, SessionOrganizationError, type SessionOrganizationFrame } from "./session-organization.js";
 
 const RING_SIZE = 1_000;
 type DriverFactory = typeof createDriver;
@@ -99,7 +100,7 @@ export class SessionManager {
   private readonly commands = new Map<string, UnifiedCommand[]>();
   private readonly listeners = new Set<(event: UnifiedEvent) => void>();
   private readonly organizationListeners = new Set<(frame: SessionOrganizationFrame) => void>();
-  private readonly groups = new Map<string, SessionGroup>();
+  private projectOrder: string[];
   private readonly restartingSessions = new Set<string>();
   /** 新建会话的后台启动：create 不等 CLI 握手（约 2–5 秒）就返回，发送消息时再等它。 */
   private readonly startups = new Map<string, Promise<void>>();
@@ -132,9 +133,9 @@ export class SessionManager {
     private readonly claudePlugins: ClaudePlugins = new ClaudePlugins(),
     private readonly systemBootTimeResolver: () => number | undefined = readSystemBootTime,
   ) {
-    for (const group of loadSessionGroups()) this.groups.set(group.id, group);
     const systemBootTime = this.systemBootTimeResolver();
     const loaded = loadRegistry();
+    this.projectOrder = loadProjectOrder(loaded);
     log("info", "legacy Claude transcript updates compacted", compactClaudeTranscripts(loaded));
     for (const stored of loaded) {
       let recovered: ReturnType<typeof readTranscriptState>;
@@ -207,7 +208,7 @@ export class SessionManager {
     return session ? { ...cloneSession(session), ...fallbackTitleMetadata(session, this.titles.get(id)), title: sessionTitle({ ...session, title: this.titles.get(id) ?? "新会话" }, undefined) } : undefined;
   }
 
-  listGroups(): SessionGroup[] { return [...this.groups.values()].map((group) => ({ ...group })); }
+  listProjectOrder(): string[] { return [...this.projectOrder]; }
 
   onOrganizationUpdated(listener: (frame: SessionOrganizationFrame) => void): () => void {
     this.organizationListeners.add(listener);
@@ -219,7 +220,6 @@ export class SessionManager {
     const session = this.sessions.get(id);
     if (!session) throw new SessionOrganizationError(`会话不存在：${id}`, 404, 40401);
     const patch = parseOrganizationPatch(value);
-    if (patch.groupId && !this.groups.has(patch.groupId)) throw new SessionOrganizationError(`分组不存在：${patch.groupId}`);
     if (patch.pinned !== undefined) session.pinned = patch.pinned;
     if (patch.customTitle !== undefined) {
       if (patch.customTitle) session.customTitle = patch.customTitle;
@@ -227,44 +227,39 @@ export class SessionManager {
       const worker = this.workers.get(id);
       if (patch.customTitle && worker instanceof CodexDriver) worker.cancelAutomaticTitle();
     }
-    if (patch.groupId !== undefined) {
-      if (patch.groupId) session.groupId = patch.groupId;
-      else delete session.groupId;
-    }
     this.persistRegistry();
     this.organizationUpdated();
     return this.get(id)!;
   }
 
-  createGroup(value: unknown): SessionGroup {
-    const group = { id: ulid(), name: parseGroupName(value), createdAt: new Date().toISOString() };
-    this.groups.set(group.id, group);
-    saveSessionGroups(this.listGroups());
+  moveProject(value: unknown): string[] {
+    const move = parseProjectMove(value);
+    const path = normalizeProjectPath(move.path);
+    const target = normalizeProjectPath(move.before ?? move.after!);
+    if (!this.projectOrder.includes(path) || !this.projectOrder.includes(target)) {
+      throw new SessionOrganizationError("工作目录不在顺序列表中");
+    }
+    if (path === target) return this.listProjectOrder();
+    const paths = this.projectOrder.filter(item => item !== path);
+    paths.splice(paths.indexOf(target) + (move.after === undefined ? 0 : 1), 0, path);
+    if (paths.every((item, index) => item === this.projectOrder[index])) return this.listProjectOrder();
+    saveProjectOrder(paths);
+    this.projectOrder = paths;
     this.organizationUpdated();
-    return { ...group };
+    return this.listProjectOrder();
   }
 
-  renameGroup(id: string, value: unknown): SessionGroup {
-    const group = this.groups.get(id);
-    if (!group) throw new SessionOrganizationError(`分组不存在：${id}`, 404, 40471);
-    group.name = parseGroupName(value);
-    saveSessionGroups(this.listGroups());
-    this.organizationUpdated();
-    return { ...group };
-  }
-
-  removeGroup(id: string): void {
-    if (!this.groups.has(id)) throw new SessionOrganizationError(`分组不存在：${id}`, 404, 40471);
-    for (const session of this.sessions.values()) if (session.groupId === id) delete session.groupId;
-    // 先持久化成员回归，再删除分组；中途退出最多留下空组，不会留下未知 groupId。
-    this.persistRegistry();
-    this.groups.delete(id);
-    saveSessionGroups(this.listGroups());
+  private registerProject(cwd: string): void {
+    const path = normalizeProjectPath(cwd);
+    if (this.projectOrder.includes(path)) return;
+    const paths = [path, ...this.projectOrder].slice(0, PROJECT_ORDER_LIMIT);
+    saveProjectOrder(paths);
+    this.projectOrder = paths;
     this.organizationUpdated();
   }
 
   private organizationUpdated(): void {
-    const frame: SessionOrganizationFrame = { type: "session_organization_updated", sessions: this.list(), groups: this.listGroups() };
+    const frame: SessionOrganizationFrame = { type: "session_organization_updated", sessions: this.list(), projectOrder: this.listProjectOrder() };
     for (const listener of this.organizationListeners) listener(frame);
   }
 
@@ -375,6 +370,8 @@ export class SessionManager {
       ...this.claudeEffectivePayload(record),
       riskyMode: record.riskyMode,
     });
+
+    this.registerProject(record.cwd);
 
     // 默认不快照（P1-8）：只有显式传 "auto" 才做；续接等未传该字段的入口一并跳过
     if (input.snapshot === "auto") {

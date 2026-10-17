@@ -114,7 +114,7 @@ try {
     write(join(home, "server.log.2"), "2".repeat(30)),
     write(join(home, "server.log.old"), "o".repeat(40)),
   ];
-  const otherFiles = [registryPath,
+  const otherFiles = [registryPath, join(home, "project-order.json"),
     write(join(home, "snapshots", "nested", "snapshot.json"), "snapshot"),
     write(join(home, "prefs.json"), "preferences"),
   ];

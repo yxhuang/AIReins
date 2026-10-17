@@ -10,7 +10,6 @@ import type {
   PermissionDecision,
   SessionConfig,
   SessionRecord,
-  SessionGroup,
   SessionOrganizationPatch,
   SessionStatus,
   UnifiedEvent,
@@ -18,7 +17,8 @@ import type {
   WorkFileTarget,
 } from "./types";
 import { createSession, deleteSession, fetchCommands, fetchEarlierEvents, fetchFiles, fetchMeta, fetchPages, fetchSessions, fetchSnapshot, releaseSession, type CreateSessionInput } from "./api";
-import { createSessionGroup, deleteSessionGroup, fetchSessionGroups, patchSession, renameSessionGroup } from "./api";
+import { fetchProjectOrder, moveProjectOrder, patchSession } from "./api";
+import { selectSidebarSections } from "./sidebar-sessions";
 import type { CodexResetStatus } from "../../server/codex-resets";
 import { fetchCodexResets, ackCodexReset } from "./api";
 import { fetchWorkFile, saveWorkFile } from "./api";
@@ -71,6 +71,9 @@ interface MobileRoute {
   dispatchesOpen: boolean;
   termOpen: boolean;
   filesOpen: boolean;
+  /** 可选以兼容本次更新前已存在的浏览器历史条目。 */
+  newSessionOpen?: boolean;
+  newSessionCwd?: string;
 }
 interface MobileSource {
   id: string;
@@ -128,11 +131,15 @@ function readFocusView(): boolean {
 
 export class Store {
   sessions: SessionRecord[] = [];
-  sessionGroups: SessionGroup[] = [];
+  projectOrder: string[] = [];
   /** 组织更改不推进会话 seq；防止在途旧 REST 响应撤销已收到的广播。 */
   private organizationVersion = 0;
   meta: MetaInfo | null = null;
   currentId: string | null = null;
+  newSessionOpen = false;
+  newSessionCwd: string | undefined;
+  /** 每次显式新建导航都要求主页重新预填目录并聚焦。 */
+  newSessionRequest = 0;
   /** 扩展页面列表（仅 type:"iframe"；未知类型进 skippedPages）与当前打开的页面 id */
   pages: PageManifest[] = [];
   codexResets: CodexResetStatus | null = null;
@@ -145,8 +152,8 @@ export class Store {
   historyCwdFilter = "";
   historySelection: HistorySession | null = null;
   historyRevision = 0;
-  /** 侧栏「更早」分区只在本次页面内展开，刷新后重新折叠（用户 10-15）。 */
-  sidebarEarlierOpen = false;
+  /** 侧栏搜索传给历史面板的一次性预填。 */
+  historySearchRequest: { query: string } | null = null;
   dispatchesOpen = false;
   termOpen = false;
   filesOpen = false;
@@ -260,11 +267,6 @@ export class Store {
     return () => this.listeners.delete(listener);
   };
 
-  toggleSidebarEarlier(): void {
-    this.sidebarEarlierOpen = !this.sidebarEarlierOpen;
-    this.notify();
-  }
-
   private notify(): void {
     if (this.streamFrame !== undefined) {
       cancelAnimationFrame(this.streamFrame);
@@ -334,7 +336,7 @@ export class Store {
     }
     // 路由先于 meta 到达；能力确认后不能留下一个无法挂载的终端全屏。
     if (this.isMobileNavigation() || this.readMobileEntry() || this.readDesktopPanelEntry()) this.onHashChange();
-    await Promise.all([this.refreshSessions(), this.refreshSessionGroups()]);
+    await Promise.all([this.refreshSessions(), this.refreshProjectOrder()]);
     if (panelRestore) {
       if (restored && !this.currentId && this.sessions.some((x) => x.id === restored)) {
         this.currentId = restored;
@@ -370,7 +372,7 @@ export class Store {
     // 以实际离开来源条目为准；延迟 hashchange 不应解除下一次 back 的锁。
     if (this.mobileBackPending && saved?.id !== this.mobileBackPending) this.mobileBackPending = null;
     // 手机创建的条目跨到桌面后也按完整快照恢复；原生桌面条目仍走旧分支。
-    if (this.isMobileNavigation() || saved) {
+    if (this.isMobileNavigation() || saved || window.location.hash === "#/new") {
       let entry = saved ?? this.replaceMobileEntry(this.mobileRouteFromHash(window.location.hash || "#/"));
       if (entry.route.termOpen && this.meta?.capabilities.terminal === false) {
         let source = entry.source;
@@ -382,6 +384,7 @@ export class Store {
       this.applyMobileRoute(entry.route);
       return;
     }
+    this.newSessionOpen = false;
     if (/^#\/dispatches(?:\/[^?]+)?(?:\?runs=.*)?$/.test(window.location.hash)) {
       if (!this.dispatchesOpen) {
         this.beforeDispatches = {
@@ -465,7 +468,7 @@ export class Store {
   private desktopPanelHash(): string {
     return this.dispatchesOpen ? this.desktopDispatchHash : this.historyOpen ? "#/history"
       : this.currentPageId ? `#/page/${encodeURIComponent(this.currentPageId)}`
-      : this.currentId ? `#/session/${encodeURIComponent(this.currentId)}` : "#/";
+      : this.newSessionOpen ? "#/new" : this.currentId ? `#/session/${encodeURIComponent(this.currentId)}` : "#/";
   }
 
   private syncDesktopPanels(opened?: DesktopPanelSide): void {
@@ -492,8 +495,10 @@ export class Store {
     const { workbenchNavigation: _mobile, workbenchDesktopPanels: _desktop, ...state } = window.history.state ?? {};
     if (previous) window.history.replaceState({ ...state, workbenchDesktopPanels: entry }, "", hash);
     else {
-      const base = this.currentId ? `#/session/${encodeURIComponent(this.currentId)}` : "#/";
-      window.history.replaceState(state, "", base);
+      const base = this.newSessionOpen ? "#/new" : this.currentId ? `#/session/${encodeURIComponent(this.currentId)}` : "#/";
+      // 新建页目录留在基础条目，之后跨会话前进/后退仍能还原。
+      const baseState = this.newSessionOpen && this.readMobileEntry() ? window.history.state : state;
+      window.history.replaceState(baseState, "", base);
       window.history.pushState({ ...state, workbenchDesktopPanels: entry }, "", hash);
       this.desktopPanelEntryId = entry.id;
     }
@@ -514,7 +519,7 @@ export class Store {
       this.beforeDispatches = null;
     }
     const { workbenchNavigation: _mobile, workbenchDesktopPanels: _desktop, ...state } = window.history.state ?? {};
-    const base = this.currentId ? `#/session/${encodeURIComponent(this.currentId)}` : "#/";
+    const base = this.newSessionOpen ? "#/new" : this.currentId ? `#/session/${encodeURIComponent(this.currentId)}` : "#/";
     window.history.replaceState(state, "", base);
     this.syncDesktopPanels();
     this.notify();
@@ -536,6 +541,8 @@ export class Store {
       historyOpen: historyOpen || (panel && this.historyOpen),
       historySelection: historyOpen || (panel && this.historyOpen) ? this.historySelection : null,
       dispatchesOpen, termOpen, filesOpen,
+      newSessionOpen: hash === "#/new" || (panel && this.newSessionOpen),
+      newSessionCwd: hash === "#/new" || panel ? this.newSessionCwd : undefined,
     };
   }
 
@@ -545,6 +552,7 @@ export class Store {
       currentPageId: this.currentPageId, historyOpen: this.historyOpen,
       historySelection: this.historySelection, dispatchesOpen: this.dispatchesOpen,
       termOpen: this.termOpen, filesOpen: this.filesOpen,
+      newSessionOpen: this.newSessionOpen, newSessionCwd: this.newSessionCwd,
     };
   }
 
@@ -555,6 +563,8 @@ export class Store {
       && (route.currentId === null || typeof route.currentId === "string")
       && (route.currentPageId === null || typeof route.currentPageId === "string")
       && (route.historySelection === null || typeof route.historySelection === "object")
+      && (route.newSessionOpen === undefined || typeof route.newSessionOpen === "boolean")
+      && (route.newSessionCwd === undefined || typeof route.newSessionCwd === "string")
       && [route.historyOpen, route.dispatchesOpen, route.termOpen, route.filesOpen].every((flag) => typeof flag === "boolean"));
     if (entry?.version !== 1 || entry.route?.hash !== (window.location.hash || "#/")) return null;
     const seen = new Set<MobileSource>();
@@ -588,7 +598,7 @@ export class Store {
     const route = this.captureMobileRoute();
     route.hash = this.termOpen ? "#/terminal" : this.filesOpen ? "#/files"
       : this.historyOpen ? "#/history" : this.currentPageId ? `#/page/${encodeURIComponent(this.currentPageId)}`
-      : this.currentId ? `#/session/${encodeURIComponent(this.currentId)}` : "#/";
+      : this.newSessionOpen ? "#/new" : this.currentId ? `#/session/${encodeURIComponent(this.currentId)}` : "#/";
     this.writeMobileEntry({ ...entry, route });
   }
 
@@ -598,6 +608,10 @@ export class Store {
       const entry = this.readMobileEntry();
       if (entry) this.writeMobileEntry({ ...entry, route });
     }
+    const newSessionOpen = route.newSessionOpen ?? route.hash === "#/new";
+    if (newSessionOpen && (!this.newSessionOpen || this.newSessionCwd !== route.newSessionCwd)) this.newSessionRequest++;
+    this.newSessionOpen = newSessionOpen;
+    this.newSessionCwd = route.newSessionCwd;
     this.currentId = route.currentId;
     this.currentPageId = route.currentPageId;
     this.historyOpen = route.historyOpen;
@@ -657,6 +671,26 @@ export class Store {
     this.onHashChange();
   }
 
+  navigateNew(cwd?: string): void {
+    const request = this.newSessionRequest;
+    const destination = { ...this.mobileRouteFromHash("#/new"), newSessionCwd: cwd };
+    if (window.location.hash === "#/new") {
+      const entry = this.readMobileEntry();
+      if (entry) this.writeMobileEntry({ ...entry, route: destination });
+      else this.replaceMobileEntry(destination);
+      this.applyMobileRoute(destination);
+    } else this.pushMobileRoute("#/new", destination);
+    if (this.newSessionRequest === request) { this.newSessionRequest++; this.notify(); }
+  }
+
+  setNewSessionCwd(cwd: string): void {
+    if (this.newSessionCwd === cwd) return;
+    this.newSessionCwd = cwd;
+    this.syncMobileRoute();
+    if (this.readDesktopPanelEntry()) this.syncDesktopPanels();
+    this.notify();
+  }
+
   private writeHash(hash: string): void {
     this.writingHash = true;
     try { window.location.hash = hash; } finally { this.writingHash = false; }
@@ -679,14 +713,23 @@ export class Store {
     this.notify();
   }
 
-  navigateHistory(cwd?: string): void {
-    if (cwd !== undefined) this.setHistoryCwdFilter(cwd);
+  navigateHistory(cwd?: string, query?: string): void {
+    if (query !== undefined) {
+      this.historyCwdFilter = "";
+      this.historySearchRequest = { query };
+    } else if (cwd !== undefined) this.setHistoryCwdFilter(cwd);
     if (this.isMobileNavigation()) { this.pushMobileRoute("#/history"); return; }
     this.historyOpen = true;
     this.currentPageId = null;
     this.historySelection = null;
     this.syncDesktopPanels("sidebar");
     this.notify();
+  }
+
+  consumeHistorySearch(): string | undefined {
+    const query = this.historySearchRequest?.query;
+    this.historySearchRequest = null;
+    return query;
   }
 
   toggleDispatches(): void {
@@ -1036,7 +1079,7 @@ export class Store {
         if (this.snapshotGen.get(id) === gen) {
           const live = this.session(id);
           const session = organizationVersion !== this.organizationVersion && live
-            ? { ...snapshot.session, pinned: live.pinned, customTitle: live.customTitle, groupId: live.groupId }
+            ? { ...snapshot.session, pinned: live.pinned, customTitle: live.customTitle }
             : snapshot.session;
           this.applySnapshot(id, session, snapshot.seq, snapshot.events, snapshot.hasMore, snapshot.firstSeq);
           this.snapshotBuffers.delete(id);
@@ -1266,7 +1309,7 @@ export class Store {
   }
 
   private async alignAfterSocketOpen(reconnected: boolean, socket = this.socket): Promise<void> {
-    await Promise.all([this.refreshSessions(), this.refreshSessionGroups()]);
+    await Promise.all([this.refreshSessions(), this.refreshProjectOrder()]);
     if (this.socket !== socket) return;
     // 列表恢复未加载会话的审批数；已加载会话通过同一条全局连接按各自游标补发。
     for (const [id, data] of this.data) {
@@ -1296,11 +1339,11 @@ export class Store {
       return;
     }
     if (type === "session_organization_updated") {
-      if (!Array.isArray(frame.sessions) || !Array.isArray(frame.groups)) return;
+      if (!Array.isArray(frame.sessions) || !Array.isArray(frame.projectOrder)) return;
       this.organizationVersion++;
       this.sessions = (frame.sessions as SessionRecord[]).filter((session) => !this.removed.has(session.id))
         .map((session) => this.mergeSessionSummary(session, this.session(session.id)));
-      this.sessionGroups = frame.groups as SessionGroup[];
+      this.projectOrder = frame.projectOrder as string[];
       this.notify();
       return;
     }
@@ -1335,8 +1378,7 @@ export class Store {
       if (stashed) {
         this.sendStash.delete(requestId);
         if (this.getDraft(stashed.sessionId).trim() === "") {
-          this.setDraft(stashed.sessionId, stashed.text);
-          this.sendTextRestore = { sessionId: stashed.sessionId, text: stashed.text, mentions: stashed.mentions ?? [], version: ++this.sendRestoreSequence };
+          this.restoreComposerSend(stashed.sessionId, stashed.text, stashed.mentions ?? []);
         }
         this.lastError = { message: msg, sessionId: stashed.sessionId };
         this.notify();
@@ -1601,6 +1643,14 @@ export class Store {
     if (this.sendNotices.delete(sessionId)) this.notify();
   }
 
+  /** 新建首条消息本地未上行与服务端拒绝共用完整输入回填。 */
+  restoreComposerSend(sessionId: string, text: string, mentions: Mention[]): void {
+    if (this.getDraft(sessionId).trim()) return;
+    this.setDraft(sessionId, text);
+    this.sendTextRestore = { sessionId, text, mentions, version: ++this.sendRestoreSequence };
+    this.notify();
+  }
+
   /** 消费一次性完整还回请求；过期/已消费返回 null，纯图片的空文本仍是有效结果。 */
   consumeSendTextRestore(version: number): Pick<ComposerSendRestore, "text" | "mentions"> | null {
     if (this.sendTextRestore?.version !== version) return null;
@@ -1859,14 +1909,14 @@ export class Store {
     const summary = live && live.seq > incoming.seq ? live : incoming;
     const organization = preserveOrganization && live ? live : incoming;
     return { ...summary, title: organization.title, nativeTitle: organization.nativeTitle,
-      pinned: organization.pinned, customTitle: organization.customTitle, groupId: organization.groupId };
+      pinned: organization.pinned, customTitle: organization.customTitle };
   }
 
-  async refreshSessionGroups(): Promise<void> {
+  async refreshProjectOrder(): Promise<void> {
     const version = this.organizationVersion;
     try {
-      const groups = await fetchSessionGroups();
-      if (version === this.organizationVersion) this.sessionGroups = groups;
+      const paths = await fetchProjectOrder();
+      if (version === this.organizationVersion) this.projectOrder = paths;
     } catch (error) {
       this.lastError = { message: error instanceof Error ? error.message : String(error) };
     }
@@ -1884,27 +1934,11 @@ export class Store {
     this.notify();
   }
 
-  async createSessionGroup(name: string): Promise<SessionGroup> {
-    const group = await createSessionGroup(name);
-    if (!this.sessionGroups.some((item) => item.id === group.id)) this.sessionGroups = [...this.sessionGroups, group];
-    this.organizationVersion++;
-    this.notify();
-    return group;
-  }
-
-  async renameSessionGroup(id: string, name: string): Promise<void> {
+  async moveProject(path: string, target: { before: string } | { after: string }): Promise<void> {
     const version = this.organizationVersion;
-    const group = await renameSessionGroup(id, name);
-    if (version === this.organizationVersion) this.sessionGroups = this.sessionGroups.map((item) => item.id === id ? group : item);
-    this.organizationVersion++;
-    this.notify();
-  }
-
-  async deleteSessionGroup(id: string): Promise<void> {
-    const version = this.organizationVersion;
-    const groups = await deleteSessionGroup(id);
-    if (version === this.organizationVersion) this.sessionGroups = groups;
-    this.sessions = this.sessions.map((session) => session.groupId === id ? { ...session, groupId: undefined } : session);
+    const paths = await moveProjectOrder(path, target);
+    // 广播若先到，以广播的最新完整顺序为准；迟到 POST 不能撤销别的页面的移动。
+    if (version === this.organizationVersion) this.projectOrder = paths;
     this.organizationVersion++;
     this.notify();
   }
@@ -1912,7 +1946,7 @@ export class Store {
   /**
    * 从工作台移除会话：DELETE 注册表条目 + 停 worker（原生 transcript 不动）。
    * 成功后清该会话全部本地状态；删的是当前会话时导航到左栏顺序的下一个会话
-   * （与左栏同序：有未决闸门的优先，其余按最后活动时间倒序），无剩余则回空态。
+   * （等待处理 → 置顶 → 服务端目录顺序，各区内活动时间倒序），无剩余则回空态。
    * 失败抛错由调用方展示。
    */
   async remove(id: string, permanently = false): Promise<void> {
@@ -1956,14 +1990,8 @@ export class Store {
     this.olderInflight.delete(id);
     this.replayBuffers.delete(id);
     if (this.currentId === id) {
-      // 与左栏同序：有未决闸门的优先（最后活动倒序），其次普通会话，最后才是折叠区的 dead
-      const remaining = [...this.sessions].sort(
-        (a, b) => Date.parse(b.lastActivityAt) - Date.parse(a.lastActivityAt),
-      );
-      const next =
-        remaining.filter((s) => this.pendingCount(s.id) > 0)[0] ??
-        remaining.filter((s) => s.status !== "dead")[0] ??
-        remaining[0];
+      const { waiting, pinned, projects, olderProjects } = selectSidebarSections(this);
+      const next = [...waiting, ...pinned, ...projects.flatMap(project => project.sessions), ...olderProjects.flatMap(project => project.sessions)][0];
       this.navigate(next?.id ?? null);
     }
     // 删除只动注册表：明示原生对话记录仍在，可凭原生 id 续接

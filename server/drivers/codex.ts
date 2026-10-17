@@ -237,19 +237,19 @@ export function codexConfigSchemaFromModels(
       }).map(item => ({ value: item.reasoningEffort, label: item.reasoningEffort,
         ...(item.description ? { description: item.description } : {}) })),
     ];
-    defaultsByModel[id] = valuesByModel[id].some(item => item.value === model.defaultReasoningEffort)
-      ? model.defaultReasoningEffort! : null;
+    const defaultEffort = valuesByModel[id].some(item => item.value === configuredEffort)
+      ? configuredEffort : model.defaultReasoningEffort;
+    defaultsByModel[id] = effectiveConfig !== undefined && valuesByModel[id].some(item => item.value === defaultEffort)
+      ? defaultEffort! : null;
   }
   const effectiveModelId = effectiveModel?.model ?? effectiveModel?.id;
   const efforts = effectiveModelId ? valuesByModel[effectiveModelId] ?? legacyEfforts : legacyEfforts;
-  const builtInEffort = efforts.some(item => item.value === effectiveModel?.defaultReasoningEffort)
-    ? effectiveModel!.defaultReasoningEffort!
-    : null;
   // effectiveConfig === undefined 表示 config/read 不可用；此时宁可报告未知，也不猜内建默认值。
   const defaultModel = effectiveConfig === undefined
     ? null
     : configuredModel ?? (String(builtInDefaultModel?.model ?? builtInDefaultModel?.id ?? "") || null);
-  const defaultEffort = effectiveConfig === undefined ? null : configuredEffort ?? builtInEffort;
+  const defaultEffort = effectiveConfig === undefined ? null
+    : effectiveModelId ? defaultsByModel[effectiveModelId] ?? null : configuredEffort ?? null;
   return {
     source: "Codex app-server config/read, model/list and v2 protocol schema",
     options: [

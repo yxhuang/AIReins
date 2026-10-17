@@ -18,8 +18,9 @@ export function configOptionsForModel<T extends ModelConfigOption>(options: T[],
   return options.map(option => {
     const values = selected ? option.valuesByModel?.[selected] : undefined;
     if (!values) return option;
-    const defaultValue = values.some(value => value.value === option.default)
-      ? option.default : option.defaultsByModel?.[selected!] ?? null;
+    const modelDefault = selected ? option.defaultsByModel?.[selected] : undefined;
+    const defaultValue = modelDefault !== undefined ? modelDefault
+      : values.some(value => value.value === option.default) ? option.default : null;
     return { ...option, values, default: defaultValue };
   });
 }

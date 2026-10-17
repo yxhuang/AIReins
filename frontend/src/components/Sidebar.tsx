@@ -1,22 +1,17 @@
-import { t, dictionaries } from "../i18n";
-import { useCallback, useEffect, useRef, useState, type Dispatch, type MouseEvent, type ReactNode, type SetStateAction } from "react";
-import type { AgentKind, ConfigOptionId, DriverConfigOption, SessionGroup, SessionRecord } from "../types";
+import { t } from "../i18n";
+import { useCallback, useEffect, useRef, useState, type DragEvent, type MouseEvent, type ReactNode } from "react";
+import type { AgentKind, SessionRecord } from "../types";
 import { relativeTime, relativeTimeShort, sessionTitle } from "../format";
 import { AgentIcon } from "./AgentIcon";
 import { isInlineSvg } from "../pages";
-import type { CreateSessionInput } from "../api";
 import { store, type Store } from "../store";
-import { selectSidebarSections, sidebarStatusDot } from "../sidebar-sessions";
+import { projectDisplayPath, selectSidebarSections, selectProjectSessions, sidebarStatusDot } from "../sidebar-sessions";
 import { lockSidebarSwipe, normalizeSidebarTitle, sidebarSwipeOffset } from "../sidebar-menu";
 import { SidebarActionMenu, type SidebarMenuItem } from "./SidebarActionMenu";
 import { useStore } from "../useStore";
 import { LauncherMenu } from "./LauncherMenu";
 import { SettingsMenu } from "./SettingsMenu";
 import { HostSwitcher } from "./HostSwitcher";
-import { ConfigPills, type MenuGroup } from "./ConfigMenu";
-import { configOptionsForModel, modelConfigPatch, newSessionConfig, pillText } from "../config-view";
-import { DirectoryContents } from "./DirectoryBrowser";
-import { normalizeDirectoryPath } from "../directory-path";
 import { HistoryView } from "./HistoryView";
 import { PageView } from "./PageView";
 import { SidebarResize } from "./SidebarResize";
@@ -46,8 +41,6 @@ const STATUS_HINTS: Record<string, string> = {
   dead: t("ui.Sidebar.ended_the_process_has_exited_create_a"),
 };
 
-const CWD_STORAGE_KEY = "workbench-last-cwd";
-
 const selectSessions = (value: Store) => value.sessions;
 const selectNow = (value: Store) => value.now;
 const selectMeta = (value: Store) => value.meta;
@@ -57,42 +50,44 @@ const selectCurrentId = (value: Store) => value.currentId;
 const selectPendingSignature = (value: Store) =>
   value.sessions.map((session) => `${session.id}:${value.pendingCount(session.id)}`).join("|");
 
-// 隐私模式下 localStorage 访问器本身就会抛异常，与主题读写同一纪律：try/catch 兜底。
-function readSavedCwd(): string {
-  try {
-    return localStorage.getItem(CWD_STORAGE_KEY)?.trim() ?? "";
-  } catch {
-    return "";
-  }
-}
-
-// cwd 预填三级回退：① localStorage 里上次成功建会话的 cwd → ② 最近活跃会话的 cwd → ③ /api/meta 的 defaultCwd
-function pickInitialCwd(): string {
-  const saved = readSavedCwd();
-  if (saved) return saved;
-  const latest = [...store.sessions].sort(
-    (a, b) => Date.parse(b.lastActivityAt) - Date.parse(a.lastActivityAt),
-  )[0];
-  if (latest?.cwd) return latest.cwd;
-  return store.meta?.defaultCwd ?? "";
-}
-
 interface SidebarProps {
   collapsed: boolean;
   onToggle: () => void;
-  newOpen: boolean;
-  onNewOpenChange: (open: boolean) => void;
   returnToSession?: boolean;
   /** 手机列表页并进顶栏同一行的面板开关（文件/终端/派单）；桌面由 CSS 隐藏 */
   mobileActions?: ReactNode;
 }
 
-export function Sidebar({ collapsed, onToggle, newOpen, onNewOpenChange, returnToSession = false, mobileActions }: SidebarProps) {
+export function Sidebar({ collapsed, onToggle, returnToSession = false, mobileActions }: SidebarProps) {
   const sessionRecords = useStore(selectSessions);
-  const sessionGroups = useStore((value) => value.sessionGroups);
-  const [collapsedGroups, toggleGroup] = usePersistedSet("workbench-collapsed-session-groups", []);
-  const [collapsedSections, toggleSection] = usePersistedSet("workbench-collapsed-time-sections", []);
-  const earlierOpen = useStore((value) => value.sidebarEarlierOpen);
+  const projectOrder = useStore((value) => value.projectOrder);
+  const meta = useStore(selectMeta);
+  const [projectFolds, setProjectFold] = usePersistedProjectFolds();
+  const [olderProjectsOpen, setOlderProjectsOpen] = useState(() => {
+    try { return localStorage.getItem("aireins-older-projects-open") === "1"; } catch { return false; }
+  });
+  const [expandedProjects, setExpandedProjects] = useState(() => new Set<string>());
+  const toggleOlderProjects = (open: boolean) => {
+    setOlderProjectsOpen(open);
+    try { localStorage.setItem("aireins-older-projects-open", open ? "1" : "0"); } catch { /* 私密模式保留内存态 */ }
+  };
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const searchRef = useRef<HTMLInputElement>(null);
+  const searchButtonRef = useRef<HTMLButtonElement>(null);
+  const [previewPaths, setPreviewPaths] = useState<string[] | null>(null);
+  const draggedPath = useRef<string | null>(null);
+  const dropBeforePath = useRef<string | null>(null);
+  const [orderError, setOrderError] = useState<string | null>(null);
+  const [canDrag, setCanDrag] = useState(false);
+  useEffect(() => {
+    const media = window.matchMedia("(min-width: 721px)");
+    const update = () => setCanDrag(media.matches);
+    update();
+    media.addEventListener("change", update);
+    return () => media.removeEventListener("change", update);
+  }, []);
+  useEffect(() => { if (searchOpen) searchRef.current?.focus(); }, [searchOpen]);
   const now = useStore(selectNow);
   const currentId = useStore(selectCurrentId);
   const panelOpen = useStore((value) => value.historyOpen || value.currentPageId !== null);
@@ -123,15 +118,9 @@ export function Sidebar({ collapsed, onToggle, newOpen, onNewOpenChange, returnT
   // pendingGates 是可变 Map；用可比较的原始字符串捕获“总数相同但分布换了会话”的变化。
   useStore(selectPendingSignature);
   const [swipedId, setSwipedId] = useState<string | null>(null);
-  const [newCwd, setNewCwd] = useState<string | undefined>();
-  // 历史面板已选定目录时，「新建会话」直接以该目录为默认工作目录
+  // 历史目录与组标题 + 都使用同一主页入口。
   const historyCwd = useStore(selectHistoryNewCwd);
-  const newSessionIn = (cwd: string) => {
-    setNewCwd(cwd);
-    if (window.matchMedia("(max-width: 720px)").matches) store.navigate(null);
-    else store.closeSidebarPanel();
-    onNewOpenChange(true);
-  };
+  const newSessionIn = (cwd?: string) => store.navigateNew(cwd);
   useEffect(() => {
     if (!swipedId) return;
     const close = (event: Event) => {
@@ -153,7 +142,18 @@ export function Sidebar({ collapsed, onToggle, newOpen, onNewOpenChange, returnT
   }, [swipedId]);
   // 复用 selectNow 订阅的全局时钟，时间越界也刷新；只筛侧栏，不裁剪完整 sessions。
   // 当前打开的旧非 dead 会话临时留在主列表，切走后恢复 72 小时规则。
-  const { waiting, pinned, groups, sections } = selectSidebarSections({ ...store, sessions: sessionRecords, sessionGroups, now, currentId, pendingCount: store.pendingCount.bind(store) });
+  const { waiting, pinned, projects: selectedProjects, olderProjects } = selectSidebarSections({ ...store, sessions: sessionRecords, projectOrder, now, currentId, pendingCount: store.pendingCount.bind(store) }, query);
+  const projects = previewPaths ? [...selectedProjects].sort((a, b) => previewPaths.indexOf(a.path) - previewPaths.indexOf(b.path)) : selectedProjects;
+  const searching = query.trim().length > 0;
+  const dropProject = async (before: string) => {
+    const path = draggedPath.current;
+    if (!path || path === before) return;
+    draggedPath.current = null;
+    dropBeforePath.current = null;
+    try { await store.moveProject(path, { before }); }
+    catch (error) { setOrderError(error instanceof Error ? error.message : String(error)); }
+    finally { setPreviewPaths(null); }
+  };
   const totalSessions = sessionRecords.length;
   // 收起态仍要能看到全局待审批压力：全部会话未决闸门总数。
   const totalPending = sessionRecords.reduce(
@@ -165,7 +165,6 @@ export function Sidebar({ collapsed, onToggle, newOpen, onNewOpenChange, returnT
     <li key={session.id}>
       <SessionRow
         session={session}
-        groups={sessionGroups}
         pending={store.pendingCount(session.id)}
         active={session.id === currentId}
         now={now}
@@ -175,8 +174,50 @@ export function Sidebar({ collapsed, onToggle, newOpen, onNewOpenChange, returnT
     </li>
   );
 
+  const renderProject = (project: typeof projects[number], index: number, sortable = true) => {
+    const working = project.sessions.some(session => session.id === currentId
+      || ["running", "starting", "needs-user"].includes(sidebarStatusDot(session, store.pendingCount(session.id), now) ?? ""));
+    const folded = !searching && (projectFolds[project.path] ? projectFolds[project.path] === "closed" : !working);
+    const expanded = expandedProjects.has(project.path);
+    const visible = selectProjectSessions(project.sessions, { now, currentId, pendingCount: store.pendingCount.bind(store), expanded, searching });
+    return <li key={project.path} className="sidebar-project" data-project-path={project.path}
+      onDragOver={sortable ? (event) => {
+        const path = draggedPath.current;
+        if (!path) return;
+        event.preventDefault(); event.dataTransfer.dropEffect = "move";
+        if (path === project.path) return;
+        dropBeforePath.current = project.path;
+        setPreviewPaths(previous => {
+          const next = (previous ?? projects.map(item => item.path)).filter(item => item !== path);
+          next.splice(next.indexOf(project.path), 0, path);
+          return next;
+        });
+      } : undefined}
+      onDrop={sortable ? (event) => { event.preventDefault(); if (dropBeforePath.current) void dropProject(dropBeforePath.current); } : undefined}>
+      <ProjectHeader project={project} collapsed={folded} now={now}
+        windowsPaths={meta?.capabilities.windowsPaths === true}
+        previous={sortable ? projects[index - 1]?.path : undefined} next={sortable ? projects[index + 1]?.path : undefined}
+        onToggle={() => setProjectFold(project.path, folded ? "open" : "closed")} onNew={() => newSessionIn(project.path)}
+        sortable={sortable} draggable={sortable && canDrag}
+        onDragStart={(event) => {
+          draggedPath.current = project.path; dropBeforePath.current = null; setOrderError(null);
+          event.dataTransfer.effectAllowed = "move"; event.dataTransfer.setData("text/plain", project.path);
+        }}
+        onDragEnd={() => { if (draggedPath.current) { draggedPath.current = null; dropBeforePath.current = null; setPreviewPaths(null); } }} />
+      {!folded && <ul className="session-list project-session-list" id={`project-${encodeURIComponent(project.path)}`}>{visible.sessions.map(renderRow)}
+        {!searching && (visible.hiddenCount > 0 || expanded) && <li>
+          <button type="button" className="project-show-more" aria-expanded={expanded} onClick={() => setExpandedProjects(previous => {
+            const next = new Set(previous);
+            if (expanded) next.delete(project.path); else next.add(project.path);
+            return next;
+          })}>{expanded ? t("ui.common.collapse") : t("ui.Sidebar.show_more_sessions", { count: visible.hiddenCount })}</button>
+        </li>}
+      </ul>}
+    </li>;
+  };
+
   return (
-    <aside className={`sidebar${pageOpen && !collapsed ? " sidebar-page-open" : ""}${newOpen && !collapsed ? " sidebar-new-open" : ""}`} ref={sidebarRef}>
+    <aside className={`sidebar${pageOpen && !collapsed ? " sidebar-page-open" : ""}${searchOpen && !collapsed ? " sidebar-search-open" : ""}`} ref={sidebarRef}>
       <div className="sidebar-head">
         <HostSwitcher />
         {/* Chrome --app 窗口和主屏幕 PWA 没有地址栏和刷新键 */}
@@ -211,27 +252,36 @@ export function Sidebar({ collapsed, onToggle, newOpen, onNewOpenChange, returnT
       {!collapsed && (
         <>
           <div className="sidebar-new-row">
+            {searchOpen ? <input
+              ref={searchRef}
+              className="sidebar-search-input"
+              type="search"
+              aria-label={t("ui.Sidebar.search_sessions")}
+              placeholder={t("ui.Sidebar.search_sessions")}
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              onBlur={() => { if (!query.trim()) setSearchOpen(false); }}
+              onKeyDown={(event) => {
+                if (event.key !== "Escape") return;
+                event.preventDefault(); event.stopPropagation();
+                setQuery(""); setSearchOpen(false);
+                requestAnimationFrame(() => searchButtonRef.current?.focus());
+              }}
+            /> : <>
             <button
               type="button"
               className="btn btn-new btn-new-session"
-              aria-expanded={newOpen}
-              aria-label={newOpen ? t("ui.Sidebar.cancel_creation") : t("ui.common.new_session")}
-              onClick={() => {
-                if (!newOpen && historyCwd) { newSessionIn(historyCwd); return; }
-                if (panelOpen) store.closeSidebarPanel(window.matchMedia("(max-width: 720px)").matches);
-                setNewCwd(undefined);
-                onNewOpenChange(!newOpen);
-              }}
+              aria-label={t("ui.common.new_session")}
+              onClick={() => newSessionIn(historyCwd || undefined)}
             >
-              {/* 收起即卸载表单、丢掉未提交的输入，所以叫「取消」而不是「收起」 */}
               <svg className="new-session-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
-              <span className="new-session-label">{newOpen ? t("ui.Sidebar.cancel_creation") : t("ui.common.new_session")}</span>
-              <span className="new-session-label-compact" aria-hidden="true">{newOpen ? t("ui.common.cancel") : t("ui.Sidebar.new")}</span>
+              <span className="new-session-label">{t("ui.common.new_session")}</span>
+              <span className="new-session-label-compact" aria-hidden="true">{t("ui.Sidebar.new")}</span>
             </button>
-            {/* chatgpt.com 禁止 iframe（X-Frame-Options: SAMEORIGIN），只能开独立窗口；已开就切过去，不重载丢页面 */}
-            <button type="button" className="btn btn-new sidebar-chatgpt" aria-label={t("ui.Sidebar.open_chatgpt_on_the_web")} title={t("ui.Sidebar.open_chatgpt_on_the_web_in_a")} onClick={openChatGPT}>
-              ChatGPT <span className="sidebar-chatgpt-arrow" aria-hidden="true">↗</span>
+            <button ref={searchButtonRef} type="button" className="btn btn-new sidebar-search" aria-label={t("ui.Sidebar.search_sessions")} title={t("ui.Sidebar.search_sessions")} onClick={() => { if (panelOpen) store.closeSidebarPanel(window.matchMedia("(max-width: 720px)").matches); setSearchOpen(true); }}>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5" /><path d="m16 16 5 5" /></svg>
             </button>
+            </>}
           </div>
           {/* 手机列表页右上角的文件 / 终端 / 派单（桌面隐藏）；放在新建行之后，网格里排到最右列 */}
           {mobileActions && <span className="mobile-panel-launcher">{mobileActions}</span>}
@@ -240,7 +290,6 @@ export function Sidebar({ collapsed, onToggle, newOpen, onNewOpenChange, returnT
       <div className="sidebar-body">
         {!collapsed && (
           <div className="sidebar-session-area" inert={panelOpen} aria-hidden={panelOpen || undefined}>
-            {newOpen && <NewSessionForm initialCwd={newCwd} onDone={() => onNewOpenChange(false)} />}
             <ul className="session-list">
               {waiting.length > 0 && (
                 // 分区标题复用 .page-nav-title 的中性小字语言；暖色仍只出现在行内闸门徽标上
@@ -249,26 +298,22 @@ export function Sidebar({ collapsed, onToggle, newOpen, onNewOpenChange, returnT
               {waiting.map(renderRow)}
               {pinned.length > 0 && <li className="sidebar-section-label" role="presentation"><span>{t("ui.Sidebar.pinned")}</span></li>}
               {pinned.map(renderRow)}
-              {groups.map(group => <li key={group.id} className="sidebar-session-group">
-                <SessionGroupHeader group={group} collapsed={collapsedGroups.has(group.id)} onToggle={() => toggleGroup(group.id)} />
-                {!collapsedGroups.has(group.id) && <ul className="session-list session-group-list" id={`session-group-${group.id}`}>{group.sessions.map(renderRow)}</ul>}
-              </li>)}
-              {sections.map(section => {
-                // Keep the legacy stored labels stable when the interface language changes.
-                const key = ["core.084", "core.085", "core.086"].find(key => t(key) === section.label);
-                const storageKey = key ? dictionaries["zh-CN"][key]! : section.label;
-                const earlier = key === "core.086";
-                const folded = earlier ? !earlierOpen : collapsedSections.has(storageKey);
-                return <li className="sidebar-time-section" key={section.label}>
-                  <button type="button" className="sidebar-section-toggle" aria-expanded={!folded}
-                    aria-controls={`time-section-${section.label}`} onClick={() => earlier ? store.toggleSidebarEarlier() : toggleSection(storageKey)}>
-                    <span>{section.label}</span>
-                    <svg className={`sidebar-section-chevron${folded ? " collapsed" : ""}`} width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.25" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg>
-                  </button>
-                  {!folded && <ul className="session-list" id={`time-section-${section.label}`}>{section.sessions.map(renderRow)}</ul>}
-                </li>;
-              })}
-              {waiting.length === 0 && pinned.length === 0 && groups.every(group => group.sessions.length === 0) && sections.length === 0 && (
+              {projects.map((project, index) => renderProject(project, index))}
+              {olderProjects.length > 0 && <li className="sidebar-older-projects">
+                <button type="button" className="project-toggle older-projects-toggle"
+                  aria-expanded={searching || olderProjectsOpen} aria-controls="older-project-list"
+                  onClick={() => toggleOlderProjects(!(searching || olderProjectsOpen))}>
+                  <svg className={`older-project-chevron${searching || olderProjectsOpen ? "" : " collapsed"}`} width="14" height="14" viewBox="0 0 24 24"
+                    fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg>
+                  <span>{t("ui.Sidebar.older_projects", { count: olderProjects.length })}</span>
+                </button>
+                {(searching || olderProjectsOpen) && <ul className="session-list older-project-list" id="older-project-list">
+                  {olderProjects.map((project, index) => renderProject(project, index, false))}
+                </ul>}
+              </li>}
+              {orderError && <li className="session-confirm-error" role="alert">{orderError}</li>}
+              {searching && <li><button type="button" className="sidebar-history-search" onClick={() => store.navigateHistory(undefined, query.trim())}>{t("ui.Sidebar.search_history", { query: query.trim() })}</button></li>}
+              {waiting.length === 0 && pinned.length === 0 && projects.length === 0 && olderProjects.length === 0 && !searching && (
                 <li className="session-list-empty">{totalSessions === 0 ? t("ui.Sidebar.no_sessions_yet") : t("ui.Sidebar.no_sessions_in_the_last_3_days")}</li>
               )}
             </ul>
@@ -440,7 +485,6 @@ function MoreDotsIcon() {
 
 function SessionRow({
   session,
-  groups,
   pending,
   active,
   now,
@@ -448,7 +492,6 @@ function SessionRow({
   onSwipeChange,
 }: {
   session: SessionRecord;
-  groups: SessionGroup[];
   pending: number;
   active: boolean;
   now: number;
@@ -465,9 +508,7 @@ function SessionRow({
   const cancelBtnRef = useRef<HTMLButtonElement>(null);
   // 行菜单（悬停 ⋮ / 右键 / 长按 / 左滑 ⋮ 同一个）：fixed 定位在指针处；长按触发后吞掉随后那次 click
   const [menuAt, setMenuAt] = useState<{ x: number; y: number } | null>(null);
-  const [menuScreen, setMenuScreen] = useState<"main" | "group" | "new-group">("main");
   const [menuError, setMenuError] = useState<string | null>(null);
-  const [newGroupName, setNewGroupName] = useState("");
   const menuClosedAt = useRef(0);
   const longPressTimer = useRef<number | undefined>(undefined);
   const longPressStart = useRef<{ x: number; y: number } | null>(null);
@@ -552,18 +593,15 @@ function SessionRow({
 
   const closeMenu = useCallback((returnFocus = false) => {
     setMenuAt(null);
-    setMenuScreen("main");
     setMenuError(null);
-    setNewGroupName("");
     menuClosedAt.current = Date.now();
     if (returnFocus) rowRef.current?.focus();
   }, []);
   const openMenu = (x: number, y: number) => {
     onSwipeChange(null);
-    setMenuScreen("main");
     setMenuError(null);
-    // 别贴出视口：菜单约 220 宽、主屏约 200 高（分组子屏内部滚动）
-    setMenuAt({ x: Math.max(8, Math.min(x, window.innerWidth - 228)), y: Math.max(8, Math.min(y, window.innerHeight - 208)) });
+    // 完整路径可换行；菜单受视口高度限制并可滚动。
+    setMenuAt({ x: Math.max(8, Math.min(x, window.innerWidth - 228)), y: Math.max(8, Math.min(y, window.innerHeight - 300)) });
   };
   // ⋮ 按钮的点击与菜单的 pointerdown 外点关闭是同一手势：刚被关掉的那次点击不再重开
   const toggleMenuAt = (event: MouseEvent<HTMLButtonElement>) => {
@@ -578,7 +616,7 @@ function SessionRow({
     longPressStart.current = null;
   };
 
-  // 菜单动作失败就留在菜单里就地报错（pin/移动分组走 PATCH，可能撞 400/404）
+  // 菜单动作失败留在原处就地报错。
   const runMenuAction = async (action: () => Promise<unknown>) => {
     setMenuError(null);
     try {
@@ -616,15 +654,6 @@ function SessionRow({
     setRenameError(null);
     requestAnimationFrame(() => rowRef.current?.focus());
   };
-  const createGroupAndMove = async () => {
-    const name = normalizeSidebarTitle(newGroupName);
-    if (!name) return;
-    await runMenuAction(async () => {
-      const group = await store.createSessionGroup(name);
-      await store.patchSession(session.id, { groupId: group.id });
-    });
-  };
-
   const confirm = async () => {
     if (busy) return;
     setBusy(true);
@@ -656,26 +685,9 @@ function SessionRow({
     { id: "pin", label: session.pinned ? t("ui.Sidebar.unpin") : t("ui.Sidebar.pin"), icon: "pin", shortcut: "P",
       onSelect: () => void runMenuAction(() => store.patchSession(session.id, { pinned: !session.pinned })) },
     { id: "rename", label: t("ui.Sidebar.rename"), icon: "rename", shortcut: "R", onSelect: startRename },
-    { id: "move", label: t("ui.common.move_to_group"), icon: "folder", trailing: "›", onSelect: () => setMenuScreen("group") },
     { id: "delete", label: t("ui.common.remove"), icon: "delete", shortcut: "D", divider: true, onSelect: () => beginConfirm() },
     ...(session.agent === "claude" ? [] : [{ id: "permanent-delete", label: t("ui.common.permanently_delete"), icon: "delete" as const, danger: true, onSelect: () => beginConfirm(true) }]),
   ];
-  const groupItems: SidebarMenuItem[] = [
-    { id: "back", label: t("ui.common.back"), icon: "back", onSelect: () => setMenuScreen("main") },
-    ...groups.map((group) => ({
-      id: `group:${group.id}`, label: group.name, icon: "folder" as const,
-      onSelect: () => void runMenuAction(() => store.patchSession(session.id, { groupId: group.id })),
-    })),
-    { id: "new-group", label: t("ui.Sidebar.new_group"), icon: "plus", divider: groups.length > 0, onSelect: () => setMenuScreen("new-group") },
-    ...(session.groupId ? [{
-      id: "leave-group", label: t("ui.Sidebar.remove_from_group"), icon: "ungroup" as const, divider: true,
-      onSelect: () => void runMenuAction(() => store.patchSession(session.id, { groupId: null })),
-    }] : []),
-  ];
-  const newGroupItems: SidebarMenuItem[] = [
-    { id: "back", label: t("ui.common.back"), icon: "back", onSelect: () => setMenuScreen("group") },
-  ];
-
   if (confirming) {
     if (permanently) return <PermanentDeleteConfirm session={session} busy={busy} error={error}
       onCancel={cancelConfirm} onConfirm={() => void confirm()} />;
@@ -848,374 +860,99 @@ function SessionRow({
           position={menuAt}
           label={t("ui.Sidebar.actions_for_session", { p0: (shortTitle) })}
           items={mainItems}
-          submenuItems={menuScreen === "group" ? groupItems : menuScreen === "new-group" ? newGroupItems : undefined}
+          description={projectDisplayPath(session.cwd, store.meta?.capabilities.windowsPaths === true)}
           error={menuError}
           onClose={(returnFocus) => closeMenu(returnFocus === true)}
         >
-          {menuScreen === "new-group" && (
-            <form
-              className="row-menu-newgroup"
-              onSubmit={(e) => {
-                e.preventDefault();
-                void createGroupAndMove();
-              }}
-            >
-              <input
-                className="row-menu-input"
-                value={newGroupName}
-                placeholder={t("ui.Sidebar.group_name_press_enter_to_create_and")}
-                aria-label={t("ui.Sidebar.new_group_name")}
-                onChange={(e) => setNewGroupName(e.target.value)}
-                onKeyDown={(e) => e.stopPropagation()}
-              />
-            </form>
-          )}
         </SidebarActionMenu>
       )}
     </div>
   );
 }
 
-/** 用户分组标题：整行折叠/展开，右侧 ⋮ 弹分组操作（重命名分组 / 删除分组＝成员移回普通分区）。 */
-/** 折叠状态按设备记在 localStorage；隐私模式读写会抛，退回内存态。 */
-function usePersistedSet(key: string, fallback: string[]): [Set<string>, (id: string) => void] {
-  const [value, setValue] = useState<Set<string>>(() => {
+/** 只保存手动选择；无记录时跟随工作状态。隐私模式读写会抛，退回内存态。 */
+function usePersistedProjectFolds(): [Record<string, "open" | "closed">, (path: string, state: "open" | "closed") => void] {
+  const key = "aireins-project-folds";
+  const [value, setValue] = useState<Record<string, "open" | "closed">>(() => {
     try {
       const raw = localStorage.getItem(key);
-      const saved: unknown = raw === null ? fallback : JSON.parse(raw);
-      return new Set(Array.isArray(saved) ? saved.filter((id): id is string => typeof id === "string") : fallback);
-    } catch { return new Set(fallback); }
+      const saved: unknown = raw === null ? {} : JSON.parse(raw);
+      return saved && typeof saved === "object" && !Array.isArray(saved)
+        ? Object.fromEntries(Object.entries(saved).filter((entry): entry is [string, "open" | "closed"] => entry[1] === "open" || entry[1] === "closed")) : {};
+    } catch { return {}; }
   });
-  const toggle = (id: string) => setValue(previous => {
-    const next = new Set(previous);
-    if (next.has(id)) next.delete(id); else next.add(id);
-    try { localStorage.setItem(key, JSON.stringify([...next])); } catch { /* 私密模式保留当前设备内存态 */ }
+  const setFold = (path: string, state: "open" | "closed") => setValue(previous => {
+    const next = { ...previous, [path]: state };
+    try { localStorage.setItem(key, JSON.stringify(next)); } catch { /* 私密模式保留当前设备内存态 */ }
     return next;
   });
-  return [value, toggle];
+  return [value, setFold];
 }
 
-function SessionGroupHeader({
-  group,
-  collapsed,
-  onToggle,
-}: {
-  group: SessionGroup;
-  collapsed: boolean;
-  onToggle: () => void;
+function ProjectHeader({ project, collapsed, onToggle, onNew, previous, next, now, windowsPaths,
+  sortable = true, draggable, onDragStart, onDragEnd }: {
+  project: ReturnType<typeof selectSidebarSections>["projects"][number];
+  collapsed: boolean; onToggle: () => void; onNew: () => void;
+  previous?: string; next?: string; now: number; windowsPaths: boolean;
+  sortable?: boolean; draggable: boolean; onDragStart: (event: DragEvent<HTMLDivElement>) => void; onDragEnd: () => void;
 }) {
   const [menuAt, setMenuAt] = useState<{ x: number; y: number } | null>(null);
   const [menuError, setMenuError] = useState<string | null>(null);
   const menuClosedAt = useRef(0);
   const moreRef = useRef<HTMLButtonElement>(null);
-  const [renaming, setRenaming] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const renameRef = useRef<HTMLInputElement>(null);
-  const renameGuard = useRef(false);
-
-  useEffect(() => {
-    if (renaming) {
-      renameRef.current?.focus();
-      renameRef.current?.select();
-    }
-  }, [renaming]);
-
+  const pointerType = useRef<string | null>(null);
   const closeMenu = (returnFocus = false) => {
-    setMenuAt(null);
-    setMenuError(null);
-    menuClosedAt.current = Date.now();
+    setMenuAt(null); setMenuError(null); menuClosedAt.current = Date.now();
     if (returnFocus) moreRef.current?.focus();
   };
-  const toggleMenu = (event: MouseEvent<HTMLButtonElement>) => {
-    event.stopPropagation();
-    if (menuAt) { closeMenu(true); return; }
-    if (Date.now() - menuClosedAt.current < 250) return;
-    const rect = event.currentTarget.getBoundingClientRect();
-    setMenuAt({ x: Math.max(8, Math.min(rect.left, window.innerWidth - 228)), y: Math.max(8, Math.min(rect.bottom + 4, window.innerHeight - 130)) });
-  };
-  const saveRename = async () => {
-    const input = renameRef.current;
-    if (!input || busy) return;
-    const name = normalizeSidebarTitle(input.value);
-    if (!name || name === group.name) { renameGuard.current = true; setRenaming(false); return; }
-    setBusy(true);
-    try {
-      await store.renameSessionGroup(group.id, name);
-      renameGuard.current = true;
-      setRenaming(false);
-      setError(null);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-      setBusy(false);
-    }
-  };
-  const removeGroup = async () => {
+  const move = async (target: { before: string } | { after: string }) => {
     setMenuError(null);
-    try {
-      // 只删分组：成员会话移回普通分区（服务端清 groupId），不动会话本身
-      await store.deleteSessionGroup(group.id);
-      closeMenu();
-    } catch (e) {
-      setMenuError(e instanceof Error ? e.message : String(e));
-    }
+    try { await store.moveProject(project.path, target); closeMenu(true); }
+    catch (error) { setMenuError(error instanceof Error ? error.message : String(error)); }
   };
   const items: SidebarMenuItem[] = [
-    { id: "rename-group", label: t("ui.Sidebar.rename_group"), icon: "rename", onSelect: () => { closeMenu(); setError(null); setRenaming(true); } },
-    { id: "delete-group", label: t("ui.Sidebar.delete_group"), icon: "delete", danger: true, divider: true, onSelect: () => void removeGroup() },
+    ...(sortable ? [{ id: "move-up", label: t("ui.Sidebar.move_up"), icon: "up", disabled: !previous,
+      onSelect: () => { if (previous) void move({ before: previous }); } },
+    { id: "move-down", label: t("ui.Sidebar.move_down"), icon: "down", disabled: !next,
+      onSelect: () => { if (next) void move({ after: next }); } }] satisfies SidebarMenuItem[] : []),
+    { id: "history", label: t("ui.Sidebar.directory_history"), icon: "folder", divider: sortable,
+      onSelect: () => { closeMenu(); store.navigateHistory(project.path); } },
   ];
-
-  return (
-    <div className="session-group-header">
-      {renaming ? (
-        <input
-          ref={renameRef}
-          className="session-title-input session-group-title-input"
-          defaultValue={group.name}
-          aria-label={t("ui.Sidebar.rename_group_2", { p0: (group.name) })}
-          disabled={busy}
-          onKeyDown={(e) => {
-            e.stopPropagation();
-            if (e.key === "Enter") { e.preventDefault(); void saveRename(); }
-            if (e.key === "Escape") { e.preventDefault(); renameGuard.current = true; setRenaming(false); }
-          }}
-          onBlur={() => {
-            if (renameGuard.current) { renameGuard.current = false; return; }
-            void saveRename();
-          }}
-        />
-      ) : (
-        <button
-          type="button"
-          className="session-group-toggle"
-          aria-expanded={!collapsed}
-          aria-controls={`session-group-${group.id}`}
-          onClick={onToggle}
-        >
-          <svg className={`session-group-chevron${collapsed ? " collapsed" : ""}`} width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg>
-          <span className="session-group-name">{group.name}</span>
-        </button>
-      )}
-      <button
-        type="button"
-        ref={moreRef}
-        className="session-group-more"
-        aria-label={t("ui.Sidebar.group_actions_for", { p0: (group.name) })}
-        aria-haspopup="menu"
-        aria-expanded={menuAt !== null}
-        onClick={toggleMenu}
-      >
-        <MoreDotsIcon />
+  const dots = project.sessions.map(session => sidebarStatusDot(session, store.pendingCount(session.id), now));
+  const dot = ["needs-user", "error", "running", "starting"].find(value => dots.includes(value));
+  const fullPath = projectDisplayPath(project.path, windowsPaths);
+  return <div className="project-header" draggable={draggable} onPointerDown={(event) => { pointerType.current = event.pointerType; }}
+    onDragStart={(event) => {
+      if (!draggable || pointerType.current === "touch" || (event.target instanceof Element && event.target.closest(".project-actions"))) { event.preventDefault(); return; }
+      closeMenu(); onDragStart(event);
+    }} onDragEnd={onDragEnd}>
+    <button type="button" className="project-toggle" title={fullPath}
+      aria-expanded={!collapsed} aria-controls={`project-${encodeURIComponent(project.path)}`} onClick={onToggle}>
+      <svg className="project-folder" data-state={collapsed ? "closed" : "open"} width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        {collapsed ? <path d="M20 20H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h4l3 3h9a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2Z" />
+          : <><path d="M2 10V6a2 2 0 0 1 2-2h4l3 3h7a2 2 0 0 1 2 2v1" /><path d="M2 10h18a2 2 0 0 1 1.94 2.5l-1.54 6A2 2 0 0 1 18.46 20H6a2 2 0 0 1-1.94-1.5L2 10Z" /></>}
+      </svg>
+      <span className="project-name">{project.label}</span>
+      {collapsed && <>
+        {dot && <span className={`status-dot status-${dot}`} aria-label={dot === "needs-user" ? t("ui.Sidebar.pending_status") : STATUS_LABELS[dot]} />}
+        <span className="project-count" aria-label={t("ui.Sidebar.project_session_count", { count: project.sessions.length })}>{project.sessions.length}</span>
+      </>}
+    </button>
+    <span className="project-actions">
+      <button type="button" className="project-action" aria-label={t("ui.Sidebar.new_in_directory", { path: project.label })} title={t("ui.Sidebar.new_in_directory", { path: fullPath })} onClick={onNew}>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
       </button>
-      {menuAt && (
-        <SidebarActionMenu
-          position={menuAt}
-          label={t("ui.Sidebar.group_actions_for", { p0: (group.name) })}
-          items={items}
-          error={menuError}
-          onClose={(returnFocus) => closeMenu(returnFocus === true)}
-        />
-      )}
-      {error && <p className="session-confirm-error session-group-error">{error}</p>}
-    </div>
-  );
+      <button type="button" ref={moreRef} className="project-action" aria-label={t("ui.Sidebar.directory_actions", { path: project.label })} aria-haspopup="menu" aria-expanded={menuAt !== null}
+        onClick={(event) => {
+          event.stopPropagation();
+          if (menuAt) { closeMenu(true); return; }
+          if (Date.now() - menuClosedAt.current < 250) return;
+          const rect = event.currentTarget.getBoundingClientRect();
+          setMenuAt({ x: Math.max(8, Math.min(rect.left, window.innerWidth - 228)), y: Math.max(8, Math.min(rect.bottom + 4, window.innerHeight - 220)) });
+        }}><MoreDotsIcon /></button>
+    </span>
+    {menuAt && <SidebarActionMenu position={menuAt} label={t("ui.Sidebar.directory_actions", { path: project.label })}
+      description={fullPath} items={items} error={menuError} onClose={closeMenu} />}
+  </div>;
 }
 
-let chatgptWin: Window | null = null;
-function openChatGPT() {
-  if (chatgptWin && !chatgptWin.closed) return chatgptWin.focus();
-  const w = Math.min(1100, screen.availWidth), h = screen.availHeight;
-  chatgptWin = window.open("https://chatgpt.com/", "wb-chatgpt", `popup,width=${w},height=${h},left=${screen.availWidth - w},top=0`);
-}
-
-function NewSessionForm({ onDone, initialCwd }: { onDone: () => void; initialCwd?: string }) {
-  const meta = useStore(selectMeta);
-  // 会话列表可能在表单挂载后才到；保留该订阅以触发 cwd 三级回退的补填 effect。
-  useStore(selectSessions);
-  const [agent, setAgent] = useState<AgentKind>("claude");
-  // startPath 只是内嵌浏览器的起点；cwd 跟随浏览器当前目录
-  const [startPath, setStartPath] = useState(() => initialCwd ?? pickInitialCwd());
-  const [cwd, setCwd] = useState(startPath);
-  // 用户在浏览器里点过/按过键后不再自动改起点
-  const cwdTouched = useRef(false);
-  const [message, setMessage] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const submitBtnRef = useRef<HTMLButtonElement>(null);
-  const formRef = useRef<HTMLFormElement>(null);
-  // 桌面「创建并进入」最低到侧栏一半高处（用户 10-16）；手机表单可占满列表区（用户 10-17）。
-  // 目录列表按剩余空间限高，最少留 6 行：笔记本等矮屏上一半处只够两行，此时表单越过一半（用户 10-16）
-  useEffect(() => {
-    const form = formRef.current;
-    const sidebar = form?.closest<HTMLElement>(".sidebar");
-    const area = form?.closest<HTMLElement>(".sidebar-session-area");
-    if (!form || !sidebar || !area || typeof ResizeObserver === "undefined") return;
-    const mobile = window.matchMedia("(max-width: 720px)");
-    const fit = () => {
-      const list = form.querySelector<HTMLElement>(".dir-list");
-      if (!list) return;
-      const box = sidebar.getBoundingClientRect();
-      const formBox = form.getBoundingClientRect();
-      const bottom = mobile.matches ? area.getBoundingClientRect().bottom - 8 : box.top + box.height / 2;
-      const rest = formBox.height - list.getBoundingClientRect().height;
-      const row = list.querySelector<HTMLElement>(".dir-entry")?.getBoundingClientRect().height || 29;
-      const floor = Math.max(58, row * 6 + 2);
-      list.style.maxHeight = `${Math.max(floor, bottom - formBox.top - rest)}px`;
-    };
-    const observer = new ResizeObserver(fit);
-    observer.observe(sidebar);
-    observer.observe(form);
-    mobile.addEventListener("change", fit);
-    return () => { observer.disconnect(); mobile.removeEventListener("change", fit); };
-  }, []);
-  // 三个配置下拉的已选值；"" = 跟随配置（不传该字段）。切 agent 时整体重置。
-  const [configSel, setConfigSel] = useState<Partial<Record<ConfigOptionId, string>>>(() => newSessionConfig("claude"));
-  const options = meta?.drivers[agent]?.options ?? [];
-
-  useEffect(() => {
-    if (initialCwd && !cwdTouched.current) setStartPath(initialCwd);
-  }, [initialCwd]);
-
-  // meta/会话列表可能晚于表单挂载到达：用户未动手且起点仍为空时补一次预填
-  useEffect(() => {
-    if (cwdTouched.current || startPath) return;
-    const next = pickInitialCwd();
-    if (next) setStartPath(next);
-  });
-
-  const submit = async () => {
-    if (!cwd.trim() || busy) return;
-    setBusy(true);
-    setError(null);
-    // 只把非默认（非「跟随配置」）的字段放进 config
-    const config = Object.fromEntries(
-      Object.entries(configSel).filter(([, value]) => value),
-    );
-    // 不做建会话前快照（2026-09-30 用户定）：显式 skip；后端默认值 10-01 起也是 skip
-    const input: CreateSessionInput = {
-      snapshot: "skip",
-      agent,
-      cwd: normalizeDirectoryPath(cwd, meta?.capabilities.windowsPaths === true),
-      ...(Object.keys(config).length > 0 ? { config } : {}),
-      ...(message.trim() ? { initialMessage: message.trim() } : {}),
-    };
-    try {
-      const session = await store.create(input);
-      // 记忆本次 cwd，下次新建直接预填（localStorage 不可用就跳过）
-      try {
-        localStorage.setItem(CWD_STORAGE_KEY, session.cwd);
-      } catch {
-        /* 仅本次不记忆 */
-      }
-      store.navigate(session.id);
-      onDone();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <form
-      ref={formRef}
-      className="new-form"
-      onSubmit={(e) => {
-        e.preventDefault();
-        void submit();
-      }}
-    >
-      <div className="new-agents" role="radiogroup" aria-label={t("ui.Sidebar.select_agent")}>
-        {(Object.keys(AGENT_LABELS) as AgentKind[]).map((kind) => (
-          <button
-            key={kind}
-            type="button"
-            className={`new-agent agent-${kind}${agent === kind ? " selected" : ""}`}
-            onClick={() => {
-              setAgent(kind);
-              // 选项随 agent 切换，已选值一并重置（别把 claude 的值发给 kimi）
-              setConfigSel(newSessionConfig(kind));
-            }}
-          >
-            {AGENT_LABELS[kind]}
-          </button>
-        ))}
-      </div>
-      <div className="new-field new-cwd" onPointerDownCapture={() => { cwdTouched.current = true; }} onKeyDownCapture={() => { cwdTouched.current = true; }}>
-        <p className="new-hint">{t("ui.Sidebar.paste_directory")}</p>
-        <DirectoryContents initialPath={startPath} includeFiles={false} allowWindowsPicker upIcon onPathChange={setCwd} onPathLost={() => setCwd("")} onSelectFile={() => {}} />
-      </div>
-      {/* 首条消息 + 配置胶囊：与会话输入框同一形态（胶囊直接显示当前值，点开选） */}
-      <div className="composer-box">
-        <textarea
-          value={message}
-          onChange={(e) => setMessage(e.target.value)}
-          rows={1}
-          aria-label={t("ui.Sidebar.first_message_optional")}
-          placeholder={t("ui.Sidebar.first_message_optional")}
-        />
-        <div className="cfg-bar">
-          <NewConfigPills options={options} selected={configSel} onChange={setConfigSel} />
-        </div>
-      </div>
-      {error && <p className="new-error">{error}</p>}
-      <button
-        type="submit"
-        className="btn btn-primary"
-        ref={submitBtnRef}
-        disabled={busy || !cwd.trim()}
-        title={!cwd.trim() ? t("ui.Sidebar.enter_a_working_directory_first") : undefined}
-      >
-        {busy ? t("ui.Sidebar.creating") : t("ui.Sidebar.create_and_open")}
-      </button>
-      {/* 禁用原因不只靠 title tooltip：直接写在按钮下方 */}
-      {!cwd.trim() && <p className="new-hint">{t("ui.Sidebar.enter_a_working_directory_first")}</p>}
-    </form>
-  );
-}
-
-// 新建表单的配置胶囊：""=跟随配置（可选回，建会话时不传该字段）；其余同会话输入框底栏。
-function NewConfigPills({
-  options,
-  selected,
-  onChange,
-}: {
-  options: DriverConfigOption[];
-  selected: Partial<Record<ConfigOptionId, string>>;
-  onChange: Dispatch<SetStateAction<Partial<Record<ConfigOptionId, string>>>>;
-}) {
-  const modelOptions = configOptionsForModel(options, selected.model);
-  const build = (option: DriverConfigOption) => {
-    // default 为 null 的那条 values 项带后端给的「跟随 … 配置」标签，优先用它
-    const followLabel = option.values.find((v) => v.value === null)?.label ?? t("ui.common.use_configuration");
-    const group: MenuGroup = {
-      id: option.id,
-      title: option.name,
-      selected: selected[option.id] ?? "",
-      slider: option.id === "effort",
-      items: [
-        { value: "", label: followLabel },
-        ...option.values
-          .filter((v): v is { value: string; label: string } => v.value !== null)
-          .map((v) => ({ value: v.value, label: v.label })),
-      ],
-      onSelect: (value) => onChange((prev) => {
-        if (option.id !== "model") return { ...prev, [option.id]: value };
-        const patch = modelConfigPatch(options, prev, value || null);
-        return { ...prev, model: value, ...(patch.effort === null ? { effort: "" } : {}) };
-      }),
-    };
-    return { group, text: pillText(option, selected[option.id]) };
-  };
-  const byId = (id: ConfigOptionId) => modelOptions.find((o) => o.id === id);
-  const main = [byId("model"), byId("effort")].filter((o): o is DriverConfigOption => Boolean(o)).map(build);
-  const perm = byId("permissionMode");
-  return (
-    <ConfigPills
-      main={main}
-      perm={perm ? build(perm) : null}
-      permMode={selected.permissionMode || perm?.default || ""}
-      placement="down"
-    />
-  );
-}

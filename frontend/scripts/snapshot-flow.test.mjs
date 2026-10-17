@@ -186,9 +186,9 @@ await t("createSession：snapshot 显式传入才出现在请求体", async () =
 
 // --- 11. 组件接线源码断言（无头环境不起浏览器，UI 渲染见 README 复核记录） ---
 await t("接线：新建表单不做快照（P1-8），弹窗组件仍在、会话头不显示快照", async () => {
-  const sidebar = readSrc("src/components/Sidebar.tsx");
-  assert.match(sidebar, /snapshot:\s*"skip"/, "新建表单必须显式跳过快照");
-  assert.doesNotMatch(sidebar, /createWithSnapshotPreflight|fetchSnapshotPreflight|<SnapshotConfirm/, "新建表单不得再走预检或弹确认框");
+  const newForm = readSrc("src/components/NewSessionForm.tsx");
+  assert.match(newForm, /snapshot:\s*"skip"/, "新建表单必须显式跳过快照");
+  assert.doesNotMatch(newForm, /createWithSnapshotPreflight|fetchSnapshotPreflight|<SnapshotConfirm/, "新建表单不得再走预检或弹确认框");
 
   const dialog = readSrc("src/components/SnapshotConfirm.tsx");
   assert.match(dialog, /role="dialog"/);

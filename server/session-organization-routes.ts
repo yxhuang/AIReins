@@ -5,17 +5,11 @@ interface OrganizationResponse { status: number; data: Record<string, unknown> }
 
 /** 由 index 的受访问控制 HTTP 分支调用，也可无端口验证实际接口契约。 */
 export function organizationRoute(manager: SessionManager, method: string, pathname: string, body?: unknown): OrganizationResponse | undefined {
-  if (pathname === "/api/session-groups") {
-    if (method === "GET") return { status: 200, data: { groups: manager.listGroups() } };
-    if (method === "POST") return { status: 201, data: { group: manager.createGroup(body) } };
-    return undefined;
+  if (method === "GET" && pathname === "/api/project-order") {
+    return { status: 200, data: { paths: manager.listProjectOrder() } };
   }
-  const groupMatch = pathname.match(/^\/api\/session-groups\/([^/]+)$/);
-  if (groupMatch) {
-    const id = decodeId(groupMatch[1]);
-    if (method === "PATCH") return { status: 200, data: { group: manager.renameGroup(id, body) } };
-    if (method === "DELETE") { manager.removeGroup(id); return { status: 200, data: { groups: manager.listGroups() } }; }
-    return undefined;
+  if (method === "POST" && pathname === "/api/project-order/move") {
+    return { status: 200, data: { paths: manager.moveProject(body) } };
   }
   const sessionMatch = pathname.match(/^\/api\/sessions\/([^/]+)$/);
   if (method === "PATCH" && sessionMatch) {

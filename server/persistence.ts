@@ -20,13 +20,14 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { createHash } from "node:crypto";
 import { EventPageIndex } from "./event-pages.js";
+import { normalizeProjectPath } from "../shared/project-path.js";
 import { sessionTitle } from "../shared/session-title.js";
 import { log } from "./logger.js";
-import type { SessionGroup, SessionRecord, UnifiedEvent } from "./types.js";
+import type { SessionRecord, UnifiedEvent } from "./types.js";
 
 export const workbenchHome = process.env.WORKBENCH_HOME || join(homedir(), ".workbench");
 export const registryPath = join(workbenchHome, "sessions.json");
-export const sessionGroupsPath = join(workbenchHome, "session-groups.json");
+export const projectOrderPath = join(workbenchHome, "project-order.json");
 const transcriptsDir = join(workbenchHome, "transcripts");
 
 function ensureStorage(): void {
@@ -48,22 +49,35 @@ export function saveRegistry(sessions: SessionRecord[]): void {
   renameSync(temporary, registryPath);
 }
 
-export function loadSessionGroups(): SessionGroup[] {
+export const PROJECT_ORDER_LIMIT = 500;
+
+export function loadProjectOrder(sessions: SessionRecord[]): string[] {
   ensureStorage();
-  if (!existsSync(sessionGroupsPath)) return [];
-  const parsed: unknown = JSON.parse(readFileSync(sessionGroupsPath, "utf8"));
-  if (!Array.isArray(parsed) || parsed.some((group) => !group || typeof group !== "object"
-    || typeof group.id !== "string" || typeof group.name !== "string" || typeof group.createdAt !== "string")) {
-    throw new Error(`${sessionGroupsPath} 必须是分组 JSON 数组`);
+  if (!existsSync(projectOrderPath)) {
+    const latest = new Map<string, string>();
+    for (const session of sessions) {
+      const path = normalizeProjectPath(session.cwd);
+      if (!latest.has(path) || session.createdAt > latest.get(path)!) latest.set(path, session.createdAt);
+    }
+    const paths = [...latest].sort((a, b) => b[1].localeCompare(a[1])).map(([path]) => path).slice(0, PROJECT_ORDER_LIMIT);
+    saveProjectOrder(paths);
+    return paths;
   }
-  return parsed as SessionGroup[];
+  const parsed: unknown = JSON.parse(readFileSync(projectOrderPath, "utf8"));
+  if (!Array.isArray(parsed) || parsed.some(path => typeof path !== "string" || !path.startsWith("/") || path.length > 4096 || path.includes("\0"))) {
+    throw new Error(`${projectOrderPath} 必须是绝对路径 JSON 数组`);
+  }
+  return [...new Set(parsed.map(normalizeProjectPath))].slice(0, PROJECT_ORDER_LIMIT);
 }
 
-export function saveSessionGroups(groups: SessionGroup[]): void {
+export function saveProjectOrder(paths: string[]): void {
   ensureStorage();
-  const temporary = `${sessionGroupsPath}.tmp`;
-  writeFileSync(temporary, `${JSON.stringify(groups, null, 2)}\n`, { mode: 0o600 });
-  renameSync(temporary, sessionGroupsPath);
+  const temporary = `${projectOrderPath}.tmp`;
+  writeFileSync(temporary, `${JSON.stringify(paths.slice(0, PROJECT_ORDER_LIMIT), null, 2)}\n`, { mode: 0o600 });
+  // 既有 tmp 文件也要收紧权限，避免被旧权限继承。
+  const fd = openSync(temporary, "r+");
+  try { fchmodSync(fd, 0o600); } finally { closeSync(fd); }
+  renameSync(temporary, projectOrderPath);
 }
 
 /**
@@ -77,7 +91,7 @@ export function pruneStorage(retentionDays: number, now = Date.now()): { expired
   const cutoff = now - retentionDays * 86_400_000;
   // 时间戳解析不了的一律保留，宁可少删
   const kept = retentionDays > 0
-    ? sessions.filter((session) => session.pinned || session.groupId || !(Date.parse(session.lastActivityAt) < cutoff))
+    ? sessions.filter((session) => session.pinned || (session as SessionRecord & { groupId?: string }).groupId || !(Date.parse(session.lastActivityAt) < cutoff))
     : sessions;
   if (kept.length !== sessions.length) saveRegistry(kept);
   const keep = new Set(kept.map((session) => session.id));

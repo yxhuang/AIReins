@@ -1,6 +1,6 @@
 import { getLocale, localizeServerData, t } from "./i18n";
 import type { ApiEnvelope, CommandInfo, DirectoryListing, HistoryListData, HistoryMessagesPage, MetaInfo, PageHealth, PageManifest, SessionConfig, SessionRecord, ShellKind, Snapshot, SnapshotPreflight, StorageCleanResult, StorageStats, TerminalInfo, WorkbenchPrefs } from "./types";
-import type { AgentKind, SessionGroup, SessionOrganizationPatch } from "./types";
+import type { AgentKind, SessionOrganizationPatch } from "./types";
 import { buildHistoryQuery, type HistoryQueryInput } from "./history";
 import type { DispatchRun } from "./dispatch-flow";
 import type { TaildropTargetsResult, TailscalePeersResult } from "../../server/tailscale-peers";
@@ -149,26 +149,14 @@ export function patchSession(id: string, patch: SessionOrganizationPatch): Promi
   }).then((data) => data.session);
 }
 
-export function fetchSessionGroups(): Promise<SessionGroup[]> {
-  return call<{ groups: SessionGroup[] }>("/api/session-groups").then((data) => data.groups);
+export function fetchProjectOrder(): Promise<string[]> {
+  return call<{ paths: string[] }>("/api/project-order").then((data) => data.paths);
 }
 
-export function createSessionGroup(name: string): Promise<SessionGroup> {
-  return call<{ group: SessionGroup }>("/api/session-groups", {
-    method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name }),
-  }).then((data) => data.group);
-}
-
-export function renameSessionGroup(id: string, name: string): Promise<SessionGroup> {
-  return call<{ group: SessionGroup }>(`/api/session-groups/${encodeURIComponent(id)}`, {
-    method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ name }),
-  }).then((data) => data.group);
-}
-
-export function deleteSessionGroup(id: string): Promise<SessionGroup[]> {
-  return call<{ groups: SessionGroup[] }>(`/api/session-groups/${encodeURIComponent(id)}`, {
-    method: "DELETE",
-  }).then((data) => data.groups);
+export function moveProjectOrder(path: string, target: { before: string } | { after: string }): Promise<string[]> {
+  return call<{ paths: string[] }>("/api/project-order/move", {
+    method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ path, ...target }),
+  }).then((data) => data.paths);
 }
 
 export function restartWorkbench(signal?: AbortSignal): Promise<{ restarting: boolean }> {

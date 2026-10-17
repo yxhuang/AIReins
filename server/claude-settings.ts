@@ -26,6 +26,16 @@ function readUserSettings(userHome: string): Record<string, unknown> {
   return parsed as Record<string, unknown>;
 }
 
+/** 新建页只读用户级默认值；坏配置不阻塞 meta，也不返回其他设置。 */
+export function readClaudeDefaultSettings(userHome = homedir()): Pick<ClaudeEffectiveSettings, "model" | "effort"> {
+  try {
+    const settings = readUserSettings(userHome);
+    return { model: nonEmptyString(settings.model), effort: nonEmptyString(settings.effortLevel) };
+  } catch {
+    return { model: null, effort: null };
+  }
+}
+
 /** 用户级开关；项目层的 false 仍由 worker 启动时单独处理。 */
 export function readClaudeStartupSettings(userHome = homedir()): ClaudeStartupSettings {
   return { remoteControlAtStartup: readUserSettings(userHome).remoteControlAtStartup === true };
