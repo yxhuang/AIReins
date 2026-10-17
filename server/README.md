@@ -1079,7 +1079,7 @@ Codex 输入框 `$` 在光标 token 处打开名称+描述面板，支持过滤�
 
 同现有 `/api/*` 的访问控制：
 
-- `GET /api/codex-resets`：`{enabled,lastSuccessAt,stale,monitor,pending,recent,alerts}`。`pending` 是 `status=announced` 的事件，`recent` 按更新时间取最近 5 条；`alerts` 最新优先，包含活动及关联 `events`。`stale` 表示 AIHOT monitor 非 healthy、outage 非空或本机连续失败超过 1 小时。关闭时 `pending` / `alerts` 为空。
+- `GET /api/codex-resets`：`{enabled,lastSuccessAt,stale,monitor,pending,recent,alerts}`。`pending` 是 `status=announced` 的事件，`recent` 按更新时间取最近 5 条；`alerts` 最新优先，包含活动及关联 `events`。`stale` 表示 AIHOT monitor 非 healthy、outage 非空或本机连续失败超过 1 小时。AIHOT monitor 的 `status` 取值见其页面：`healthy` 监控正常、`delayed` 检查有延迟、`attention` 监控需要处理、`unknown` 未知；`lastCollectedAt` 是上次读到帖子，`lastVerifiedAt` 是上次完整检查。`attention` 时新帖可能仍在采集，但完整检查停滞，提醒可能不全，因此仍算 stale，由前端按原因显示文案。关闭时 `pending` / `alerts` 为空。
 - `POST /api/codex-resets/ack {id}`：幂等标记已读。新的快照/提醒、ack 或开关变化通过全局 WS 控制帧 `{type:"codex_resets_updated",data:状态快照}` 同步所有页面；前端连接/重连也拉取一次。任一端 ack 后其他端同步关闭该提醒。
 
 UI 在额度页 iframe 上方显示 AIReins 自己的重置信息卡；数据仅供提醒，额度数值仍由原有 AI-Usage 提供。每个展示位置保留「数据来源 AIHOT」链接到 <https://aihot.news/codex-reset>。此公开 API 限个人非商业使用，须保留来源信息。

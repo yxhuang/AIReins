@@ -39,3 +39,9 @@ assert.equal(store.codexResets.alerts.length, 1, '离线刷新保留快照');
 store.handleFrame({ type: 'codex_resets_updated', data: { ...baseline, enabled: false } });
 assert.equal(store.codexResets.enabled, false);
 console.log('✅ codex reset store: fresh WS, cross-client ack, failure recovery, disable');
+
+const { staleText } = await import('../src/components/CodexResets.tsx');
+const now = Date.parse('2026-10-17T08:00:00Z'), fresh = '2026-10-17T07:55:00Z';
+assert.match(staleText({ ...baseline, lastSuccessAt: '2026-10-17T06:30:00Z' }, now), /超过 1 小时未能从 AIHOT 更新/, '本机失败优先');
+assert.equal(staleText({ ...baseline, lastSuccessAt: fresh, monitor: { status: 'attention', lastVerifiedAt: '2026-10-17T05:00:00Z' } }, now), 'AIHOT 监控需要处理，最近完整检查 3小时前，信息可能不全。');
+assert.match(staleText({ ...baseline, lastSuccessAt: fresh }, now), /AIHOT 报告服务异常/, 'healthy 时只剩 outage');

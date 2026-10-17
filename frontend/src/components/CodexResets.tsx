@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import type { CodexResetEvent, CodexResetTime } from "../../../server/codex-resets";
+import type { CodexResetEvent, CodexResetStatus, CodexResetTime } from "../../../server/codex-resets";
 import { formatDate, formatRelativeTime, t } from "../i18n";
 import { store } from "../store";
 import { useStore } from "../useStore";
@@ -36,6 +36,18 @@ function ResetTime({ event, now }: { event: CodexResetEvent; now: number }) {
     <strong>{label}</strong>
     {event.status === "announced" && countdown && <span>{countdown}</span>}
   </div>;
+}
+
+// 本机失败优先；AIHOT 自身状态非 healthy 时说明是来源的问题；剩下的是 outage。
+export function staleText(state: CodexResetStatus, now: number): string {
+  const success = Date.parse(state.lastSuccessAt ?? "");
+  if (!Number.isFinite(success) || now - success > 60 * 60_000) return t("ui.CodexResets.stale_local");
+  const monitor = state.monitor;
+  if (monitor?.status !== "healthy" && monitor?.lastVerifiedAt) {
+    const status = t(monitor.status === "attention" ? "ui.CodexResets.monitor_attention" : monitor.status === "delayed" ? "ui.CodexResets.monitor_delayed" : "ui.CodexResets.monitor_unknown");
+    return t("ui.CodexResets.stale_source", { status, time: relative(monitor.lastVerifiedAt, now) });
+  }
+  return t("ui.CodexResets.stale");
 }
 
 function Source() {
@@ -101,7 +113,7 @@ export function CodexResetDialog() {
         <p>{alert.originalText}</p>
         {alert.context.filter(context => context.originalText).map((context, index) => <blockquote key={context.id ?? index}>{context.originalText}</blockquote>)}
       </details>}
-      {state?.stale && <p className="codex-reset-stale">{t("ui.CodexResets.stale")}</p>}
+      {state?.stale && <p className="codex-reset-stale">{staleText(state, now)}</p>}
       {error && <p className="new-error" role="alert">{error}</p>}
       <div className="codex-reset-actions">
         {alert.url && <a className="btn" href={alert.url} target="_blank" rel="noopener noreferrer">{t("ui.CodexResets.post")}</a>}
@@ -134,7 +146,7 @@ export function CodexResetCard() {
         </div>}
       </div>;
     }) : <p>{t(state.lastSuccessAt ? "ui.CodexResets.empty" : "ui.CodexResets.waiting")}</p>}
-    {state.stale && <p className="codex-reset-stale">{t("ui.CodexResets.stale")}</p>}
+    {state.stale && <p className="codex-reset-stale">{staleText(state, now)}</p>}
     <div className="codex-reset-card-foot">
     <details className="codex-reset-history">
       <summary>{t("ui.CodexResets.history")}</summary>
