@@ -322,6 +322,12 @@ function componentFixture(component, values = []) {
       if (!same(memos[index]?.deps, deps)) memos[index] = { deps, value: fn() };
       return memos[index].value;
     };
+    const effect = (fn, deps) => {
+      const index = effectIndex++;
+      if (!same(effects[index]?.deps, deps)) {
+        pending.push(() => { effects[index]?.cleanup?.(); effects[index] = { deps, cleanup: fn() }; });
+      }
+    };
     internals.H = {
       useState(initial) {
         const index = stateIndex++;
@@ -332,12 +338,8 @@ function componentFixture(component, values = []) {
       useCallback(fn, deps) { return memo(() => fn, deps); },
       useMemo: memo,
       useId() { return "fixture-id"; },
-      useEffect(fn, deps) {
-        const index = effectIndex++;
-        if (!same(effects[index]?.deps, deps)) {
-          pending.push(() => { effects[index]?.cleanup?.(); effects[index] = { deps, cleanup: fn() }; });
-        }
-      },
+      useEffect: effect,
+      useLayoutEffect: effect,
       useSyncExternalStore(_subscribe, getSnapshot) { return getSnapshot(); },
     };
     try { return component(); }
@@ -565,17 +567,18 @@ async function withNewForm({ saved = "", cwd, sessions = [], meta = { defaultCwd
   store.sendComposerInput = async (sessionId, text, mentions) => { sends.push({ sessionId, text, mentions }); return true; };
   store.navigate = id => navigations.push(id);
   store.setNewSessionCwd = path => { store.newSessionCwd = path; };
-  const render = componentFixture(() => NewSessionForm());
+  const render = componentFixture(() => NewSessionForm({}));
   const update = () => {
     render(); render.flushEffects();
     render(); render.flushEffects();
     return render();
   };
-  const select = () => treeFind(update(), node => node.type === "select");
+  const contents = () => treeFind(update(), node => node.type === DirectoryContents);
+  const currentCwd = () => { update(); return store.newSessionCwd; };
   const textarea = () => treeFind(update(), node => node.type === "textarea");
   const submit = () => treeFind(update(), node => node.props?.type === "submit");
   const agent = kind => treeButtons(update()).find(node => node.props.className?.split(" ").includes(`agent-${kind}`));
-  try { await run({ render, update, select, textarea, submit, agent, storage, calls, sends, navigations }); }
+  try { await run({ render, update, contents, cwd: currentCwd, textarea, submit, agent, storage, calls, sends, navigations }); }
   finally {
     render.dispose();
     Object.assign(store, previous);
@@ -621,10 +624,10 @@ await t("主页新建：Shift+Enter/IME 不提交；空目录禁用且表单和�
     assert.equal(f.calls.length, 0);
   });
   await withNewForm({ meta: { drivers: {}, capabilities: {} } }, async f => {
-    assert.equal(f.select().props.value, "");
+    assert.equal(f.cwd(), "");
+    assert.equal(f.contents().props.initialPath, "", "空目录不让地址栏自动打开主目录");
     assert.equal(f.submit().props.disabled, true);
     assert.ok(treeFind(f.update(), node => node.props?.className === "new-hint"));
-    assert.ok(treeFind(f.update(), node => node.type === "option" && node.props.value === "").props.disabled);
     f.update().props.onSubmit({ preventDefault() {} });
     f.textarea().props.onKeyDown(key("Enter"));
     await finishNewCreate();
@@ -643,54 +646,59 @@ await t("主页新建：显式目录优先，其次 saved → 最近活动目录
     [{ sessions }, "/latest"],
     [{}, "/meta"],
   ]) await withNewForm(options, async f => {
-    assert.equal(f.select().props.value, expected);
-    assert.equal(store.newSessionCwd, expected, "初始化目录同步到导航状态");
+    assert.equal(f.cwd(), expected, "初始化目录同步到导航状态");
+    assert.equal(f.contents().props.initialPath, expected);
   });
 });
 
 await t("主页新建：晚到 meta/sessions 补填，用户选择不覆盖；显式重选保留消息和 agent/config", async () => {
   for (const source of ["meta", "sessions"]) await withNewForm({ meta: null }, async f => {
-    assert.equal(f.select().props.value, "");
+    assert.equal(f.cwd(), "");
     if (source === "meta") store.meta = { defaultCwd: "/late-meta", drivers: {}, capabilities: {} };
     else store.sessions = [{ id: "late", cwd: "/late-session", lastActivityAt: "2026-10-17T00:00:00Z" }];
-    assert.equal(f.select().props.value, source === "meta" ? "/late-meta" : "/late-session");
+    assert.equal(f.cwd(), source === "meta" ? "/late-meta" : "/late-session");
+    assert.equal(f.contents().props.initialPath, f.cwd(), "回填后地址栏重新打开");
   });
   await withNewForm({ cwd: "/initial", saved: "/saved-default" }, async f => {
-    f.select().props.onChange({ target: { value: "/manual" } });
+    f.contents().props.onPathChange("/manual");
     f.agent("kimi").props.onClick();
     f.textarea().props.onChange({ target: { value: "保留草稿" } });
     store.meta = { defaultCwd: "/new-meta", drivers: {}, capabilities: {} };
     store.sessions = [{ id: "late", cwd: "/new-session", lastActivityAt: "2026-10-17T00:00:00Z" }];
-    assert.equal(f.select().props.value, "/manual", "后来的缺省目录不覆盖手选");
+    assert.equal(f.cwd(), "/manual", "后来的缺省目录不覆盖手选");
     for (const path of ["/explicit-again", "/explicit-repeat"]) {
       store.newSessionCwd = path; store.newSessionRequest++;
-      assert.equal(f.select().props.value, path);
+      assert.equal(f.cwd(), path);
+      assert.equal(f.contents().props.initialPath, path);
       assert.equal(f.textarea().props.value, "保留草稿");
       assert.equal(f.agent("kimi").props["aria-pressed"], true);
       assert.deepEqual(treeFind(f.update(), node => node.type?.name === "NewConfigPills").props.selected, { permissionMode: "auto" });
     }
     store.newSessionCwd = undefined; store.newSessionRequest++;
-    assert.equal(f.select().props.value, "/saved-default", "通用新建重新走三级回退，不沿用上一显式或手动目录");
+    assert.equal(f.cwd(), "/saved-default", "通用新建重新走三级回退，不沿用上一显式或手动目录");
     assert.equal(f.textarea().props.value, "保留草稿");
     assert.equal(f.agent("kimi").props["aria-pressed"], true);
   });
 });
 
-await t("主页新建：浏览仅打开 DirectoryBrowser，取消不变、确认才选择并同步目录", async () => {
+await t("主页新建：内嵌地址栏即目录选择，导航不重挂载，读不了清空，外部换目录才重挂载", async () => {
   await withNewForm({ cwd: "/initial" }, async f => {
-    const browser = () => treeFind(f.update(), node => node.type === DirectoryBrowser);
-    f.select().props.onChange({ target: { value: "__browse__" } });
-    assert.equal(f.select().props.value, "/initial");
-    assert.equal(browser().props.initialPath, "/initial");
-    assert.equal(browser().props.allowWindowsPicker, true);
-    browser().props.onClose();
-    assert.equal(browser(), undefined);
-    assert.equal(f.select().props.value, "/initial");
-    f.select().props.onChange({ target: { value: "__browse__" } });
-    browser().props.onSelect("/confirmed");
-    assert.equal(browser(), undefined);
-    assert.equal(f.select().props.value, "/confirmed");
-    assert.equal(store.newSessionCwd, "/confirmed");
+    const first = f.contents();
+    assert.equal(first.props.collapsible, true);
+    assert.equal(first.props.allowWindowsPicker, true);
+    assert.equal(first.props.initialPath, "/initial");
+    assert.equal(treeFind(f.update(), node => node.type === DirectoryBrowser), undefined, "不再弹窗");
+    first.props.onPathChange("/initial/child");
+    assert.equal(f.cwd(), "/initial/child", "地址栏导航即选定");
+    assert.equal(f.contents().key, first.key, "内部导航不重挂载");
+    assert.equal(f.contents().props.initialPath, "/initial");
+    f.contents().props.onPathLost();
+    assert.equal(f.cwd(), "", "读不了的目录清空选择");
+    assert.equal(f.submit().props.disabled, true);
+    store.newSessionCwd = "/group"; store.newSessionRequest++;
+    assert.equal(f.cwd(), "/group");
+    assert.notEqual(f.contents().key, first.key, "组「+」等外部换目录重新挂载地址栏");
+    assert.equal(f.contents().props.initialPath, "/group");
   });
 });
 

@@ -716,28 +716,33 @@ body.resizing {
 .mobile-panel-launcher { display: none; }
 
 /* 新建页复用会话输入框的附件、胶囊与发送按钮。 */
-/* 底部多留 12dvh，让 margin:auto 居中后整体略偏上 */
-.welcome-view .empty-state { width: 100%; max-width: 920px; padding-bottom: 12dvh; }
+/* 以输入卡片本身为准，在整个主区（含顶栏）垂直居中：顶栏浮在上方不占高度，上下等距留白不压顶栏；
+   卡片上方（标志 + agent 切换）与下方（地址栏）两块等分剩余高度；目录列表浮在下方块里不占高度，展开不挪动内容 */
+.welcome-view { position: relative; }
+.welcome-view > .view-panel-actions { position: absolute; top: 0; right: 0; left: 0; z-index: 3; }
+.welcome-view .empty-state { display: flex; flex: 1 0 auto; flex-direction: column; width: 100%; max-width: 800px; margin: 0 auto; padding-block: 56px; }
+.welcome-view .new-form { flex: 1 0 auto; }
+.new-form-head, .new-form-foot { display: flex; flex: 1 1 0; flex-direction: column; }
+.new-form-head { align-items: center; justify-content: flex-end; }
+.new-form-head > .new-agents { margin-top: 14px; }
+.new-form-foot { gap: 14px; }
 .new-form { display: flex; flex-direction: column; gap: 14px; text-align: left; min-width: 0; }
 .new-form .composer-box { border-radius: 24px; box-shadow: var(--raised-shadow); }
-.new-form .composer-box textarea { min-height: 120px; max-height: 40dvh; line-height: 1.6; resize: none; padding: 20px 22px 12px; }
+.new-form .composer-box textarea { min-height: 88px; max-height: 40dvh; line-height: 1.6; resize: none; padding: 20px 22px 12px; }
 .new-form .composer-box .attach-bar { margin: 16px 16px 0; }
-.new-form .cfg-bar { padding: 4px 12px 12px; gap: 4px; }
+.new-form .cfg-bar { padding: 4px 12px 8px; gap: 4px; }
 .new-form .cfg-bar .send-btn { width: 36px; height: 36px; }
 .new-form .new-command-panel { bottom: calc(100% + 4px); left: 8px; right: 8px; max-height: 260px; }
 .new-command-panel .cmd-item { width: 100%; border: none; background: transparent; color: var(--text); font: inherit; text-align: left; }
 .new-command-panel .cmd-item.selected { background: var(--chrome); }
-/* 项目选择：与输入卡片同宽的一整条，显示短名 + 完整路径，整条可点开原生下拉 */
-.new-project-row { display: flex; min-width: 0; }
-.new-project { position: relative; display: flex; align-items: center; gap: 10px; width: 100%; min-width: 0; min-height: 40px; padding: 6px 14px; border: 1px solid var(--border); border-radius: 14px; background: var(--surface); color: var(--text-muted); font-size: 14px; }
-.new-project:hover { border-color: var(--border-strong); color: var(--text); }
-.new-project:focus-within { outline: 2px solid var(--border-strong); outline-offset: 2px; }
-.new-project > svg { flex-shrink: 0; }
-.new-project-name { flex-shrink: 0; max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); font-weight: 500; }
-.new-project-path { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.new-project-caret { margin-left: auto; }
-.new-project-select { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; font: inherit; }
-.new-project-select option { background: var(--surface); color: var(--text); }
+/* 项目选择：内嵌地址栏即工作目录；WSL/Windows 在左下，列表开关在右下，列表默认收起、内部滚动 */
+.new-project-row { min-width: 0; margin: 0; padding: 0; border: 0; }
+.new-project-row .dir-contents { gap: 8px; }
+.new-project-row .dir-list-toggle { margin-left: auto; }
+.new-project-row .dir-contents { position: relative; }
+/* 高度由 DirectoryContents 量到视口底后写入 max-height */
+.new-project-row .dir-list { position: absolute; top: 100%; left: 0; right: 0; z-index: 2; margin-top: 8px; min-height: 0; max-height: 42dvh; background: var(--surface); }
+.new-project-row .dir-entry { padding-block: 7px; }
 .new-submit { flex-shrink: 0; }
 .new-session-back { display: none; }
 .new-agents { align-self: center; display: inline-flex; gap: 4px; padding: 4px; border-radius: 16px; background: var(--chrome); }
@@ -749,11 +754,11 @@ body.resizing {
 .new-agent.agent-kimi.selected { color: var(--agent-kimi-ink); border-color: var(--agent-kimi); }
 @media (max-width: 720px) {
   .new-session-back { display: inline-flex; }
-  .welcome-view .empty-state { padding: 20px 12px; }
+  .welcome-view .empty-state { padding: 64px 12px; }
   .new-form .composer-box textarea { padding: 16px 16px 10px; font-size: 16px; }
   .new-form .cfg-bar { flex-wrap: wrap; padding: 4px 6px 8px; gap: 0; }
   .new-form .cfg-bar .attach-btn, .new-form .cfg-bar .send-btn { width: 44px; height: 44px; }
-  .new-form .new-agent, .new-project { min-height: 44px; }
+  .new-form .new-agent { min-height: 44px; }
   .new-agent { padding-inline: 12px; }
   .new-form .cfg-bar .cfg-pills { flex-basis: auto; order: 0; margin-right: 0; }
   .new-form .cfg-bar .cfg-pill { min-height: 44px; }
@@ -762,8 +767,8 @@ body.resizing {
   .new-form .cfg-bar .new-submit { margin-left: auto; }
 }
 @media (pointer: coarse) {
-  .new-form .composer-box textarea, .new-project-select { font-size: 16px; }
-  .new-form .new-agent, .new-project { min-height: 44px; }
+  .new-form .composer-box textarea { font-size: 16px; }
+  .new-form .new-agent, .new-project-row .dir-nav .btn { min-height: 44px; }
 }
 
 .new-field {
@@ -2632,7 +2637,7 @@ body.resizing {
 .empty-logo-line { width: 1.5px; height: 56px; background: var(--border-strong); }
 .empty-logo-name { font-size: 28px; font-weight: 700; letter-spacing: 0.04em; }
 
-.empty-state > p {
+.empty-state > p, .new-form-head > p {
   font-size: 14px;
   color: var(--text-muted);
   line-height: 1.7;

@@ -133,13 +133,14 @@ export function App() {
               <PanelActions />
             </div>
             <div className="empty-state">
-              <h1 className="empty-logo" aria-label={PRODUCT_NAME}>
-                <span className="empty-logo-mark" aria-hidden="true"><BrandMark /></span>
-                <span className="empty-logo-line" aria-hidden="true" />
-                <span className="empty-logo-name" aria-hidden="true">{PRODUCT_NAME}</span>
-              </h1>
-              <p>{t("core.001")}</p>
-              <NewSessionForm />
+              <NewSessionForm>
+                <h1 className="empty-logo" aria-label={PRODUCT_NAME}>
+                  <span className="empty-logo-mark" aria-hidden="true"><BrandMark /></span>
+                  <span className="empty-logo-line" aria-hidden="true" />
+                  <span className="empty-logo-name" aria-hidden="true">{PRODUCT_NAME}</span>
+                </h1>
+                <p>{t("core.001")}</p>
+              </NewSessionForm>
             </div>
             </section>
           )}

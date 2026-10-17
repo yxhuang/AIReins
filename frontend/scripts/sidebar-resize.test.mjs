@@ -1,7 +1,7 @@
 // 真实 Chromium 拖动/布局回归；只使用合成 API，不连接真实会话。
 // CHROMIUM 可指定 Linux Chromium；默认复用本机 Playwright 的 headless shell。
 import assert from "node:assert/strict";
-import { runNewSessionBrowserChecks } from "./aireins-new-session.test.mjs";
+import { NEW_CWD, runNewSessionBrowserChecks } from "./aireins-new-session.test.mjs";
 import { spawn } from "node:child_process";
 import { mkdirSync, mkdtempSync, readdirSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
@@ -620,7 +620,7 @@ try {
       assert.equal(await evaluate("document.querySelector('.row-menu-path').textContent"),'C:/Users/Research/pinned');
       await shotA(`${variant}-row-path`); await key('Escape');
       await click(group('/teaching/paper')+' .project-action:not([aria-haspopup])');
-      await waitFor("document.querySelector('.new-form .new-project-select')?.value==='/teaching/paper'");
+      await waitFor(`${NEW_CWD}==='/teaching/paper'`);
       assert.equal(await evaluate('location.hash'),'#/new','组标题+打开主页新建');
       assert.ok(await evaluate("!document.querySelector('.sidebar .new-form')"),'侧栏不内嵌新建');
       assert.ok(await evaluate('document.documentElement.scrollWidth<=innerWidth'),'页面不横向溢出');

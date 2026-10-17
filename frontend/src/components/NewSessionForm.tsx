@@ -1,19 +1,18 @@
 import { t } from "../i18n";
-import { useEffect, useRef, useState, type Dispatch, type SetStateAction } from "react";
+import { useEffect, useRef, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
 import type { AgentKind, ConfigOptionId, DriverConfigOption, SessionRecord } from "../types";
 import type { CreateSessionInput } from "../api";
 import { store } from "../store";
 import { shallowEqual, useStore } from "../useStore";
 import { ConfigPills, PlusIcon, SendIcon, type MenuGroup } from "./ConfigMenu";
 import { configOptionsForModel, modelConfigPatch, newSessionConfig, pillText } from "../config-view";
-import { DirectoryBrowser } from "./DirectoryBrowser";
-import { normalizeDirectoryPath, recentDirectoryPaths } from "../directory-path";
+import { DirectoryContents } from "./DirectoryBrowser";
+import { normalizeDirectoryPath } from "../directory-path";
 import { uploadAttachment } from "../api";
 import { AgentIcon } from "./AgentIcon";
 import { attachmentMention, prepareImageForUpload, type Attachment } from "../attachments";
 import { filterCommands, noteCommandUsed } from "../commands";
 import { newSessionCommands } from "../new-session-input";
-import { projectDisplayPath } from "../sidebar-sessions";
 
 type NewAttachment = Attachment & { file?: File };
 
@@ -39,7 +38,8 @@ function pickInitialCwd(): string {
   return store.meta?.defaultCwd ?? "";
 }
 
-export function NewSessionForm() {
+/** children：主页标志，与 agent 切换同在输入卡片上方一块，卡片本身垂直居中。 */
+export function NewSessionForm({ children }: { children?: ReactNode }) {
   const meta = useStore(value => value.meta);
   const sessions = useStore(value => value.sessions);
   const initialCwd = useStore(value => value.newSessionCwd);
@@ -49,9 +49,9 @@ export function NewSessionForm() {
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [browserOpen, setBrowserOpen] = useState(false);
+  // 外部换到另一个目录（回填、组「+」）时换 key 重新挂载地址栏；地址栏内导航只改 cwd。
+  const [browse, setBrowse] = useState(() => ({ key: 0, from: cwd }));
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const projectRef = useRef<HTMLSelectElement>(null);
   const cwdTouched = useRef(false);
   const lastCwdRequest = useRef(cwdRequest);
   const [configSel, setConfigSel] = useState<Partial<Record<ConfigOptionId, string>>>(() => newSessionConfig("claude"));
@@ -73,8 +73,13 @@ export function NewSessionForm() {
   const attachEnabled = !busy && meta?.drivers[agent]?.mentions === true;
   const options = meta?.drivers[agent]?.options ?? [];
   const windowsPaths = meta?.capabilities.windowsPaths === true;
-  const recentPaths = recentDirectoryPaths(sessions, [], windowsPaths);
   const applyCwd = (path: string) => {
+    setCwd(path);
+    store.setNewSessionCwd(path);
+    if (path !== cwd) setBrowse(previous => ({ key: previous.key + 1, from: path }));
+  };
+  const navigateCwd = (path: string) => {
+    cwdTouched.current = true;
     setCwd(path);
     store.setNewSessionCwd(path);
   };
@@ -87,7 +92,6 @@ export function NewSessionForm() {
       if (!createdSession.current) applyCwd(initialCwd ?? pickInitialCwd());
       cwdTouched.current = false;
     }
-    setBrowserOpen(false);
     // 手机进新建页不弹输入法，免得遮住目录选择（用户 10-17）
     if (!window.matchMedia("(max-width: 720px), (pointer: coarse)").matches) textareaRef.current?.focus();
   }, [cwdRequest]);
@@ -139,14 +143,6 @@ export function NewSessionForm() {
   const insertCommand = (name: string) => {
     setMessage(`${slashQuery !== null || !message ? "" : `${message}\n`}/${name} `); setSlashMenuOpen(false); setDismissed(true);
     textareaRef.current?.focus();
-  };
-  const selectCwd = (path: string) => {
-    cwdTouched.current = true;
-    applyCwd(path);
-  };
-  const closeBrowser = () => {
-    setBrowserOpen(false);
-    projectRef.current?.focus();
   };
   const submit = async () => {
     if (!cwd.trim() || submitting.current) return;
@@ -202,12 +198,15 @@ export function NewSessionForm() {
   };
 
   return <form className={`new-form agent-${agent}`} onSubmit={event => { event.preventDefault(); void submit(); }}>
-    <div className="new-agents" role="group" aria-label={t("ui.Sidebar.select_agent")}>
-      {(["claude", "codex", "kimi"] as const).map(kind => <button key={kind} type="button"
-        className={`new-agent agent-${kind}${agent === kind ? " selected" : ""}`} aria-pressed={agent === kind}
-        disabled={busy || !!createdSession.current} onClick={() => { setAgent(kind); setConfigSel(newSessionConfig(kind)); setDismissed(false); setSlashMenuOpen(false); }}>
-        <AgentIcon agent={kind} label={kind} /><span>{{ claude: "Claude", codex: "Codex", kimi: "Kimi" }[kind]}</span>
-      </button>)}
+    <div className="new-form-head">
+      {children}
+      <div className="new-agents" role="group" aria-label={t("ui.Sidebar.select_agent")}>
+        {(["claude", "codex", "kimi"] as const).map(kind => <button key={kind} type="button"
+          className={`new-agent agent-${kind}${agent === kind ? " selected" : ""}`} aria-pressed={agent === kind}
+          disabled={busy || !!createdSession.current} onClick={() => { setAgent(kind); setConfigSel(newSessionConfig(kind)); setDismissed(false); setSlashMenuOpen(false); }}>
+          <AgentIcon agent={kind} label={kind} /><span>{{ claude: "Claude", codex: "Codex", kimi: "Kimi" }[kind]}</span>
+        </button>)}
+      </div>
     </div>
     <div className="composer-box" onDragOver={event => {
       if (attachEnabled && event.dataTransfer.types.includes("Files")) event.preventDefault();
@@ -270,28 +269,15 @@ export function NewSessionForm() {
     <input ref={fileInputRef} type="file" multiple hidden onChange={event => {
       addFiles(Array.from(event.target.files ?? [])); event.target.value = "";
     }} />
-    <div className="new-project-row">
-      <label className="new-project" title={projectDisplayPath(cwd, windowsPaths)}>
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true"><path d="M3 7V5h6l2 2h10v13H3z" /></svg>
-        <span className="new-project-name">{cwd ? cwd.split(/[\\/]/).filter(Boolean).pop() ?? cwd : t("ui.NewSessionForm.project")}</span>
-        {cwd && <span className="new-project-path">{projectDisplayPath(cwd, windowsPaths)}</span>}
-        <svg className="new-project-caret" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg>
-        <select ref={projectRef} className="new-project-select" value={cwd} title={projectDisplayPath(cwd, windowsPaths)}
-          aria-label={t("ui.NewSessionForm.project")} disabled={busy || !!createdSession.current} onChange={event => {
-            if (event.target.value === "__browse__") setBrowserOpen(true);
-            else selectCwd(event.target.value);
-          }}>
-          <option value="__browse__">{t("ui.NewSessionForm.browse")}</option>
-          {!cwd && <option value="" disabled>{t("ui.Sidebar.enter_a_working_directory_first")}</option>}
-          {cwd && !recentPaths.includes(cwd) && <option value={cwd}>{projectDisplayPath(cwd, windowsPaths)}</option>}
-          {recentPaths.map(path => <option key={path} value={path}>{projectDisplayPath(path, windowsPaths)}</option>)}
-        </select>
-      </label>
+    <div className="new-form-foot">
+      <fieldset className="new-project-row" aria-label={t("ui.NewSessionForm.project")} disabled={busy || !!createdSession.current}>
+        {/* 读不了的目录清空选择，免得带着旧目录误建会话 */}
+        <DirectoryContents key={browse.key} initialPath={browse.from} includeFiles={false} collapsible allowWindowsPicker
+          onSelectFile={() => {}} onPathChange={navigateCwd} onPathLost={() => navigateCwd("")} />
+      </fieldset>
+      {!cwd.trim() && <p className="new-hint">{t("ui.Sidebar.enter_a_working_directory_first")}</p>}
+      {error && <p className="new-error" role="alert">{error}</p>}
     </div>
-    {!cwd.trim() && <p className="new-hint">{t("ui.Sidebar.enter_a_working_directory_first")}</p>}
-    {error && <p className="new-error" role="alert">{error}</p>}
-    {browserOpen && <DirectoryBrowser initialPath={cwd} allowWindowsPicker onClose={closeBrowser}
-      onSelect={path => { selectCwd(path); closeBrowser(); }} />}
   </form>;
 }
 

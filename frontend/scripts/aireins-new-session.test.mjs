@@ -25,11 +25,11 @@ const fixture = (locale, theme, options = {}) => `
   const effort={id:'effort',name:'Effort',default:'high',mutable:true,values:[{value:'low',label:'Low'},{value:'high',label:'High'}]};
   const permission={id:'permissionMode',name:'Permissions',default:'default',mutable:true,values:[{value:'default',label:'Ask'},{value:'auto-review',label:'Auto'},{value:'auto',label:'Auto'}]};
   const meta={claudeDefaults:{model:'opus',effort:'high'},defaultCwd:options.defaultCwd??'/meta/default',homeDir:'/home/demo',
-    capabilities:{terminal:false,windowsPaths:true,windowsDirectoryPicker:true},
+    capabilities:options.mac?{terminal:false}:{terminal:false,windowsPaths:true,windowsDirectoryPicker:true},
     drivers:Object.fromEntries(['claude','codex','kimi'].map(id=>[id,{options:[id==='claude'?{...model,default:null,values:[{value:null,label:'Follow Claude settings'},{value:'opus',label:'Opus'},{value:'synthetic-model',label:'Synthetic model'}]}:model,effort,permission],available:true,usage:false,interrupt:false,commands:true,mentions:true}]))};
   const fixtures={'/api/meta':meta,'/api/sessions':{sessions},'/api/project-order':{paths:['/repo/recent','/repo/second']},
     '/api/pages':{pages:[]},'/api/links':{links:[]},'/api/prefs':{idleReleaseMinutes:0},'/api/claude/settings':{remoteControlAtStartup:false}};
-  const f=window.__newFixture={sessions,sent:[],uploads:[],creates:[],writes:[],directories:[],history:[],fail:false,hold:false};
+  const f=window.__newFixture={manyDirs:!!options.manyDirs,sessions,sent:[],uploads:[],creates:[],writes:[],directories:[],history:[],fail:false,hold:false};
   const response=(data,code=0,msg='')=>new Response(JSON.stringify({code,data,msg,request_id:'aireins-new-fixture'}),{headers:{'content-type':'application/json'}});
   const realFetch=window.fetch;
   window.fetch=(input,init)=>{
@@ -55,7 +55,8 @@ const fixture = (locale, theme, options = {}) => `
     if(path==='/api/sessions'&&options.delaySessions)return new Promise(resolve=>{f.finishSessions=()=>resolve(response({sessions}));});
     if(path==='/api/fs/dirs'){
       const current=url.searchParams.get('path')??'/meta/default';f.directories.push(current);
-      return Promise.resolve(response({path:current,parent:'/',dirs:[{name:'nested',path:current+'/nested'}],files:[]}));
+      const names=f.manyDirs?Array.from({length:60},(_,index)=>'folder-'+String(index).padStart(2,'0')):['nested'];
+      return Promise.resolve(response({path:current,parent:'/',dirs:names.map(name=>({name,path:current+'/'+name})),files:[]}));
     }
     if(path==='/api/history'){
       f.history.push(Object.fromEntries(url.searchParams));
@@ -70,6 +71,9 @@ const fixture = (locale, theme, options = {}) => `
   window.WebSocket=class{static CONNECTING=0;static OPEN=1;static CLOSING=2;static CLOSED=3;readyState=1;addEventListener(){}close(){}send(raw){f.sent.push(JSON.parse(raw));}};
 `;
 
+// 新建页地址栏即工作目录：已读出的目录看当前面包屑，未读出或空目录看输入框。
+export const NEW_CWD = "(document.querySelector('.new-form .dir-address-crumbs [aria-current=location]')?.title ?? document.querySelector('.new-form .dir-address input')?.value ?? '')";
+
 export async function runNewSessionBrowserChecks({ send, evaluate, settle, waitFor, rect, click, key, check, base, activate, shots = defaultShots }) {
   mkdirSync(shots, { recursive: true });
   const screenshot = async name => {
@@ -83,11 +87,11 @@ export async function runNewSessionBrowserChecks({ send, evaluate, settle, waitF
     await settle();
   };
   const select = async value => {
-    await evaluate(`(() => {const field=document.querySelector('.new-project-select');field.value=${JSON.stringify(value)};
-      field.dispatchEvent(new Event('change',{bubbles:true}));})()`);
-    await settle();
+    await click('.new-form .dir-recent-toggle');
+    await click(`.new-form .dir-recent-option[title=${JSON.stringify(value)}]`);
+    await waitFor(`${NEW_CWD}===${JSON.stringify(value)}`);
   };
-  const cwd = () => evaluate("document.querySelector('.new-project-select').value");
+  const cwd = () => evaluate(NEW_CWD);
   const showNew = async path => {
     await evaluate(`import('/src/store.ts').then(({store})=>store.navigateNew(${JSON.stringify(path)}))`);
     await waitFor("document.querySelector('.new-form textarea')"); await settle();
@@ -102,7 +106,7 @@ export async function runNewSessionBrowserChecks({ send, evaluate, settle, waitF
     await send('Page.navigate',{url:base});
     await waitFor("document.querySelector('.btn-new-session')");
     await click('.btn-new-session');
-    await waitFor("document.querySelector('.new-form .new-project-select')"); await settle();
+    await waitFor("document.querySelector('.new-form .new-project-row .dir-address')"); await settle();
     return target.targetId;
   };
   for (const width of [1440,390]) for (const locale of ['zh-CN','en']) for (const theme of ['light','dark']) {
@@ -111,11 +115,12 @@ export async function runNewSessionBrowserChecks({ send, evaluate, settle, waitF
       const target=await open(width,locale,theme);
       assert.equal(await cwd(),'/saved/project','上次成功目录优先');
       assert.equal(await evaluate("document.activeElement===document.querySelector('.new-form textarea')"),width!==390,'桌面新建聚焦输入框，手机不弹输入法');
-      assert.equal(await evaluate("document.querySelector('.new-project-select').getAttribute('aria-label')"),locale==='en'?'Project':'项目');
+      assert.equal(await evaluate("document.querySelector('.new-project-row').getAttribute('aria-label')"),locale==='en'?'Project':'项目');
       assert.ok(await evaluate("!document.querySelector('.sidebar .new-form') && !!document.querySelector('.main .new-form')"));
       const area=await rect('.new-form textarea');
-      assert.ok(area.height>=100 && area.width>250,'主页大输入框');
-      assert.ok(await evaluate("![...document.querySelector('.new-project-select').options].some(option=>option.value==='')"),'有目录时没有不选项');
+      assert.ok(area.height>=80 && area.width>250,'主页大输入框');
+      {const box=await rect('.new-form .composer-box'),view=await rect('.welcome-view');
+        assert.ok(Math.abs((box.y+box.height/2)-(view.y+view.height/2))<=2,`输入卡片在主区垂直居中 ${JSON.stringify({box,view})}`);}
       assert.equal(await evaluate("document.documentElement.dataset.theme"),theme);
       if(width===390){
         assert.equal(await evaluate('location.hash'),'#/new');
@@ -123,8 +128,9 @@ export async function runNewSessionBrowserChecks({ send, evaluate, settle, waitF
         assert.ok(await evaluate("parseFloat(getComputedStyle(document.querySelector('.new-form textarea')).fontSize)>=16"),'触屏输入字号至少16px');
       }
       await screenshot(variant+'-home');
-      assert.equal(await evaluate("document.querySelector('.new-project-select').options[0].value"),'__browse__','浏览置顶');
-      if(width===1440) assert.ok((await rect('.new-form .composer-box')).width>=760,'桌面输入卡片明显加宽');
+      assert.ok(await evaluate("!document.querySelector('.new-form .dir-list') && !document.querySelector('.dir-dialog')"),'目录列表默认收起、不弹窗');
+      assert.deepEqual(await evaluate("[...document.querySelectorAll('.new-form .dir-nav .btn')].map(node=>node.textContent)"),['WSL','Windows',locale==='en'?'Browse folders':'浏览文件夹'],'WSL/Windows 在左下，列表开关在右');
+      if(width===1440) assert.ok((await rect('.new-form .composer-box')).width>=700,'桌面输入卡片约 800px');
       assert.ok((await rect('.new-agents')).width < (await rect('.new-form .composer-box')).width,'agent分段按钮随内容');
       for(const kind of ['claude','codex','kimi']) {
         await click('.new-agent.agent-'+kind);
@@ -160,28 +166,30 @@ export async function runNewSessionBrowserChecks({ send, evaluate, settle, waitF
       await screenshot(variant+'-attachments');
       await evaluate("document.querySelectorAll('.new-form .attach-remove').forEach(button=>button.click())");await settle();
       if(width===390){
-        const targets=await evaluate("[...document.querySelectorAll('.new-agent,.new-form .attach-btn,.new-form .send-btn,.new-project,.new-form .cfg-pill')].map(node=>({cls:node.className,w:node.getBoundingClientRect().width,h:node.getBoundingClientRect().height}))");
+        const targets=await evaluate("[...document.querySelectorAll('.new-agent,.new-form .attach-btn,.new-form .send-btn,.new-form .dir-nav .btn,.new-form .cfg-pill')].map(node=>({cls:node.className,w:node.getBoundingClientRect().width,h:node.getBoundingClientRect().height}))");
         assert.ok(targets.every(target=>target.w>=44&&target.h>=44),JSON.stringify(targets));
       }
-      await evaluate("document.querySelector('.new-project-select').focus()");
-      await send('Input.dispatchKeyEvent',{type:'keyDown',key:' ',code:'Space',windowsVirtualKeyCode:32});
-      await send('Input.dispatchKeyEvent',{type:'keyUp',key:' ',code:'Space',windowsVirtualKeyCode:32});await settle();
+      await click('.new-form .dir-recent-toggle'); await waitFor("document.querySelector('.new-form .dir-recent-option')");
+      assert.ok(await evaluate("!document.querySelector('.new-form .dir-list')"),'最近下拉不展开浏览列表');
       await screenshot(variant+'-project-dropdown');
       await key('Escape');
 
-      await select('__browse__'); await waitFor("document.querySelector('.dir-dialog .dir-entry')");
-      assert.ok((await rect('.dir-dialog .dir-list')).height >= (await rect('.dir-dialog .dir-entry')).height*6,'目录列表至少容纳6行');
-      await click('.dir-entry[aria-label="nested"]');
-      await waitFor("window.__newFixture.directories.at(-1)==='/saved/project/nested'");
-      assert.equal(await cwd(),'/saved/project','浏览尚未确认时保留已选目录');
+      await click('.new-form .dir-list-toggle'); await waitFor("document.querySelector('.new-form .dir-entry')");
+      await click('.new-form .dir-entry[aria-label="nested"]');
+      await waitFor(`${NEW_CWD}==='/saved/project/nested'`);
+      assert.ok(await evaluate("!!document.querySelector('.new-form .dir-list')"),'进子目录后列表保持展开');
       await screenshot(variant+'-browse');
-      await click('.dir-heading .btn');
-      assert.equal(await cwd(),'/saved/project','取消浏览保留目录');
-      await select('__browse__'); await waitFor("document.querySelector('.dir-dialog .dir-entry')");
-      await click('.dir-entry[aria-label="nested"]');
-      await waitFor("window.__newFixture.directories.at(-1)==='/saved/project/nested'");
-      await click('.dir-actions .btn-primary');
-      assert.equal(await cwd(),'/saved/project/nested','确认目录后应用');
+      await evaluate("document.querySelector('.new-form .dir-entry').focus()");
+      await key('Escape');
+      assert.ok(await evaluate("!document.querySelector('.new-form .dir-list')"),'Esc 收起列表');
+      await click('.new-form .dir-address-crumbs button[title="/saved/project"]');
+      await waitFor(`${NEW_CWD}==='/saved/project' && !!document.querySelector('.new-form .dir-entry')`);
+      assert.equal(await cwd(),'/saved/project','点上层面包屑即选定并展开列表');
+      await select('/repo/recent');
+      assert.ok(await evaluate("!document.querySelector('.new-form .dir-list')"),'选最近目录后收起列表');
+      await click('.new-form .dir-list-toggle'); await waitFor("document.querySelector('.new-form .dir-entry')");
+      await click('.new-form .dir-entry[aria-label="nested"]');
+      await waitFor(`${NEW_CWD}==='/repo/recent/nested'`);
       await input('Preserve draft'); await click('.new-agent.agent-codex');
       if(width===390)await click('.new-session-back');
       await click('.sidebar-project[data-project-path="/repo/second"] .project-action:not([aria-haspopup])');
@@ -195,14 +203,14 @@ export async function runNewSessionBrowserChecks({ send, evaluate, settle, waitF
       await screenshot(variant+'-group-new');
       if(width===390){
         await evaluate('history.back()'); await waitFor("!document.querySelector('.app').classList.contains('has-main')");
-        await evaluate('history.forward()'); await waitFor("document.querySelector('.new-project-select')?.value==='/repo/second'");
+        await evaluate('history.forward()'); await waitFor(`${NEW_CWD}==='/repo/second'`);
         assert.equal(await evaluate('location.hash'),'#/new','前进恢复新建路由及目录');
         await click('.new-session-back');
       }
       await evaluate("import('/src/store.ts').then(({store})=>store.navigateHistory('/repo/recent'))");
       await waitFor("document.querySelector('.history-cwd-chip')");
       await click('.btn-new-session');
-      await waitFor("document.querySelector('.new-project-select')?.value==='/repo/recent'");
+      await waitFor(`${NEW_CWD}==='/repo/recent'`);
       await screenshot(variant+'-history-new');
       await select('/repo/second');
       await click('.new-agent.agent-codex');
@@ -236,20 +244,19 @@ export async function runNewSessionBrowserChecks({ send, evaluate, settle, waitF
       target=await open(1280,'en','light',{saved:null,empty:delayed==='delayMeta',defaultCwd:delayed==='delayMeta'?'/meta/late':'',[delayed]:true});
       assert.equal(await cwd(),'','数据晚到之前不凭空选目录');
       await evaluate(`window.__newFixture.${delayed==='delayMeta'?'finishMeta':'finishSessions'}()`);
-      await waitFor(`document.querySelector('.new-project-select').value===${JSON.stringify(delayed==='delayMeta'?'/meta/late':'/repo/recent')}`);
+      await waitFor(`${NEW_CWD}===${JSON.stringify(delayed==='delayMeta'?'/meta/late':'/repo/recent')}`);
       await send('Target.closeTarget',{targetId:target},null);
     }
     target=await open(1280,'en','light');
-    await select('__browse__');await waitFor("document.querySelector('.dir-windows-picker:not(:disabled)')");
-    await click('.dir-windows-picker');
-    // 弹窗提供 onSelectDirectory：原生窗口确认后直接选定并关闭；只有旧内嵌模式才 load()。
-    await waitFor("document.querySelector('.new-project-select').value==='/mnt/c/selected' && !document.querySelector('.dir-dialog')");
-    const nativeSelection = await evaluate("import('/src/store.ts').then(({store})=>({request:window.__newFixture.writes.at(-1),project:document.querySelector('.new-project-select').value,routeCwd:store.newSessionCwd,dialogOpen:!!document.querySelector('.dir-dialog'),directoryRequests:window.__newFixture.directories}))");
+    await waitFor("document.querySelector('.new-form .dir-windows-picker:not(:disabled)')");
+    await click('.new-form .dir-windows-picker');
+    // 内嵌地址栏不传 onSelectDirectory：原生窗口确认后 load() 该目录，导航即选定。
+    await waitFor(`${NEW_CWD}==='/mnt/c/selected'`);
+    const nativeSelection = await evaluate(`import('/src/store.ts').then(({store})=>({request:window.__newFixture.writes.at(-1),project:${NEW_CWD},routeCwd:store.newSessionCwd,directoryRequests:window.__newFixture.directories}))`);
     console.log('Windows picker evidence:', JSON.stringify(nativeSelection));
     assert.deepEqual(nativeSelection.request,{path:'/api/fs/pick-directory',body:{path:'/saved/project'}});
     assert.equal(nativeSelection.project,'/mnt/c/selected','原生确认后直接应用目录');
     assert.equal(nativeSelection.routeCwd,'/mnt/c/selected','目录同时写入路由快照');
-    assert.equal(nativeSelection.dialogOpen,false,'选定后关闭弹窗，无需再次网页确认');
     await input('draft');
     await send('Input.dispatchKeyEvent',{type:'keyDown',key:'Enter',code:'Enter',windowsVirtualKeyCode:13,nativeVirtualKeyCode:13,modifiers:8,text:'\r',unmodifiedText:'\r'});
     await send('Input.dispatchKeyEvent',{type:'keyUp',key:'Enter',code:'Enter',windowsVirtualKeyCode:13,nativeVirtualKeyCode:13,modifiers:8});await settle();
@@ -267,6 +274,19 @@ export async function runNewSessionBrowserChecks({ send, evaluate, settle, waitF
     assert.equal(await evaluate('window.__newFixture.creates.length'),2,'创建中重复提交仅一个请求');
     await evaluate('window.__newFixture.finish()');
     await waitFor("location.hash.startsWith('#/session/created-')");
+    await send('Target.closeTarget',{targetId:target},null);
+  });
+  await check('新建页非 Windows（Mac/Linux）：无 WSL/Windows 按钮，左侧图标展开列表',async()=>{
+    const target=await open(1280,'en','light',{mac:true,manyDirs:true});
+    assert.deepEqual(await evaluate("[...document.querySelectorAll('.new-form .dir-nav .btn')].map(node=>node.textContent)"),['Browse folders']);
+    const logo=await rect('.empty-logo'),box=await rect('.new-form .composer-box'),view=await rect('.welcome-view');
+    assert.ok(Math.abs((box.y+box.height/2)-(view.y+view.height/2))<=2,'输入卡片本身在整个主区（含顶栏）垂直居中');
+    await click('.new-form .dir-windows-picker'); await waitFor("document.querySelectorAll('.new-form .dir-entry').length===60");
+    assert.equal((await rect('.empty-logo')).y,logo.y,'展开列表不挪动标志与输入框');
+    assert.ok(await evaluate("(()=>{const v=document.querySelector('.welcome-view'),l=document.querySelector('.new-form .dir-list');return v.scrollHeight<=v.clientHeight&&l.scrollHeight>l.clientHeight&&l.getBoundingClientRect().bottom<=innerHeight;})()"),'长列表只在列表内滚动，首页不出现滚动条');
+    assert.equal(await evaluate("document.querySelector('.new-form .dir-windows-picker').getAttribute('aria-expanded')"),'true');
+    assert.equal(await evaluate("window.__newFixture.writes.length"),0,'不请求原生选择窗口');
+    await screenshot('1280-en-light-mac-browse');
     await send('Target.closeTarget',{targetId:target},null);
   });
   await check('阶段 C 首条附件/命令同路发送、上传失败重试、断线与服务端拒绝回填',async()=>{

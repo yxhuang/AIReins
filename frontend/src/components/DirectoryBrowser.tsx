@@ -1,5 +1,5 @@
 import { t } from "../i18n";
-import { useEffect, useId, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { fetchDirectories, fetchHistory, pickWindowsDirectory, pickWindowsFile } from "../api";
 import { store } from "../store";
@@ -82,7 +82,7 @@ export function DirectoryBrowser({ initialPath, onSelect, onClose, mode = "dir",
 }
 
 /** 弹窗与右侧面板共用导航、请求和列表；宿主决定点击文件后的行为。 */
-export function DirectoryContents({ initialPath, includeFiles, onSelectFile, onEntryMenu, onSelectDirectory, allowWindowsPicker = false, onPathChange, onPathLost, onBrowseHistory, navigationHistory, registerBrowserBack, navTarget, afterLocation, showHidden = true, upIcon = false }: {
+export function DirectoryContents({ initialPath, includeFiles, onSelectFile, onEntryMenu, onSelectDirectory, allowWindowsPicker = false, onPathChange, onPathLost, onBrowseHistory, navigationHistory, registerBrowserBack, navTarget, afterLocation, showHidden = true, upIcon = false, collapsible = false }: {
   initialPath: string;
   includeFiles: boolean;
   onSelectFile: (path: string, name: string) => void;
@@ -104,6 +104,8 @@ export function DirectoryContents({ initialPath, includeFiles, onSelectFile, onE
   showHidden?: boolean;
   /** 内联导航的「上一级」用文件面板同款圆形箭头钮（新建表单）。 */
   upIcon?: boolean;
+  /** 新建页内嵌：所在目录即选择，列表默认收起；不回退主目录，空路径不自动打开。 */
+  collapsible?: boolean;
 }) {
   const [listing, setListing] = useState<DirectoryListing | null>(null);
   const tableListing = useMemo(() => !listing || showHidden ? listing : {
@@ -116,6 +118,18 @@ export function DirectoryContents({ initialPath, includeFiles, onSelectFile, onE
   const [address, setAddress] = useState(() => normalizePath(initialPath));
   const [addressEditing, setAddressEditing] = useState(false);
   const [recentOpen, setRecentOpen] = useState(false);
+  const [listOpen, setListOpen] = useState(!collapsible);
+  const listRef = useRef<HTMLDivElement>(null);
+  // 新建页列表浮在表单下方（CSS 绝对定位），不撑高页面、不挪动居中内容；高度量到视口底，超出在列表内滚动。
+  useLayoutEffect(() => {
+    const list = listRef.current;
+    if (!collapsible || !list) return;
+    const fit = () => { list.style.maxHeight = `${Math.max(120, window.innerHeight - list.getBoundingClientRect().top - 16)}px`; };
+    const observer = new ResizeObserver(fit);
+    observer.observe(list.closest("form") ?? list);
+    window.addEventListener("resize", fit);
+    return () => { observer.disconnect(); window.removeEventListener("resize", fit); };
+  }, [collapsible, listOpen]);
   const addressRoot = useRef<HTMLDivElement>(null);
   const addressInput = useRef<HTMLInputElement>(null);
   const addressCrumbs = useRef<HTMLElement>(null);
@@ -198,7 +212,10 @@ export function DirectoryContents({ initialPath, includeFiles, onSelectFile, onE
 
   useEffect(() => {
     const path = normalizePath(initialPath);
-    void load(path || undefined, path ? "" : undefined);
+    if (collapsible) {
+      if (path) void load(path);
+      else setLoading(false);
+    } else void load(path || undefined, path ? "" : undefined);
     return () => { requestId.current += 1; };
     // 宿主在会话切换时重新挂载；后续目录导航由按钮触发。
   }, [initialPath, includeFiles]);
@@ -213,6 +230,10 @@ export function DirectoryContents({ initialPath, includeFiles, onSelectFile, onE
 
   const entries = includeFiles ? [] : sortedDirectoryEntries(listing, false, { key: "name", direction: "asc" });
   const recentPaths = recentDirectoryPaths([...sessions, ...windowsHistory], [initialPath, savedCwd], windowsPaths).filter(path => path !== listing?.path);
+  function toggleList() {
+    if (!listOpen && !listing && !loading) void load();
+    setListOpen(value => !value);
+  }
   function editAddress() {
     if (busy) return;
     setRecentOpen(false);
@@ -221,6 +242,7 @@ export function DirectoryContents({ initialPath, includeFiles, onSelectFile, onE
 
   function goUp() { if (listing?.parent) void load(listing.parent); }
   function openWindows() {
+    setListOpen(true);
     const target = lastWindowsCwd(store.sessions, windowsHistory);
     void load(target, target === WINDOWS_FALLBACK ? undefined : WINDOWS_FALLBACK);
   }
@@ -251,12 +273,21 @@ export function DirectoryContents({ initialPath, includeFiles, onSelectFile, onE
   }
 
   return (
-    <div className="dir-contents">
+    <div className="dir-contents" onKeyDown={event => {
+      if (collapsible && listOpen && event.key === "Escape") { event.stopPropagation(); setListOpen(false); }
+    }}>
         <div className="dir-location" role="group" aria-label={t("ui.DirectoryBrowser.go_to_directory")}>
           <div className="dir-address" ref={addressRoot} tabIndex={-1}>
             {nativePicker && <button ref={pickerButton} className="dir-windows-picker" type="button" aria-label={t("ui.DirectoryBrowser.windows_file_picker")}
               title={pickerBusy ? t("ui.DirectoryBrowser.windows_file_picker_opened_waiting_for_selection") : includeFiles ? t("ui.DirectoryBrowser.open_the_windows_file_picker_to_select") : t("ui.DirectoryBrowser.open_the_windows_folder_picker")}
               aria-busy={pickerBusy} disabled={busy} onClick={() => { setRecentOpen(false); void browseWindows(); }}>
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M3 8V5.5A1.5 1.5 0 0 1 4.5 4H9l2 2h8.5A1.5 1.5 0 0 1 21 7.5V9" fill="currentColor" fillOpacity=".25" />
+                <path d="M3.5 8h17a1.5 1.5 0 0 1 1.5 1.7l-1.2 9A1.5 1.5 0 0 1 19.3 20H4.7a1.5 1.5 0 0 1-1.5-1.3L2 9.7A1.5 1.5 0 0 1 3.5 8Z" fill="currentColor" fillOpacity=".5" />
+              </svg>
+            </button>}
+            {!nativePicker && collapsible && <button className="dir-windows-picker" type="button" aria-label={t("ui.DirectoryBrowser.show_folders")}
+              aria-expanded={listOpen} disabled={busy} onClick={toggleList}>
               <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                 <path d="M3 8V5.5A1.5 1.5 0 0 1 4.5 4H9l2 2h8.5A1.5 1.5 0 0 1 21 7.5V9" fill="currentColor" fillOpacity=".25" />
                 <path d="M3.5 8h17a1.5 1.5 0 0 1 1.5 1.7l-1.2 9A1.5 1.5 0 0 1 19.3 20H4.7a1.5 1.5 0 0 1-1.5-1.3L2 9.7A1.5 1.5 0 0 1 3.5 8Z" fill="currentColor" fillOpacity=".5" />
@@ -274,7 +305,7 @@ export function DirectoryContents({ initialPath, includeFiles, onSelectFile, onE
                   {index > 0 && <span className="dir-address-separator" aria-hidden="true">›</span>}
                   <button type="button" title={crumb.path} disabled={busy}
                     aria-current={crumb.path === listing.path ? "location" : undefined}
-                    onClick={() => void load(crumb.path)}>{crumb.label}</button>
+                    onClick={() => { setListOpen(true); void load(crumb.path); }}>{crumb.label}</button>
                 </span>)}
               </nav>
               <button type="button" className="dir-address-edit" aria-label={t("ui.DirectoryBrowser.edit_directory_path")}
@@ -313,7 +344,7 @@ export function DirectoryContents({ initialPath, includeFiles, onSelectFile, onE
             }}>
               <div className="dir-recent-heading">{t("ui.DirectoryBrowser.recent_directories")}</div>
               {recentPaths.map(path => <button type="button" className="dir-recent-option mono" role="menuitem" title={path} key={path}
-                onClick={() => { setRecentOpen(false); void load(path).then(() => addressRoot.current?.focus()); }}>{path}</button>)}
+                onClick={() => { setRecentOpen(false); if (collapsible) setListOpen(false); void load(path).then(() => addressRoot.current?.focus()); }}>{path}</button>)}
             </div>}
           </div>
           {onBrowseHistory && <button className="btn dir-history-button" type="button" disabled={busy || !listing}
@@ -321,7 +352,15 @@ export function DirectoryContents({ initialPath, includeFiles, onSelectFile, onE
             onClick={() => { if (listing) onBrowseHistory(listing.path); }}>{t("ui.common.sessions")}</button>}
         </div>
         {afterLocation}
-        {navTarget === undefined ? <div className="dir-nav">
+        {collapsible ? <div className="dir-nav">
+          {windowsPaths && <>
+            <button className="btn" type="button" title={t("ui.DirectoryBrowser.open_the_wsl_home_directory")} disabled={busy} onClick={() => { setListOpen(true); void load(); }}>WSL</button>
+            <button className="btn" type="button" title={t("ui.DirectoryBrowser.open_the_most_recent_windows_directory")} disabled={busy} onClick={openWindows}>Windows</button>
+          </>}
+          <button className="btn dir-list-toggle" type="button" aria-expanded={listOpen} disabled={busy} onClick={toggleList}>
+            {listOpen ? t("ui.DirectoryBrowser.hide_folders") : t("ui.DirectoryBrowser.show_folders")}
+          </button>
+        </div> : navTarget === undefined ? <div className="dir-nav">
           {upIcon ? <button className="file-nav-btn file-nav-icon dir-nav-up" type="button" aria-label={t("ui.DirectoryBrowser.parent_directory")} title={t("ui.DirectoryBrowser.go_to_the_parent_of_the_current")} disabled={!listing?.parent || busy} onClick={goUp}><NavIcon d="M12 19V5 M5 12l7-7 7 7" /></button>
             : <button className="btn" type="button" title={t("ui.DirectoryBrowser.go_to_the_parent_of_the_current")} disabled={!listing?.parent || busy} onClick={goUp}>{t("ui.DirectoryBrowser.parent_directory")}</button>}
           <button className="btn" type="button" title={windowsPaths ? t("ui.DirectoryBrowser.open_the_wsl_home_directory") : t("ui.DirectoryBrowser.open_the_home_directory")} disabled={busy} onClick={() => void load()}>{windowsPaths ? "WSL" : t("ui.DirectoryBrowser.home_directory")}</button>
@@ -333,8 +372,8 @@ export function DirectoryContents({ initialPath, includeFiles, onSelectFile, onE
           {windowsPaths && <button className="file-nav-btn" type="button" title={t("ui.DirectoryBrowser.open_the_most_recent_windows_directory")} disabled={busy} onClick={openWindows}>Windows</button>}
         </>, navTarget)}
         {error && <p className="new-error" role="alert">{error}</p>}
-        {listing?.truncated && <p className="new-hint">{includeFiles ? t("ui.DirectoryBrowser.many_entries_found_up_to_1_000") : t("ui.DirectoryBrowser.this_directory_has_over_1_000_subdirectories")}</p>}
-        <div className={`dir-list${includeFiles ? " dir-list-table" : ""}`} aria-label={includeFiles ? t("ui.common.directories_and_files") : t("ui.DirectoryBrowser.subdirectories")}>
+        {listOpen && listing?.truncated && <p className="new-hint">{includeFiles ? t("ui.DirectoryBrowser.many_entries_found_up_to_1_000") : t("ui.DirectoryBrowser.this_directory_has_over_1_000_subdirectories")}</p>}
+        {listOpen && <div ref={listRef} className={`dir-list${includeFiles ? " dir-list-table" : ""}`} aria-label={includeFiles ? t("ui.common.directories_and_files") : t("ui.DirectoryBrowser.subdirectories")}>
           {loading ? <p className="new-hint">{t("ui.common.reading")}</p> : includeFiles && listing && tableListing ?
             tableListing.dirs.length + (tableListing.files?.length ?? 0) > 0 ? <DirectoryTable listing={tableListing} busy={busy}
               onActivate={(path, name, folder) => folder ? void load(path) : onSelectFile(path, name)}
@@ -350,7 +389,7 @@ export function DirectoryContents({ initialPath, includeFiles, onSelectFile, onE
               ))}
             </>
           ) : <p className="new-hint">{includeFiles ? t("ui.DirectoryBrowser.no_directories_or_files_to_browse") : t("ui.DirectoryBrowser.no_subdirectories_to_browse")}</p>}
-        </div>
+        </div>}
         {onSelectDirectory && (
           <div className="dir-actions">
             <button className="btn btn-primary" type="button" title={t("ui.DirectoryBrowser.use_the_current_directory_as_the_working")} disabled={!listing || busy} onClick={() => { if (listing) onSelectDirectory(listing.path); }}>{t("ui.DirectoryBrowser.select_this_directory")}</button>
