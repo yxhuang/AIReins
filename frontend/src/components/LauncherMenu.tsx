@@ -2,6 +2,8 @@ import { t } from "../i18n";
 import { useEffect, useId, useRef, useState } from "react";
 import { fetchLinks, type LauncherLink } from "../api";
 import { useAnchoredMenu } from "./useAnchoredMenu";
+import { isInlineSvg } from "../pages";
+import { AgentIcon } from "./AgentIcon";
 
 export function LauncherMenu({ collapsed }: { collapsed: boolean }) {
   const [open, setOpen] = useState(false);
@@ -52,7 +54,13 @@ export function LauncherMenu({ collapsed }: { collapsed: boolean }) {
         : [...groups].map(([group, items]) => <section className="settings-group" key={group}>
           <h3 className="settings-group-title">{group}</h3>
           {items.map((link, index) => <a className="launcher-link" key={index} href={link.url} target="_blank" rel="noopener noreferrer" onClick={() => close(true)}>
-            {link.icon && <span className="launcher-link-icon" aria-hidden="true">{link.icon}</span>}
+            {/* 与扩展页 manifest 同一信任边界：links.json 由用户自己维护，内联 SVG 按 HTML 渲染 */}
+            {link.icon && (/^agent:(claude|codex|kimi)$/.test(link.icon)
+              // 三家品牌图标复用 AgentIcon，配置里写 agent:claude / agent:codex / agent:kimi，不在 links.json 里复制路径
+              ? <span className="launcher-link-icon" aria-hidden="true"><AgentIcon agent={link.icon.slice(6) as "claude" | "codex" | "kimi"} label={link.name} /></span>
+              : isInlineSvg(link.icon)
+              ? <span className="launcher-link-icon" aria-hidden="true" dangerouslySetInnerHTML={{ __html: link.icon }} />
+              : <span className="launcher-link-icon" aria-hidden="true">{link.icon}</span>)}
             <span className="launcher-link-name">{link.name}</span>
           </a>)}
         </section>)}
