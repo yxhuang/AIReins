@@ -3107,55 +3107,55 @@
     },
     {
       "file": "server/windows-directory-picker.ts",
-      "line": 86,
+      "line": 111,
       "key": "server.message455",
       "category": "WindowsPickerError"
     },
     {
       "file": "server/windows-directory-picker.ts",
-      "line": 86,
+      "line": 111,
       "key": "server.message456",
       "category": "WindowsPickerError"
     },
     {
       "file": "server/windows-directory-picker.ts",
-      "line": 93,
+      "line": 118,
       "key": "server.message457",
       "category": "WindowsPickerError"
     },
     {
       "file": "server/windows-directory-picker.ts",
-      "line": 100,
+      "line": 125,
       "key": "server.message458",
       "category": "WindowsPickerError"
     },
     {
       "file": "server/windows-directory-picker.ts",
-      "line": 102,
+      "line": 127,
       "key": "server.message458",
       "category": "WindowsPickerError"
     },
     {
       "file": "server/windows-directory-picker.ts",
-      "line": 106,
+      "line": 131,
       "key": "server.message459",
       "category": "WindowsPickerError"
     },
     {
       "file": "server/windows-directory-picker.ts",
-      "line": 106,
+      "line": 131,
       "key": "server.message460",
       "category": "WindowsPickerError"
     },
     {
       "file": "server/windows-directory-picker.ts",
-      "line": 111,
+      "line": 136,
       "key": "server.message461",
       "category": "WindowsPickerError"
     },
     {
       "file": "server/windows-directory-picker.ts",
-      "line": 114,
+      "line": 139,
       "key": "server.message462",
       "category": "WindowsPickerError"
     },
@@ -3550,7 +3550,7 @@
       "line": 33,
       "text": "(embedded Windows picker script comments)",
       "reason": "内嵌 PowerShell 的中文仅位于 # 注释；精确模板摘要防止后续用户文案混入，修改脚本后须核查所有中文字面量再更新摘要。",
-      "sha256": "a2d9dbe7eead6a214747bc676d470e0e5249c46a748081a660f7f0989fef683b"
+      "sha256": "79beaf90743545d2687bdfb78e686a0396b59909a9ae300e039edf2cffe579c8"
     },
     {
       "file": "server/i18n/messages.ts",

@@ -34,6 +34,9 @@ export const PICKER_SCRIPT = String.raw`
 $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
 Add-Type -AssemblyName System.Windows.Forms
+# pwsh.exe 未声明 DPI 感知，系统会把窗口按位图放大而发虚；必须在创建任何窗口前设定。
+[System.Windows.Forms.Application]::EnableVisualStyles()
+[void][System.Windows.Forms.Application]::SetHighDpiMode([System.Windows.Forms.HighDpiMode]::PerMonitorV2)
 # .NET 委托直接在计时线程退出，不调用 PowerShell runspace，也不逐次加载 C# 编译器。
 $exitMethod = [System.Environment].GetMethod('Exit', [type[]]@([int]))
 $exitBody = [System.Linq.Expressions.Expression]::Call($exitMethod, [System.Linq.Expressions.Expression[]]@([System.Linq.Expressions.Expression]::Constant(3)))
@@ -65,6 +68,28 @@ try {
   $owner.Opacity = 0
   $owner.StartPosition = [System.Windows.Forms.FormStartPosition]::CenterScreen
   $owner.Show()
+  # 从 WSL 启动的后台进程无权抢前台，Activate 只会让任务栏一直闪；临时挂到前台窗口的输入队列通常可以激活。尽力而为，失败仍照常弹窗。
+  try {
+    # Reflection.Emit 声明 P/Invoke，避免 Add-Type 编译 C# 的启动开销。
+    $nativeType = [System.Reflection.Emit.AssemblyBuilder]::DefineDynamicAssembly([System.Reflection.AssemblyName]::new('AIReinsPicker'), 'Run').DefineDynamicModule('AIReinsPicker').DefineType('Native', 'Public, Class')
+    foreach ($m in @(
+      @('user32.dll', 'GetForegroundWindow', [IntPtr], @()),
+      @('user32.dll', 'GetWindowThreadProcessId', [uint32], @([IntPtr], [IntPtr])),
+      @('user32.dll', 'AttachThreadInput', [bool], @([uint32], [uint32], [bool])),
+      @('user32.dll', 'SetForegroundWindow', [bool], @([IntPtr])),
+      @('kernel32.dll', 'GetCurrentThreadId', [uint32], @())
+    )) {
+      $method = $nativeType.DefinePInvokeMethod($m[1], $m[0], 'Public, Static, PinvokeImpl', 'Standard', $m[2], [type[]]$m[3], 'Winapi', 'Auto')
+      # 不加 PreserveSig 时返回值按 HRESULT 处理。
+      $method.SetImplementationFlags($method.GetMethodImplementationFlags() -bor [System.Reflection.MethodImplAttributes]::PreserveSig)
+    }
+    $native = $nativeType.CreateType()
+    $foreground = $native::GetWindowThreadProcessId($native::GetForegroundWindow(), [IntPtr]::Zero)
+    $current = $native::GetCurrentThreadId()
+    $attached = $foreground -ne 0 -and $foreground -ne $current -and $native::AttachThreadInput($current, $foreground, $true)
+    try { [void]$native::SetForegroundWindow($owner.Handle) }
+    finally { if ($attached) { [void]$native::AttachThreadInput($current, $foreground, $false) } }
+  } catch { [Console]::Error.WriteLine("foreground: $_") }
   $owner.TopMost = $true
   $owner.Activate()
   if ($dialog.ShowDialog($owner) -eq [System.Windows.Forms.DialogResult]::OK) {

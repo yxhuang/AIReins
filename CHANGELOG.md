@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- The native Windows folder/file picker is no longer blurry on high-DPI displays, and it now comes to the front instead of flashing in the taskbar.
+
 ## 0.1.0 (2026-10-17)
 
 First public release.
