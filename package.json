@@ -40,6 +40,7 @@
     "test:long-session": "node --import ./frontend/scripts/i18n-zh.mjs --import tsx frontend/scripts/long-session-render.test.mjs && node --import tsx server/long-session.test.ts && node --import tsx server/long-session-review.test.ts && node --import ./frontend/scripts/i18n-zh.mjs --import tsx frontend/scripts/long-session-scroll.test.mjs",
     "check:i18n": "node --import tsx frontend/scripts/check-i18n.mjs && node frontend/scripts/check-server-i18n.mjs",
     "check:privacy": "node scripts/check-privacy.mjs",
+    "hooks:install": "git config --local core.hooksPath scripts/git-hooks",
     "test:privacy": "node scripts/check-privacy.test.mjs",
     "test:i18n": "node --import tsx frontend/scripts/i18n.test.mjs && node frontend/scripts/check-server-i18n.test.mjs"
   },

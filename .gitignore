@@ -4,3 +4,11 @@ scratch/
 __pycache__/
 .work-orders/
 HANDOFF.md
+.claude/
+.codex/
+.kimi-code/
+.vscode/
+.env
+.env.*
+*.log
+.workbench/

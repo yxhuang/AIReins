@@ -16,8 +16,8 @@ const rules = [
   { id: 'token', pattern: /\b(?:sk-ant-[\w-]{10,}|sk-(?:proj-)?[\w-]{20,}|gh[pousr]_[a-z\d]{20,}|github_pat_[a-z\d_]{20,}|AKIA[A-Z\d]{16}|AIza[\w-]{30,}|xox[baprs]-[\w-]{15,})\b/gi },
 ];
 
-// Local handoff is removed from public history; this is not a public source document.
-const excludedFiles = [{ file: 'HANDOFF.md', reason: 'Local maintainer state, excluded from the public release.' }];
+// Local maintainer state must never be tracked, even through git add -f.
+const forbiddenFiles = new Set(['HANDOFF.md']);
 // Exact source lines only: exceptions do not suppress other rules or private patterns.
 const scratch = '/tmp/' + 'claude-1000/';
 // Assemble synthetic path examples so the exception declarations also pass the scan.
@@ -48,10 +48,20 @@ const exceptions = [
     reason: 'Synthetic Windows filename verifies rejection on non-WSL platforms.' },
 ];
 
-let staged = false;
+const usage = 'Usage: node scripts/check-privacy.mjs [--staged | --range <base>..<head> | --commit-msg <file>] [--patterns <file>]';
+let mode = 'worktree', range, messageFile;
 for (let index = 2; index < process.argv.length; index++) {
   const arg = process.argv[index];
-  if (arg === '--staged') staged = true;
+  if (['--staged', '--range', '--commit-msg'].includes(arg)) {
+    if (mode !== 'worktree') throw new Error(usage);
+    mode = arg.slice(2);
+    if (arg !== '--staged') {
+      const value = process.argv[++index];
+      if (!value || value.startsWith('--')) throw new Error(usage);
+      if (arg === '--range') range = value;
+      else messageFile = resolve(value);
+    }
+  }
   else if (arg === '--patterns' && process.argv[index + 1] && !process.argv[index + 1].startsWith('--')) {
     const file = resolve(process.argv[++index]);
     for (const [line, source] of readFileSync(file, 'utf8').split(/\r?\n/).entries()) {
@@ -60,59 +70,113 @@ for (let index = 2; index < process.argv.length; index++) {
       try { rules.push({ id: `private-pattern-${line + 1}`, pattern: new RegExp(pattern, 'gi') }); }
       catch { throw new Error(`Invalid private pattern at line ${line + 1}`); }
     }
-  } else throw new Error('Usage: node scripts/check-privacy.mjs [--staged] [--patterns <file>]');
+  } else throw new Error(usage);
 }
 
-const git = args => execFileSync('git', args, { maxBuffer: 64 * 1024 * 1024 });
+const git = args => execFileSync('git', ['--literal-pathspecs', ...args], { maxBuffer: 64 * 1024 * 1024 });
 const root = git(['rev-parse', '--show-toplevel']).toString().trim();
 process.chdir(root);
-const files = git(staged
-  ? ['diff', '--cached', '--no-renames', '--diff-filter=ACM', '--name-only', '-z']
-  : ['ls-files', '-z']).toString().split('\0').filter(Boolean);
 let checked = 0, lines = 0;
-const failures = [];
-function inspect(file, line, text) {
+const failures = [], skipped = [];
+function inspect(label, line, text, file) {
   lines++;
+  let matched = false;
   for (const rule of rules) {
     if (exceptions.some(item => item.file === file && item.rules.includes(rule.id) && item.text === text.trim())) continue;
     for (const match of text.matchAll(rule.pattern)) {
       if (rule.username && placeholders.has(match[1].trim().toLowerCase())) continue;
       // Do not echo the matched value: a finding may contain a real credential.
-      failures.push(`${file}:${line}: ${rule.id}`);
+      failures.push(`${label}:${line}: ${rule.id}`);
+      matched = true;
       break;
     }
   }
+  return matched;
 }
-for (const file of files) {
-  if (excludedFiles.some(item => item.file === file)) continue;
-  let data;
-  if (staged) data = git(['show', `:${file}`]);
-  else {
-    try {
-      const path = join(root, file), stat = lstatSync(path);
-      if (!stat.isFile() && !stat.isSymbolicLink()) continue;
-      data = stat.isSymbolicLink() ? Buffer.from(readlinkSync(path)) : readFileSync(path);
-    } catch (error) {
-      if (error.code === 'ENOENT') continue; // Deleted worktree file has no current content.
-      throw error;
-    }
+function inspectLines(label, text, file) {
+  text.split('\n').forEach((line, index) => inspect(label, index + 1, line, file));
+}
+function inspectFile(file, data, diff, prefix = '') {
+  // Never echo a filename which itself contains a private value.
+  const privateName = inspect(`${prefix}<filename>`, 1, file);
+  const label = prefix + (privateName ? '<redacted-path>' : file);
+  if (forbiddenFiles.has(file)) {
+    failures.push(`${label}:1: forbidden-file`);
+    return;
   }
-  if (data.includes(0) || !isUtf8(data)) continue;
+  if (data === undefined) return; // Still inspect tracked paths absent from the worktree.
+  if (data.includes(0) || !isUtf8(data)) {
+    skipped.push(label);
+    return;
+  }
   checked++;
-  if (!staged) data.toString().split('\n').forEach((text, index) => inspect(file, index + 1, text));
+  if (diff === undefined) inspectLines(label, data.toString(), file);
   else {
-    const diff = git(['diff', '--cached', '--no-color', '--no-ext-diff', '--no-textconv', '--no-renames', '--unified=0', '--', file]).toString();
     let line;
     for (const text of diff.split('\n')) {
       const hunk = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(text);
-      if (hunk) line = Number(hunk[1]);
-      else if (line !== undefined && text.startsWith('+')) inspect(file, line++, text.slice(1));
+      if (text.startsWith('diff --git ')) line = undefined;
+      else if (hunk) line = Number(hunk[1]);
+      else if (line !== undefined && text.startsWith('+')) inspect(label, line++, text.slice(1), file);
       else if (line !== undefined && text.startsWith(' ')) line++;
     }
   }
 }
+const diffOptions = ['--no-color', '--no-ext-diff', '--no-textconv', '--no-renames'];
+function inspectChanges(base, revision = '') {
+  const files = git([...base, ...diffOptions, '--diff-filter=ACMT', '--name-only', '-z']).toString().split('\0').filter(Boolean);
+  for (const file of files) {
+    const data = git(['show', `${revision}:${file}`]);
+    const diff = data.includes(0) || !isUtf8(data) ? ''
+      : git([...base, ...diffOptions, '--text', '--unified=0', '--', file]).toString();
+    inspectFile(file, data, diff, revision ? `${revision}:` : '');
+  }
+  // Catch an unchanged forbidden file too; a staged deletion is allowed.
+  const handoff = git(revision ? ['ls-tree', '--name-only', revision, '--', 'HANDOFF.md'] : ['ls-files', '--', 'HANDOFF.md']);
+  if (handoff.length && !files.includes('HANDOFF.md')) failures.push(`${revision ? revision + ':' : ''}HANDOFF.md:1: forbidden-file`);
+}
+if (mode === 'range') {
+  const refs = range.split('..');
+  if (refs.length !== 2 || refs.some(ref => !ref)) throw new Error(usage);
+  const commit = ref => git(['rev-parse', '--verify', '--end-of-options', `${ref}^{commit}`]).toString().trim();
+  const head = commit(refs[1]);
+  const revisions = /^0{40}(?:0{24})?$/.test(refs[0]) ? head : `${commit(refs[0])}..${head}`;
+  const commits = git(['rev-list', '--reverse', '--topo-order', '--parents', revisions]).toString().trim();
+  for (const entry of commits ? commits.split('\n') : []) {
+    const [sha, parent] = entry.split(' ');
+    const metadata = git(['show', '-s', '--no-show-signature', '--no-notes', '--format=%an%x00%ae%x00%cn%x00%ce%x00%B', sha]).toString().split('\0');
+    for (const [index, field] of ['author-name', 'author-email', 'committer-name', 'committer-email', 'commit-message'].entries()) {
+      inspectLines(`${sha}:<${field}>`, metadata[index]);
+    }
+    // A merge is compared to its first parent; roots compare to the empty tree.
+    inspectChanges(parent ? ['diff', parent, sha] : ['diff-tree', '--root', '--no-commit-id', '-r', sha], sha);
+  }
+} else if (mode === 'commit-msg') {
+  inspectLines('<commit-message>', readFileSync(messageFile, 'utf8'));
+  for (const field of ['GIT_AUTHOR_IDENT', 'GIT_COMMITTER_IDENT']) {
+    inspectLines(`<${field}>`, git(['var', field]).toString());
+  }
+} else if (mode === 'staged') inspectChanges(['diff', '--cached']);
+else {
+  const files = git(['ls-files', '-z']).toString().split('\0').filter(Boolean);
+  for (const file of files) {
+    if (forbiddenFiles.has(file)) {
+      failures.push(`${file}:1: forbidden-file`);
+      continue;
+    }
+    try {
+      const path = join(root, file), stat = lstatSync(path);
+      if (!stat.isFile() && !stat.isSymbolicLink()) { inspectFile(file); continue; }
+      inspectFile(file, stat.isSymbolicLink() ? Buffer.from(readlinkSync(path)) : readFileSync(path));
+    } catch (error) {
+      if (error.code === 'ENOENT') { inspectFile(file); continue; }
+      throw error;
+    }
+  }
+}
+if (skipped.length) console.warn(`Skipped content (binary/non-UTF-8, not verified; 请人工检查):\n${skipped.join('\n')}`);
 if (failures.length) {
   console.error(failures.join('\n'));
   console.error(`Privacy check failed: ${failures.length} matches`);
   process.exitCode = 1;
-} else console.log(`Privacy check OK: ${checked} text files, ${lines} ${staged ? 'staged added' : 'worktree'} lines, 0 matches`);
+} else console.log(`Privacy text check OK: ${checked} text files, ${lines} inspected lines, 0 matches${skipped.length ? `; ${skipped.length} skipped files remain unverified` : ''}`);
