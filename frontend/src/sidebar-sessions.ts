@@ -3,6 +3,18 @@ import { normalizeProjectPath } from "../../shared/project-path";
 import type { Store } from "./store";
 import type { SessionRecord } from "./types";
 
+// 同一摘要对象只解析一次；seq 原地推进不影响活动时间。
+const activityTimes = new WeakMap<SessionRecord, number>();
+function activityTime(session: SessionRecord): number {
+  let time = activityTimes.get(session);
+  if (time === undefined) {
+    time = Date.parse(session.lastActivityAt);
+    activityTimes.set(session, time);
+  }
+  return time;
+}
+const byActivity = (a: SessionRecord, b: SessionRecord) => activityTime(b) - activityTime(a);
+
 /** 侧栏活跃目录候选取最近 3 天；较早目录另从完整 sessions 中选取。 */
 export const SIDEBAR_RECENT_WINDOW_MS = 72 * 60 * 60 * 1000;
 
@@ -16,13 +28,11 @@ export function selectSidebarSessions(value: Pick<Store, "sessions" | "now" | "c
       waiting.push(session);
     } else if (session.status !== "dead" && (
       session.status === "running" || session.status === "starting"
-      || session.id === value.currentId || Date.parse(session.lastActivityAt) >= cutoff
+      || session.id === value.currentId || activityTime(session) >= cutoff
     )) {
       active.push(session);
     }
   }
-  const byActivity = (a: SessionRecord, b: SessionRecord) =>
-    Date.parse(b.lastActivityAt) - Date.parse(a.lastActivityAt);
   return { waiting: waiting.sort(byActivity), active: active.sort(byActivity) };
 }
 
@@ -40,7 +50,6 @@ type SidebarValue = Pick<Store, "sessions" | "now" | "currentId" | "pendingCount
 export function selectSidebarSections(value: SidebarValue, query = "") {
   const { waiting, active } = selectSidebarSessions(value);
   const waitingIds = new Set(waiting.map(session => session.id));
-  const byActivity = (a: SessionRecord, b: SessionRecord) => Date.parse(b.lastActivityAt) - Date.parse(a.lastActivityAt);
   const pinned = value.sessions.filter(session => !waitingIds.has(session.id) && session.pinned).sort(byActivity);
   const pinnedIds = new Set(pinned.map(session => session.id));
   const directories = new Map<string, SessionRecord[]>();
@@ -103,7 +112,7 @@ export function selectSidebarSections(value: SidebarValue, query = "") {
 export function selectProjectSessions(sessions: SessionRecord[], options: Pick<Store, "now" | "currentId" | "pendingCount"> & {
   expanded: boolean; searching: boolean;
 }): { sessions: SessionRecord[]; hiddenCount: number } {
-  const sorted = [...sessions].sort((a, b) => Date.parse(b.lastActivityAt) - Date.parse(a.lastActivityAt));
+  const sorted = [...sessions].sort(byActivity);
   if (options.expanded || options.searching) return { sessions: sorted, hiddenCount: 0 };
   let ordinaryCount = 0;
   const visible = sorted.filter(session => session.id === options.currentId || (session.backgroundTasks?.length ?? 0) > 0
@@ -117,6 +126,6 @@ export function sidebarStatusDot(session: SessionRecord, pending: number, now: n
   if (pending > 0) return 'needs-user';
   if (session.status === 'idle' && (session.backgroundTasks?.length ?? 0) > 0) return 'running';
   if (session.status === 'running' || session.status === 'starting' || session.status === 'error') return session.status;
-  if (session.status === 'idle' && Date.parse(session.lastActivityAt) >= now - SIDEBAR_WORKING_WINDOW_MS) return 'idle';
+  if (session.status === 'idle' && activityTime(session) >= now - SIDEBAR_WORKING_WINDOW_MS) return 'idle';
   return null;
 }

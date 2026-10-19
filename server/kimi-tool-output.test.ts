@@ -10,6 +10,7 @@ interface TestTerminal {
   eventTruncated: boolean;
   exitCode?: number;
   signal?: string;
+  process?: ChildProcessWithoutNullStreams;
 }
 
 function harness() {
@@ -38,6 +39,8 @@ function harness() {
   });
   const put = (terminalId: string, state: Omit<TestTerminal, "eventTail" | "eventTruncated"> & Partial<Pick<TestTerminal, "eventTail" | "eventTruncated">>) =>
     internals.terminals.set(terminalId, {
+      // 已退出的命令：release 的组清理对它直接完成。
+      process: { pid: undefined, exitCode: 0, signalCode: null, once() {}, off() {} } as unknown as ChildProcessWithoutNullStreams,
       ...state,
       eventTail: state.eventTail ?? Buffer.from(state.output),
       eventTruncated: state.eventTruncated ?? state.truncated,

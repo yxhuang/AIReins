@@ -59,7 +59,7 @@ export function SessionView({ session, mobileTail, usage }: { session: SessionRe
 
   const focusView = useStore(selectFocusView);
   const prefixVersion = renderBuilder.prefixVersion;
-  const shown = useMemo(() => renderBuilder.display(focusView, session.cwd),
+  const shown = useMemo(() => renderBuilder.display(focusView, session.cwd, data?.toolFrames),
     [renderBuilder, data, focusView, session.cwd]);
 
   const streamRef = useRef<HTMLDivElement>(null);
@@ -145,7 +145,7 @@ export function SessionView({ session, mobileTail, usage }: { session: SessionRe
       readingAnchor.current = null;
     } else if (container && stickToBottom.current) container.scrollTop = container.scrollHeight;
     if (container) setShowLatest(awayFromLatest(container.scrollHeight, container.scrollTop, container.clientHeight));
-  }, [items, data?.seq, data?.dropped, data?.events, data?.prependVersion]);
+  }, [items, data?.seq, data?.dropped, data?.events, data?.prependVersion, data?.toolFrames]);
 
   useEffect(() => {
     const container = streamRef.current;
@@ -220,6 +220,7 @@ export function SessionView({ session, mobileTail, usage }: { session: SessionRe
     const deps = [items, prefixVersion, focusView, session.id, session.agent, session.cwd, dead, running];
     const cached = rowCache.current;
     if (cached && deps.every((value, i) => value === cached.deps[i])) {
+      for (const i of renderBuilder.changedDisplayIndices) cached.rows[i] = renderItem(shown[i]!, i);
       for (let i = Math.max(0, cached.length - 1); i < shown.length; i++) cached.rows[i] = renderItem(shown[i]!, i);
       cached.length = shown.length;
       return cached.rows;
@@ -876,10 +877,10 @@ export function Composer({ session, dead, errored }: { session: SessionRecord; d
     return () => controller.abort();
   }, [skillOpen, session.id]);
 
-  // @ 检索：250ms 防抖 + 序号作废旧响应；检索结果同时写进存在性缓存
+  // @ 检索：250ms 防抖；新查询、关闭面板或卸载时中止旧请求。
   useEffect(() => {
     const seq = ++searchSeq.current;
-    let cancelled = false;
+    const controller = new AbortController();
     setFiles([]);
     setFilesError(null);
     setFilesLoading(mentionOpen);
@@ -887,20 +888,20 @@ export function Composer({ session, dead, errored }: { session: SessionRecord; d
       return;
     }
     const timer = setTimeout(() => {
-      fetchFiles(session.id, mentionQuery ?? "")
+      fetchFiles(session.id, mentionQuery ?? "", undefined, controller.signal)
         .then((list) => {
-          if (cancelled || searchSeq.current !== seq) return; // 晚到的旧响应丢弃
+          if (controller.signal.aborted || searchSeq.current !== seq) return; // 晚到的旧响应丢弃
           store.noteFiles(session.id, list);
           setFiles(list);
           setFilesLoading(false);
         })
         .catch((error: unknown) => {
-          if (cancelled || searchSeq.current !== seq) return;
+          if (controller.signal.aborted || searchSeq.current !== seq) return;
           setFilesError(error instanceof Error ? error.message : String(error));
           setFilesLoading(false);
         });
     }, 250);
-    return () => { cancelled = true; clearTimeout(timer); };
+    return () => { controller.abort(); clearTimeout(timer); };
     // store 是模块级单例，不进依赖
   }, [mentionOpen, mentionQuery, session.id]);
 

@@ -1,6 +1,8 @@
 import { createReadStream, existsSync, statSync } from "node:fs";
 import { extname, resolve } from "node:path";
 import type { ServerResponse } from "node:http";
+import { pipeline } from "node:stream";
+import { log } from "./logger.js";
 import { acceptsGzip } from "./response-compression.js";
 
 export function serveStatic(staticRoot: string, pathname: string, response: ServerResponse, acceptEncoding = ""): boolean {
@@ -32,6 +34,11 @@ export function serveStatic(staticRoot: string, pathname: string, response: Serv
     "x-frame-options": "DENY",
     "content-security-policy": "frame-ancestors 'none'",
   });
-  createReadStream(gzip ? `${path}.gz` : path).pipe(response);
+  pipeline(createReadStream(gzip ? `${path}.gz` : path), response, (error) => {
+    if (error) {
+      response.destroy();
+      log("warn", "static stream failed", { message: error.message });
+    }
+  });
   return true;
 }

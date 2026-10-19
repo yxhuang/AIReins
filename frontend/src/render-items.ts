@@ -488,11 +488,7 @@ function renderItemsReducer(events: UnifiedEvent[], agent: AgentKind) {
         if (view) {
           view = replace(view);
           tools.set(view.toolCallId, view);
-          // kimi 跑命令时的 content 是终端引用（{type:"terminal"}），不是入参，不能覆盖真实入参
-          const updated = toolInputText(p);
-          if (updated && !isTerminalRefContent(p.content)) view.input = updated;
-          if (typeof p.toolName === "string") view.toolName = p.toolName;
-          mergeToolExtras(view, p);
+          applyToolUpdate(view, p);
         }
         break;
       }
@@ -637,7 +633,7 @@ function renderItemsReducer(events: UnifiedEvent[], agent: AgentKind) {
     }
     if (items.length) positions.set(items[items.length - 1]!, items.length - 1);
   };
-  return { items, append };
+  return { items, append, tools };
 }
 
 // 工具入参的展示文本：claude 流式给 partialInput 字符串，kimi 给 content/rawInput，宽容处理。
@@ -656,14 +652,18 @@ export function createRenderItemsBuilder(agent: AgentKind) {
   let last: UnifiedEvent | undefined;
   let maxSeq = -Infinity;
   let reducer = renderItemsReducer([], agent);
-  let displayCache: { items: RenderItem[]; version: number; focus: boolean; cwd: string; length: number; shown: StreamRenderItem[] } | undefined;
+  let displayCache: { items: RenderItem[]; version: number; focus: boolean; cwd: string; length: number; shown: StreamRenderItem[];
+    toolPositions: Map<string, number>; previews: Map<string, UnifiedEvent> } | undefined;
   return {
     // Older item changes invalidate the cached display prefix; text deltas only change the tail.
     prefixVersion: 0,
+    /** 临时工具帧只重绘这些显示行，不使持久前缀失效。 */
+    changedDisplayIndices: [] as number[],
     firstUser: undefined as UnifiedEvent | undefined,
-    display(focus: boolean, cwd: string): StreamRenderItem[] {
+    display(focus: boolean, cwd: string, toolFrames?: ReadonlyMap<string, UnifiedEvent>): StreamRenderItem[] {
       const items = reducer.items;
-      const cached = displayCache;
+      let cached = displayCache;
+      this.changedDisplayIndices = [];
       if (cached && cached.items === items && cached.version === this.prefixVersion && cached.focus === focus && cached.cwd === cwd) {
         for (let i = Math.max(0, cached.length - 1); i < items.length; i++) {
           const item = items[i]!;
@@ -672,13 +672,29 @@ export function createRenderItemsBuilder(agent: AgentKind) {
           else if (i >= cached.length) cached.shown.push(item);
         }
         cached.length = items.length;
-        return cached.shown;
+      } else {
+        const grouped = groupReadOnlyTools(items, agent, cwd);
+        // 原始通知只留在事件记录中，正常对话和专注视图均不显示调试卡片。
+        const shown = grouped.filter(item => item.kind !== "raw" && (!focus || focusVisible(item)));
+        const toolPositions = new Map<string, number>();
+        shown.forEach((item, index) => { if (item.kind === "tool") toolPositions.set(item.toolCallId, index); });
+        cached = displayCache = { items, version: this.prefixVersion, focus, cwd, length: items.length, shown,
+          toolPositions, previews: new Map() };
       }
-      const grouped = groupReadOnlyTools(items, agent, cwd);
-      // 原始通知只留在事件记录中，正常对话和专注视图均不显示调试卡片。
-      const shown = grouped.filter(item => item.kind !== "raw" && (!focus || focusVisible(item)));
-      displayCache = { items, version: this.prefixVersion, focus, cwd, length: items.length, shown };
-      return shown;
+      for (const id of new Set([...cached.previews.keys(), ...(toolFrames?.keys() ?? [])])) {
+        const index = cached.toolPositions.get(id);
+        const base = reducer.tools.get(id);
+        if (index === undefined || !base) continue;
+        const frame = toolFrames?.get(id);
+        // 最后一行可能刚被增量路径还原成 base；也需重新叠加未变的临时帧。
+        if (frame && frame === cached.previews.get(id) && cached.shown[index] !== base) continue;
+        const view = { ...base };
+        if (frame) applyToolUpdate(view, frame.payload);
+        cached.shown[index] = frame ? view : base;
+        this.changedDisplayIndices.push(index);
+      }
+      cached.previews = new Map(toolFrames);
+      return cached.shown;
     },
     update(events: UnifiedEvent[], nextDropped = 0): RenderItem[] {
       let safe = source === events && dropped === nextDropped && events.length >= length
@@ -713,6 +729,14 @@ export function createRenderItemsBuilder(agent: AgentKind) {
       return reducer.items;
     },
   };
+}
+
+function applyToolUpdate(view: ToolView, payload: Record<string, unknown>): void {
+  // kimi 的终端引用不是入参，不能覆盖真实参数。
+  const updated = toolInputText(payload);
+  if (updated && !isTerminalRefContent(payload.content)) view.input = updated;
+  if (typeof payload.toolName === "string") view.toolName = payload.toolName;
+  mergeToolExtras(view, payload);
 }
 
 function toolInputText(p: Record<string, unknown>): string {

@@ -19,6 +19,8 @@ npm run server
 - 非 Git 工作目录的委派前快照：`~/.workbench/snapshots/<basename>-<pathHash>/`
 - 各家 CLI 自有 transcript：由原生 CLI 管理；普通「移除」保留。用户明确确认「彻底删除」时，Codex 经正式 `codex delete --force <UUID>` 删除单个原生会话；Claude/Kimi 当前未开放此操作。
 
+活动事件触发的定时注册表保存失败时记录日志并保留 dirty，按 2、4、8 秒递增重试，最长间隔 30 秒，成功后恢复 1 秒合并窗口。driver 的 IO/退出回调中发生的注册表写入错误采用同样的后台重试，避免未捕获异常；直接同步调用 `emit`、`setStatus` 等路径仍向调用方抛出写入错误。
+
 服务启动会把已释放或符合安全恢复条件的异常退出记录载入为 `idle + released`，下一次发送原地续接；包括原状态已被旧代码写成 `dead`、PID 已清空，但能通过系统启动时间证明旧 worker 全部消失的记录。不会接管旧进程。其余记录保持 `dead`，transcript 损坏优先为 `error`。新建续接也可传原生 `resumeSessionId`；Claude 使用 `--resume`，Codex 使用 `thread/resume`，Kimi 使用 `session/resume`。续接前若另一条 AIReins 会话仍有 worker 占着同一原生会话：它空闲或出错（如上一轮因模型满载失败、进程仍在）时先停掉它的 worker，旧会话随进程退出标 `dead`；它正在执行、有待处理闸门或后台任务、正在续接/重启/检查时返回 400 / 40063。三家都只留一个进程写同一原生会话（Codex 有单写者锁，Claude `--resume` 追加同一 jsonl）。
 
 ### Claude Remote Control 契约（M23）
@@ -53,6 +55,8 @@ Claude 停止走 `control_request {subtype:"interrupt"}`（与 CLI/扩展按 Esc
 - **Host**：必须是 `127.0.0.1` 或 `localhost`，端口为本端口或 5173。用来挡 DNS 重绑定。
 - **Origin**：写操作（GET、HEAD 以外）和 WS 握手如果带了 Origin，必须是上面四个地址对应的 `http://` 源。用来挡跨站伪造和 WS 劫持。
 - **不带 Origin 的请求放行**：这类请求来自本机进程。
+
+静态资源与上传文件字节通过 `pipeline` 发送；打开或读取失败以及客户端断开时收尾两端、销毁响应并记录日志，源流错误不会成为未捕获异常。
 
 另外，静态资源响应带 `X-Frame-Options: DENY` 和 `Content-Security-Policy: frame-ancestors 'none'`，不允许别的网站嵌入 AIReins。
 
@@ -268,6 +272,8 @@ Kimi 配置探测仍通过 `session/new` 读取 configOptions。探测进程关�
 
 `GET /api/fs/content?path=...&root=...&sessionId=...` 返回字节，最多 32 MiB，`download=1` 作为完整附件下载；不支持格式也可在此上限内下载。图片/PDF/HTML 默认 inline，其余作为 octet-stream 附件；响应 `no-store`、`nosniff`。HTML、SVG和下载响应带 `CSP: sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src data:`，不执行脚本，也不加载相对图片/CSS。PDF inline 支持单一 `bytes=start-end`、`bytes=start-` 或 `bytes=-suffix` Range，有效返回 206/Content-Range，无效返回 416/`bytes */size`；下载忽略 Range。文件接口错误分别返回 HTTP 400/403/404/409/413/415，错误码为 `status*100+90`；JSON格式/请求体超限沿用 `40000/41300`。真实设备的 PDF 嵌入能力由浏览器决定，前端保留下载回退。
 
+内联 PDF 的单区间 Range 在完成同一套路径、realpath、fd 身份校验后，仅从已验证的 fd 读取所需字节；读取后仍检查文件状态是否变化。无 Range 与 `download=1` 保持完整读取和下载行为，非法或不可满足的范围返回 416。
+
 `POST /api/uploads` 的查询参数 `sessionId` 必须是已存在的会话（否则 404/`40401`），`name` 必须非空（否则 400/`40070`）。请求体是附件原始字节；服务端只按查询参数里的文件名存盘：取 basename、替换路径分隔符与控制字符、去掉首尾部点和空白、限长 120 字符，保存为 `~/.workbench/uploads/<sessionId>/<YYYYMMDD-HHMMSS>-<清洗名>`（同秒同名追加 `-1` 等序号；目录 0700、文件 0600）。单文件上限 25 MB，超限返回 413/`41301` 且不留半截文件。成功返回 `data` 为 `{path,name,size,mimeType}`，`mimeType` 仅按扩展名判断（png/jpg/jpeg/gif/webp/heic/pdf/office 等常见扩展，未知为 `application/octet-stream`）。
 
 `GET /api/uploads/file` 不是信封接口，直接返回文件字节；`path` 经 `realpath` 后必须落在 `~/.workbench/uploads/` 之内且是普通文件（`..` 与指向目录外的符号链接一律拒绝），否则 404/`40450`。响应带 `content-type`（按扩展名）与 `cache-control: private, max-age=3600`。
@@ -415,7 +421,11 @@ REST 沿用 `{code,msg,data,request_id}` 信封：
 
 `/ws/terminal` 是独立的 JSON 文本帧通道，一个连接可订阅多个终端。上行 `{type:"attach",terminalId}` 后，服务端依次发送 `{type:"attached",terminalId,omitted}`、`{type:"data",terminalId,data}`（当前全部回放），随后推送实时 `{type:"data",terminalId,data}`。重复 attach 同一 id 会重新回放。**回放帧会剥掉 OSC 4/10/11/12 颜色查询与 CSI DA 与 DSR/CPR（5n/6n/?6n）询问序列**（`stripReplayQueries`）：查询无视觉效果，但重放时 xterm 会重新应答，应答字节进 PTY 输入被 shell 回显成垃圾；实时推送不剥。PTY 输出 CPR 询问（`ESC[6n`）时若没有任何订阅者，服务端代答 `ESC[1;1R`：WSL 拉起的 Windows 程序（ConPTY）启动即询问并阻塞到收到应答，远程高延迟下 attach 晚于这一刻、回放又剥掉询问，PowerShell 会永远空白；有订阅者时仍由前端 xterm 应答。每终端只保留最近 256KB 输出，`omitted` 为此前丢弃的字节数。上行还支持 `{type:"input",terminalId,data}` 和 `{type:"resize",terminalId,cols,rows}`。进程退出发送 `{type:"exit",terminalId,exitCode}`；未知 id、已退出或参数无效发送 `{type:"error",terminalId?,message}`。连接断开仅解除订阅，不结束 PTY。
 
+已退出且无人附着的终端最多保留最近 8 个，按退出顺序淘汰更早记录及其回放 Buffer；运行中和仍有人附着的记录保留，退出或最后一个订阅解除时执行上限检查。保留记录重新 attach 时仍返回退出前输出与退出码。
+
 ## 委派前自动快照
+
+自动快照等待期间若会话已移除或服务端已进入 shutdown，快照完成后中止创建，不登记或启动 worker；返回现有的“会话不存在”或“AIReins 正在退出”错误。
 
 `POST /api/snapshot/preflight` 的请求体严格使用 cwd：
 
@@ -539,6 +549,8 @@ interface HistoryListData {
 `source` 表示原生会话的可识别创建来源，而不是当前读取者。Claude 老会话首个 `entrypoint:"sdk-cli"` 仍为 `workbench`；新 worker 默认不设 `CLAUDE_CODE_ENTRYPOINT`，可在本机 `prefs.json` 设置 `claudeCodeEntrypoint: "claude-vscode"`；两种入口身份的新建会话都靠 `~/.workbench/sessions.json` 中未带 `resumedFrom` 的注册表记录判为 `workbench`，其他已知 CLI/VSCode 入口会话为 `interactive`，缺少入口身份时为 `unknown`。Codex 的 `originator` 以 `workbench` 开头为 `workbench`，其他已知 originator 为 `interactive`；Kimi 的多代落盘格式没有稳定的客户端来源字段，也用未带 `resumedFrom` 的注册表记录回退为 `workbench`，其余为 `unknown`。导入的 VSCode/Kimi 原生会话保留原来源。
 
 
+历史列表发现的候选按 `agent + nativeSessionId` 缓存在内存中。消息翻页与导入截止 cursor 优先复用候选，每次核对文件存在、为普通文件且真实路径仍位于该 agent 的历史根目录内；失效才重新发现，命中缓存不消耗全量发现预算。
+
 完整历史使用 `GET /api/history/:agent/:nativeSessionId/messages?limit=<默认50>&cursor=<可选>`。`limit` 范围 1–200；不传 cursor 时读取最新一页，带回服务端给出的不透明 `nextCursor` 可继续向更早消息翻页。每页内部仍按时间正序返回，前端可直接 prepend 到现有消息列表。单次最多倒读 4 MiB 原生 NDJSON，不会为了取一页全文解析巨大 transcript，也不会在三家原生目录或 AIReins 目录写索引、缓存或修复文件。
 
 成功响应的 `data` 为：
@@ -597,6 +609,10 @@ Claude 跳过 meta/sidechain，按 assistant 内容块顺序输出文字与 `too
 生命周期终止证据按事件顺序判定：`session_created` 或 `config_updated.workerRestarted:true` 开始新 worker 生命周期；普通配置、回合完成及 `worker_released` 不清除之前的退出证据。`process_exited` 及非明确 `severity:"warning", nonBlocking:true` 的 `session_error` 保守阻止恢复。CLI 自己崩溃退出依然 `dead`；即使随后机器重启也不复活。旧审批虽已失效，仍和 shutdown 一样保持 `dead`。原状态 `error` 不授予新增恢复资格，transcript 错误仍优先显示 `error`。
 
 存档定位复用 `NativeConversationReader`：Claude 须实际落盘且含用户/助手记录（首条消息前只有 session_id 不算）；Codex 须有 ID 匹配的 rollout/session_meta；Kimi 须有可读 wire 和 ID、cwd 相符的 state。原生只作有界头部检查，不扫描整份大存档。
+
+POSIX worker 与 Kimi 自建终端在 spawn 后立即采集身份，只保存已确认 `pgid === pid` 的独立进程组。停止 worker 时仍先关闭 stdin、等待最多 1 秒；随后向已确认组发送 SIGTERM，1 秒后 SIGKILL 兜底。组信号只在本次 stop 内核实过组长身份后发出：进入 stop 时组长仍活着且身份匹配，则组长在宽限期或 SIGTERM 后退出时，同一次 stop 内的后续组信号仍发往原组（该 PID 已无进程才发，ESRCH 视为已无成员）；调用 stop 前组长就已退出时，无法证明组号在此期间未被复用，不发组信号（可能残留孤儿进程，但不误杀无关进程）。该 PID 上有进程时，每次发组信号前二次身份读取都必须匹配；读取失败、不匹配或组信号无法发送时，退回 child 本身的 SIGTERM、1 秒后 SIGKILL，等待 close 或兜底后再 resolve，不把身份失败当成停止成功。非 detached 平台只结束 child，不发送组信号；始终排除 AIReins 自身组。Kimi 的 `terminal/release` 按 ACP 语义同样结束仍在运行的命令并回收其独立组；stop 在 worker 退出后再收一次最新清理链，`session/close` 期间新建或 release 的终端也会被等待。
+
+Kimi 的正常 stop 与异常退出共用同一清理逻辑，立即向自建终端独立组发送 SIGTERM、1 秒后 SIGKILL，包含命令 shell 已退出但仍有后代的情况，并清空终端记录。正常 stop 等待清理完成；异常退出后再 stop 也等待已在途的终端清理。Windows 等非 detached 平台维持只结束命令进程的行为。
 
 worker 的 `processId` 原本就持久化；新启动的 POSIX worker 使用独立进程组，并保存内部 `processIdentity:{bootId,startTime,processGroupId?}`，用于识别 PID 复用及 launcher 退出后尚存的子进程。不同 boot 可证明旧进程树已消失；同 boot 必须确认 PID 及已记录的独立组均不存在，同 boot PID 已复用时还须确认旧组消失。旧记录只有 PID 时须 `process.kill(pid,0)` 明确返回 ESRCH；未取得上述系统重启证据时，活着的 PID、权限错误、缺失 PID 或损坏身份字段均不授予恢复资格。只检查，不接管或终止旧进程。载入后 `processId` 清空，Claude RC 状态为 `disconnected`，发送续接时按既有配置重新启动。
 
@@ -704,6 +720,10 @@ interface PageHealth {
 
 事件最小集为 `session_created / config_update_started / external_messages_added / user_message / agent_text_delta / thought_delta / tool_call_started / tool_call_updated / tool_call_completed / permission_request / permission_resolved / commands_updated / config_updated / usage_updated / turn_completed / session_error / process_exited / worker_released`；另有容错用 `raw_event`。每个 session 的持久事件独立计数，`seq` 单调递增。临时事件不推进该游标。
 
+Kimi ACP 的 `fs/read_text_file`、`fs/write_text_file` 使用异步文件 I/O，文件请求按接收顺序串行处理并回复。指定 line/limit 时按 LF 流式读取，到范围末尾即关闭流，保留 CR 和末尾空行；无范围时异步读全文。负的 slice 终点需要全文行数，使用异步全文读取保持旧参数语义；错误仍返回 RPC `-32000`。
+
+stop 或 worker 异常退出时立即关闭文件队列：未开始的请求（包括之后到达的请求）跳过，不再读写或回复；已开始的操作允许完成，但关闭后不再发送文件回复。stop 最多等待在途文件队列 1 秒，超时记 warn 日志后继续退出；超时不强行中断已经开始的文件 I/O。
+
 Kimi 的 `tool_call_started / tool_call_updated / tool_call_completed` 在 ACP 更新含 `kind`（字符串）或 `locations`（`{path, line?}` 数组）时，分别原样透传为 payload 的同名字段；缺失时不添加。Kimi 命令工具的完成事件若 `content` 含 `{type:"terminal", terminalId}` 且终端仍在运行或已释放，会额外包含 `terminalOutput: {terminalId, output, truncated, exitCode, signal}`。事件另行收集真正的输出末尾，`output` 最多保留末尾 64 KiB（按 UTF-8 字节并在字符边界截取）；发生过截断，包括 ACP 终端原收集上限造成的截断，`truncated` 为 `true`。ACP `terminal/output` 仍按其 `outputByteLimit` 返回输出开头，语义不变。尚未退出时事件返回已收集部分，`exitCode` 为 `null`；无退出信号时 `signal` 为 `null`。多个 terminal content 只取第一个；找不到终端则不添加 `terminalOutput`。已释放终端最多保留最近 64 个，每条仅存事件尾部与退出状态，随会话结束清空。以上新增字段只有 Kimi driver 提供，Claude、Codex 的工具事件契约不变。
 
 上行至少支持：
@@ -772,6 +792,8 @@ Claude 的 model/effort 切换优先热切换：模型走 `set_model`，effort �
 ```
 
 `q` 默认为空字符串，匹配相对路径中的大小写不敏感子串；`limit` 默认 50，范围为 1–200。枚举本身限时 3 秒、输出缓冲上限 8 MiB，达到结果上限或总时限即停止文件校验，避免大仓库无限遍历。Git 工作树使用 `git ls-files --cached --others --exclude-standard`，非 Git cwd 回退到 `rg --files`；两条路径都尊重 `.gitignore`，并额外硬排除任意层级的 `.git` 与 `node_modules`。
+
+同 cwd（及同 PATH）的候选枚举共用在途 Promise，完成后缓存 2 秒，归一化和排序结果也复用；最多保留 64 个已完成的 cwd 缓存条目（在途枚举不因缓存淘汰而重复启动）。新增或忽略规则的变化最多延迟 2 秒生效。HTTP 请求未完成即关闭，或响应连接关闭后，该请求不再排序、校验候选或写响应；共享枚举仍可供其他请求使用。
 
 安全边界以会话 `cwd` 的真实路径为准：任何 `..` 路径段、NUL、cwd 外的 POSIX 绝对路径以及 Windows/UNC 绝对路径都会以 HTTP 400 拒绝；cwd 内绝对路径会先归一为相对查询。候选文件先做词法 containment，再 `realpath` 后做第二次 containment；普通文件和指向 cwd 内普通文件的符号链接可返回，断链、目录、特殊文件及目标逃出 cwd 的符号链接全部跳过。
 
@@ -1034,6 +1056,8 @@ Codex 输入框 `$` 在光标 token 处打开名称+描述面板，支持过滤�
   };
 }
 ```
+
+上传目录为空时，引用统计直接返回空引用，不读取任何 transcript。存在上传目录时，按 transcript 路径、已有签名及上传 id 列表缓存引用集合；签名或目录列表变化才重新读取，清理仍复用同一引用保护规则。
 
 统计递归遍历 `WORKBENCH_HOME`（默认 `~/.workbench`），按文件逻辑长度计字节，不计目录元数据与文件系统分配块。符号链接仅计链接自身长度和一个文件，不跟随目标；清理不会把链接当成日志副本或孤儿 transcript / uploads 目录。分类分别为 `transcripts/`、`uploads/`、顶层 `server.log*`、其余全部。`sessions` 在 transcripts 中计顶层 `<id>.ndjson` 数，在 uploads 中计顶层真实目录数；logs/other 固定为 0。空目录没有字节或文件数，但孤儿 uploads 仍计目录数。
 

@@ -1,3 +1,4 @@
+import { pipeline } from "node:stream";
 import { localizeContentError, withMessageMetadata } from "./i18n/messages.js";
 import { getPlatformCapabilities, platform } from "./platform.js";
 import { createReadStream, statSync } from "node:fs";
@@ -586,7 +587,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
         } else {
           const download = url.searchParams.get("download");
           if (download !== null && download !== "1") throw new WorkFileError(400, "download 只接受 1");
-          const { file, bytes } = await getWorkContent(input, options);
+          const { file, bytes, range } = await getWorkContent(input, options, download === "1" ? undefined : request.headers.range);
           const attachment = download === "1" || !["image", "pdf", "html"].includes(file.kind);
           const headers: Record<string, string | number> = {
             "content-type": attachment ? "application/octet-stream" : file.mimeType,
@@ -594,29 +595,13 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
             "content-disposition": `${attachment ? "attachment" : "inline"}; filename*=UTF-8''${encodeURIComponent(file.name).replace(/['()*]/g, character => `%${character.charCodeAt(0).toString(16).toUpperCase()}`)}`,
           };
           if (file.kind === "html" || file.mimeType === "image/svg+xml" || attachment) headers["content-security-policy"] = "sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src data:";
-          let start = 0;
-          let end = bytes.length - 1;
-          let status = 200;
-          if (file.kind === "pdf" && !attachment) {
-            headers["accept-ranges"] = "bytes";
-            const range = request.headers.range;
-            if (range !== undefined) {
-              const match = /^bytes=(\d*)-(\d*)$/.exec(range);
-              if (!match || (!match[1] && !match[2]) || (match[1] && !Number.isSafeInteger(Number(match[1]))) || (match[2] && !Number.isSafeInteger(Number(match[2])))) {
-                response.writeHead(416, { ...headers, "content-range": `bytes */${bytes.length}`, "content-length": 0 }); response.end(); return;
-              }
-              start = match[1] ? Number(match[1]) : Math.max(0, bytes.length - Number(match[2]));
-              end = match[1] && match[2] ? Math.min(Number(match[2]), bytes.length - 1) : bytes.length - 1;
-              if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start > end || start >= bytes.length || (!match[1] && Number(match[2]) === 0)) {
-                response.writeHead(416, { ...headers, "content-range": `bytes */${bytes.length}`, "content-length": 0 }); response.end(); return;
-              }
-              status = 206;
-              headers["content-range"] = `bytes ${start}-${end}/${bytes.length}`;
-            }
+          if (file.kind === "pdf" && !attachment) headers["accept-ranges"] = "bytes";
+          if (range === null) {
+            response.writeHead(416, { ...headers, "content-range": `bytes */${file.size}`, "content-length": 0 }); response.end(); return;
           }
-          const content = bytes.subarray(start, end + 1);
-          response.writeHead(status, { ...headers, "content-length": content.length });
-          response.end(content);
+          if (range) headers["content-range"] = `bytes ${range.start}-${range.end}/${file.size}`;
+          response.writeHead(range ? 206 : 200, { ...headers, "content-length": bytes.length });
+          response.end(bytes);
         }
       } catch (error) {
         if (error instanceof WorkFileError) throw new ApiError(error.status, error.status * 100 + 90, error.message);
@@ -645,7 +630,12 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
         // 上传的 SVG/HTML 被直接打开时不能在工作台同源下跑脚本；<img> 不受影响
         "content-security-policy": "sandbox",
       });
-      createReadStream(file.path).pipe(response);
+      pipeline(createReadStream(file.path), response, (error) => {
+        if (error) {
+          response.destroy();
+          log("warn", "upload stream failed", { requestId, message: error.message });
+        }
+      });
     } else if (method === "GET" && url.pathname === "/api/dispatches") {
       try {
         const parent = url.searchParams.get("parent");
@@ -835,8 +825,21 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
         if (!session) throw new ApiError(404, 40401, `会话不存在：${id}`);
         const query = validateFileQuery(session.cwd, url.searchParams.get("q") ?? "");
         const limit = validateFileLimit(url.searchParams.get("limit"));
-        const files = await searchFiles(session.cwd, query, limit);
-        await respond(response, 200, 0, "success", { files }, requestId);
+        const controller = new AbortController();
+        const abort = () => controller.abort();
+        const requestClosed = () => { if (!request.complete) abort(); };
+        request.once("close", requestClosed);
+        response.once("close", abort);
+        if (request.destroyed && !request.complete || response.destroyed) abort();
+        try {
+          const files = await searchFiles(session.cwd, query, limit, controller.signal);
+          if (!controller.signal.aborted) await respond(response, 200, 0, "success", { files }, requestId);
+        } catch (error) {
+          if (!controller.signal.aborted) throw error;
+        } finally {
+          request.off("close", requestClosed);
+          response.off("close", abort);
+        }
       } else if (method === "POST" && releaseMatch) {
         const id = decodeURIComponent(releaseMatch[1]);
         if (!manager.get(id)) throw new ApiError(404, 40401, `会话不存在：${id}`);

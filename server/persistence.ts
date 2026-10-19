@@ -111,20 +111,28 @@ export function pruneStorage(retentionDays: number, now = Date.now()): { expired
  * 删除 uploads/<id> 目录。引用路径可以指向别的会话的附件，所以仍被 kept 中某会话 transcript
  * 提到的目录保留。返回实际删除的目录数。
  */
+const uploadReferenceCache = new Map<string, { signature: string; idsKey: string; references: Set<string> }>();
+
 export function uploadDirReferences(kept: SessionRecord[]): Map<string, Set<string>> {
   const uploadsDir = join(workbenchHome, "uploads");
   const ids = existsSync(uploadsDir) ? readdirSync(uploadsDir) : [];
-  const byPath = new Map<string, Set<string>>();
+  const paths = new Set(kept.map(session => session.transcriptPath));
+  for (const path of uploadReferenceCache.keys()) if (!paths.has(path)) uploadReferenceCache.delete(path);
+  if (ids.length === 0) { uploadReferenceCache.clear(); return new Map(); }
+  const idsKey = JSON.stringify(ids.sort());
   return new Map(kept.map((session) => {
-    const cached = byPath.get(session.transcriptPath);
-    if (cached) return [session.id, cached];
+    const path = session.transcriptPath;
+    flushTranscripts(path);
+    const signature = transcriptSignature(path);
+    const cached = uploadReferenceCache.get(path);
+    if (cached?.signature === signature && cached.idsKey === idsKey) return [session.id, cached.references];
     let text: string;
-    try { flushTranscripts(session.transcriptPath); text = readFileSync(session.transcriptPath, "utf8"); } catch (error) {
+    try { text = readFileSync(path, "utf8"); } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
       text = "";
     }
     const references = new Set(ids.filter((id) => text.includes(join(uploadsDir, id))));
-    byPath.set(session.transcriptPath, references);
+    if (signature === transcriptSignature(path)) uploadReferenceCache.set(path, { signature, idsKey, references });
     return [session.id, references];
   }));
 }

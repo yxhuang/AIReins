@@ -212,7 +212,7 @@ WS `/ws/terminal`（与 `/ws` 同一套 Host / Origin / Tailscale 身份检查�
 - 上行 `{type:"attach", terminalId}`：服务端先回 `{type:"attached", terminalId, omitted}`（`omitted` = scrollback 因 256KB 上限丢掉的字节数，>0 时前端顶部提示「已省略较早输出」），再发一条 `{type:"data", terminalId, data}` 装当前全部 scrollback（回放帧会剥掉 OSC 4/10/11/12 颜色查询与 CSI DA 与 DSR/CPR（5n/6n/?6n）询问序列，见 `stripReplayQueries`——重放会让 xterm 重新应答、应答字节被 shell 当输入回显成垃圾；实时推送不剥），之后实时推送。同一连接可 attach 多个；重复 attach 同一 id 视为重新回放（前端先 `reset()` 再写）。上行 `{type:"detach", terminalId}` 解除该连接对它的订阅（PTY 与 scrollback 保留），前端切换 shell 时对切走的终端发送。
 - 上行 `{type:"input", terminalId, data}`、`{type:"resize", terminalId, cols, rows}`。
 - 下行 `{type:"data", terminalId, data}`、`{type:"exit", terminalId, exitCode}`、`{type:"error", terminalId?, message}`（未知 id、已退出等）。
-- 服务端每终端保留最近 256KB 输出；进程退出后记录保留（`exited: true`），直到 server 重启。server 重启 = 全部终端结束，这是已知行为。
+- 服务端每终端保留最近 256KB 输出；进程退出后记录保留（`exited: true`），直到 server 重启；已退出且无人附着的记录最多保留最近 8 个，更早的连同回放 Buffer 淘汰（运行中或仍有人附着的不淘汰）。server 重启 = 全部终端结束，这是已知行为。
 
 安全硬约束（§5）：用户终端注册表与 kimi ACP `terminal/create` **物理隔离**，独立模块、独立 id 空间，agent 侧代码不得 import 它；终端输出永远不进会话事件流。
 

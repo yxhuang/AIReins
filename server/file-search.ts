@@ -5,6 +5,28 @@ import { delimiter, dirname, isAbsolute, join, relative, resolve, sep, win32 } f
 
 const SEARCH_TIMEOUT_MS = 3_000;
 const SEARCH_MAX_BUFFER = 8 * 1024 * 1024;
+const CANDIDATE_TTL_MS = 2_000;
+const candidateCache = new Map<string, { expires: number; pending: Promise<string[]>; sorted?: string[] }>();
+
+function sharedCandidates(cwd: string) {
+  const key = `${cwd}\0${process.env.PATH ?? ""}`;
+  const cached = candidateCache.get(key);
+  if (cached && cached.expires > Date.now()) return cached;
+  const entry = { expires: Infinity, pending: listCandidates(cwd) } as { expires: number; pending: Promise<string[]>; sorted?: string[] };
+  candidateCache.set(key, entry);
+  void entry.pending.then(() => {
+    entry.expires = Date.now() + CANDIDATE_TTL_MS;
+    if (candidateCache.size > 64) {
+      const oldest = [...candidateCache].find(([, item]) => item.expires !== Infinity);
+      if (oldest) candidateCache.delete(oldest[0]);
+    }
+  }, () => {
+    if (candidateCache.get(key) === entry) candidateCache.delete(key);
+  });
+  // 保留活跃 cwd 的短时结果；旧结果按需淘汰，避免长期保留大量工程文件名。
+  for (const [oldKey, old] of candidateCache) if (old.expires <= Date.now()) candidateCache.delete(oldKey);
+  return entry;
+}
 
 interface CommandError extends Error {
   code?: number | string;
@@ -35,16 +57,21 @@ export function normalizeFileQuery(cwd: string, rawQuery: string): string {
   return rawQuery.replaceAll("\\", "/").replace(/^\.\//u, "");
 }
 
-export async function searchFiles(cwd: string, query: string, limit: number): Promise<string[]> {
+export async function searchFiles(cwd: string, query: string, limit: number, signal?: AbortSignal): Promise<string[]> {
   const deadline = Date.now() + SEARCH_TIMEOUT_MS;
   const logicalRoot = resolve(cwd);
+  if (signal?.aborted) return [];
   const realRoot = await realpath(logicalRoot);
-  const candidates = await listCandidates(logicalRoot);
+  if (signal?.aborted) return [];
+  const entry = sharedCandidates(logicalRoot);
+  const candidates = await entry.pending;
+  if (signal?.aborted) return [];
+  entry.sorted ??= [...new Set(candidates.map(toPosix))].sort();
   const needle = query.toLocaleLowerCase();
   const results: string[] = [];
 
-  for (const relativePath of [...new Set(candidates.map(toPosix))].sort()) {
-    if (Date.now() > deadline || results.length >= limit) break;
+  for (const relativePath of entry.sorted) {
+    if (signal?.aborted || Date.now() > deadline || results.length >= limit) break;
     if (!relativePath || hasSkippedSegment(relativePath)) continue;
     if (needle && !relativePath.toLocaleLowerCase().includes(needle)) continue;
 
@@ -52,8 +79,10 @@ export async function searchFiles(cwd: string, query: string, limit: number): Pr
     if (!isWithin(logicalRoot, candidate)) continue;
     try {
       const realCandidate = await realpath(candidate);
+      if (signal?.aborted) break;
       if (!isWithin(realRoot, realCandidate)) continue;
       if (!(await stat(realCandidate)).isFile()) continue;
+      if (signal?.aborted) break;
       results.push(relativePath);
     } catch {
       // 文件在枚举后消失、断链或不可读时跳过；不会把不确定路径暴露给前端。

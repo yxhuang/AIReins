@@ -1,7 +1,7 @@
-import { readFileSync, writeFileSync } from "node:fs";
+import { createReadStream, readFileSync } from "node:fs";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { basename, join } from "node:path";
-import { lstat, readdir, readFile, realpath, rm, unlink } from "node:fs/promises";
+import { lstat, readdir, readFile, realpath, rm, unlink, writeFile } from "node:fs/promises";
 import { kimiHistoryRoot } from "../history.js";
 import { pathToFileURL } from "node:url";
 import type {
@@ -14,8 +14,10 @@ import type {
   UserMessageInput,
   SendUserMessageOptions,
   SendUserMessageReceipt,
+  WorkerProcessIdentity,
 } from "../types.js";
-import { BaseDriver, errorMessage, mentionFallbackNote, parseJsonLine, tryReadMentionText, userMessageText, withTimeout } from "./base.js";
+import { BaseDriver, captureProcessGroup, stopChildProcess, POSIX_PROCESS_GROUPS, errorMessage, mentionFallbackNote, parseJsonLine, tryReadMentionText, userMessageText, withTimeout } from "./base.js";
+import { log } from "../logger.js";
 import { StdioRpcProbe } from "./rpc-probe.js";
 
 interface PendingRpc {
@@ -53,6 +55,7 @@ interface TerminalEventOutputState {
 
 interface TerminalState extends TerminalEventOutputState {
   process: ChildProcessWithoutNullStreams;
+  processIdentity?: WorkerProcessIdentity;
   output: string;
   truncated: boolean;
   done: Promise<void>;
@@ -243,7 +246,29 @@ export async function probeKimiConfigSchema(cwd: string): Promise<DriverConfigSc
   }
 }
 
+/** 按 LF 切分，保留 CR 和文件末尾空行，与 split("\n") 一致。 */
+async function* textFileLines(path: string): AsyncGenerator<string> {
+  const stream = createReadStream(path, { encoding: "utf8" });
+  let pending = "";
+  try {
+    for await (const chunk of stream) {
+      pending += chunk;
+      let start = 0;
+      let end: number;
+      while ((end = pending.indexOf("\n", start)) !== -1) {
+        yield pending.slice(start, end);
+        start = end + 1;
+      }
+      pending = pending.slice(start);
+    }
+    yield pending;
+  } finally { stream.destroy(); }
+}
+
 export class KimiDriver extends BaseDriver {
+  private fileRequests: Promise<void> = Promise.resolve();
+  private filesClosed = false;
+  private terminalCleanup: Promise<void> = Promise.resolve();
   readonly kind = "kimi" as const;
   private rpcId = 1_000;
   private readonly rpc = new Map<number, PendingRpc>();
@@ -424,18 +449,21 @@ export class KimiDriver extends BaseDriver {
   }
 
   async stop(): Promise<void> {
+    this.filesClosed = true;
+    const filesStopped = withTimeout(this.fileRequests, 1_000, "Kimi file operations").catch(error => {
+      log("warn", "Kimi file operation drain timed out", { sessionId: this.sessionId, message: errorMessage(error) });
+    });
     this.cancelQueuedPrompts("worker 已停止");
     this.cancelElicitations();
-    for (const terminal of this.terminals.values()) {
-      if (terminal.process.exitCode === null && terminal.process.signalCode === null) terminal.process.kill("SIGTERM");
-    }
+    const terminalsStopped = this.cleanupTerminals();
     if (this.nativeSessionId && this.child?.stdin.writable) {
       try {
         await withTimeout(this.request("session/close", { sessionId: this.nativeSessionId }), 1_000, "Kimi session/close");
       } catch { /* process shutdown remains authoritative */ }
     }
-    await super.stop();
-    this.releasedTerminals.clear();
+    try { await super.stop(); }
+    // 等待 session/close 期间仍可能新建或 release 终端；worker 停止后再收一次最新的清理链。
+    finally { await Promise.all([terminalsStopped, this.cleanupTerminals(), filesStopped]); this.releasedTerminals.clear(); }
   }
 
   protected handleStdoutLine(line: string): void {
@@ -488,12 +516,15 @@ export class KimiDriver extends BaseDriver {
       this.handleCreateTerminal(message.id, message.params ?? {});
       return;
     }
-    if (method === "fs/write_text_file") {
-      this.handleWriteTextFile(message.id, message.params ?? {});
-      return;
-    }
-    if (method === "fs/read_text_file") {
-      this.handleReadTextFile(message.id, message.params ?? {});
+    if (method === "fs/write_text_file" || method === "fs/read_text_file") {
+      if (this.filesClosed) return;
+      this.fileRequests = this.fileRequests.then(() => {
+        if (this.filesClosed) return;
+        return method === "fs/write_text_file"
+          ? this.handleWriteTextFile(message.id, message.params ?? {})
+          : this.handleReadTextFile(message.id, message.params ?? {});
+      })
+        .catch(() => { /* worker 已退出时不再回复。 */ });
       return;
     }
     if (method === "terminal/output") {
@@ -570,11 +601,23 @@ export class KimiDriver extends BaseDriver {
   }
 
   protected handleProcessExit(): void {
+    this.filesClosed = true;
+    void this.cleanupTerminals();
     this.promptActive = false;
     this.cancelQueuedPrompts("worker 已退出");
     this.permissions.clear();
     this.rpc.clear();
     this.releasedTerminals.clear();
+  }
+
+  private cleanupTerminals(): Promise<void> {
+    const pending = [this.terminalCleanup];
+    for (const terminal of this.terminals.values()) {
+      pending.push(stopChildProcess(terminal.process, terminal.processIdentity));
+    }
+    this.terminals.clear();
+    this.terminalCleanup = Promise.all(pending).then(() => undefined);
+    return this.terminalCleanup;
   }
 
   private cancelElicitations(): void {
@@ -625,11 +668,14 @@ export class KimiDriver extends BaseDriver {
     const processHandle = spawn(String(params.command), args, {
       cwd: typeof params.cwd === "string" ? params.cwd : this.cwd,
       env,
+      detached: POSIX_PROCESS_GROUPS,
       stdio: ["pipe", "pipe", "pipe"],
     });
+    const processIdentity = captureProcessGroup(processHandle);
     let finish!: () => void;
     const state: TerminalState = {
       process: processHandle,
+      processIdentity,
       output: "",
       truncated: false,
       eventTail: Buffer.alloc(0),
@@ -653,27 +699,41 @@ export class KimiDriver extends BaseDriver {
     this.replyResult(id, { terminalId });
   }
 
-  private handleWriteTextFile(id: string | number, params: Record<string, any>): void {
+  private async handleWriteTextFile(id: string | number, params: Record<string, any>): Promise<void> {
     try {
-      writeFileSync(String(params.path), String(params.content ?? ""), "utf8");
-      this.replyResult(id, {});
+      await writeFile(String(params.path), String(params.content ?? ""), "utf8");
+      if (!this.filesClosed) this.replyResult(id, {});
     } catch (error) {
-      this.replyError(id, -32000, errorMessage(error));
+      if (!this.filesClosed) this.replyError(id, -32000, errorMessage(error));
     }
   }
 
-  private handleReadTextFile(id: string | number, params: Record<string, any>): void {
+  private async handleReadTextFile(id: string | number, params: Record<string, any>): Promise<void> {
     try {
-      let content = readFileSync(String(params.path), "utf8");
+      const path = String(params.path);
       const startLine = Math.max(1, Number(params.line) || 1);
       const limit = Number(params.limit);
-      if (startLine > 1 || Number.isFinite(limit)) {
-        const lines = content.split("\n");
-        content = lines.slice(startLine - 1, Number.isFinite(limit) ? startLine - 1 + limit : undefined).join("\n");
+      let content: string;
+      const start = Math.trunc(startLine - 1);
+      const end = Number.isFinite(limit) ? Math.trunc(startLine - 1 + limit) : Infinity;
+      if ((params.line === undefined && params.limit === undefined) || end < 0) {
+        // 负的 slice 终点依赖全文行数；保留旧协议对这类参数的行为。
+        content = await readFile(path, "utf8");
+        if (startLine > 1 || Number.isFinite(limit)) content = content.split("\n").slice(start, Number.isFinite(limit) ? end : undefined).join("\n");
+      } else {
+        const lines: string[] = [];
+        let index = 0;
+        for await (const line of textFileLines(path)) {
+          if (index >= end) break;
+          if (index >= start) lines.push(line);
+          index++;
+          if (index >= end) break;
+        }
+        content = lines.join("\n");
       }
-      this.replyResult(id, { content });
+      if (!this.filesClosed) this.replyResult(id, { content });
     } catch (error) {
-      this.replyError(id, -32000, errorMessage(error));
+      if (!this.filesClosed) this.replyError(id, -32000, errorMessage(error));
     }
   }
 
@@ -721,6 +781,8 @@ export class KimiDriver extends BaseDriver {
       this.releasedTerminals.delete(this.releasedTerminals.keys().next().value!);
     }
     this.terminals.delete(terminalId);
+    // ACP release 语义是结束仍在运行的命令；组长已退出时也回收其独立组，stop 会等待这条清理。
+    this.terminalCleanup = Promise.all([this.terminalCleanup, stopChildProcess(terminal.process, terminal.processIdentity)]).then(() => undefined);
     this.replyResult(id, {});
   }
 

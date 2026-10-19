@@ -227,11 +227,12 @@ export function runCodexCommand(id: string, name: string, args?: string): Promis
 }
 
 /** 会话 cwd 内的文件检索（@ 引用补全）：子串匹配、字典序；空 q 也返回列表。 */
-export function fetchFiles(id: string, q: string, limit?: number): Promise<string[]> {
+export function fetchFiles(id: string, q: string, limit?: number, signal?: AbortSignal): Promise<string[]> {
   const params = new URLSearchParams({ q });
   if (limit !== undefined) params.set("limit", String(limit));
   return call<{ files: string[] }>(
-    `/api/sessions/${encodeURIComponent(id)}/files?${params}`,
+    // 调用方取消与默认 10 秒超时并存
+    `/api/sessions/${encodeURIComponent(id)}/files?${params}`, { signal: signal && AbortSignal.any([signal, AbortSignal.timeout(10_000)]) },
   ).then((data) => data.files);
 }
 

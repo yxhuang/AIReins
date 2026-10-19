@@ -40,7 +40,7 @@ for (const mode of process.argv[2] ? [process.argv[2]] : ["deletion", "scan"]) {
     const manager = { list: () => [...records, { ...records[0]!, id: "alias" }],
       isEndedSessionRemovable: (id: string) => id === "ended" } as unknown as SessionManager;
       getStorageStats(manager);
-      for (const record of records) assert.equal(counts.get(record.transcriptPath), 1, "每份 transcript 只读一次");
+      for (const record of records) assert.ok((counts.get(record.transcriptPath) ?? 0) <= 1, "每份 transcript 至多读一次，签名未变时复用缓存");
     }
   } finally {
     fs.readFileSync = read;

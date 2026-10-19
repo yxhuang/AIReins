@@ -40,7 +40,7 @@ const selectAppUi = (value: Store) =>
     value.newSessionOpen,
   ] as const;
 const selectPendingTotal = (value: Store) =>
-  value.sessions.reduce((sum, session) => sum + value.pendingCount(session.id), 0);
+  value.sessions.reduce((sum, session) => sum + value.pendingCountFor(session), 0);
 
 export function App() {
   const [collapsed, setCollapsed] = useState(false);

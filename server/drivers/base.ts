@@ -2,6 +2,7 @@ import { spawn, type ChildProcessWithoutNullStreams, type SpawnOptionsWithoutStd
 import { openSync, fstatSync, readSync, closeSync } from "node:fs";
 import { createInterface } from "node:readline";
 import { log } from "../logger.js";
+import { captureWorkerIdentity } from "../worker-process.js";
 import { platform } from "../platform.js";
 import type {
   AgentKind,
@@ -16,9 +17,86 @@ import type {
   UserMessageInput,
   SendUserMessageOptions,
   SendUserMessageReceipt,
+  WorkerProcessIdentity,
 } from "../types.js";
 
 const MAX_EMBEDDED_MENTION_BYTES = 1024 * 1024;
+export const POSIX_PROCESS_GROUPS = ["linux", "wsl", "darwin"].includes(platform);
+
+/** 只在 spawn 后确认 child 确实拥有独立组时保存；不能等到组长退出后再采集。 */
+export function captureProcessGroup(child: ChildProcessWithoutNullStreams, detached = POSIX_PROCESS_GROUPS): WorkerProcessIdentity | undefined {
+  if (!detached || !POSIX_PROCESS_GROUPS || child.pid === process.pid) return undefined;
+  const identity = captureWorkerIdentity(child.pid);
+  return identity?.processGroupId === child.pid ? identity : undefined;
+}
+
+function pidGone(pid: number): boolean {
+  try { process.kill(pid, 0); return false; }
+  catch (error) { return (error as NodeJS.ErrnoException).code === "ESRCH"; }
+}
+
+/** 当前 child 与已确认的独立组共用收尾；身份失效只降级为 child 信号，不提前成功。 */
+export async function stopChildProcess(child: ChildProcessWithoutNullStreams, identity?: WorkerProcessIdentity, graceMs = 0): Promise<void> {
+  const pid = child.pid;
+  const live = () => child.exitCode === null && child.signalCode === null;
+  let group = POSIX_PROCESS_GROUPS && typeof pid === "number" && pid > 0 && pid !== process.pid && identity?.processGroupId === pid;
+  const matchesNow = () => {
+    const current = group ? captureWorkerIdentity(pid) : undefined;
+    return current !== undefined && current.bootId === identity!.bootId && current.startTime === identity!.startTime && current.processGroupId === pid;
+  };
+  // 进入 stop 时组长仍活着且身份匹配，本次 stop（宽限期 + 补刀，约 2 秒）内组长退出后仍可清理原组。
+  let verified = live() && matchesNow();
+  const signal =(value: NodeJS.Signals): "group" | "child" | "gone" => {
+    if (group && child.pid === pid) {
+      const matches = matchesNow();
+      // 组信号只在本次 stop 内核实过组长身份后发出；组长在 stop 前已退出时无法证明组号未被复用，
+      // 不发组信号（可能残留孤儿，但不误杀）。核实后组长才退出的，同一次 stop 内仍发往原组。
+      if (matches || (verified && !live() && pidGone(pid!))) {
+        verified = true;
+        try { process.kill(-pid!, value); return "group"; }
+        catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== "ESRCH") log("warn", "process group signal failed", { pid, signal: value, message: errorMessage(error) });
+        }
+      }
+      group = false;
+    } else group = false;
+    if (!live()) return "gone";
+    try { child.kill(value); }
+    catch (error) { log("warn", "child signal failed", { pid, signal: value, message: errorMessage(error) }); }
+    return "child";
+  };
+  if (!live() && !group) return;
+  await new Promise<void>(resolve => {
+    let settled = false;
+    let target: "group" | "child" | "gone" | undefined;
+    let grace: ReturnType<typeof setTimeout> | undefined;
+    let escalation: ReturnType<typeof setTimeout> | undefined;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      if (grace) clearTimeout(grace);
+      if (escalation) clearTimeout(escalation);
+      child.off("close", closed);
+      resolve();
+    };
+    const terminate = () => {
+      if (settled || escalation) return;
+      target = signal("SIGTERM");
+      if (settled) return;
+      if (target === "gone") { finish(); return; }
+      escalation = setTimeout(() => { signal("SIGKILL"); finish(); }, 1_000);
+    };
+    const closed = () => {
+      if (target === "child" || !group) finish();
+      else terminate();
+    };
+    child.once("close", closed);
+    if (live() && graceMs > 0) {
+      grace = setTimeout(terminate, graceMs);
+      child.stdin.end();
+    } else terminate();
+  });
+}
 
 export abstract class BaseDriver implements Driver {
   abstract readonly kind: AgentKind;
@@ -29,6 +107,7 @@ export abstract class BaseDriver implements Driver {
   protected readonly resumeSessionId?: string;
   protected readonly callbacks: DriverCallbacks;
   protected stopping = false;
+  private processGroup?: { child: ChildProcessWithoutNullStreams; identity: WorkerProcessIdentity };
 
   constructor(options: DriverOptions) {
     this.sessionId = options.sessionId;
@@ -55,15 +134,18 @@ export abstract class BaseDriver implements Driver {
     for (const key of ["DELEGATE_RUN_ID", "DELEGATE_TOOL", "CLAUDE_CODE_SESSION_ID", "CODEX_THREAD_ID", "CODEX_SESSION_ID", "KIMI_CODE_SESSION_ID", "KIMI_SESSION_ID"]) delete env[key];
     env.WORKBENCH_PARENT_AGENT = this.kind;
     env.WORKBENCH_PARENT_SESSION_ID = this.sessionId;
+    const detached = options.detached ?? POSIX_PROCESS_GROUPS;
     const child = spawn(command, args, {
       cwd: this.cwd,
       // Keep launcher descendants identifiable after AIReins or the launcher itself is killed.
-      detached: platform === "linux" || platform === "wsl" || platform === "darwin",
+      detached,
       ...options,
       env,
       stdio: ["pipe", "pipe", "pipe"],
     });
     this.child = child;
+    const identity = captureProcessGroup(child, detached);
+    this.processGroup = identity ? { child, identity } : undefined;
     this.callbacks.metadata({});
 
     createInterface({ input: child.stdout }).on("line", (line) => this.handleStdoutLine(line));
@@ -99,29 +181,12 @@ export abstract class BaseDriver implements Driver {
   }
 
   async stop(): Promise<void> {
-    const child = this.child;
-    if (!child || child.exitCode !== null || child.signalCode !== null) return;
     this.stopping = true;
-    child.stdin.end();
-    await new Promise<void>((resolve) => {
-      let settled = false;
-      const finish = () => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timer);
-        resolve();
-      };
-      child.once("close", finish);
-      const timer = setTimeout(() => {
-        if (child.exitCode === null && child.signalCode === null) child.kill("SIGTERM");
-        setTimeout(() => {
-          if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
-          finish();
-        }, 1_000).unref();
-      }, 1_000);
-      timer.unref();
-    });
+    const child = this.child;
+    if (!child) return;
+    await stopChildProcess(child, this.processGroup?.child === child ? this.processGroup.identity : undefined, 1_000);
   }
+
 }
 
 export function parseJsonLine(line: string): Record<string, any> | undefined {

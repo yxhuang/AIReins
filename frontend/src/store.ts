@@ -49,6 +49,11 @@ export interface ComposerSendRestore {
 
 /** 旧服务端全量快照的兼容窗口上限；分页模式保留已加载完整段。 */
 const MAX_EVENTS = 2000;
+/** 当前会话与最近访问的三个会话（含在途加载）共用预算。 */
+const MAX_CACHED_SESSIONS = 4;
+const STREAM_DELTA_TYPES = new Set(["agent_text_delta", "thought_delta", "tool_call_updated", "raw_event"]);
+/** 不改变列表状态/processId 的高频帧，不触发权威列表对齐。 */
+const NO_LIST_REFRESH_TYPES = new Set([...STREAM_DELTA_TYPES, "tool_call_started", "tool_call_completed"]);
 
 /** 有活跃会话时保持用时读数秒级；全局空闲后把唤醒频率降到 30 秒。 */
 const ACTIVE_TICK_MS = 1000;
@@ -108,6 +113,9 @@ function mobileEntryId(): string {
 interface SessionData {
   events: UnifiedEvent[];
   seq: number;
+  /** 临时工具参数不进入持久事件窗口，也不推进 replay 游标。 */
+  toolFrames?: Map<string, UnifiedEvent>;
+  finalizedTools?: Set<string>;
   /** 因 MAX_EVENTS 常规窗口被省略的较早事件数（>0 时流顶部提示） */
   dropped: number;
   /** requestId → 请求事件 seq，用于闸门块定位与排序 */
@@ -131,6 +139,9 @@ function readFocusView(): boolean {
 
 export class Store {
   sessions: SessionRecord[] = [];
+  private indexedSessions: SessionRecord[] | undefined;
+  private sessionsById = new Map<string, SessionRecord>();
+  private cachedSessions = new Map<string, true>();
   projectOrder: string[] = [];
   /** 组织更改不推进会话 seq；防止在途旧 REST 响应撤销已收到的广播。 */
   private organizationVersion = 0;
@@ -1010,12 +1021,21 @@ export class Store {
   }
 
   session(id: string): SessionRecord | undefined {
-    return this.sessions.find((s) => s.id === id);
+    if (this.indexedSessions !== this.sessions || this.sessionsById.size !== this.sessions.length) {
+      this.sessionsById = new Map(this.sessions.map(session => [session.id, session]));
+      this.indexedSessions = this.sessions;
+    }
+    return this.sessionsById.get(id);
   }
 
   pendingCount(id: string): number {
-    if (this.session(id)?.status === "dead") return 0;
-    return this.data.get(id)?.pendingGates.size ?? this.session(id)?.pendingGateCount ?? 0;
+    const session = this.session(id);
+    return session ? this.pendingCountFor(session) : 0;
+  }
+
+  pendingCountFor(session: SessionRecord): number {
+    if (session.status === "dead") return 0;
+    return this.data.get(session.id)?.pendingGates.size ?? session.pendingGateCount ?? 0;
   }
 
   async refreshSessions(): Promise<void> {
@@ -1048,9 +1068,47 @@ export class Store {
     this.notify();
   }
 
+  /** 只按访问淘汰；后台输出不改变最近访问顺序。发送暂存保留到 ack/error。 */
+  private touchSessionCache(id: string): void {
+    this.cachedSessions.delete(id);
+    this.cachedSessions.set(id, true);
+    this.trimSessionCache(id);
+  }
+
+  private trimSessionCache(id?: string): void {
+    for (const candidate of this.cachedSessions.keys()) {
+      if (this.cachedSessions.size <= MAX_CACHED_SESSIONS) break;
+      if (candidate === this.currentId || candidate === id) continue;
+      // 配置切换未落定时暂不淘汰：缓冲里的完成事件可能被摘要 seq 去重吞掉，控件停在提交态。
+      if (this.configPending.has(candidate) || this.configSwitching.has(candidate)) continue;
+      const data = this.data.get(candidate);
+      const session = this.session(candidate);
+      if (data && session) {
+        this.sessions = this.sessions.map(item => item.id === candidate
+          ? { ...item, seq: Math.max(item.seq, data.seq), pendingGateCount: item.seq > data.seq ? item.pendingGateCount : this.pendingCountFor(item) } : item);
+      }
+      // 清空原数组，已发出的请求闭包也不再持有整段缓冲。
+      const buffered = [...(this.replayBuffers.get(candidate)?.splice(0) ?? []),
+        ...(this.snapshotBuffers.get(candidate)?.splice(0) ?? [])];
+      this.cachedSessions.delete(candidate);
+      this.data.delete(candidate);
+      this.snapshotGen.delete(candidate);
+      this.snapshotInflight.delete(candidate);
+      this.olderInflight.delete(candidate);
+      this.snapshotBuffers.delete(candidate);
+      this.replayBuffers.delete(candidate);
+      this.commands.delete(candidate);
+      this.fileKnown.delete(candidate);
+      this.mentionPaths.delete(candidate);
+      // 按未加载路径吸收尚未落地的摘要（包括闸门），不会重新加载事件。
+      for (const event of buffered.sort((a, b) => a.seq - b.seq)) this.handleEvent(event);
+    }
+  }
+
   /** 会话事件是否已加载；未加载则取快照。 */
   async ensureLoaded(id: string): Promise<void> {
     if (this.removed.has(id)) return; // 已移除的会话不再取快照
+    this.touchSessionCache(id);
     if (this.data.has(id)) return;
     await this.alignSnapshot(id);
     this.notify();
@@ -1061,6 +1119,8 @@ export class Store {
    * 版本戳不匹配的过期响应直接丢弃（等待期间已有更新的对齐周期启动）。
    */
   private alignSnapshot(id: string): Promise<void> {
+    if (this.removed.has(id)) return Promise.resolve();
+    if (!this.cachedSessions.has(id)) this.touchSessionCache(id);
     const inflight = this.snapshotInflight.get(id);
     if (inflight) return inflight;
     // 每个新快照请求分配唯一 generation 并立即写入 Map——缺省归一为 0 但不写入时，
@@ -1102,6 +1162,7 @@ export class Store {
       // REST 首取实时命令表（覆盖快照里可能过期的 commands_updated 结果）；
       // dead 会话等失败场景保留快照内的结果，不打扰全局错误条。
       try {
+        if (this.snapshotGen.get(id) !== gen) return;
         const list = await fetchCommands(id);
         if (this.snapshotGen.get(id) === gen) this.commands.set(id, list);
       } catch {
@@ -1233,7 +1294,10 @@ export class Store {
     const sorted = [...events].sort((a, b) => a.seq - b.seq);
     const paged = hasMore !== undefined;
     const { events: retained, omitted: dropped } = paged ? { events: sorted, omitted: 0 } : retainEventWindow(sorted, pendingGates);
-    this.data.set(id, { events: retained, seq, dropped, pendingGates, latestUsage, paged, hasMore, firstSeq: firstSeq ?? sorted[0]?.seq ?? 0, ...cache });
+    const finalizedTools = new Set(events.filter(event => event.type === "tool_call_completed" || event.payload.inputComplete)
+      .map(event => String(event.payload.toolCallId ?? "")));
+    this.data.set(id, { events: retained, seq, dropped, pendingGates, latestUsage, paged, hasMore, firstSeq: firstSeq ?? sorted[0]?.seq ?? 0,
+      finalizedTools, toolFrames: new Map(), ...cache });
     const index = this.sessions.findIndex((s) => s.id === id);
     if (index >= 0) {
       const next = [...this.sessions];
@@ -1365,7 +1429,9 @@ export class Store {
     }
     if (type === "resync_required") {
       const id = String(frame.sessionId ?? "");
-      if (id) { this.replayBuffers.delete(id); void this.resync(id); }
+      if (id && (this.data.has(id) || this.snapshotInflight.has(id))) {
+        this.replayBuffers.delete(id); void this.resync(id);
+      }
       return;
     }
     if (type === "error") {
@@ -1391,6 +1457,7 @@ export class Store {
       if (sid && this.configPending.has(sid) && frame.action !== "user_message") {
         this.configPending.delete(sid);
         this.configErrors.set(sid, msg);
+        this.trimSessionCache();
       } else {
         this.lastError = sid ? { message: msg, sessionId: sid } : { message: msg };
       }
@@ -1414,12 +1481,14 @@ export class Store {
     }
     if (event.ephemeral) {
       if (data && event.type === "tool_call_updated") {
-        const events = data.events.filter((item) => !(item.ephemeral && item.payload.toolCallId === event.payload.toolCallId));
+        const toolId = String(event.payload.toolCallId ?? "");
         // 断线前的迟到临时帧不得覆盖已完成工具的最终参数。
-        if (!events.some((item) => item.payload.toolCallId === event.payload.toolCallId
-          && (item.type === "tool_call_completed" || item.payload.inputComplete))) {
-          events.push(event);
-          this.data.set(event.sessionId, { ...data, events });
+        data.finalizedTools ??= new Set(data.events.filter(item => item.type === "tool_call_completed" || item.payload.inputComplete)
+          .map(item => String(item.payload.toolCallId ?? "")));
+        if (!data.finalizedTools.has(toolId)) {
+          const toolFrames = new Map(data.toolFrames);
+          toolFrames.set(toolId, event);
+          this.data.set(event.sessionId, { ...data, toolFrames });
           this.notifyStreamDelta();
         }
       }
@@ -1434,7 +1503,9 @@ export class Store {
       }
       if (event.seq === data.seq + 1) {
         if (event.type === "tool_call_completed" || event.payload.inputComplete) {
-          data.events = data.events.filter((item) => !(item.ephemeral && item.payload.toolCallId === event.payload.toolCallId));
+          const toolId = String(event.payload.toolCallId ?? "");
+          (data.finalizedTools ??= new Set()).add(toolId);
+          data.toolFrames?.delete(toolId);
         }
         data.events.push(event);
         data.seq = event.seq;
@@ -1457,16 +1528,6 @@ export class Store {
           // claude model/effort 重启切换开始：控件禁用 + 就地显示后端给的过渡文案，
           // config_updated / session_error 到达才解除（见下方两处）。
           this.configSwitching.set(event.sessionId, switchMessageFromPayload(event.payload));
-        } else if (event.type === "session_error") {
-          // 切换中途失败（续接 worker 初始化失败等）：解除过渡态，错误就地显示在控件旁，
-          // 不渲染成全局故障。
-          if (this.configSwitching.delete(event.sessionId)) {
-            this.configPending.delete(event.sessionId);
-            this.configErrors.set(
-              event.sessionId,
-              String(event.payload.message ?? t("core.095")),
-            );
-          }
         }
         // 分页不裁剪完整回合；旧服务端兼容窗口仍保护未决 permission_request。
         const retained = data.paged ? { events: data.events, omitted: 0 } : retainEventWindow(data.events, data.pendingGates);
@@ -1477,7 +1538,14 @@ export class Store {
       }
       else return; // event.seq <= data.seq：补发重复帧，忽略。
     } else {
-      // 未加载会话只维护列表摘要，打开时再取快照。
+      // 未加载会话只维护列表摘要；重复帧也不能解除后续配置操作。
+      if (event.seq <= (this.session(event.sessionId)?.seq ?? -1)) return;
+    }
+
+    // 配置操作独立于事件缓存；淘汰后收到失败也必须解除提交态。
+    if (event.type === "session_error" && this.configSwitching.delete(event.sessionId)) {
+      this.configPending.delete(event.sessionId);
+      this.configErrors.set(event.sessionId, String(event.payload.message ?? t("core.095")));
     }
 
     // 去重和补发缓存处理之后才确认回显；不以相同文本猜测是哪一次发送。
@@ -1489,13 +1557,14 @@ export class Store {
       }
     }
 
-    // 任何事件都刷新该会话的本地视图（lastActivityAt / 状态推断）。
-    const sessionIndex = this.sessions.findIndex((item) => item.id === event.sessionId);
-    if (sessionIndex >= 0) {
-      const session: SessionRecord = {
-        ...this.sessions[sessionIndex]!,
-        lastActivityAt: event.timestamp,
-      };
+    const streamDelta = STREAM_DELTA_TYPES.has(event.type);
+    const previous = this.session(event.sessionId);
+    if (previous) {
+      // seq 始终即时推进；流式摘要只在可见字段变化或活动时间跨秒时发布。
+      const session: SessionRecord = { ...previous };
+      if (!streamDelta || Date.parse(event.timestamp) - Date.parse(previous.lastActivityAt) >= 1000) {
+        session.lastActivityAt = event.timestamp;
+      }
       const freshSummary = event.seq > session.seq;
       if (freshSummary) {
         if (event.type === "user_message") {
@@ -1523,15 +1592,18 @@ export class Store {
         session.released = true;
         session.processId = undefined;
       }
-      const sessions = [...this.sessions];
-      sessions[sessionIndex] = session;
-      this.sessions = sessions;
-    } else {
-      // 新会话（别的客户端建的）：刷新列表。
-      void this.refreshSessions();
+      if (!streamDelta || session.lastActivityAt !== previous.lastActivityAt
+        || session.status !== previous.status || session.pendingGateCount !== previous.pendingGateCount) {
+        this.sessions = this.sessions.map(item => item === previous ? session : item);
+      } else {
+        previous.seq = session.seq;
+      }
     }
-    this.scheduleListRefresh();
-    if (["agent_text_delta", "thought_delta", "tool_call_updated", "raw_event"].includes(event.type)) this.notifyStreamDelta();
+    // 生命周期帧仍需权威列表补齐 idle/error、processId 等；纯增量不触发轮询。
+    if (!previous || !NO_LIST_REFRESH_TYPES.has(event.type)) this.scheduleListRefresh();
+    // 配置操作落定后补做一次预算检查（切换期间曾跳过淘汰）。
+    if (event.type === "config_updated" || event.type === "session_error") this.trimSessionCache();
+    if (streamDelta) this.notifyStreamDelta();
     else this.notify();
   }
 
@@ -1575,7 +1647,7 @@ export class Store {
     }
   }
 
-  /** 事件驱动之外，定期对齐一次权威列表（状态、processId 等）。 */
+  /** 未知会话或非流式事件后，合批对齐权威列表（状态、processId 等）。 */
   private scheduleListRefresh(): void {
     if (this.listRefreshTimer) return;
     this.listRefreshTimer = setTimeout(() => {
@@ -1964,6 +2036,7 @@ export class Store {
     this.removed.add(id);
     this.sessions = this.sessions.filter((s) => s.id !== id);
     this.data.delete(id);
+    this.cachedSessions.delete(id);
     this.commands.delete(id);
     this.fileKnown.delete(id);
     this.mentionPaths.delete(id);

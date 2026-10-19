@@ -3,7 +3,7 @@ import { open, readdir, readFile, realpath, stat } from "node:fs/promises";
 import { createReadStream } from "node:fs";
 import { createInterface } from "node:readline";
 import { homedir } from "node:os";
-import { basename, dirname, join } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, sep } from "node:path";
 import type { AgentKind } from "./types.js";
 import { dispatchSessionMap, type DispatchSession } from "./dispatches.js";
 
@@ -172,6 +172,7 @@ export class HistoryIndex {
   private readonly headBytes: number;
   private readonly messagePageBytes: number;
   private readonly cache = new Map<string, CachedSession>();
+  private readonly candidatesById = new Map<string, Candidate>();
   private registryFingerprint = "";
   private workbenchSessionIds = new Set<string>();
 
@@ -279,8 +280,7 @@ export class HistoryIndex {
    */
   async endCursor(agent: AgentKind, nativeSessionId: string): Promise<string | undefined> {
     const deadline = Date.now() + this.timeoutMs;
-    const discovery = await this.discover([agent], deadline);
-    const candidate = discovery.candidates.find((item) => item.idHint === nativeSessionId);
+    const candidate = await this.findCandidate(agent, nativeSessionId, deadline);
     if (!candidate) return undefined;
     const path = agent === "kimi"
       ? join(dirname(candidate.path), "agents", "main", "wire.jsonl")
@@ -300,8 +300,7 @@ export class HistoryIndex {
   ): Promise<HistoryMessagesPage | undefined> {
     const started = Date.now();
     const deadline = started + this.timeoutMs;
-    const discovery = await this.discover([agent], deadline);
-    const candidate = discovery.candidates.find((item) => item.idHint === nativeSessionId);
+    const candidate = await this.findCandidate(agent, nativeSessionId, deadline);
     if (!candidate) return undefined;
     const session = await this.parseCandidate(candidate);
     if (!session) return undefined;
@@ -365,6 +364,25 @@ export class HistoryIndex {
     };
   }
 
+  private async findCandidate(agent: AgentKind, nativeSessionId: string, deadline: number): Promise<Candidate | undefined> {
+    const key = `${agent}:${nativeSessionId}`;
+    const cached = this.candidatesById.get(key);
+    if (cached) {
+      try {
+        const root = await realpath(this.roots[agent]);
+        const path = await realpath(cached.path);
+        const part = relative(root, path);
+        const metadata = await stat(path);
+        if (part && part !== ".." && !part.startsWith(`..${sep}`) && !isAbsolute(part) && metadata.isFile()) {
+          return { ...cached, path, mtimeMs: metadata.mtimeMs, size: metadata.size };
+        }
+      } catch { /* 文件消失或根目录变化，重新发现。 */ }
+      this.candidatesById.delete(key);
+    }
+    const discovery = await this.discover([agent], deadline);
+    return discovery.candidates.find(item => item.idHint === nativeSessionId);
+  }
+
   private async discover(agents: AgentKind[], deadline: number): Promise<DiscoveryResult> {
     const result: DiscoveryResult = { candidates: [], skipped: 0, truncated: false };
     for (const agent of agents) {
@@ -395,13 +413,15 @@ export class HistoryIndex {
           if (!entry.isFile() || !isHistoryFile(agent, entry.name)) continue;
           try {
             const metadata = await stat(path);
-            result.candidates.push({
+            const candidate: Candidate = {
               agent,
               path,
               idHint: idHintFor(agent, path),
               mtimeMs: metadata.mtimeMs,
               size: metadata.size,
-            });
+            };
+            result.candidates.push(candidate);
+            this.candidatesById.set(`${agent}:${candidate.idHint}`, candidate);
           } catch {
             result.skipped += 1;
           }
@@ -433,6 +453,7 @@ export class HistoryIndex {
       session = null;
     }
     this.cache.set(candidate.path, { fingerprint, session });
+    if (session) this.candidatesById.set(`${candidate.agent}:${session.nativeSessionId}`, candidate);
     return session;
   }
 

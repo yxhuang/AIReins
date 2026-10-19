@@ -13,6 +13,8 @@ export default defineConfig({
     outDir: "dist",
     // 已打开的页面可能仍引用旧 hash，构建时保留旧资源。
     emptyOutDir: false,
+    // 清理脚本据此追踪当前入口的静态/动态 chunk、CSS 与资源。
+    manifest: true,
   },
   server: {
     port: 5173,

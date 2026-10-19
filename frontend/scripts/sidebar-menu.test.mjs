@@ -74,7 +74,7 @@ t('行渲染：默认折叠、工作中自动展开、手动优先、旧键忽�
   globalThis.localStorage = { getItem: key => { reads.push(key); return key === 'aireins-project-folds' ? folds : '["/repo"]'; }, setItem() {}, removeItem() {} };
   const saved = { sessions: store.sessions, now: store.now, currentId: store.currentId, projectOrder: store.projectOrder, pendingCount: store.pendingCount, historyOpen: store.historyOpen, currentPageId: store.currentPageId };
   try {
-    Object.assign(store, { now, currentId: null, projectOrder: ['/repo'], sessions: [session('wait'), session('pin', 400000000, 'dead', { pinned: true }), session('fresh'), session('old', 7200001)], pendingCount: id => id === 'wait' ? 1 : 0, historyOpen: false, currentPageId: null });
+    Object.assign(store, { now, currentId: null, projectOrder: ['/repo'], sessions: [session('wait', 0, 'idle', { pendingGateCount: 1 }), session('pin', 400000000, 'dead', { pinned: true }), session('fresh'), session('old', 7200001)], pendingCount: id => id === 'wait' ? 1 : 0, historyOpen: false, currentPageId: null });
     const render = () => renderToStaticMarkup(React.createElement(Sidebar, { collapsed: false, onToggle() {} }));
     const expanded = html => /aria-expanded="true" aria-controls="project-%2Frepo"/.test(html);
     const html = render();

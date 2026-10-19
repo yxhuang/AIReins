@@ -10,7 +10,7 @@ Vite + React + TypeScript 调度台，将 Claude Code、Codex、Kimi 会话放�
 npm install
 npm run server                 # 后端默认 :8790；从 / 托管 frontend/dist
 npm run dev                    # Vite :5173，需后端先启动
-npm run build                  # frontend/dist + 静态资源预压缩
+npm run build                  # frontend/dist + 静态资源预压缩 + 7 天旧资源清理
 npm run typecheck              # 根配置：后端与 spikes
 npm run typecheck:frontend     # 前端独立 tsc --noEmit
 npm test                       # 前后端聚合回归
@@ -19,7 +19,7 @@ node frontend/scripts/smoke-ws.mjs  # 需后端；会创建测试会话、批准
 
 开发代理包含 `/api`、`/pages` 和 `/ws`，目标为 `127.0.0.1:8790`；配置见 [vite.config.ts](vite.config.ts) 与 [package.json](../package.json)。没有 `@vitejs/plugin-react`，automatic JSX 下开发热更新退化为整页刷新。
 
-`frontend/dist/` 不入库。`install.sh` 安装/更新时执行 `npm run build`（含预压缩），构建失败则安装失败；`aireins` 启动前缺少 `frontend/dist/index.html` 时也会自动构建，失败则退出。构建使用 `emptyOutDir: false`，保留已打开页面引用的旧 hash 资源，不要清空 dist。
+`frontend/dist/` 不入库。`install.sh` 安装/更新时执行 `npm run build`（含预压缩），构建失败则安装失败；`aireins` 启动前缺少 `frontend/dist/index.html` 时也会自动构建，失败则退出。构建使用 `emptyOutDir: false`，保留已打开页面引用的旧 hash 资源，不要清空 dist。预压缩后运行 [prune-assets.mjs](scripts/prune-assets.mjs)：根据当前 `index.html` 与 Vite manifest 的静态/动态 chunk、CSS 和资源引用链，只删除 `dist/assets` 中未被引用且原资源 mtime 早于 7 天的文件，并删除其 `.gz` / `.map` 伴生文件（伴生文件沿用原资源年龄，避免预压缩刷新 `.gz` 时间后无法清理）。当前构建的被引用资源即使超过 7 天仍保留；缺失或损坏的 manifest 不执行删除。回归只在临时目录构建和清理，见 [prune-assets.test.mjs](scripts/prune-assets.test.mjs)。
 针对功能可用根目录 `test:*` 脚本；直接运行前端逻辑测试用 `node --import tsx frontend/scripts/<name>.test.mjs`。`check:theme` 当前只检查文件浏览与侧栏入口样式，不能替代完整主题检查。
 
 ## 架构
@@ -34,14 +34,14 @@ node frontend/scripts/smoke-ws.mjs  # 需后端；会创建测试会话、批准
 ### 状态模型
 
 - 单一 `Store` 经 [useStore.ts](src/useStore.ts) 的 `useSyncExternalStore` 订阅；优先 selector 与稳定引用，派生 tuple 用 `shallowEqual`，避免每次通知重绘全部组件。
-- `sessions` 保存列表摘要；未打开会话只更新标题、seq、未决数与状态，不预取全部快照。标题优先后端 `session.title`，首条结构化命令可从 `/name 参数` 派生，兼容事件派生见 [shared/session-title.ts](../shared/session-title.ts)。主会话桌面/手机顶栏固定显示开头 12 个可见字符，超出追加省略号；左侧会话标签按字体和当前行可用宽度实际截短 DOM 文本及悬停提示，拖动侧栏/缩放字号后重新计算。原标题保留在记录与重命名输入中；截短逻辑见 [SessionTitle.tsx](src/components/SessionTitle.tsx)。
-- `data` 按会话保存已加载事件、replay 游标、分页游标、未决闸门、用量/缓存信息；配置、RC、后台任务来自会话记录。普通事件推断状态，2 秒防抖重拉列表对齐，列表不覆盖较新 WS 摘要。
-- 流式文本、思考、工具更新和调试事件通知按 `requestAnimationFrame` 合批；其他通知立即发出。活动会话时钟每秒更新，全局空闲改为 30 秒；实现见 [store.ts](src/store.ts)。
+- `sessions` 保存列表摘要；未打开或事件缓存已淘汰的会话只更新标题、seq、未决数与状态，不预取全部快照。按 `sessions` 引用失效的 id 索引提供会话查询；徽标和窗口标题聚合直接用正在遍历的摘要计算待审批数，避免重复查找。标题优先后端 `session.title`，首条结构化命令可从 `/name 参数` 派生，兼容事件派生见 [shared/session-title.ts](../shared/session-title.ts)。主会话桌面/手机顶栏固定显示开头 12 个可见字符，超出追加省略号；左侧会话标签按字体和当前行可用宽度实际截短 DOM 文本及悬停提示，拖动侧栏/缩放字号后重新计算。原标题保留在记录与重命名输入中；截短逻辑见 [SessionTitle.tsx](src/components/SessionTitle.tsx)。
+- `data` 按会话保存已加载事件、replay 游标、分页游标、未决闸门、用量/缓存信息；事件缓存（含在途快照）最多保留 4 个会话，保护当前会话，其余按最近访问淘汰，后台输出不延长保留。淘汰前把 seq、待审批数写回列表摘要，作废旧快照/旧页并清理重放缓冲、命令与文件查询缓存；未落地事件沿未加载路径吸收摘要，再次打开取现有尾部快照。发送暂存与配置操作状态保留到回执，防止丢失拒绝后的输入恢复。配置、RC、后台任务来自会话记录。普通事件推断状态；未知会话或非流式事件后以 2 秒防抖重拉权威列表，补齐 idle/error、processId 等信息，列表不覆盖较新 WS 摘要。
+- 流式文本、思考、工具更新和调试事件通知按 `requestAnimationFrame` 合批；seq 即时推进，列表可见状态不变且活动时间距上次发布不足 1 秒时保持 `sessions` 与行对象引用，不触发列表重拉。侧栏会话行用 `memo` 隔离无关变化，排序复用每个摘要的活动时间解析结果。其他通知立即发出。活动会话时钟每秒更新，全局空闲改为 30 秒；实现见 [store.ts](src/store.ts)。
 
 ### 连接与恢复
 
 - 一条全局 `/ws` 收所有会话事件。首连/重连刷新列表，对已加载会话发送 `{type:"replay", sessionId, afterSeq}`；`replay_complete` 后顺序应用缓冲帧，不再对每个会话一律重取快照。
-- 快照请求去重并带代次戳，期间实时事件先缓存；响应原子替换旧窗口后追加较新帧。只接受推进 seq 的持久事件，重复帧忽略；临时工具更新不推进游标。
+- 快照请求去重并带代次戳，期间实时事件先缓存；响应原子替换旧窗口后追加较新帧。只接受推进 seq 的持久事件，重复帧忽略；临时工具更新按 `toolCallId` 单独保存在 `toolFrames`，不改持久事件数组、不推进游标。render-items builder 在缓存的工具显示行上叠加临时参数，只重绘对应行；最终参数或完成事件移除临时帧，迟到临时帧不能覆盖最终值。缓存、流式摘要、临时参数和文件补全回归见 [review-fixes.test.mjs](scripts/review-fixes.test.mjs)。
 - seq 缺口、`resync_required` 或补发失败退回快照；重连作废受影响的在途快照。断线退避 1 秒起、封顶 15 秒，回前台可立即重连；见 [store.ts](src/store.ts)。
 - 用户输入、审批回执、中断、配置和 RC 控制共用 WS；配置错误就地显示，其余进入可关联会话的全局错误条。发送被拒绝时保留文本与草稿，不把发送帧写出视为模型完成。Codex 消息的 `turn/start` 后续失败目前通过 `session_error` 显示，不自动还回已确认输入；Codex 斜杠命令失败则在输入仍为空时还回提交原文，保留随后新写的草稿。消息输入框有稳定的无障碍标签「消息」。
 
@@ -103,7 +103,7 @@ node frontend/scripts/smoke-ws.mjs  # 需后端；会创建测试会话、批准
 - 输入栏 Permission 左侧显示上下文圆环，悬停/键盘聚焦显示约占百分比；Codex 取最新请求 `usage.last.totalTokens / modelContextWindow`，Kimi 取 `used / size`，Claude 在打开及回合用量更新后调用现有只读 context 接口。缺失数据显示未知，不用累计 token 猜测，不轮询或唤醒已释放 worker。
 - 手机输入栏 Codex 权限标签缩写为 `Ask / Auto / Full`，桌面和权限菜单仍显示完整名称；圆环两端均显示，模型名可按剩余宽度截短。输入框聚焦时（键盘弹起）去掉 `.app` 底部安全区留白、`.composer` 底边距收到 4px；iOS 弹键盘不缩 `100dvh` 而是平移可视视口，所以手机键盘打开（`visualViewport` 比 `innerHeight` 矮 120px 以上且未双指缩放）时 `main.tsx` 给 `<html>` 加 `data-keyboard`，`.app` 改为 fixed 并按 `visualViewport` 的 offsetTop/height 铺满可见区，输入框贴住键盘；键盘上方的 ∧ ∨ ✓ 条是 iOS Safari 系统表单辅助栏，网页无法隐藏（用户 10-16）。
 - `/` 行首触发命令，`@` 在光标处 token 触发；↑↓/Enter/Tab/Esc 保留 textarea 焦点，IME 组合期间不触发/发送。命令表由快照、REST、WS 更新，是否结构化发送由能力位决定；见 [commands.ts](src/commands.ts)、[SessionView.tsx](src/components/SessionView.tsx)。
-- `@` 面板显示会话 cwd、检索中及接口错误；请求失败不冒充“没有匹配”。更换关键词立即清空旧候选，关闭面板后丢弃迟到响应；检索中 Enter 不发送未完成引用。
+- `@` 面板显示会话 cwd、检索中及接口错误；请求失败不冒充“没有匹配”。检索保留 250ms 防抖；更换关键词立即清空旧候选，新查询、关闭面板或组件卸载时通过 `AbortController` 中止旧请求，取消不显示错误、不写回旧结果；检索中 Enter 不发送未完成引用。
 - `@token` 整体先精确查真实文件，失败才剥尾部标点/截句读候选；保留原文本，按最终路径去重、合计 ≤20。含空白路径无法作为完整 token；显示标签与解析规则分离，见 [mentions.ts](src/mentions.ts)、[store.ts](src/store.ts)。
 - 「+」支持手机选文件、电脑文件浏览、粘贴/拖入。上传为原始字节 POST `/api/uploads?sessionId&name`，本机文件只引用绝对路径；ready 才进发送帧，失败不进，发送成功清附件/预览 URL，失败保留；见 [attachments.ts](src/attachments.ts)。
 - `image/*` 超 3.5 MiB 或非 png/jpeg/gif/webp，尝试长边 ≤2048、JPEG 0.85；解码失败原样上传。上传上限 25 MiB，image mention 上限 10 MiB；附件与 `@` 共用 20 个上限，Codex 命令带附件明确拒绝，其他结构化命令带附件改走文本+mentions。
@@ -122,7 +122,7 @@ node frontend/scripts/smoke-ws.mjs  # 需后端；会创建测试会话、批准
 
 ## 消息与原生历史
 
-- 顺序追加事件由持久 reducer 增量折叠，更新条目使用新对象；分组和已完成行缓存，仅更新末尾。事件窗口引用替换、`dropped`、乱序/重复 seq 和 Codex 回溯输出依赖会全量重建。流式 Markdown 每 100ms 最多解析一次，停止流式后立即使用完整原文，代码着色仍等整轮结束。正文实际提交后同步贴底与“回到最新”状态，阅读历史时保持滚动位置。回归见 [long-session-scroll.test.mjs](scripts/long-session-scroll.test.mjs)、 [long-session-render.test.mjs](scripts/long-session-render.test.mjs)。
+- 顺序追加事件由持久 reducer 增量折叠，更新条目使用新对象；分组和已完成行缓存，持久文本增量仅更新末尾，临时工具参数只更新对应显示行。事件窗口引用替换、`dropped`、乱序/重复 seq 和 Codex 回溯输出依赖会全量重建。流式 Markdown 每 100ms 最多解析一次，停止流式后立即使用完整原文，代码着色仍等整轮结束。正文实际提交后同步贴底与“回到最新”状态，阅读历史时保持滚动位置。回归见 [long-session-scroll.test.mjs](scripts/long-session-scroll.test.mjs)、 [long-session-render.test.mjs](scripts/long-session-render.test.mjs)。
 - 助手用 `react-markdown` + GFM，禁原始 HTML、过滤 URL，外链加 noopener/noreferrer；单换行保留，代码/表格块内横滚，复制使用原文并提示失败。见 [MarkdownMessage.tsx](src/components/MarkdownMessage.tsx)。
 - 代码按需加载轻量词法着色，源码先转义；无/未知语言或 >2000 行纯文本，流式整轮结束后着色并丢弃过期结果；不是完整语法解析器，支持语言见 [code-highlight.ts](src/code-highlight.ts)、[highlight-languages.ts](src/highlight-languages.ts)。
 - 同回合 text/thought/tool 共用时间线，闸门/提问独立；正常结束不额外显示系统行，异常如实显示。连续 ≥3 个成功只读工具合并摘要，读取路径去重，未知工具回落原名/原始内容；命令先展示 20 行，可展开全部。见 [tool-summary.ts](src/tool-summary.ts)、[render-items.ts](src/render-items.ts)。

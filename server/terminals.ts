@@ -124,6 +124,7 @@ function fileExists(path: string): boolean {
 export class TerminalRegistry {
   private readonly records = new Map<string, TerminalRecord>();
   private stopping = false;
+  private readonly exited = new Set<string>();
 
   constructor(
     private readonly defaultCwd: string,
@@ -179,7 +180,9 @@ export class TerminalRegistry {
     pty.onExit(({ exitCode }) => {
       info.exited = true;
       info.exitCode = exitCode;
+      this.exited.add(info.id);
       this.emit(record, { type: "exit", terminalId: info.id, exitCode });
+      this.pruneExited();
     });
     return { ...info };
   }
@@ -193,7 +196,7 @@ export class TerminalRegistry {
       data: stripReplayQueries(this.snapshot(record).toString("utf8")),
       exited: record.info.exited,
       exitCode: record.info.exitCode,
-      detach: () => record.listeners.delete(listener),
+      detach: () => { record.listeners.delete(listener); this.pruneExited(); },
     };
   }
 
@@ -224,6 +227,15 @@ export class TerminalRegistry {
         try { record.pty.kill(); } catch { /* 进程可能已退出但 onExit 尚未回调；继续结束其余 PTY。 */ }
       }
       record.listeners.clear();
+    }
+  }
+
+  /** 最近 8 个无人附着的已退出终端仍可回放；运行中和有人附着的终端不淘汰。 */
+  private pruneExited(): void {
+    const idle = [...this.exited].filter(id => this.records.get(id)?.listeners.size === 0);
+    for (const id of idle.slice(0, -8)) {
+      this.records.delete(id);
+      this.exited.delete(id);
     }
   }
 

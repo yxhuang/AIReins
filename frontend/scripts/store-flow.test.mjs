@@ -201,9 +201,10 @@ await t("临时事件不推进 seq、不 resync；最终参数取代临时参数
   globalThis.fetch = () => { throw new Error("临时事件请求了快照"); };
   for (const partialInput of ["{", '{"x":']) s.handleEvent({ ...makeEvent(session.id, 99, "tool_call_updated", { toolCallId: "t", partialInput }), ephemeral: true });
   assert.equal(s.data.get(session.id).seq, 1);
-  assert.equal(s.data.get(session.id).events.filter((event) => event.ephemeral).length, 1);
+  assert.equal(s.data.get(session.id).toolFrames.size, 1);
+  assert.equal(s.data.get(session.id).events.length, 1);
   s.handleEvent(makeEvent(session.id, 2, "tool_call_updated", { toolCallId: "t", input: { x: 1 }, inputComplete: true }));
-  assert.equal(s.data.get(session.id).events.some((event) => event.ephemeral), false);
+  assert.equal(s.data.get(session.id).toolFrames.size, 0);
 });
 
 await t("重连补发与实时帧交错：先缓存、后按序去重，审批不漏", async () => {

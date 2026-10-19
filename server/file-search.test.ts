@@ -39,7 +39,10 @@ try {
   assert.deepEqual(await searchFiles(project, "报告", 20), ["报告.txt"]);
   assert.equal((await searchFiles(project, "", 1)).length, 1);
   execFileSync("/usr/bin/git", ["init", "--quiet", project]);
-  assert.deepEqual(await searchFiles(project, "", 20), [".gitignore", "README.md", "报告.txt"]);
+  const now = Date.now;
+  Date.now = () => now() + 3_000;
+  try { assert.deepEqual(await searchFiles(project, "", 20), [".gitignore", "README.md", "报告.txt"]); }
+  finally { Date.now = now; }
   process.env.PATH = root;
   await assert.rejects(searchFiles(project, "", 20), /Git 文件枚举失败/);
 } finally {

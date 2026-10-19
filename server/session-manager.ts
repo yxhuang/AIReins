@@ -123,6 +123,8 @@ export class SessionManager {
   /** shutdown 开始后不再起新 worker（否则停服期间的发送会拉起一个 shutdown 管不到的进程） */
   private stopping = false;
   private registryDirty = false;
+  private registryRetryMs = 1_000;
+  private driverCallbackDepth = 0;
   private registryTimer?: ReturnType<typeof setTimeout>;
   private readonly titles = new Map<string, string>();
   private readonly partialUpdates = new Map<string, Map<string, {
@@ -385,7 +387,7 @@ export class SessionManager {
     if (input.snapshot === "auto") {
       try {
         const snapshotPath = await this.snapshotCreator(record.cwd);
-        if (snapshotPath) {
+        if (snapshotPath && !this.stopping && this.sessions.get(id) === record) {
           record.snapshotPath = snapshotPath;
           this.persistRegistry();
         }
@@ -404,6 +406,9 @@ export class SessionManager {
         });
       }
     }
+
+    if (this.stopping) throw new Error("AIReins 正在退出");
+    if (this.sessions.get(id) !== record) throw new Error(`会话不存在：${id}`);
 
     let worker!: Driver;
     const callbacks = this.driverCallbacks(id, () => worker);
@@ -1379,8 +1384,13 @@ export class SessionManager {
 
   private driverCallbacks(id: string, worker: () => Driver): DriverCallbacks {
     const current = () => !this.damagedTranscripts.has(id) && this.workers.get(id) === worker();
+    // CLI 的 IO/退出回调没有同步调用方；仅注册表写失败在这里转为后台重试。
+    const background = <A extends unknown[], R>(callback: (...args: A) => R) => (...args: A): R => {
+      this.driverCallbackDepth++;
+      try { return callback(...args); } finally { this.driverCallbackDepth--; }
+    };
     return {
-      emit: (type, payload = {}) => {
+      emit: background((type, payload = {}) => {
         if (!current()) return undefined;
         const session = this.sessions.get(id);
         if (session?.agent === "claude") {
@@ -1397,8 +1407,8 @@ export class SessionManager {
             ? this.configUpdatedPayload(session, payload)
             : payload,
         );
-      },
-      metadata: (metadata) => {
+      }),
+      metadata: background((metadata) => {
         const session = this.sessions.get(id);
         if (!session || !current()) return;
         const before = JSON.stringify(session);
@@ -1418,21 +1428,21 @@ export class SessionManager {
         this.trackWorkerProcess(session, worker());
         if (JSON.stringify(session) !== before) this.persistRegistry();
         if (titleChanged) this.organizationUpdated();
-      },
-      commands: (commands) => {
+      }),
+      commands: background((commands) => {
         if (!this.sessions.has(id) || !current()) return;
         const normalized = commands.map((command) => ({ ...command }));
         if (commandContent(this.commands.get(id) ?? []) === commandContent(normalized)) return;
         this.commands.set(id, normalized);
         this.emit(id, "commands_updated", { commands: normalized });
-      },
-      status: (status) => {
+      }),
+      status: background((status) => {
         if (current()) {
           if (status === "error" || status === "dead") this.flushPartialUpdates(id);
           this.setStatus(id, status);
         }
-      },
-      exited: (info) => {
+      }),
+      exited: background((info) => {
         if (!this.sessions.has(id) || !current()) return;
         this.flushPartialUpdates(id);
         this.emit(id, "process_exited", info as unknown as Record<string, unknown>);
@@ -1443,7 +1453,7 @@ export class SessionManager {
         }
         this.setStatus(id, "dead");
         this.workers.delete(id);
-      },
+      }),
     };
   }
 
@@ -1562,19 +1572,28 @@ export class SessionManager {
     if (this.registryTimer) return;
     this.registryTimer = setTimeout(() => {
       this.registryTimer = undefined;
-      if (this.registryDirty) this.persistRegistry();
-    }, 1000);
+      if (this.registryDirty) this.persistRegistry(true);
+    }, this.registryRetryMs);
     this.registryTimer.unref();
   }
 
-  private persistRegistry(): void {
+  private persistRegistry(background = false): void {
     if (this.registryTimer) clearTimeout(this.registryTimer);
     this.registryTimer = undefined;
-    saveRegistry([...this.sessions.values()].map((session) => ({
-      ...session,
-      releasedMark: this.nativeMarks.get(session.id) ?? session.releasedMark,
-    })));
-    this.registryDirty = false;
+    this.registryDirty = true;
+    try {
+      saveRegistry([...this.sessions.values()].map((session) => ({
+        ...session,
+        releasedMark: this.nativeMarks.get(session.id) ?? session.releasedMark,
+      })));
+      this.registryDirty = false;
+      this.registryRetryMs = 1_000;
+    } catch (error) {
+      if (!background && this.driverCallbackDepth === 0) throw error;
+      log("error", "background registry save failed; retrying", { message: String(error) });
+      this.registryRetryMs = Math.min(this.registryRetryMs * 2, 30_000);
+      this.markRegistryDirty();
+    }
   }
 
   private claudeEffectivePayload(session: SessionRecord): Record<string, unknown> {

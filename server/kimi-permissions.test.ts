@@ -90,6 +90,7 @@ for (const mode of modes) {
   const approvalsBefore = h.events.filter((event) => event.type === "permission_request").length;
   const file = join(root, `${mode}.txt`);
   h.receive({ jsonrpc: "2.0", id: 50, method: "fs/write_text_file", params: { path: file, content: `mode=${mode}` } });
+  await h.internal.fileRequests;
   assert.deepEqual(h.sent.at(-1), { jsonrpc: "2.0", id: 50, result: {} });
   assert.equal(await readFile(file, "utf8"), `mode=${mode}`);
   h.receive({ jsonrpc: "2.0", id: 51, method: "terminal/create", params: {
@@ -108,6 +109,7 @@ for (const mode of modes) {
   assert.equal(h.internal.permissions.size, 0);
 
   h.receive({ jsonrpc: "2.0", id: 54, method: "fs/write_text_file", params: { path: join(root, "missing", "file.txt"), content: "test" } });
+  await h.internal.fileRequests;
   assert.equal(h.sent.at(-1).error.code, -32000, "实际写入失败仍回传 RPC 错误");
 }
 

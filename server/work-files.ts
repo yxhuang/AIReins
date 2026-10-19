@@ -192,13 +192,34 @@ export async function getWorkFile(input: WorkFileInput, options: WorkFileOptions
   } catch (error) { fsError(error); }
   finally { await file.handle.close(); }
 }
-export async function getWorkContent(input: WorkFileInput, options: WorkFileOptions = {}): Promise<{ file: WorkFile; bytes: Buffer }> {
+/** 仅内联 PDF 使用 Range；仍在同一个已授权 fd 上读取并核对读取前后版本。 */
+export async function getWorkContent(input: WorkFileInput, options: WorkFileOptions = {}, rangeHeader?: string): Promise<{ file: WorkFile; bytes: Buffer; range?: { start: number; end: number } | null }> {
   const target = await openFile(input, options);
   try {
     if (target.info.size > FILE_LIMIT) throw new WorkFileError(413, "文件超过 32 MiB，无法通过工作台下载或查看");
-    const bytes = await readBounded(target.handle, FILE_LIMIT);
+    const file = metadata(target.path, target.info.size);
+    let range: { start: number; end: number } | null | undefined;
+    let bytes: Buffer;
+    if (file.kind === "pdf" && rangeHeader !== undefined) {
+      const match = /^bytes=(\d*)-(\d*)$/.exec(rangeHeader);
+      range = null;
+      if (match && (match[1] || match[2]) && (!match[1] || Number.isSafeInteger(Number(match[1]))) && (!match[2] || Number.isSafeInteger(Number(match[2])))) {
+        const start = match[1] ? Number(match[1]) : Math.max(0, file.size - Number(match[2]));
+        const end = match[1] && match[2] ? Math.min(Number(match[2]), file.size - 1) : file.size - 1;
+        if (Number.isSafeInteger(start) && Number.isSafeInteger(end) && start <= end && start < file.size && (match[1] || Number(match[2]) !== 0)) range = { start, end };
+      }
+      bytes = Buffer.alloc(range ? range.end - range.start + 1 : 0);
+      let offset = 0;
+      while (range && offset < bytes.length) {
+        const { bytesRead } = await target.handle.read(bytes, offset, bytes.length - offset, range.start + offset);
+        if (!bytesRead) throw new WorkFileError(409, "读取时文件已变化，请重试");
+        offset += bytesRead;
+      }
+    } else {
+      bytes = await readBounded(target.handle, FILE_LIMIT);
+    }
     if (!sameState(target.info, await target.handle.stat())) throw new WorkFileError(409, "读取时文件已变化，请重试");
-    return { file: metadata(target.path, bytes.length), bytes };
+    return { file, bytes, ...(range !== undefined ? { range } : {}) };
   } catch (error) { fsError(error); }
   finally { await target.handle.close(); }
 }

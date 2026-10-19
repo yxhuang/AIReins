@@ -1,5 +1,5 @@
 import { t } from "../i18n";
-import { useCallback, useEffect, useRef, useState, type DragEvent, type MouseEvent, type ReactNode } from "react";
+import { memo, useCallback, useEffect, useRef, useState, type DragEvent, type MouseEvent, type ReactNode } from "react";
 import type { AgentKind, SessionRecord } from "../types";
 import { relativeTime, relativeTimeShort, sessionTitle } from "../format";
 import { AgentIcon } from "./AgentIcon";
@@ -48,7 +48,7 @@ const selectHistoryOpen = (value: Store) => value.historyOpen;
 const selectHistoryNewCwd = (value: Store) => value.historyOpen ? value.historyCwdFilter : "";
 const selectCurrentId = (value: Store) => value.currentId;
 const selectPendingSignature = (value: Store) =>
-  value.sessions.map((session) => `${session.id}:${value.pendingCount(session.id)}`).join("|");
+  value.sessions.map((session) => `${session.id}:${value.pendingCountFor(session)}`).join("|");
 
 interface SidebarProps {
   collapsed: boolean;
@@ -157,7 +157,7 @@ export function Sidebar({ collapsed, onToggle, returnToSession = false, mobileAc
   const totalSessions = sessionRecords.length;
   // 收起态仍要能看到全局待审批压力：全部会话未决闸门总数。
   const totalPending = sessionRecords.reduce(
-    (sum, session) => sum + store.pendingCount(session.id),
+    (sum, session) => sum + store.pendingCountFor(session),
     0,
   );
 
@@ -165,9 +165,10 @@ export function Sidebar({ collapsed, onToggle, returnToSession = false, mobileAc
     <li key={session.id}>
       <SessionRow
         session={session}
-        pending={store.pendingCount(session.id)}
+        pending={store.pendingCountFor(session)}
         active={session.id === currentId}
         now={now}
+        windowsPaths={meta?.capabilities.windowsPaths === true}
         swipeOpen={swipedId === session.id}
         onSwipeChange={setSwipedId}
       />
@@ -176,7 +177,7 @@ export function Sidebar({ collapsed, onToggle, returnToSession = false, mobileAc
 
   const renderProject = (project: typeof projects[number], index: number, sortable = true) => {
     const working = project.sessions.some(session => session.id === currentId
-      || ["running", "starting", "needs-user"].includes(sidebarStatusDot(session, store.pendingCount(session.id), now) ?? ""));
+      || ["running", "starting", "needs-user"].includes(sidebarStatusDot(session, store.pendingCountFor(session), now) ?? ""));
     const folded = !searching && (projectFolds[project.path] ? projectFolds[project.path] === "closed" : !working);
     const expanded = expandedProjects.has(project.path);
     const visible = selectProjectSessions(project.sessions, { now, currentId, pendingCount: store.pendingCount.bind(store), expanded, searching });
@@ -483,11 +484,12 @@ function MoreDotsIcon() {
   );
 }
 
-function SessionRow({
+const SessionRow = memo(function SessionRow({
   session,
   pending,
   active,
   now,
+  windowsPaths,
   swipeOpen,
   onSwipeChange,
 }: {
@@ -495,6 +497,7 @@ function SessionRow({
   pending: number;
   active: boolean;
   now: number;
+  windowsPaths: boolean;
   swipeOpen: boolean;
   onSwipeChange: (id: string | null) => void;
 }) {
@@ -860,7 +863,7 @@ function SessionRow({
           position={menuAt}
           label={t("ui.Sidebar.actions_for_session", { p0: (shortTitle) })}
           items={mainItems}
-          description={projectDisplayPath(session.cwd, store.meta?.capabilities.windowsPaths === true)}
+          description={projectDisplayPath(session.cwd, windowsPaths)}
           error={menuError}
           onClose={(returnFocus) => closeMenu(returnFocus === true)}
         >
@@ -868,7 +871,7 @@ function SessionRow({
       )}
     </div>
   );
-}
+});
 
 /** 只保存手动选择；无记录时跟随工作状态。隐私模式读写会抛，退回内存态。 */
 function usePersistedProjectFolds(): [Record<string, "open" | "closed">, (path: string, state: "open" | "closed") => void] {
@@ -918,7 +921,7 @@ function ProjectHeader({ project, collapsed, onToggle, onNew, previous, next, no
     { id: "history", label: t("ui.Sidebar.directory_history"), icon: "folder", divider: sortable,
       onSelect: () => { closeMenu(); store.navigateHistory(project.path); } },
   ];
-  const dots = project.sessions.map(session => sidebarStatusDot(session, store.pendingCount(session.id), now));
+  const dots = project.sessions.map(session => sidebarStatusDot(session, store.pendingCountFor(session), now));
   const dot = ["needs-user", "error", "running", "starting"].find(value => dots.includes(value));
   const fullPath = projectDisplayPath(project.path, windowsPaths);
   return <div className="project-header" draggable={draggable} onPointerDown={(event) => { pointerType.current = event.pointerType; }}
