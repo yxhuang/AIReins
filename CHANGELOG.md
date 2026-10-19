@@ -2,9 +2,25 @@
 
 ## Unreleased
 
+## 0.2.0 (2026-10-19)
+
+### Added
+
+- Local Windows + WSL and macOS file-panel menus can open files with the system default application and folders in the file manager. The action follows workspace authorization checks and is unavailable through remote access or on native Linux.
+- Markdown file previews can open local document links in the file panel, resolving relative paths from the Markdown file's directory and preserving unsaved-change confirmation. Web links open in a separate tab.
+
+### Changed
+
+- Light-theme inputs and floating panels use a warm off-white surface, with matching warm-gray scrollbars in explicit light mode and when following a light system theme.
+- Normal and focus conversation views hide raw debug-event cards while preserving the original event records for diagnostics; normalized errors, tool results, approvals and questions remain visible under the existing view rules.
+- Privacy checks now have versioned commit hooks and scan every incoming commit in CI, including filenames, commit messages and author metadata. Local handoff documents stay outside the public repository.
+
 ### Fixed
 
 - The native Windows folder/file picker is no longer blurry on high-DPI displays, and it now comes to the front instead of flashing in the taskbar.
+- Resuming a native session first stops an idle or failed AIReins worker that still owns it. Busy sessions, concurrent resumes, deletion and worker restarts are guarded against competing writers.
+- Claude native-title detection retries after registering its file watcher, covering macOS watcher startup delays.
+- The installer handles macOS Bash 3.2 variable and empty-array edge cases; CI fixtures use consistent shell, platform and temporary-directory behavior on macOS.
 
 ## 0.1.0 (2026-10-17)
 

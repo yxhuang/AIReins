@@ -88,6 +88,8 @@ const SESSION_INFO_SUBTYPES: Record<string, string> = {
 };
 
 export class SessionBusyError extends Error {}
+const NATIVE_IN_USE = "另一条 AIReins 会话正在使用这条原生会话，请等它空闲或先停止后再续接。";
+const nativeClaim = (agent: string, nativeSessionId?: string) => `${agent}\0${nativeSessionId}`;
 
 export class SessionManager {
   private readonly thinkingUpdates = new Set<string>();
@@ -108,6 +110,8 @@ export class SessionManager {
   private readonly backgroundStops = new Set<Promise<void>>();
   private readonly checkingSessions = new Set<string>();
   private readonly deletingSessions = new Set<string>();
+  /** 新建续接正在接管的原生会话（agent\0id），挡住并发续接与旧会话原地重建。 */
+  private readonly nativeClaims = new Set<string>();
   /** 同会话的原生检查/恢复共享一个在途任务，避免并发菜单操作重复起 worker。 */
   private readonly nativeRefreshes = new Map<string, Promise<void>>();
   /** 发过消息的会话：Claude 原生存档要到首条消息后才落盘，没发过的切换配置时不能续接 */
@@ -317,12 +321,16 @@ export class SessionManager {
   }
 
   async create(input: CreateSessionInput): Promise<SessionRecord> {
-    if (input.resumeSessionId && [...this.sessions.values()].some(record => record.agent === input.agent
-      && record.nativeSessionId === input.resumeSessionId && this.deletingSessions.has(record.id))) {
-      throw new SessionBusyError("原生会话正在彻底删除，无法续接。");
-    }
     if (this.stopping) throw new Error("AIReins 正在退出");
     this.validateCwd(input.cwd);
+    if (input.resumeSessionId) {
+      // 交接完成后同步注册 starting 记录，占用标记与记录之间没有空窗。
+      const claim = nativeClaim(input.agent, input.resumeSessionId);
+      if (this.nativeClaims.has(claim)) throw new SessionBusyError(NATIVE_IN_USE);
+      this.nativeClaims.add(claim);
+      try { await this.handOverNative(input.agent, input.resumeSessionId); } finally { this.nativeClaims.delete(claim); }
+      if (this.stopping) throw new Error("AIReins 正在退出");
+    }
     const id = ulid();
     const now = new Date().toISOString();
     const config = configFromCreateInput(input);
@@ -744,6 +752,10 @@ export class SessionManager {
     if (!record) return undefined;
     flushTranscripts(record.transcriptPath);
     if (permanently) {
+      // 新建续接正在接管这条原生会话（新记录尚未注册）：不能同时删它的历史。
+      if (this.nativeClaims.has(nativeClaim(record.agent, record.nativeSessionId))) {
+        throw new SessionBusyError("另一条 AIReins 会话引用同一原生历史，请先移除其他引用。");
+      }
       validateNativeDelete(record);
       if (this.stopping || this.startups.has(id) || !["idle", "dead", "error"].includes(record.status)) {
         throw new SessionBusyError("请先停止当前执行，等会话空闲或结束后再彻底删除。");
@@ -860,6 +872,44 @@ export class SessionManager {
     try { return await releasing; } finally {
       if (this.releases.get(id) === releasing) this.releases.delete(id);
     }
+  }
+
+  /**
+   * 原生会话只留一个 worker（Codex 单写者）：续接前停掉仍占着它的空闲/出错会话，旧会话随 exited 标 dead；
+   * 对方正在执行则拒绝。上一轮失败（如模型满载）后会话为 error 但进程仍在，正是这条路径。
+   */
+  private async handOverNative(agent: SessionRecord["agent"], nativeSessionId: string): Promise<void> {
+    for (const other of [...this.sessions.values()]) {
+      if (other.agent !== agent || other.nativeSessionId !== nativeSessionId) continue;
+      await this.releases.get(other.id)?.catch(() => undefined);
+      if (this.deletingSessions.has(other.id)) throw new SessionBusyError("原生会话正在彻底删除，无法续接。");
+      const worker = this.workers.get(other.id);
+      if (!worker && !this.nativeBusy(other)) continue;
+      if (!worker || this.nativeBusy(other) || !["idle", "error"].includes(other.status)
+        || this.thinkingUpdates.has(other.id) || this.sideQuestions.has(other.id)
+        || this.pendingGates.get(other.id)?.size || other.backgroundTasks?.length) {
+        throw new SessionBusyError(NATIVE_IN_USE);
+      }
+      // 停止期间按“续接中”挡住旧会话的发送、切配置、移除与彻底删除。
+      this.restartingSessions.add(other.id);
+      try { await worker.stop(); } finally { this.restartingSessions.delete(other.id); }
+      // stop 超时走 SIGKILL 后不等 close：进程没确认退出（写锁可能还在）就不放新进程进来。
+      if (worker.child && worker.child.exitCode === null && worker.child.signalCode === null) throw new SessionBusyError(NATIVE_IN_USE);
+    }
+    // 普通移除在后台停进程且记录已删，扫不到；放在最后并等到清空，扫描期间新发生的移除也一并等到。
+    while (this.backgroundStops.size) await Promise.all([...this.backgroundStops]);
+  }
+
+  /** 启动、续接、重启、检查或释放中的会话：worker 可能暂时不在表里，但随时会有进程写原生会话。 */
+  private nativeBusy(record: SessionRecord): boolean {
+    return record.status === "starting" || this.restartingSessions.has(record.id) || this.checkingSessions.has(record.id)
+      || this.nativeRefreshes.has(record.id) || this.releases.has(record.id);
+  }
+
+  /** 另一条会话占着同一原生会话：有 worker、处在启停中，或正被新建续接接管。 */
+  private nativeHeldElsewhere(record: SessionRecord, nativeSessionId: string): boolean {
+    return this.nativeClaims.has(nativeClaim(record.agent, nativeSessionId)) || [...this.sessions.values()].some(other => other.id !== record.id
+      && other.agent === record.agent && other.nativeSessionId === nativeSessionId && (this.workers.has(other.id) || this.nativeBusy(other)));
   }
 
   /** 自动释放跳过的原因；null 表示可以释放。手动释放把这些原因转成可读错误。 */
@@ -1155,6 +1205,7 @@ export class SessionManager {
       if (released) throw new Error("会话已释放且缺少原生会话 ID，无法续接");
       return;
     }
+    if (this.nativeHeldElsewhere(record, nativeSessionId)) throw new SessionBusyError(NATIVE_IN_USE);
     const oldWorker = this.workers.get(id) ?? null;
     this.assertNoMenuControl(id, oldWorker);
     this.restartingSessions.add(id);

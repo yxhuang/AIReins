@@ -302,13 +302,13 @@ async function pendingMarks(manager: InstanceType<typeof SessionManager>, id: st
   const old = new Date(Date.now() - 60 * 60_000).toISOString();
   const records = (manager as unknown as { sessions: Map<string, { lastActivityAt: string }> }).sessions;
   const releasable = await manager.create({ agent: "claude", cwd: fixture, resumeSessionId: claudeId, snapshot: "skip" });
-  const running = await manager.create({ agent: "claude", cwd: fixture, resumeSessionId: claudeId, snapshot: "skip" });
+  const running = await manager.create({ agent: "claude", cwd: fixture, resumeSessionId: `${claudeId.slice(0, -1)}2`, snapshot: "skip" });
   await manager.sendUserMessage(running.id, { text: "进行中" });
-  const gated = await manager.create({ agent: "claude", cwd: fixture, resumeSessionId: claudeId, snapshot: "skip" });
+  const gated = await manager.create({ agent: "claude", cwd: fixture, resumeSessionId: `${claudeId.slice(0, -1)}3`, snapshot: "skip" });
   instances.at(-1)!.requestApproval("gate-idle");
-  const remoteControlled = await manager.create({ agent: "claude", cwd: fixture, resumeSessionId: claudeId, snapshot: "skip" });
+  const remoteControlled = await manager.create({ agent: "claude", cwd: fixture, resumeSessionId: `${claudeId.slice(0, -1)}4`, snapshot: "skip" });
   await manager.setRemoteControl(remoteControlled.id, true);
-  const recent = await manager.create({ agent: "claude", cwd: fixture, resumeSessionId: claudeId, snapshot: "skip" });
+  const recent = await manager.create({ agent: "claude", cwd: fixture, resumeSessionId: `${claudeId.slice(0, -1)}5`, snapshot: "skip" });
   for (const id of [releasable.id, running.id, gated.id, remoteControlled.id]) {
     records.get(id)!.lastActivityAt = old;
   }
@@ -426,6 +426,93 @@ for (const operation of ["remote", "send", "failure"] as const) {
   const kimi = await manager.create({ agent: "kimi", cwd: fixture, resumeSessionId: "session_kimi_1", snapshot: "skip" });
   const kimiResult = await manager.release(kimi.id, "manual");
   assert.equal(kimiResult.resumeCommand, `cd '${fixture}' && kimi -S session_kimi_1`);
+  await manager.shutdown();
+}
+
+// ── 9. 新建续接先接管同一原生会话：上一轮失败（error）但进程仍在的旧会话被停掉，执行中的拒绝 ──
+{
+  const { manager, instances } = harness();
+  const first = await manager.create({ agent: "codex", cwd: fixture, resumeSessionId: "codex-native-2", snapshot: "skip" });
+  instances[0]!.options.callbacks.status("error");
+  const second = await manager.create({ agent: "codex", cwd: fixture, resumeSessionId: "codex-native-2", snapshot: "skip" });
+  assert.equal(instances[0]!.stopped, true, "旧 worker 须在新进程启动前停掉");
+  assert.equal(manager.get(first.id)!.status, "dead");
+  await manager.sendUserMessage(second.id, { text: "继续" });
+  await assert.rejects(manager.create({ agent: "codex", cwd: fixture, resumeSessionId: "codex-native-2", snapshot: "skip" }), /正在使用/);
+  assert.equal(instances[1]!.stopped, false);
+  assert.equal(instances.length, 2);
+  // 并发两次续接同一原生 id：只放进一个
+  const raced = await Promise.allSettled([1, 2].map(() => manager.create({ agent: "codex", cwd: fixture, resumeSessionId: "codex-native-3", snapshot: "skip" })));
+  assert.deepEqual(raced.map(result => result.status).sort(), ["fulfilled", "rejected"]);
+  // 已释放的旧会话被新会话接管后，不得再原地重建 worker
+  const released = await manager.create({ agent: "codex", cwd: fixture, resumeSessionId: "codex-native-4", snapshot: "skip" });
+  await manager.release(released.id, "manual");
+  await manager.create({ agent: "codex", cwd: fixture, resumeSessionId: "codex-native-4", snapshot: "skip" });
+  const before = instances.length;
+  await assert.rejects(manager.sendUserMessage(released.id, { text: "抢回" }), /正在使用/);
+  assert.equal(instances.length, before);
+  // 旧进程 stop 后仍未确认退出：不启动新进程
+  const stuck = await manager.create({ agent: "codex", cwd: fixture, resumeSessionId: "codex-native-5", snapshot: "skip" });
+  Object.assign(instances.at(-1)!, { child: { exitCode: null, signalCode: null } });
+  await assert.rejects(manager.create({ agent: "codex", cwd: fixture, resumeSessionId: "codex-native-5", snapshot: "skip" }), /正在使用/);
+  assert.equal(instances.at(-1)!.stopped, true);
+  const gatedStop = (driver: FakeDriver) => {
+    let open!: () => void;
+    const gate = new Promise<void>(resolve => { open = resolve; });
+    const stop = driver.stop.bind(driver);
+    driver.stop = async () => { await gate; await stop(); };
+    return () => open();
+  };
+  const tick = () => new Promise(resolve => setImmediate(resolve));
+  // 交接停旧进程期间，旧会话不能被彻底删除或改配置重建
+  const old = await manager.create({ agent: "codex", cwd: fixture, resumeSessionId: "codex-native-6", snapshot: "skip" });
+  instances.at(-1)!.options.callbacks.status("error");
+  const openOld = gatedStop(instances.at(-1)!);
+  const taking = manager.create({ agent: "codex", cwd: fixture, resumeSessionId: "codex-native-6", snapshot: "skip" });
+  await tick();
+  await assert.rejects(manager.remove(old.id, true), /续接/);
+  openOld();
+  await taking;
+  assert.equal(manager.get(old.id)!.status, "dead");
+  // 普通移除在后台停进程：紧接着续接同一 id 要等旧进程退出
+  const removed = await manager.create({ agent: "codex", cwd: fixture, resumeSessionId: "codex-native-7", snapshot: "skip" });
+  const openRemoved = gatedStop(instances.at(-1)!);
+  await manager.remove(removed.id);
+  const count = instances.length;
+  const resuming = manager.create({ agent: "codex", cwd: fixture, resumeSessionId: "codex-native-7", snapshot: "skip" });
+  await tick();
+  assert.equal(instances.length, count, "旧进程退出前不启动新进程");
+  openRemoved();
+  await resuming;
+  assert.equal(instances.length, count + 1);
+  // 等待后台停止期间又移除了别的会话：一并等到清空
+  const earlier = await manager.create({ agent: "codex", cwd: fixture, resumeSessionId: "codex-native-8", snapshot: "skip" });
+  const openFirst = gatedStop(instances.at(-1)!);
+  const later = await manager.create({ agent: "codex", cwd: fixture, resumeSessionId: "codex-native-9", snapshot: "skip" });
+  const openLater = gatedStop(instances.at(-1)!);
+  await manager.remove(earlier.id);
+  const drained = instances.length;
+  const draining = manager.create({ agent: "codex", cwd: fixture, resumeSessionId: "codex-native-10", snapshot: "skip" });
+  await tick();
+  await manager.remove(later.id);
+  openFirst();
+  await tick();
+  assert.equal(instances.length, drained, "后加入的后台停止也要等");
+  openLater();
+  await draining;
+  assert.equal(instances.length, drained + 1);
+  // 接管完成、仍在等后台停止时，被续接的原生会话不能被彻底删除
+  const target = await manager.create({ agent: "codex", cwd: fixture, resumeSessionId: "codex-native-12", snapshot: "skip" });
+  instances.at(-1)!.options.callbacks.status("error");
+  const unrelated = await manager.create({ agent: "codex", cwd: fixture, resumeSessionId: "codex-native-11", snapshot: "skip" });
+  const openUnrelated = gatedStop(instances.at(-1)!);
+  await manager.remove(unrelated.id);
+  const resumingTarget = manager.create({ agent: "codex", cwd: fixture, resumeSessionId: "codex-native-12", snapshot: "skip" });
+  await tick();
+  assert.equal(manager.get(target.id)!.status, "dead");
+  await assert.rejects(manager.remove(target.id, true), /引用同一原生历史/);
+  openUnrelated();
+  await resumingTarget;
   await manager.shutdown();
 }
 

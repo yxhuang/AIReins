@@ -1,5 +1,9 @@
 // Interface copy. Keep keys aligned with the other locale.
 const dictionary: Record<string, string> = {
+  "ui.FilePanel.open_in_file_manager": "Open in file manager",
+  "ui.FilePanel.open_with_default": "Open with default app",
+  "ui.FilePanel.opening_in_system": "Opening…",
+  "ui.FilePanel.opened_in_system": "Sent to the system to open",
   "ui.Sidebar.older_projects": "Older projects · {count}",
   "ui.Sidebar.show_more_sessions": "Show more · {count}",
   "ui.NewSessionForm.no_commands": "No commands available; load the command list in a session with this agent first",

@@ -667,7 +667,7 @@ export function createRenderItemsBuilder(agent: AgentKind) {
       if (cached && cached.items === items && cached.version === this.prefixVersion && cached.focus === focus && cached.cwd === cwd) {
         for (let i = Math.max(0, cached.length - 1); i < items.length; i++) {
           const item = items[i]!;
-          if (focus && !focusVisible(item)) continue;
+          if (item.kind === "raw" || focus && !focusVisible(item)) continue;
           if (cached.shown.at(-1)?.key === item.key) cached.shown[cached.shown.length - 1] = item;
           else if (i >= cached.length) cached.shown.push(item);
         }
@@ -675,7 +675,8 @@ export function createRenderItemsBuilder(agent: AgentKind) {
         return cached.shown;
       }
       const grouped = groupReadOnlyTools(items, agent, cwd);
-      const shown = focus ? grouped.filter(focusVisible) : grouped;
+      // 原始通知只留在事件记录中，正常对话和专注视图均不显示调试卡片。
+      const shown = grouped.filter(item => item.kind !== "raw" && (!focus || focusVisible(item)));
       displayCache = { items, version: this.prefixVersion, focus, cwd, length: items.length, shown };
       return shown;
     },

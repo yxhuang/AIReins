@@ -14,6 +14,7 @@ import { DispatchQueryError, getDispatch, getDispatchLog, getDispatchMessages, l
 import { log } from "./logger.js";
 import { DirListError, listDirectories } from "./dir-list.js";
 import { pickWindowsDirectory, pickWindowsFile, WindowsPickerError, windowsPickerEnabled } from "./windows-directory-picker.js";
+import { openSystemWorkPath, systemOpenEnabled } from "./system-open.js";
 import { normalizeFileQuery, searchFiles } from "./file-search.js";
 import { getWorkFile, getWorkContent, openWorkSendSource, saveWorkFile, WorkFileError, FILE_LIMIT } from "./work-files.js";
 import { HistoryIndex, HistoryQueryError } from "./history.js";
@@ -429,7 +430,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
         terminalShell: basename(resolveShell(undefined).file),
         capabilities: getPlatformCapabilities({ local: policy.kind === "local", remoteTerminal: REMOTE_CONFIG?.terminal,
           chrome: appWindowEnabled(policy, APP_CHROME), picker: windowsPickerEnabled(policy.kind === "local"),
-          powerOff: powerOffEnabled(prefs.shutdownCommand) }),
+          shellOpen: systemOpenEnabled(policy.kind === "local"), powerOff: powerOffEnabled(prefs.shutdownCommand) }),
       }, requestId);
     } else if (method === "POST" && url.pathname === "/api/open-app-window") {
       if (policy.kind !== "local") throw new ApiError(403, 40300, "仅本机入口可打开 AIReins 窗口");
@@ -540,6 +541,21 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       } catch (error) {
         if (error instanceof WindowsPickerError) throw new ApiError(error.status, error.status * 100, error.message);
         if (error instanceof DirListError) throw new ApiError(400, 40035, error.message);
+        throw error;
+      }
+    } else if (method === "POST" && url.pathname === "/api/fs/open-system") {
+      if (!systemOpenEnabled(policy.kind === "local")) throw new ApiError(403, 40300, "系统程序仅在支持的本机入口可用");
+      try {
+        const body = await readJson(request, 32 * 1024);
+        if (!body || typeof body !== "object" || Array.isArray(body)) throw new WorkFileError(400, "请求必须包含 path 和 root");
+        const input = body as { path: string; root: string; sessionId?: string };
+        if (input.sessionId !== undefined && (typeof input.sessionId !== "string" || !input.sessionId)) throw new WorkFileError(400, "sessionId 必须是非空字符串");
+        const session = input.sessionId === undefined ? undefined : manager.get(input.sessionId);
+        if (input.sessionId !== undefined && !session) throw new WorkFileError(404, "会话不存在");
+        await openSystemWorkPath(input, { sessionCwd: session?.cwd });
+        await respond(response, 200, 0, "success", { opened: true }, requestId);
+      } catch (error) {
+        if (error instanceof WorkFileError) throw new ApiError(error.status, error.status * 100 + 90, error.message);
         throw error;
       }
     } else if (method === "GET" && url.pathname === "/api/fs/dirs") {
@@ -754,7 +770,9 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
           });
         }
       }
-      const session = await manager.create({ ...input, historyCursor });
+      const session = await manager.create({ ...input, historyCursor }).catch((error: unknown) => {
+        throw error instanceof SessionBusyError ? new ApiError(400, 40063, error.message) : error;
+      });
       await respond(response, 201, 0, "success", { session }, requestId);
     } else {
       const snapshotMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/snapshot$/);

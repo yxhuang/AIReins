@@ -1,6 +1,7 @@
 /* 设计令牌：琥珀金 --gate 系只留给闸门、提问和待处理贴条。 */
 /* 配色不变量（改色前务必读）：
-   底色前提 = 三层暖纸：浅色外框 --chrome #F0EEE6 / 画布 --bg #F5F4ED / 浮起物 --surface #FFFFFF。
+   底色前提 = 三层暖纸：浅色外框 --chrome #F0EEE6 / 画布 --bg #F5F4ED / 输入框与浮起物 --surface #FAF8F2。
+   浅色滚动条沿用暖灰外框色，避免输入框、地址栏、弹层与滚动轨道出现大块纯白。
    --chrome 仅侧栏、会话标题栏、手机标题栏、侧栏展开面板与页面工具栏；
    --chrome-sunk 仅外框悬停/选中态（浅 #E7E5DB），弹层与输入框内部仍用 --surface-sunk。
    深色令牌值保持暖深灰画布 #1F1E1D、外框 #262624 / 浮起物 #2A2926（C1，2026-10-03 用户批准）、下沉态 #191817。
@@ -29,13 +30,14 @@
   --bg:               light-dark(#F5F4ED, #1F1E1D);
   --chrome:           light-dark(#F0EEE6, #262624);
   --chrome-sunk:      light-dark(#E7E5DB, #191817);
-  --surface:          light-dark(#FFFFFF, #2A2926);
+  --surface:          light-dark(#FAF8F2, #2A2926);
   --surface-sunk:     light-dark(#F0EEE6, #191817);
   --border:           light-dark(#E3E0D6, #3A3936);
   --border-strong:    light-dark(#C9C5B8, #55534E);
   --text:             light-dark(#1F1E1D, #F2F0EA);
   --text-muted:       light-dark(#5C5A54, #A8A59D);
   --text-faint:       light-dark(#69665E, #908D85);
+  --scrollbar-thumb:  color-mix(in srgb, var(--text-muted) 70%, var(--chrome));
   --agent-claude:     light-dark(#D97757, #E08B6F);
   --agent-claude-ink: light-dark(#A8471F, #EDA88E);
   --agent-codex:      light-dark(#10A37F, #2BC49C);
@@ -135,8 +137,16 @@
   --accent-shadow: inset 0 1px 0 color-mix(in srgb, white 22%, transparent), 0 1px 2px light-dark(color-mix(in srgb, var(--text) 16%, transparent), rgb(0 0 0 / 0.5));
 }
 
-:root[data-theme="light"] { color-scheme: light; }
+:root[data-theme="light"] {
+  color-scheme: light;
+  scrollbar-color: var(--scrollbar-thumb) var(--chrome);
+}
 :root[data-theme="dark"] { color-scheme: dark; }
+
+/* scrollbar-color 会继承到各滚动区；跟随系统时也使用同一套浅色滚动条。 */
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) { scrollbar-color: var(--scrollbar-thumb) var(--chrome); }
+}
 
 * { box-sizing: border-box; }
 button, input, select, textarea { font-size: 15px; } /* 桌面默认；触屏在 pointer: coarse 中保持至少 16px */

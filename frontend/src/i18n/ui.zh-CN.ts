@@ -1,5 +1,9 @@
 // Interface copy. Keep keys aligned with the other locale.
 const dictionary: Record<string, string> = {
+  "ui.FilePanel.open_in_file_manager": "在文件管理器中打开",
+  "ui.FilePanel.open_with_default": "用默认程序打开",
+  "ui.FilePanel.opening_in_system": "正在打开…",
+  "ui.FilePanel.opened_in_system": "已交给系统打开",
   "ui.Sidebar.older_projects": "较早的项目 · {count}",
   "ui.Sidebar.show_more_sessions": "显示更多 · {count}",
   "ui.NewSessionForm.no_commands": "暂无可用命令；请先在同一 agent 的会话中加载命令表",

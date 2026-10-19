@@ -1,6 +1,6 @@
 import { t } from "../i18n";
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
-import { sendTaildrop, workFileContentUrl } from "../api";
+import { openWorkPathInSystem, sendTaildrop, workFileContentUrl } from "../api";
 import { mentionQueryAt } from "../mentions";
 import { store, type FileTab } from "../store";
 import type { SessionRecord, WorkFileTarget } from "../types";
@@ -10,6 +10,7 @@ import { FILE_WIDTH_OPTIONS, PanelBackButton, PanelRightIcon, SidePanelResize, u
 import { FilePreview } from "./FilePreview";
 import { Segmented } from "./Segmented";
 import { TaildropMenu } from "./TaildropMenu";
+import type { SidebarMenuItem } from "./SidebarActionMenu";
 
 const PREVIEW_OPTIONS = [{ value: "preview", label: t("ui.FilePanel.preview"), title: t("ui.FilePanel.view_the_rendered_document") }, { value: "source", label: t("ui.FilePanel.source"), title: t("ui.FilePanel.view_or_edit_the_document_source") }] as const;
 const TABLE_OPTIONS = [{ value: "preview", label: t("ui.FilePanel.table"), title: t("ui.FilePanel.view_data_as_a_table") }, { value: "source", label: t("ui.FilePanel.source"), title: t("ui.FilePanel.view_or_edit_raw_data") }] as const;
@@ -103,6 +104,7 @@ export function FilePanel({ onClose }: { onClose: () => void }) {
   const [notice, setNotice] = useState<{ path: string; copied: boolean | null; reason: string | null } | null>(null);
   const taildrop = useStore(value => value.meta?.capabilities.taildrop === true);
   const folderTaildrop = useStore(value => value.meta?.capabilities.folderTaildrop === true);
+  const systemOpen = useStore(value => value.meta?.capabilities.systemOpen === true);
   const copyId = useRef(0);
   useEffect(() => () => { copyId.current += 1; }, []);
   const source = preview !== null && sourcePath === preview.target.path;
@@ -146,6 +148,23 @@ export function FilePanel({ onClose }: { onClose: () => void }) {
       if (id === copyId.current) setNotice({ path, copied, reason: null });
     })();
   };
+
+  const menuItems: SidebarMenuItem[] = [];
+  if (sendMenu?.row) {
+    const menu = sendMenu;
+    menuItems.push({ id: "new-tab", icon: "plus", label: t("ui.FilePanel.open_in_a_new_tab"), onSelect: () => {
+      setSendMenu(null); setNotice(null);
+      store.openFileTab({ path: menu.target.path, root: menu.target.root, folder: menu.folder });
+    } });
+    if (systemOpen) menuItems.push({ id: "open-system", icon: menu.folder ? "folder" : "open", label: t(menu.folder ? "ui.FilePanel.open_in_file_manager" : "ui.FilePanel.open_with_default"), onSelect: () => {
+      setSendMenu(null);
+      const id = ++copyId.current;
+      setNotice({ path: menu.target.path, copied: null, reason: t("ui.FilePanel.opening_in_system") });
+      openWorkPathInSystem(menu.target).then(
+        () => { if (id === copyId.current) setNotice({ path: menu.target.path, copied: null, reason: t("ui.FilePanel.opened_in_system") }); },
+        (error: Error) => { if (id === copyId.current) setNotice({ path: menu.target.path, copied: null, reason: error.message }); });
+    } });
+  }
 
   const tabRow = <div className="term-tabs file-tabs">
     <div className="term-tab-list" role="tablist" aria-label={t("ui.FilePanel.file_tabs")} onKeyDown={event => {
@@ -224,10 +243,7 @@ export function FilePanel({ onClose }: { onClose: () => void }) {
         onSelectFile={path => { setNotice(null); void store.openFilePreview({ path, root: sessionDirectory() ?? session?.cwd ?? "/", sessionId: session?.id }); }}
         onEntryMenu={(entry, x, y) => openSendMenu({ path: entry.path, root: entry.root, sessionId: session?.id }, entry.name, entry.folder, x, y, true)} />}
       {sendMenu && <TaildropMenu enabled={sendMenu.folder ? folderTaildrop : taildrop} position={sendMenu} folder={sendMenu.folder} onClose={() => setSendMenu(null)}
-        leadingItems={sendMenu.row ? [{ id: "new-tab", icon: "plus", label: t("ui.FilePanel.open_in_a_new_tab"), onSelect: () => {
-          setSendMenu(null); setNotice(null);
-          store.openFileTab({ path: sendMenu.target.path, root: sendMenu.target.root, folder: sendMenu.folder });
-        } }] : undefined}
+        leadingItems={menuItems}
         onSend={(ip, device) => sendFile(sendMenu.target, sendMenu.name, sendMenu.folder, ip, device)} />}
     </div>
   </>;

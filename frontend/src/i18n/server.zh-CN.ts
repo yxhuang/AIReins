@@ -481,6 +481,12 @@ const messages: Record<string, string> = {
   "server.message497": "原文件超过 32 MiB，不能编辑",
   "server.message498": "磁盘文件已修改，请重新加载后再保存",
   "server.message499": "保存目录已变化",
-  "server.message500": "保存前磁盘文件或路径已修改，请重新加载"
+  "server.message500": "保存前磁盘文件或路径已修改，请重新加载",
+  "server.message501": "系统程序仅在支持的本机入口可用",
+  "server.message502": "另一条 {product} 会话正在使用这条原生会话，请等它空闲或先停止后再续接。",
+  "server.message503": "此路径无法用 Windows 程序打开",
+  "server.message504": "无法确定 WSL 发行版，不能打开 Windows 路径",
+  "server.message505": "无法用系统程序打开，请检查默认程序和桌面登录状态",
+  "server.message506": "只支持普通文件或文件夹"
 };
 export default messages;

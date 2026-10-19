@@ -15,7 +15,7 @@ for (const theme of ["light", "dark"]) {
 
 // 底栏已有局部尺寸变量；颜色仍必须由 :root 的主题令牌提供。
 const localSizes = new Set([...css.matchAll(/(--[\w-]+)\s*:\s*(?:\d+(?:\.\d+)?(?:px|em|rem)|0)\s*;/g)].map(([, name]) => name));
-assert.equal(tokens.get("--surface"), "light-dark(#FFFFFF, #2A2926)", "C1 深色浮层提亮");
+assert.equal(tokens.get("--surface"), "light-dark(#FAF8F2, #2A2926)", "浅色浮层暖白，深色浮层保持 C1");
 assert.equal(tokens.get("--chrome"), "light-dark(#F0EEE6, #262624)", "C1 外框保持原值");
 
 let checked = 0;

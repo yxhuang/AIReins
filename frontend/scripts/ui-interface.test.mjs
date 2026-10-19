@@ -93,7 +93,7 @@ test("M3：标题按中轴居中，有派单和徽标时对称让位", () => {
   assert.match(css, /\.session-head:has\(\.mobile-tail\)/);
 });
 test("C1：浮层与外框在深色主题分层", () => {
-  assert.match(css, /--surface:\s*light-dark\(#FFFFFF, #2A2926\)/);
+  assert.match(css, /--surface:\s*light-dark\(#FAF8F2, #2A2926\)/);
   assert.match(css, /--chrome:\s*light-dark\(#F0EEE6, #262624\)/);
 });
 test("C2：运行中输入有字时可单独中断，空白保持原入口", async () => {

@@ -7,7 +7,7 @@ import { strict as assert } from "node:assert";
 await import("./codex-commands.test.mjs");
 
 // 用 tsx 把 TS 模块加载进来
-const { buildRenderItems, buildHistoryRenderItems, focusVisible, groupReadOnlyTools, gateFromEvent, promptCacheExpiry } = await import("../src/render-items.ts");
+const { buildRenderItems, buildHistoryRenderItems, createRenderItemsBuilder, focusVisible, groupReadOnlyTools, gateFromEvent, promptCacheExpiry } = await import("../src/render-items.ts");
 const {
   filterCommands,
   isSubsequence,
@@ -97,6 +97,38 @@ t("渲染层过滤已知无信息量 raw，不拆开文本；未知 method 仍�
     assert.equal(JSON.stringify(events), original, "原始事件不变");
     const unknown = buildRenderItems([ev(1, "raw_event", { source: agent, method: "future/method", raw: { type: "future_event" } })], agent);
     assert.equal(unknown[0].kind, "raw");
+  }
+});
+
+t("正常会话隐藏收尾调试项，保留原始记录、错误和审批，缓存与视图切换不漏出调试项", () => {
+  for (const agent of ["codex", "claude", "kimi"]) {
+    const builder = createRenderItemsBuilder(agent);
+    const raw = seq => ev(seq, "raw_event", { source: agent, method: "future/method", raw: { type: "future_event" } });
+    const events = [ev(1, "user_message", { text: "问题" }), ev(2, "agent_text_delta", { text: "最终回答" }),
+      ev(3, "turn_completed"), raw(4), raw(5)];
+    const original = JSON.stringify(events);
+    const normalized = builder.update(events);
+    assert.equal(normalized.filter(item => item.kind === "raw").length, 2, "排错记录仍保留");
+    assert.equal(JSON.stringify(events), original, "原始事件不变");
+    for (const focus of [false, false, true, false]) {
+      assert.deepEqual(builder.display(focus, "/repo").map(item => item.kind), ["user", "text"]);
+    }
+    events.push(raw(6));
+    builder.update(events);
+    assert.deepEqual(builder.display(false, "/repo").map(item => item.kind), ["user", "text"]);
+    // 追加文本命中显示缓存；隐藏的原始通知不能在缓存复用时重新出现。
+    events.push(ev(7, "agent_text_delta", { text: "补充" }));
+    builder.update(events);
+    assert.deepEqual(builder.display(false, "/repo").map(item => item.kind), ["user", "text", "text"]);
+    events.push(ev(8, "session_error", { message: "连接失败" }),
+      ev(9, "permission_request", { requestId: "approval", toolName: "commandExecution" }));
+    builder.update(events);
+    for (const focus of [false, true]) {
+      const shown = builder.display(focus, "/repo");
+      assert.equal(shown.some(item => item.kind === "raw"), false);
+      assert.equal(shown.find(item => item.kind === "system")?.tone, "error");
+      assert.ok(shown.some(item => item.kind === "gate"));
+    }
   }
 });
 

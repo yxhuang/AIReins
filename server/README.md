@@ -19,7 +19,7 @@ npm run server
 - 非 Git 工作目录的委派前快照：`~/.workbench/snapshots/<basename>-<pathHash>/`
 - 各家 CLI 自有 transcript：由原生 CLI 管理；普通「移除」保留。用户明确确认「彻底删除」时，Codex 经正式 `codex delete --force <UUID>` 删除单个原生会话；Claude/Kimi 当前未开放此操作。
 
-服务启动会把已释放或符合安全恢复条件的异常退出记录载入为 `idle + released`，下一次发送原地续接；包括原状态已被旧代码写成 `dead`、PID 已清空，但能通过系统启动时间证明旧 worker 全部消失的记录。不会接管旧进程。其余记录保持 `dead`，transcript 损坏优先为 `error`。新建续接也可传原生 `resumeSessionId`；Claude 使用 `--resume`，Codex 使用 `thread/resume`，Kimi 使用 `session/resume`。
+服务启动会把已释放或符合安全恢复条件的异常退出记录载入为 `idle + released`，下一次发送原地续接；包括原状态已被旧代码写成 `dead`、PID 已清空，但能通过系统启动时间证明旧 worker 全部消失的记录。不会接管旧进程。其余记录保持 `dead`，transcript 损坏优先为 `error`。新建续接也可传原生 `resumeSessionId`；Claude 使用 `--resume`，Codex 使用 `thread/resume`，Kimi 使用 `session/resume`。续接前若另一条 AIReins 会话仍有 worker 占着同一原生会话：它空闲或出错（如上一轮因模型满载失败、进程仍在）时先停掉它的 worker，旧会话随进程退出标 `dead`；它正在执行、有待处理闸门或后台任务、正在续接/重启/检查时返回 400 / 40063。三家都只留一个进程写同一原生会话（Codex 有单写者锁，Claude `--resume` 追加同一 jsonl）。
 
 ### Claude Remote Control 契约（M23）
 
@@ -176,6 +176,7 @@ macOS 安装时若已安装 Homebrew、stdin/stdout 都是 TTY，缺失或版本
 - `GET /api/fs/dirs?path=<绝对路径>&files=1`：只读列出一级子目录；省略 `path` 时使用 `$HOME`，可由 `prefs.json` 的 `directoryBrowserHome` 覆盖；带 `files=1` 时同层普通文件一并列出，并为文件/目录补充 `size` 和 `modifiedAt`（Unix 毫秒）。普通文件大小为字节，文件夹大小为 `null`，不递归累加；无法 stat 时字段为 `null`，保留可列出的名称。只对已收集的条目读取元数据，并发最多8个；文件夹/文件分别最多1000个，超限标记 `truncated`。不带 `files=1` 的目录选择模式保持原返回与读取范围。
 - `POST /api/fs/pick-directory`：仅本机监听允许，WSL＋Windows PowerShell 7 可用时 `GET /api/meta` 返回 `capabilities.windowsDirectoryPicker:true`；远程始终为false且POST返回403。JSON `{path?:string}` 指定起点，Windows盘符与 `/mnt/<盘符>` 支持，Linux cwd/空值从 Windows 用户目录打开。通过固定 PowerShell 程序调用现代 WinForms `FolderBrowserDialog`，路径以环境变量传入，窗口前声明 PerMonitorV2 DPI 感知（否则高缩放屏幕上发虚），并临时挂接前台窗口的输入队列后激活（否则只闪任务栏）；单实例，进程内120秒自动退出（后端130秒超时，前端135秒）。取消返回 `{path:null}`；选定盘符目录后映射并检查可浏览性，返回 `{path:"/mnt/c/..."}`；已有窗口409，输入/目录不合法400，调用失败/超时503。保留所有原有 Host/Origin 检查，不启动常驻 Windows 服务。
 - `POST /api/fs/pick-file`：右侧文件面板的原生 Windows 浏览入口；与目录选择共享上述本机能力、起点、单窗口、取消及超时规则。调用 WinForms `OpenFileDialog`，`All files (*.*)|*.*` 显示所有扩展名，仅选一个既有文件；返回映射到 `/mnt/<盘符>/...` 并经 `stat` 确认为普通文件的路径。预览仍由工作文件接口独立检查授权根与 realpath，不因原生选择而放宽读取权限。
+- `POST /api/fs/open-system`：仅支持的本机入口可用（`GET /api/meta` 的 `capabilities.systemOpen`）；JSON `{path,root,sessionId?}`，成功返回 `{opened:true}` 表示已交给系统，不表示应用已加载完成。沿用工作文件接口的授权根、逻辑路径/realpath、会话检查，只接受普通文件或目录，不读取内容，不限制网页支持格式或 32 MiB 预览大小。WSL 用可用的 PowerShell 执行固定 ShellExecute 程序，路径经环境变量传递：Windows 盘映射为盘符，Linux 路径映射为当前发行版的 `\\wsl.localhost` 路径；无法无歧义表示的路径拒绝。macOS 调用 `/usr/bin/open`；原生 Linux 不提供（`xdg-open` 可能等应用退出）；无运行时新依赖，启动器 15 秒超时，不等待文档关闭。远程入口始终隐藏并拒绝调用，原有 Host/Origin 和 Tailscale 检查不变。不可用返回 403，路径/授权/会话错误沿用工作文件状态码，启动失败 503；默认程序由操作系统决定，不修改文件关联或 CLI 全局配置。
 - `POST /api/uploads?sessionId=<id>&name=<文件名>`：上传附件，请求体为原始字节（非 multipart）；保存到 `~/.workbench/uploads/<sessionId>/`，返回 `{path,name,size,mimeType}` 同秒同名文件通过 `wx` 原子预留路径，再用该文件描述符写流；并发上传各自保留，失败只删除自己的半截文件。
 - `GET /api/uploads/file?path=<绝对路径>`：读取上传目录内的文件字节（缩略图用）；只允许 `~/.workbench/uploads/` 之下
 - `GET /api/sessions`

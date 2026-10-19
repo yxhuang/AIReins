@@ -105,6 +105,16 @@ async function resolveFile(input: WorkFileInput, options: WorkFileOptions) {
     return { path, root, real, realRoot };
   } catch (error) { fsError(error); }
 }
+/** 供系统默认程序打开；不读取内容，不受网页预览格式和大小上限影响。 */
+export async function resolveWorkOpenTarget(input: WorkFileInput, options: WorkFileOptions = {}): Promise<string> {
+  const target = await resolveFile(input, options);
+  try {
+    const info = await stat(target.real);
+    if (!info.isFile() && !info.isDirectory()) throw new WorkFileError(400, "只支持普通文件或文件夹");
+    return target.real;
+  } catch (error) { fsError(error); }
+}
+
 async function openFile(input: WorkFileInput, options: WorkFileOptions) {
   const target = await resolveFile(input, options);
   let handle: FileHandle | undefined;

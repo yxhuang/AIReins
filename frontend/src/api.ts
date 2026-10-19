@@ -69,6 +69,10 @@ export function pickWindowsFile(path: string): Promise<{ path: string | null }> 
     body: JSON.stringify({ path }), signal: AbortSignal.timeout(135_000) });
 }
 
+export function openWorkPathInSystem(target: import("./types").WorkFileTarget): Promise<{ opened: true }> {
+  return call("/api/fs/open-system", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(target) });
+}
+
 export function fetchDispatches(signal?: AbortSignal): Promise<{ dispatches: DispatchRun[] }> {
   return call("/api/dispatches?limit=50", { signal });
 }

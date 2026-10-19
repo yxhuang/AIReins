@@ -35,14 +35,15 @@ export function windowsPickerAvailable(local: boolean, host = platform, exists: 
   return local && host === "wsl" && exists(powershellCandidates[0]!);
 }
 export function getPlatformCapabilities({ host = platform, local, remoteTerminal = false, chrome = false,
-  picker = windowsPickerAvailable(local, host), powershell = Boolean(findPowerShell(host)), powerOff = false,
+  picker = windowsPickerAvailable(local, host), powershell = Boolean(findPowerShell(host)), shellOpen = false, powerOff = false,
   tailscale = tailscaleExecutables(host).some(commandAvailable), zip = commandAvailable("zip") }:
   { host?: WorkbenchPlatform; local: boolean; remoteTerminal?: boolean; chrome?: boolean; picker?: boolean;
-    powershell?: boolean; powerOff?: boolean; tailscale?: boolean; zip?: boolean }) {
+    powershell?: boolean; shellOpen?: boolean; powerOff?: boolean; tailscale?: boolean; zip?: boolean }) {
   const supported = host !== "unsupported";
   return {
     terminal: supported && (local || remoteTerminal),
     windowsDirectoryPicker: host === "wsl" && local && picker,
+    systemOpen: supported && local && shellOpen,
     appWindow: host === "wsl" && local && chrome,
     powerOff: supported && powerOff,
     windowsPaths: host === "wsl",

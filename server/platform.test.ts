@@ -9,7 +9,7 @@ for (const [input, expected] of [
   [{ os: "darwin", kernel: "23.0", interop: true }, "darwin"],
   [{ os: "win32", kernel: "microsoft", interop: true }, "unsupported"],
 ] as const) assert.equal(detectPlatform(input), expected);
-const installed = { local: true, chrome: true, picker: true, powershell: true, powerOff: true, tailscale: true, zip: true };
+const installed = { local: true, chrome: true, picker: true, powershell: true, shellOpen: true, powerOff: true, tailscale: true, zip: true };
 const wsl = getPlatformCapabilities({ ...installed, host: "wsl" });
 assert.ok(Object.values(wsl).every(Boolean), "具备原依赖和关机prefs的WSL入口全部保留");
 for (const host of ["linux", "darwin"] as const) {
@@ -36,7 +36,7 @@ for (const host of ["linux", "darwin"] as const) {
 }
 for (const host of ["wsl", "linux", "darwin"] as const) {
   const caps = getPlatformCapabilities({ ...installed, local: false, host });
-  assert.equal(caps.terminal, false); assert.equal(caps.appWindow, false); assert.equal(caps.windowsDirectoryPicker, false);
+  assert.equal(caps.terminal, false); assert.equal(caps.appWindow, false); assert.equal(caps.windowsDirectoryPicker, false); assert.equal(caps.systemOpen, false);
   assert.equal(getPlatformCapabilities({ ...installed, local: false, remoteTerminal: true, host }).terminal, true);
 }
 assert.deepEqual(tailscaleExecutables("wsl"), ["tailscale", "/mnt/c/Program Files/Tailscale/tailscale.exe"]);

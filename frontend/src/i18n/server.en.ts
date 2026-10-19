@@ -481,6 +481,12 @@ const messages: Record<string, string> = {
   "server.message497": "Original file exceeds 32 MiB and cannot be edited",
   "server.message498": "File on disk was modified. Reload before saving",
   "server.message499": "Save directory changed",
-  "server.message500": "File or path changed before saving. Reload the file"
+  "server.message500": "File or path changed before saving. Reload the file",
+  "server.message501": "System apps are only available from a supported local entry",
+  "server.message502": "Another {product} session is using this native session. Wait until it is idle, or stop it, before resuming.",
+  "server.message503": "This path cannot be opened with a Windows app",
+  "server.message504": "Cannot determine the WSL distribution, so the Windows path cannot be opened",
+  "server.message505": "Could not open with the system app. Check the default app and that the desktop session is signed in",
+  "server.message506": "Only regular files or folders are supported"
 };
 export default messages;

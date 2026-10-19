@@ -1,14 +1,16 @@
 import { t } from "../i18n";
 import { useMemo, useState } from "react";
-import Markdown from "react-markdown";
+import Markdown, { defaultUrlTransform } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { workFileContentUrl } from "../api";
-import { isolatedHtml, parseDelimited } from "../file-preview";
+import { isolatedHtml, parseDelimited, resolveLocalFileLink } from "../file-preview";
+import { FileLinkContext, MessageLink } from "./MarkdownMessage";
 import { store } from "../store";
 import type { FilePreviewState } from "../types";
 
 export function FilePreview({ preview, source = false }: { preview: FilePreviewState; source?: boolean }) {
   const { file, target, draft, loading, saving, error } = preview;
+  const cwd = target.path.slice(0, target.path.lastIndexOf("/")) || "/";
   const [failedLoad, setFailedLoad] = useState<number | null>(null);
   const table = useMemo(() => file?.kind === "csv" || file?.kind === "tsv"
     ? parseDelimited(draft, file.kind === "tsv" ? "\t" : ",") : null, [file?.kind, draft]);
@@ -32,8 +34,9 @@ export function FilePreview({ preview, source = false }: { preview: FilePreviewS
             onChange={event => store.updateFileDraft(event.target.value)} onKeyDown={event => {
               if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") { event.preventDefault(); void store.saveFilePreview(); }
             }} /> :
-          file.kind === "markdown" ? <div className="markdown-message file-markdown"><Markdown skipHtml remarkPlugins={[remarkGfm]}
-            components={{ a: ({ href, children }) => <span title={href}>{children}</span>, img: ({ alt }) => <span>{t("ui.FilePreview.image_sentence", { p0: (alt ?? "") })}</span> }}>{draft}</Markdown></div> :
+          file.kind === "markdown" ? <div className="markdown-message file-markdown"><FileLinkContext value={{ cwd, root: target.root, sessionId: target.sessionId }}><Markdown skipHtml remarkPlugins={[remarkGfm]}
+            urlTransform={(url, key) => key === "href" && resolveLocalFileLink(url, cwd, store.meta?.capabilities.windowsPaths === true) ? url : defaultUrlTransform(url)}
+            components={{ a: MessageLink, img: ({ alt }) => <span>{t("ui.FilePreview.image_sentence", { p0: (alt ?? "") })}</span> }}>{draft}</Markdown></FileLinkContext></div> :
           table ? <div className="file-table-scroll">
             {table.truncated && <p className="new-hint">{t("ui.FilePreview.table_display_has_been_truncated")}</p>}
             {table.error && <p className="new-error" role="alert">{table.error}</p>}

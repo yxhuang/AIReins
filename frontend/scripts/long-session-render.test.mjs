@@ -18,7 +18,7 @@ for (const agent of ['codex', 'claude', 'kimi']) {
     const full = buildRenderItems(events, agent);
     assert.deepEqual(builder.update(events, dropped), full, `${agent} step ${i}`);
     const focus = i % 43 < 21;
-    assert.deepEqual(builder.display(focus, '/tmp'), groupReadOnlyTools(full, agent, '/tmp').filter(item => !focus || focusVisible(item)), `${agent} display ${i}`);
+    assert.deepEqual(builder.display(focus, '/tmp'), groupReadOnlyTools(full, agent, '/tmp').filter(item => item.kind !== 'raw' && (!focus || focusVisible(item))), `${agent} display ${i}`);
   }
 }
 const events = [ev(1, 'agent_text_delta', { text: 'a' })];
