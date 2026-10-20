@@ -142,7 +142,7 @@ export function pickRecentTerminal(terminals: TerminalInfo[], kind: ShellKind, a
   return live[0] ?? null;
 }
 
-/** 关闭退出标签时优先右侧邻居，再向两侧找最近的存活标签。 */
+/** 关闭标签时优先右侧邻居，再向两侧找最近的存活标签。 */
 export function pickAdjacentTerminal(terminals: TerminalInfo[], id: string): TerminalInfo | null {
   const index = terminals.findIndex((terminal) => terminal.id === id);
   if (index < 0) return null;

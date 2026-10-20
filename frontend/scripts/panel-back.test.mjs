@@ -134,6 +134,31 @@ for(const mobile of [false,true]){
 }
 console.log('PASS: AIReins new-page routes, directory snapshots, panel and session Back/Forward, old state');
 
+for (const start of ['list', 'session', 'direct']) for (const browserBack of [false, true]) {
+  const f=fixture({mobile:true}),s=f.store;
+  if(start==='list') s.navigate(null);
+  if(start==='direct') { window.location.hash='#/new';s.onHashChange(); }
+  else s.navigateNew('/project/new');
+  const before=f.history.length;
+  s.navigateCreatedSession('created');
+  assert.equal(window.location.hash,'#/session/created');
+  assert.equal(s.currentId,'created');assert.equal(s.newSessionOpen,false);
+  if(start==='list') assert.equal(f.history.length,before,'creation replaces the new-page entry');
+  if(browserBack) f.back(); else { s.backFromSession();f.settle(); }
+  assert.equal(window.location.hash,'#/','created-session Back returns to the list');
+  assert.equal(s.currentId,null);assert.equal(s.newSessionOpen,false);
+  f.history.forward();f.settle();
+  assert.equal(s.currentId,'created');assert.equal(s.newSessionOpen,false,'Forward never restores the submitted form');
+}
+{
+  const f=fixture({mobile:true}),s=f.store;s.navigate(null);s.navigateNew('/project');s.navigateCreatedSession('created');
+  const reloaded=new Store();reloaded.ensureLoaded=async()=>{};reloaded.onHashChange();
+  reloaded.backFromSession();
+  assert.equal(window.location.hash,'#/','after reload the saved source is still the list');
+  assert.equal(reloaded.newSessionOpen,false);
+}
+console.log('PASS: created-session replacement, button/system Back, Forward and reload fallback');
+
 {
   const f=fixture(),s=f.store;
   s.navigateNew('/older');s.setFilesOpen(true);f.back();

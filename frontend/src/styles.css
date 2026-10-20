@@ -1352,6 +1352,7 @@ body.resizing {
 .session-more-menu .btn.session-more-item:disabled { color: var(--text-faint); background: transparent; }
 .session-more-reason { margin: 2px 10px 6px; font-size: 13px; line-height: 1.5; color: var(--text-muted); overflow-wrap: anywhere; }
 .view-panel-actions { display: flex; align-items: center; flex: 0 0 auto; padding: 6px 8px; background: var(--chrome); border-bottom: 1px solid var(--border); }
+.view-panel-actions.mobile-topbar { display: flex; }
 .view-panel-actions .panel-actions { margin-left: auto; }
 .welcome-view { display: flex; flex: 1 1 auto; flex-direction: column; min-height: 0; overflow-y: auto; }
 /* 手机顶栏（参照 Claude App）：色带 · 圆形返回 · 标题/模型 · 闸门计数 · 圆形「⋯」。
@@ -2859,9 +2860,9 @@ body.resizing {
 
 /* 外框小按钮：只映射外框上的控件，不影响浮层或终端。 */
 .sidebar-reload, .sidebar-toggle, .sidebar-panel-head > .icon-btn,
-.session-head-actions .btn, .mobile-topbar .btn { background: transparent; }
+.session-head-actions .btn { background: transparent; }
 .sidebar-reload:hover, .sidebar-toggle:hover, .sidebar-panel-head > .icon-btn:hover,
-.session-head-actions .btn:hover, .mobile-topbar .btn:hover { background: var(--chrome-sunk); }
+.session-head-actions .btn:hover { background: var(--chrome-sunk); }
 
 .settings { position: relative; }
 
@@ -2907,7 +2908,7 @@ body.resizing {
   animation: settings-pop 0.12s ease-out;
 }
 
-/* 桌面设置面板两栏（各自一个 .settings-col，免得两栏行高互相撑出空隙）：左「会话（含存储）│ 重启」，右「外观 │ 主机」。
+/* 桌面设置面板两栏（各自一个 .settings-col，免得两栏行高互相撑出空隙）：左「外观 │ 主机」，右「会话（含存储）│ 重启」。
    .sidebar 有 overflow:hidden，540px 会被裁，所以改 fixed 贴左下（10 侧栏内边距 + 2 底栏内边距 + 按钮 + 8 间距） */
 @media (min-width: 721px) {
   .app:not(.sidebar-collapsed) .sidebar-foot .settings > .settings-panel,
@@ -3905,8 +3906,13 @@ body.resizing {
     /* 放不下（小屏 + 特大字号）时右侧三颗圆钮一起收到 32px，不挤掉左侧「+」 */
     flex: 0 1 44px; width: 44px; height: auto; aspect-ratio: 1; min-width: 32px; min-height: 0; padding: 0;
     border: none; border-radius: 50%; font-size: 18px; color: var(--text);
-    background: var(--raised-bg); box-shadow: var(--raised-shadow);
+    /* 与底栏胶囊同一质感：实线描边 + 内高光与轻投影 */
+    background: var(--raised-bg); box-shadow: inset 0 0 0 1px var(--border-strong), var(--raised-shadow-soft);
   }
+  .app:not(.sidebar-collapsed) .sidebar-search {
+    color: var(--text); background: var(--raised-bg); box-shadow: inset 0 0 0 1px var(--border-strong), var(--raised-shadow-soft);
+  }
+  .app:not(.sidebar-collapsed) .sidebar-search:hover { background: var(--raised-bg-hover); }
   /* .panel-actions 基础规则给 svg / .page-icon 定了 flex: 0 0 18px，只改 width 不生效，flex-basis 要一起覆盖 */
   .mobile-panel-launcher .panel-actions .chrome-icon-btn svg,
   .app:not(.sidebar-collapsed) .sidebar-head .sidebar-reload svg { width: 24px; height: 24px; flex: 0 0 24px; }
@@ -4404,8 +4410,26 @@ button:disabled { box-shadow: none !important; }
 .btn:active:not(:disabled), .chrome-icon-btn:active:not(:disabled), .settings-gear:active, .launcher-button:active { transform: scale(0.96); }
 /* 菜单条目、透明底按钮、描边型危险按钮不做凸起 */
 .session-more-menu .session-more-item, .slash-toggle, .btn-danger,
-.session-head-actions .btn:not(.chrome-icon-btn):not(.session-dispatch-link), .mobile-topbar .btn {
+.session-head-actions .btn:not(.chrome-icon-btn):not(.session-dispatch-link) {
   background-image: none; box-shadow: none;
+}
+@media (max-width: 720px) {
+  .mobile-topbar .btn:not(.session-more-item) {
+    display: inline-flex; align-items: center; justify-content: center;
+    flex: 0 0 auto; width: 44px; height: 44px; min-width: 44px; min-height: 44px; padding: 0;
+    border: none; border-radius: 50%; color: var(--text);
+  }
+  .mobile-topbar .btn:not(.session-more-item) svg { width: 22px; height: 22px; flex: 0 0 22px; }
+  /* 手机顶栏沿用底栏胶囊的描边、内高光与轻投影；菜单条目保持原样。 */
+  .session-head .btn:is(.mobile-round, .session-more-trigger), .mobile-topbar .btn:not(.session-more-item) {
+    background: var(--raised-bg);
+    box-shadow: inset 0 0 0 1px var(--border-strong), var(--raised-shadow-soft);
+  }
+  .session-head .btn:is(.mobile-round, .session-more-trigger):hover:not(:disabled), .mobile-topbar .btn:not(.session-more-item):hover:not(:disabled) { background: var(--raised-bg-hover); }
+  .session-head .btn:is(.mobile-round, .session-more-trigger):is(:active, [aria-expanded="true"], [aria-pressed="true"]),
+  .mobile-topbar .btn:not(.session-more-item):is(:active, [aria-expanded="true"], [aria-pressed="true"]) {
+    background: var(--sunk-bg); box-shadow: var(--sunk-shadow);
+  }
 }
 @media (prefers-reduced-motion: reduce) {
   .btn:active, .chrome-icon-btn:active, .settings-gear:active, .launcher-button:active { transform: none; }

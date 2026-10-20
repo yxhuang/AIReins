@@ -413,6 +413,15 @@ else
   exit 1
 fi
 
+# 版本化钩子：git pull 后自动重建前端；已有 core.hooksPath 时不覆盖
+if git -C "$REPO" rev-parse --git-dir >/dev/null 2>&1 && [[ -z "$(git -C "$REPO" config --local --get core.hooksPath || :)" ]]; then
+  if git -C "$REPO" config --local core.hooksPath scripts/git-hooks; then
+    ok '已启用仓库钩子：git pull 后自动重建前端' 'Repository hooks enabled: the frontend rebuilds after git pull'
+  else
+    warn '未能启用仓库钩子；可手动运行 npm run hooks:install。' 'Could not enable repository hooks; run npm run hooks:install manually.'
+  fi
+fi
+
 if ! mkdir -p "$HOME/.local/bin"; then
   fail '无法创建 ~/.local/bin，请检查目录权限。' 'Cannot create ~/.local/bin; check the directory permissions.'
   summary

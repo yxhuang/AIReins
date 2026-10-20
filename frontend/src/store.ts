@@ -682,6 +682,24 @@ export class Store {
     this.onHashChange();
   }
 
+  navigateCreatedSession(id: string): void {
+    if (this.isMobileNavigation() && this.newSessionOpen) {
+      const entry = this.readMobileEntry();
+      if (entry?.source?.route.hash === "#/") {
+        // 替换新建页，沿用条目身份和已知前驱，使所有返回入口都回列表。
+        const route = this.mobileRouteFromHash(`#/session/${encodeURIComponent(id)}`);
+        this.writeMobileEntry({ ...entry, route });
+        this.applyMobileRoute(route);
+        return;
+      }
+      // 冷启动或从其他页面新建时，也为浏览器后退留下真正的列表条目。
+      const home = this.mobileRouteFromHash("#/");
+      this.replaceMobileEntry(home);
+      this.applyMobileRoute(home);
+    }
+    this.navigate(id);
+  }
+
   navigateNew(cwd?: string): void {
     const request = this.newSessionRequest;
     const destination = { ...this.mobileRouteFromHash("#/new"), newSessionCwd: cwd };

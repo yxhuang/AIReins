@@ -188,7 +188,7 @@ export function NewSessionForm({ children }: { children?: ReactNode }) {
         else if (/^\/([^\s]+)/.test(text)) noteCommandUsed(agent, /^\/([^\s]+)/.exec(text)![1]!);
       }
       try { localStorage.setItem(CWD_STORAGE_KEY, session.cwd); } catch { /* 仅本次不记忆 */ }
-      store.navigate(session.id);
+      store.navigateCreatedSession(session.id);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {

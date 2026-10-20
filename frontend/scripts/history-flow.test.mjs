@@ -553,7 +553,7 @@ await t("已加载条目仍未完成扫描时不显示没有更多；完成后�
 
 // 无 DOM 的真实主页组件交互；只替换会话 API/导航和浏览器存储，不代替截图验收。
 async function withNewForm({ saved = "", cwd, sessions = [], meta = { defaultCwd: "/meta", drivers: {}, capabilities: {} }, create } = {}, run) {
-  const fields = ["meta", "sessions", "newSessionCwd", "newSessionRequest", "create", "navigate", "setNewSessionCwd", "sendComposerInput", "commands"];
+  const fields = ["meta", "sessions", "newSessionCwd", "newSessionRequest", "create", "navigateCreatedSession", "setNewSessionCwd", "sendComposerInput", "commands"];
   const previous = Object.fromEntries(fields.map(name => [name, store[name]]));
   const storageDescriptor = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
   const storage = new Map(saved ? [["workbench-last-cwd", saved]] : []);
@@ -565,7 +565,7 @@ async function withNewForm({ saved = "", cwd, sessions = [], meta = { defaultCwd
   Object.assign(store, { meta, sessions, newSessionCwd: cwd, newSessionRequest: 0, commands: new Map() });
   store.create = async input => { calls.push(input); return create ? create(input) : { id: "created-home", cwd: input.cwd }; };
   store.sendComposerInput = async (sessionId, text, mentions) => { sends.push({ sessionId, text, mentions }); return true; };
-  store.navigate = id => navigations.push(id);
+  store.navigateCreatedSession = id => navigations.push(id);
   store.setNewSessionCwd = path => { store.newSessionCwd = path; };
   const render = componentFixture(() => NewSessionForm({}));
   const update = () => {

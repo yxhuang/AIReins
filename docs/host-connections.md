@@ -24,7 +24,7 @@ tailscale serve --bg http://127.0.0.1:8793
 
 macOS 缺失/版本不足的 Node 与缺失的 ripgrep：若已有 Homebrew 且 stdin/stdout 都是 TTY，安装器合并询问一次 `[Y/n]`，确认后 `brew install` 并重新体检；无 Homebrew、非 TTY、拒绝或 `--check` 时保留手动提示。Linux/WSL 的 apt/NodeSource 命令仍须用户自行执行。安装器不安装或登录三家 CLI/Tailscale，不自动改 PATH 或启用 systemd。
 
-`git pull` 后重跑即可更新；`bash install.sh --check` 只读体检，不安装或写配置。新配置遇到正在运行的 AIReins 时只提示择时 `aireins restart`，不自动重启。远程终端新配置默认关闭，要启用须显式 `terminal:true`；已有 true 保留。CLI 登录/配置和工作目录属于目标机器，不由 clone 复制。系统代理须绕过 `*.ts.net`。
+安装器同时把 `core.hooksPath` 设为 `scripts/git-hooks`（已设置时不覆盖；也可运行 `npm run hooks:install`）：之后 `git pull`（含 `--rebase`）若改动 `frontend/`、`shared/` 或 `package*.json` 会自动 `npm run build`，刷新页面即用上新前端；依赖变化提示 `npm install`，后端变化只提示择时 `aireins restart`，不自动重启。依赖或部署有变化时 `git pull` 后重跑 `bash install.sh` 即可更新；`bash install.sh --check` 只读体检，不安装或写配置。新配置遇到正在运行的 AIReins 时只提示择时 `aireins restart`，不自动重启。远程终端新配置默认关闭，要启用须显式 `terminal:true`；已有 true 保留。CLI 登录/配置和工作目录属于目标机器，不由 clone 复制。系统代理须绕过 `*.ts.net`。
 
 强烈推荐同时接入独立的 [ai-usage](https://github.com/yxhuang/ai-usage) 额度面板（Python 3.11+/uv）。安装器在 stdin/stdout 都是 TTY 时默认询问，回车即同意；非 TTY 默认跳过。`--with-ai-usage` 明确接入，`--without-ai-usage` 跳过，两者均可与 `--check` 组合只读查看状态。目录优先取 `AI_USAGE_DIR`，否则取 AIReins 同级的 `ai-usage`；新 clone 默认钉在 `e67d06b`（可用 `AI_USAGE_REF` 覆盖），已有检出不更新或切换版本。Linux/WSL 需 uv 与可用的用户级 systemd 才自动部署；macOS 仅给出在 ai-usage 目录运行 `uv sync`、`uv run python -m server.launch` 的手工说明。识别服务后才生成缺失的扩展页面 manifest，已有文件不覆盖，不安装 ai-usage 的 Windows 托盘；AIReins 已运行时需择时 `aireins restart` 才显示侧栏页面，重启会中断所有会话。手工接入见[后端扩展页面说明](../server/README.md#pages-扩展页面)。
 

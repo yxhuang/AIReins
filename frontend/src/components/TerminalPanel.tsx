@@ -93,7 +93,7 @@ interface TermRuntime {
   createNew: (kind: ShellKind) => Promise<void>;
   switchTo: (id: string) => void;
   switchShell: (kind: ShellKind) => Promise<void>;
-  closeExited: (id: string) => void;
+  closeTab: (id: string) => void;
   reconnectNow: () => void;
 }
 
@@ -317,7 +317,7 @@ export function TerminalPanel({ open, onClose }: { open: boolean; onClose: () =>
             term.write(effect.data);
           } else if (effect.type === "exited") {
             setExit({ code: effect.exitCode });
-            // 同步标签条状态（kill 的退出也走这条路）；exited 标签在切走后由 buildTermTabs 过滤掉
+            // 自行退出保留输出；确认 kill 成功后由 closeTab 关闭标签。
             setTerminalList(
               terminalsRef.current.map((t) =>
                 t.id === attachedId ? { ...t, exited: true, exitCode: effect.exitCode } : t,
@@ -425,10 +425,10 @@ export function TerminalPanel({ open, onClose }: { open: boolean; onClose: () =>
         attach(target.id);
       } else await createNew(kind);
     };
-    const closeExited = (id: string) => {
+    const closeTab = (id: string) => {
       if (busy) return;
       const target = terminalsRef.current.find((terminal) => terminal.id === id);
-      if (!target?.exited) return;
+      if (!target) return;
       const neighbor = pickAdjacentTerminal(terminalsRef.current, id);
       if (neighbor) switchTo(neighbor.id);
       else {
@@ -462,7 +462,7 @@ export function TerminalPanel({ open, onClose }: { open: boolean; onClose: () =>
       createNew: (kind) => runGuarded(() => createNew(kind)),
       switchTo,
       switchShell: (kind) => runGuarded(() => showShell(kind)),
-      closeExited,
+      closeTab,
       reconnectNow: onVisibilityChange,
     };
 
@@ -533,7 +533,8 @@ export function TerminalPanel({ open, onClose }: { open: boolean; onClose: () =>
     setError(null);
     try {
       await killTerminal(info.id);
-      // 退出态以 WS exit 帧为准（带退出码）；REST 成功只解除确认态
+      // REST 成功即关闭，不依赖 exit 帧先后或 WS 是否在线。
+      runtimeRef.current?.closeTab(info.id);
       setConfirmKill(false);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -569,8 +570,8 @@ export function TerminalPanel({ open, onClose }: { open: boolean; onClose: () =>
             {info?.cwd ?? "…"}
           </span>
           <span className="panel-titlebar-actions">
-            {exit && <span className="term-exited">{t("ui.TerminalPanel.exited_code_sentence", { p0: (exit.code ?? t("ui.common.unknown")) })}</span>}
-            {confirmKill && !exit ? (
+            {exit && !killBusy && <span className="term-exited">{t("ui.TerminalPanel.exited_code_sentence", { p0: (exit.code ?? t("ui.common.unknown")) })}</span>}
+            {confirmKill && (!exit || killBusy) ? (
               <span
                 className="term-confirm"
                 onKeyDown={(e) => {
@@ -636,7 +637,8 @@ export function TerminalPanel({ open, onClose }: { open: boolean; onClose: () =>
             }}>
             {tabs.map((tab) => {
               const active = tab.id === info?.id;
-              return <div key={tab.id} className={`term-tab${active ? " active" : ""}${tab.exited ? " exited" : ""}`}>
+              const showExited = tab.exited && !killBusy;
+              return <div key={tab.id} className={`term-tab${active ? " active" : ""}${showExited ? " exited" : ""}`}>
                 <button type="button" role="tab" aria-selected={active} tabIndex={active ? 0 : -1}
                   className="term-tab-select" title={tab.cwd} disabled={switching || killBusy}
                   onClick={() => runtimeRef.current?.switchTo(tab.id)}>
@@ -644,12 +646,12 @@ export function TerminalPanel({ open, onClose }: { open: boolean; onClose: () =>
                     stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                     {tab.kind === "bash" ? <path d="m4 6 6 6-6 6m9 0h7" /> : <><path d="m7 5 7 7-9 7M15 19h5" /><path d="M3 2h18l-3 20H0z" /></>}
                   </svg>
-                  <span className="term-tab-label">{tab.label}{tab.exited ? t("ui.TerminalPanel.exited") : ""}</span>
+                  <span className="term-tab-label">{tab.label}{showExited ? t("ui.TerminalPanel.exited") : ""}</span>
                 </button>
                 <button type="button" className="term-tab-close" aria-label={t("ui.TerminalPanel.message", { p0: (tab.exited ? t("ui.TerminalPanel.remove_detail") : t("ui.TerminalPanel.end_detail")), p1: (tab.label) })}
                   title={tab.exited ? t("ui.TerminalPanel.remove_exited_tab") : t("ui.TerminalPanel.end_terminal_confirmation_required")} disabled={switching || killBusy}
                   onClick={() => {
-                    if (tab.exited) runtimeRef.current?.closeExited(tab.id);
+                    if (tab.exited) runtimeRef.current?.closeTab(tab.id);
                     else {
                       runtimeRef.current?.switchTo(tab.id);
                       setConfirmKill(true);

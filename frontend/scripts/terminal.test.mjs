@@ -331,6 +331,14 @@ t("关闭退出标签：右邻优先、左邻回落、跳过退出记录，没�
   assert.equal(pickAdjacentTerminal(list, "missing"), null);
 });
 
+t("确认结束的标签：无需等待 exit 帧即可选相邻存活终端，唯一标签关闭后清空", () => {
+  const list = [term("a", false), term("ending", false), term("p", false, "powershell")];
+  assert.equal(pickAdjacentTerminal(list, "ending")?.id, "p");
+  assert.equal(pickAdjacentTerminal(list.slice(0, 2), "ending")?.id, "a");
+  assert.equal(pickAdjacentTerminal([term("ending", false)], "ending"), null);
+  assert.deepEqual(buildTermTabs([], null), []);
+});
+
 t("标签：唯一时不带序号；同种多个按注册表顺序全体编号", () => {
   assert.deepEqual(buildTermTabs([term("a", false)], "a").map((x) => x.label), ["bash"]);
   const duo = buildTermTabs([term("a", false), term("b", false)], "a");

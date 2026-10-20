@@ -508,15 +508,6 @@ export function SettingsMenu() {
       {open && (
         <div className="settings-panel" ref={panelRef} role="dialog" aria-label={t("ui.common.settings")} inert={dialogOpen}>
           <div className="settings-col">
-            {renderGroup(SESSIONS_GROUP, <WorkbenchStorage dialogOpen={storageDialogOpen} onDialogOpenChange={setStorageDialogOpen} />)}
-            <section className="settings-group">
-              <button type="button" className="settings-action" ref={restartButton} disabled={restartState !== "idle"}
-                aria-haspopup="dialog" onClick={() => void restart()}>
-                <span aria-hidden="true">↻</span>{restartState === "checking" ? t("ui.SettingsMenu.checking_sessions") : t("ui.SettingsMenu.restart")}
-              </button>
-            </section>
-          </div>
-          <div className="settings-col">
             {renderGroup(APPEARANCE_GROUP)}
             <section className="settings-group">
               <h3 className="settings-group-title">{t("ui.SettingsMenu.host")}</h3>
@@ -528,6 +519,15 @@ export function SettingsMenu() {
                   : power?.state === "scheduled" ? (powerSeconds === null ? t("ui.SettingsMenu.cancel_shutdown") : t("ui.SettingsMenu.cancel_shutdown_shutting_down_in_seconds", { p0: (powerSeconds) })) : t("ui.SettingsMenu.shut_down")}
               </button>}
               {powerSupported && (power?.error || powerError) && <span className="new-error" role="alert">{power?.error || powerError}</span>}
+            </section>
+          </div>
+          <div className="settings-col">
+            {renderGroup(SESSIONS_GROUP, <WorkbenchStorage dialogOpen={storageDialogOpen} onDialogOpenChange={setStorageDialogOpen} />)}
+            <section className="settings-group">
+              <button type="button" className="settings-action" ref={restartButton} disabled={restartState !== "idle"}
+                aria-haspopup="dialog" onClick={() => void restart()}>
+                <span aria-hidden="true">↻</span>{restartState === "checking" ? t("ui.SettingsMenu.checking_sessions") : t("ui.SettingsMenu.restart")}
+              </button>
             </section>
           </div>
         </div>

@@ -39,7 +39,7 @@ npm run hooks:install
 git config --local aireins.privatePatterns /absolute/path/to/private-patterns.txt
 ```
 
-Keep the private pattern file outside version control. The hooks check staged content and commit messages; if the setting is absent or its file is missing, they warn and continue with generic rules. Hooks can be bypassed and do not replace a review before publishing. Avoid real session IDs, personal paths and credentials in fixtures or screenshots.
+The same hooks rebuild the frontend after `git pull` (merge or rebase) when `frontend/`, `shared/` or `package*.json` changed, and only print a reminder for `npm install` or `aireins restart`; `bash install.sh` enables them when `core.hooksPath` is unset. Keep the private pattern file outside version control. The hooks check staged content and commit messages; if the setting is absent or its file is missing, they warn and continue with generic rules. Hooks can be bypassed and do not replace a review before publishing. Avoid real session IDs, personal paths and credentials in fixtures or screenshots.
 
 CI checks every incoming commit with `node scripts/check-privacy.mjs --range <base>..<head>` (push: before..sha, or the default branch..sha for new branches and tags; pull request: base..head), including commit metadata, and also runs the full-tree `npm run check:privacy`. CI has no local private pattern file. Binary files and images skip automatic content checks: manually inspect visible text and metadata before committing them. A passing check does not establish that an image is safe to publish.
 

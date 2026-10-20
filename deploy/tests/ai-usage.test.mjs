@@ -117,9 +117,12 @@ const snapshot = path => !existsSync(path) ? null : readdirSync(path, { withFile
     return [entry.name, stat.mode, stat.mtimeMs, entry.isSymbolicLink() ? readlinkSync(full)
       : entry.isDirectory() ? snapshot(full) : readFileSync(full, 'utf8')];
   });
+// install.sh 给自身仓库启用钩子的 git 调用与 ai-usage 部署无关
+const aiCalls = f => f.calls().replace(/^git -C \S+ (?:rev-parse --git-dir|config --local (?:--get )?core\.hooksPath\b).*\n/gm, '');
 const notDeployed = f => {
   assert(!existsSync(f.manifestPath));
-  assert(!/^(?:git|deploy|uv|systemctl)\b/m.test(f.calls()), f.calls());
+  const calls = aiCalls(f);
+  assert(!/^(?:git|deploy|uv|systemctl)\b/m.test(calls), calls);
 };
 
 const nonTty = fixture('non-tty');
@@ -168,7 +171,7 @@ for (const [name, locale, body] of [
   assert(!/\/home\/|\/tmp\//.test(manifest.description));
   assert.match(output, /aireins restart/);
   assert(!/^deploy$/m.test(valid.calls()), valid.calls());
-  assert(!/^git /m.test(valid.calls()), valid.calls());
+  assert(!/^git /m.test(aiCalls(valid)), aiCalls(valid));
   assert(valid.calls().includes('http://127.0.0.1:9876/api/summary'));
   if (!locale.startsWith('zh')) assert(!/\p{Script=Han}/u.test(output), output);
   const parsed = spawnSync(process.execPath, ['--import', 'tsx', '-e',

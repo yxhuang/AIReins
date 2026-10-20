@@ -125,7 +125,7 @@ export function App() {
             } }} />
           ) : (
             <section className="welcome-view">
-            <div className="view-panel-actions">
+            <div className="view-panel-actions mobile-topbar">
               <button type="button" className="btn mobile-round mobile-back new-session-back"
                 aria-label={t("ui.SessionView.back_to_session_list")} onClick={() => store.backFromSession()}>
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7" /></svg>

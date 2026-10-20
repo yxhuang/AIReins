@@ -1,0 +1,4 @@
+#!/bin/sh
+# 只处理 git pull --rebase / git rebase；commit --amend 不算拉取。
+[ "$1" = rebase ] || exit 0
+exec "$(dirname "$0")/after-pull.sh"
