@@ -47,7 +47,10 @@ export function SelfUpdate({ dialogOpen, onDialogOpenChange, onRestart }: {
     setResult(null);
     setError("");
     try {
-      setStatus(await fetchUpdateStatus());
+      const next = await fetchUpdateStatus();
+      setStatus(next);
+      // 预填默认说明，可直接确认；重新检查时保留已改过的内容。
+      setMessage((current) => current || next.defaultMessage);
       setPhase("confirm");
     } catch (reason) {
       setError(errorMessage(reason));
@@ -126,7 +129,7 @@ export function SelfUpdate({ dialogOpen, onDialogOpenChange, onRestart }: {
                 <LogList items={status.changes} total={status.changes.length} />
                 <label className="new-field">
                   {t("ui.SelfUpdate.commit_message")}
-                  <input value={message} placeholder={status.defaultMessage} maxLength={500} disabled={phase === "applying"} onChange={(event) => setMessage(event.target.value)} />
+                  <input value={message} maxLength={500} disabled={phase === "applying"} onChange={(event) => setMessage(event.target.value)} />
                 </label>
               </>}
             </>}

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { stripTypeScriptTypes } from "node:module";
+import { transformWithOxc } from "vite";
 import { Store } from "../src/store.ts";
 import { createRenderItemsBuilder } from "../src/render-items.ts";
 import { selectSidebarSections, selectProjectSessions } from "../src/sidebar-sessions.ts";
@@ -227,7 +227,8 @@ try {
   const view = readFileSync(new URL("../src/components/SessionView.tsx", import.meta.url), "utf8");
   const start = view.indexOf("  useEffect(() => {", view.indexOf("// @ 检索：250ms"));
   const end = view.indexOf("}, [mentionOpen, mentionQuery, session.id]);", start) + "}, [mentionOpen, mentionQuery, session.id]);".length;
-  const effect = stripTypeScriptTypes(view.slice(start, end));
+  // Node 22.12（最低支持版本）没有 module.stripTypeScriptTypes，改用 Vite 自带的 Oxc 去类型。
+  const effect = (await transformWithOxc(view.slice(start, end), "effect.ts")).code;
   const runEffect = new Function("useEffect", "searchSeq", "setFiles", "setFilesError", "setFilesLoading", "mentionOpen", "mentionQuery", "session", "fetchFiles", "store", effect);
   let cleanup, files, error, loadingState, noted = 0;
   const requestsForFiles = [];
