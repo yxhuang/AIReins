@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <defs>
+    <mask id="stitch" maskUnits="userSpaceOnUse" x="-10" y="-10" width="170" height="120">
+      <rect x="-10" y="-10" width="170" height="120" fill="white" />
+      <g fill="none" stroke="black" stroke-width="2.6" stroke-dasharray="5 4" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M88 82 V14 H104 C128 14 128 52 104 52 H90" />
+        <path d="M100 52 C106 62 110 70 117 76 C122 81 130 82 134 76" />
+      </g>
+    </mask>
+  </defs>
+  <rect class="plate" width="100" height="100" rx="22" fill="#1F1E1D" />
+  <g class="glyph" transform="translate(8.23 22.15) scale(0.58)" fill="none" stroke="#F0EEE6" stroke-linecap="round" stroke-linejoin="round" mask="url(#stitch)">
+    <path class="a" d="M6 80 L36 14 L66 80 M19 58 H53" stroke-width="13" />
+    <path class="r" d="M88 82 V14 H104 C128 14 128 52 104 52 H90" stroke-width="15" />
+    <path class="r" d="M100 52 C106 62 110 70 117 76 C122 81 130 82 134 76" stroke-width="15" />
+    <path class="loop" d="M134 76 C138 69 129 64 125 71 C122 77 129 84 137 85" stroke-width="8" />
+  </g>
+</svg>

@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AIReins</title>
+  <meta name="description" content="Let the agents run. Keep the reins. A local workbench for Claude Code, Codex and Kimi Code, from your desktop or phone.">
+  <meta name="color-scheme" content="light dark">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="AIReins">
+  <meta property="og:description" content="Let the agents run. Keep the reins. A local workbench for Claude Code, Codex and Kimi Code, from your desktop or phone.">
+  <meta property="og:image" content="./assets/banner-en-light.png">
+  <meta property="og:image:alt" content="AIReins: Let the agents run. Keep the reins.">
+  <link rel="icon" href="./assets/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="./assets/apple-touch-icon.png">
+  <link rel="stylesheet" href="./style.css">
+  <script src="./main.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#main" data-i18n="skip">Skip to content</a>
+  <header class="site-header wrap">
+    <a class="brand" href="#" aria-label="AIReins">
+      <img src="./assets/icon.svg" alt="" width="36" height="36">
+      <span>AIReins</span>
+    </a>
+    <nav class="navigation" aria-label="Main navigation" data-i18n-aria="navigation">
+      <a href="#features" data-i18n="navFeatures">Features</a>
+      <a href="#how-it-works" data-i18n="navHow">How it works</a>
+      <a href="#security" data-i18n="navSecurity">Security</a>
+    </nav>
+    <div class="language-switch" role="group" aria-label="Language" data-i18n-aria="language">
+      <button type="button" lang="en" data-language="en" aria-pressed="true">EN</button>
+      <button type="button" lang="zh-CN" data-language="zh" aria-pressed="false">中文</button>
+    </div>
+  </header>
+
+  <main id="main">
+    <!-- README: What it is / Why "Reins"; 中文：这是什么 / 为什么叫 AIReins。 -->
+    <section class="hero wrap" aria-labelledby="hero-title">
+      <div class="hero-copy">
+        <h1 id="hero-title"><span data-i18n="heroLine1">Let the agents run.</span><span data-i18n="heroLine2">Keep the reins.</span></h1>
+        <p class="hero-description" data-i18n="heroDescription">Your AI workbench, on your own computer. Use Claude Code, Codex and Kimi Code from a browser on your desktop or phone.</p>
+        <div class="actions">
+          <a class="button button-primary" href="https://github.com/yxhuang/AIReins" data-i18n="github">View on GitHub</a>
+          <a class="text-link" href="https://github.com/yxhuang/AIReins#get-started" data-doc="start" data-i18n="getStarted">Get started</a>
+        </div>
+      </div>
+      <div class="hero-art">
+        <picture data-image="banner">
+          <source media="(prefers-color-scheme: dark)" srcset="./assets/banner-en-dark.png">
+          <img src="./assets/banner-en-light.png" width="2560" height="1120" fetchpriority="high" alt="Claude Code, Codex and Kimi Code converge through AR on an Approve button on your phone">
+        </picture>
+      </div>
+      <ul class="agent-list" aria-label="Official CLIs" data-i18n-aria="officialClis">
+        <li class="claude"><span aria-hidden="true"></span>Claude Code</li>
+        <li class="codex"><span aria-hidden="true"></span>Codex</li>
+        <li class="kimi"><span aria-hidden="true"></span>Kimi Code</li>
+      </ul>
+    </section>
+
+    <!-- README: Highlights / Why "Reins" / Features; 中文：特点 / 为什么叫 AIReins / 功能一览。 -->
+    <section class="features wrap section" id="features" aria-labelledby="features-title">
+      <div class="section-intro">
+        <h2 id="features-title" data-i18n="featuresTitle">One workbench for all three.</h2>
+        <p data-i18n="featuresIntro">Keep the tools you already use. Bring the work into one place.</p>
+      </div>
+      <div class="feature-grid">
+        <article>
+          <h3 data-i18n="harnessTitle">Your setup comes with you.</h3>
+          <p data-i18n="harnessText">Official CLIs, existing logins. Your instructions, skills, hooks, MCP servers and plugins load as usual. Nothing to migrate.</p>
+        </article>
+        <article>
+          <h3 data-i18n="controlTitle">The next move is yours.</h3>
+          <p data-i18n="controlText">Approve or deny tool calls, answer questions and interrupt a run. Everything waiting on you, across all sessions, is collected in one place.</p>
+        </article>
+        <article>
+          <h3 data-i18n="historyTitle">Pick up where you left off.</h3>
+          <p data-i18n="historyText">Search, filter by folder and resume the native history of all three CLIs. Sessions stay in each CLI’s own history.</p>
+        </article>
+      </div>
+    </section>
+
+    <!-- README: A look / Highlights / Features / Optional integrations; 中文：看一眼 / 特点 / 功能一览 / 可选集成。 -->
+    <section class="desktop-section wrap section" id="workbench" aria-labelledby="desktop-title">
+      <div class="section-intro">
+        <h2 id="desktop-title" data-i18n="desktopTitle">See the work as it happens.</h2>
+        <p data-i18n="desktopText">Sessions together, approvals in view, sub-agents in a tree. Files and a multi-tab terminal are right at hand.</p>
+      </div>
+      <figure class="screenshot desktop-shot">
+        <picture data-image="desktop">
+          <source media="(prefers-color-scheme: dark)" srcset="./assets/desktop-en-dark.png">
+          <img src="./assets/desktop-en-light.png" width="3040" height="2040" loading="lazy" decoding="async" alt="Desktop: sessions from three agents on the left, a Claude session with a pending approval in the middle, and the dispatch flow chart on the right showing Codex and Kimi runs live">
+        </picture>
+        <figcaption data-i18n="dispatchNote">The dispatch chart also shows runs from an external delegation tool when connected. Without one, it shows native sub-agents.</figcaption>
+      </figure>
+    </section>
+
+    <!-- README: A look / Phone and Taildrop / Remote access from your phone; 中文：看一眼 / 手机与发送 / 手机远程。 -->
+    <section class="phone-section section" aria-labelledby="phone-title">
+      <div class="phone-layout wrap">
+        <div class="phone-copy">
+          <h2 id="phone-title" data-i18n="phoneTitle">Step away. Stay in control.</h2>
+          <p data-i18n="phoneText">Connect back over Tailscale. Approve a tool call, answer a question or browse your files, all from your phone.</p>
+          <p class="small" data-i18n="terminalNote">Add it to your home screen to open it like an app. The remote terminal is off by default; enable it when you need it.</p>
+        </div>
+        <figure class="screenshot mobile-shot">
+          <picture data-image="mobile">
+            <source media="(prefers-color-scheme: dark)" srcset="./assets/mobile-en-dark.png">
+            <img src="./assets/mobile-en-light.png" width="2800" height="2100" loading="lazy" decoding="async" alt="Three phone screens: the session list, a session with an approval card, and the terminal">
+          </picture>
+        </figure>
+      </div>
+      <p class="demo-note wrap" data-i18n="demoNote">Screenshots from a local instance running on demo data; the sessions and paths are made up.</p>
+    </section>
+
+    <!-- README: How it works; 中文：它是怎么工作的。 -->
+    <section class="how-section wrap section" id="how-it-works" aria-labelledby="how-title">
+      <div class="section-intro">
+        <h2 id="how-title" data-i18n="howTitle">Your browser. Your computer.</h2>
+        <p data-i18n="howIntro">One Node process. The official CLIs. Your existing logins.</p>
+      </div>
+      <figure class="how-diagram">
+        <picture data-image="how">
+          <source media="(prefers-color-scheme: dark)" srcset="./assets/how-en-dark.png">
+          <img src="./assets/how-en-light.png" width="2560" height="1120" loading="lazy" decoding="async" alt="Six steps: open, your tailnet, one process, official CLIs, whole computer, your call">
+        </picture>
+      </figure>
+      <p class="how-text" data-i18n="howText">On the same computer, your browser connects directly to loopback. From another device, join your tailnet: Tailscale Serve forwards to AIReins’ remote entry, which checks Host/Origin and allows only the Tailscale logins you approve. The local Node process drives the official CLIs and writes sessions to their own history.</p>
+    </section>
+
+    <!-- README: Before you start / Security / Remote access from your phone; 中文：说在前面 / 安全 / 手机远程。 -->
+    <section class="security-section wrap" id="security" aria-labelledby="security-title">
+      <div class="security-panel">
+        <div>
+          <h2 id="security-title" data-i18n="securityTitle">Read Security first.</h2>
+          <p class="security-statement" data-i18n="securityStatement">This is access to your whole computer.</p>
+          <p data-i18n="securityText">Anyone who can reach AIReins has the power of your user account on that machine.</p>
+          <a class="text-link" href="https://github.com/yxhuang/AIReins#security" data-doc="security" data-i18n="readSecurity">Read Security in the README</a>
+        </div>
+        <ul class="boundaries">
+          <li><strong data-i18n="loopbackTitle">Loopback only</strong><span data-i18n="loopbackText">AIReins listens on the local loopback address.</span></li>
+          <li><strong data-i18n="tailnetTitle">Your tailnet, your allowlist</strong><span data-i18n="tailnetText">Remote access goes only through Tailscale, for logins you explicitly allow.</span></li>
+          <li><strong data-i18n="exposureTitle">Keep it off the public internet</strong><span data-i18n="exposureText">Never expose AIReins with Funnel or port forwarding.</span></li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- README: Get started / Platform support; 中文：跑起来 / 平台支持。 -->
+    <section class="start-section wrap section" id="get-started" aria-labelledby="start-title">
+      <div>
+        <h2 id="start-title" data-i18n="startTitle">Keep the reins in your hand.</h2>
+        <p data-i18n="startText">Installation, prerequisites and remote setup are in the README.</p>
+        <p class="small" data-i18n="platforms">Windows + WSL2 and native Linux supported. macOS is experimental, with CI coverage only.</p>
+      </div>
+      <a class="button button-primary" href="https://github.com/yxhuang/AIReins#get-started" data-doc="start" data-i18n="startButton">Get started in the README</a>
+    </section>
+  </main>
+
+  <!-- README: License; 中文：许可证。 -->
+  <footer class="site-footer wrap">
+    <a class="brand" href="#" aria-label="AIReins"><img src="./assets/icon.svg" alt="" width="28" height="28" loading="lazy"><span>AIReins</span></a>
+    <div class="footer-links">
+      <a href="https://github.com/yxhuang/AIReins/blob/main/LICENSE" data-i18n="license">Code: MIT License</a>
+      <a href="https://github.com/yxhuang/AIReins/blob/main/NOTICE" data-i18n="notice">Name &amp; marks: NOTICE</a>
+      <a href="https://github.com/yxhuang/AIReins">GitHub</a>
+    </div>
+  </footer>
+</body>
+</html>
