@@ -25,6 +25,7 @@ import { appWindowEnabled, findWindowsChrome, openAppWindow, AppWindowError } fr
 import { getTaildropTargets, getTailscalePeers, sendTaildrop, TaildropError } from "./tailscale-peers.js";
 import { createCodexResetWatch } from "./codex-resets.js";
 import { busySessionCount, createPowerOff, powerOffEnabled } from "./power-off.js";
+import { applyUpdate, SelfUpdateError, updateStatus } from "./self-update.js";
 import { feishuSender, GateNotifier, larkCliSender, loadNotifyConfig, type NotifyConfig } from "./notify.js";
 import { checkPageHealth, proxyPage, readLauncherLinks, scanPages } from "./pages.js";
 import { pruneStorage, workbenchHome } from "./persistence.js";
@@ -505,6 +506,15 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
         });
       }
       await respond(response, 202, 0, "accepted", { restarting: true }, requestId);
+    } else if (url.pathname === "/api/update" && (method === "GET" || method === "POST")) {
+      try {
+        const result = method === "GET" ? await updateStatus() : await applyUpdate(await readJson(request, 64 * 1024));
+        if (method === "POST") log("info", "self-update", { action: (result as { action: string }).action });
+        await respond(response, 200, 0, "success", result, requestId);
+      } catch (error) {
+        if (error instanceof SelfUpdateError) throw new ApiError(error.status, error.status * 100 + 75, error.message);
+        throw error;
+      }
     } else if (url.pathname === "/api/power-off" && ["GET", "POST", "DELETE"].includes(method)) {
       if (!powerOffEnabled(prefs.shutdownCommand)) throw new ApiError(503, 50300, "未配置可执行的关机命令");
       const status = method === "POST" ? await powerOff.request() : method === "DELETE" ? await powerOff.cancel() : powerOff.status();

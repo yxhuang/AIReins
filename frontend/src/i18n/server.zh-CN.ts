@@ -487,6 +487,12 @@ const messages: Record<string, string> = {
   "server.message503": "此路径无法用 Windows 程序打开",
   "server.message504": "无法确定 WSL 发行版，不能打开 Windows 路径",
   "server.message505": "无法用系统程序打开，请检查默认程序和桌面登录状态",
-  "server.message506": "只支持普通文件或文件夹"
+  "server.message506": "只支持普通文件或文件夹",
+  "server.message507": "{p0} 执行失败：{p1}",
+  "server.message508": "当前不在任何分支上，无法与远端对比",
+  "server.message509": "分支 {p0} 没有设置上游，无法与远端对比",
+  "server.message510": "请求必须包含 action、head、upstreamHead 和 changes",
+  "server.message512": "更新正在进行，请稍候",
+  "server.message513": "仓库状态已变化，请重新检查"
 };
 export default messages;

@@ -487,6 +487,12 @@ const messages: Record<string, string> = {
   "server.message503": "This path cannot be opened with a Windows app",
   "server.message504": "Cannot determine the WSL distribution, so the Windows path cannot be opened",
   "server.message505": "Could not open with the system app. Check the default app and that the desktop session is signed in",
-  "server.message506": "Only regular files or folders are supported"
+  "server.message506": "Only regular files or folders are supported",
+  "server.message507": "{p0} failed: {p1}",
+  "server.message508": "Not on a branch; cannot compare with the remote",
+  "server.message509": "Branch {p0} has no upstream; cannot compare with the remote",
+  "server.message510": "The request must include action, head, upstreamHead and changes",
+  "server.message512": "An update is already in progress; please wait",
+  "server.message513": "The repository has changed; check again"
 };
 export default messages;

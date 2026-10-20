@@ -178,6 +178,41 @@ export function powerOff(method: "GET" | "POST" | "DELETE" = "GET"): Promise<Pow
   return call("/api/power-off", { method });
 }
 
+export interface UpdateStatus {
+  branch: string;
+  upstream: string;
+  head: string;
+  upstreamHead: string;
+  ahead: number;
+  behind: number;
+  aheadLog: string[];
+  behindLog: string[];
+  changes: string[];
+  defaultMessage: string;
+  action: "pull" | "push" | "none" | "diverged";
+}
+
+export interface UpdateResult {
+  action: "pull" | "push";
+  output: string;
+  restart: boolean;
+}
+
+/** 先 git fetch，网络慢时要等一会儿。 */
+export function fetchUpdateStatus(): Promise<UpdateStatus> {
+  return call("/api/update", { signal: AbortSignal.timeout(90_000) });
+}
+
+/** 拉取后可能 npm install + npm run build，推送可能经过提交钩子，给足时间。 */
+export function applyUpdate(status: UpdateStatus, message: string): Promise<UpdateResult> {
+  return call("/api/update", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ ...status, message, lang: getLocale() }),
+    signal: AbortSignal.timeout(16 * 60_000),
+  });
+}
+
 export function fetchStorage(signal?: AbortSignal): Promise<StorageStats> {
   return call("/api/storage", { signal });
 }

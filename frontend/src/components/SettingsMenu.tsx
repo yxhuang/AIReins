@@ -4,6 +4,7 @@ import { createPortal } from "react-dom";
 import { modalKeyDown, useAnchoredMenu } from "./useAnchoredMenu";
 import { Segmented } from "./Segmented";
 import { WorkbenchStorage } from "./WorkbenchStorage";
+import { SelfUpdate } from "./SelfUpdate";
 import { OPEN_HOST_MENU_EVENT } from "./HostSwitcher";
 import { BODY_FONT_MAX, BODY_FONT_MIN, BODY_FONT_STEP, BODY_FONT_STORAGE_KEY, TERM_FONT_MAX, TERM_FONT_MIN, TERM_FONT_STORAGE_KEY, applyBodyFontSize, bodyFontSize, readBodyFontSize, readTermFontSize, termFontSize } from "../body-font";
 import { fetchClaudeStartupSettings, fetchPrefs, fetchSessions, powerOff, restartWorkbench, saveClaudeStartupSettings, savePrefs, type PowerOffStatus } from "../api";
@@ -134,6 +135,7 @@ export function SettingsMenu() {
   const powerSupported = useStore(value => value.meta?.capabilities?.powerOff === true);
   const [open, setOpen] = useState(false);
   const [storageDialogOpen, setStorageDialogOpen] = useState(false);
+  const [updateDialogOpen, setUpdateDialogOpen] = useState(false);
   const [theme, setTheme] = useState<ThemeChoice>(() => readTheme());
   const [language, setLanguage] = useState<LanguagePreference>(readLanguagePreference);
   const [scaleChoice, setScaleChoice] = useState<FontScaleChoice>(readFontScaleChoice);
@@ -168,7 +170,7 @@ export function SettingsMenu() {
   const [restartConfirm, setRestartConfirm] = useState<number | null>(null);
   const restartButton = useRef<HTMLButtonElement>(null);
   const restartConfirmDialog = useRef<HTMLDivElement>(null);
-  const dialogOpen = storageDialogOpen || powerConfirm !== null || restartConfirm !== null;
+  const dialogOpen = storageDialogOpen || updateDialogOpen || powerConfirm !== null || restartConfirm !== null;
   const powerActive = power !== null && power.state !== "idle";
   /** 已排定关机的本地时刻：按服务端给的剩余毫秒折算，避开手机与电脑时钟差。 */
   const [powerDeadline, setPowerDeadline] = useState<number | null>(null);
@@ -318,6 +320,7 @@ export function SettingsMenu() {
 
   const close = (returnFocus: boolean) => {
     setStorageDialogOpen(false);
+    setUpdateDialogOpen(false);
     setPowerConfirm(null);
     setOpen(false);
     if (returnFocus) gearRef.current?.focus();
@@ -511,23 +514,26 @@ export function SettingsMenu() {
             {renderGroup(APPEARANCE_GROUP)}
             <section className="settings-group">
               <h3 className="settings-group-title">{t("ui.SettingsMenu.host")}</h3>
-              <button type="button" className="settings-action settings-hosts" onClick={openHostMenu} aria-haspopup="menu">{t("ui.SettingsMenu.hosts_and_connections_tailscale")}</button>
-              {powerSupported && <button type="button" className={`settings-action settings-power${powerActive ? " is-pending" : ""}`} ref={powerButton}
-                aria-haspopup={powerActive ? undefined : "dialog"} onClick={() => void togglePowerOff()}>
-                {powerActive ? <span aria-hidden="true">✕</span> : <span aria-hidden="true">⏻</span>}
-                {power?.state === "waiting" ? t("ui.SettingsMenu.cancel_shutdown_waiting_for_sessions", { p0: (power.busy) })
-                  : power?.state === "scheduled" ? (powerSeconds === null ? t("ui.SettingsMenu.cancel_shutdown") : t("ui.SettingsMenu.cancel_shutdown_shutting_down_in_seconds", { p0: (powerSeconds) })) : t("ui.SettingsMenu.shut_down")}
-              </button>}
+              <div className="settings-action-row">
+                <button type="button" className="settings-action" onClick={openHostMenu} aria-haspopup="menu">{t("ui.SettingsMenu.hosts_and_connections")}</button>
+                {powerSupported && <button type="button" className={`settings-action settings-power${powerActive ? " is-pending" : ""}`} ref={powerButton}
+                  aria-haspopup={powerActive ? undefined : "dialog"} onClick={() => void togglePowerOff()}>
+                  {powerActive ? <span aria-hidden="true">✕</span> : <span aria-hidden="true">⏻</span>}
+                  {power?.state === "waiting" ? t("ui.SettingsMenu.cancel_shutdown_waiting_for_sessions", { p0: (power.busy) })
+                    : power?.state === "scheduled" ? (powerSeconds === null ? t("ui.SettingsMenu.cancel_shutdown") : t("ui.SettingsMenu.cancel_shutdown_shutting_down_in_seconds", { p0: (powerSeconds) })) : t("ui.SettingsMenu.shut_down")}
+                </button>}
+              </div>
               {powerSupported && (power?.error || powerError) && <span className="new-error" role="alert">{power?.error || powerError}</span>}
             </section>
           </div>
           <div className="settings-col">
             {renderGroup(SESSIONS_GROUP, <WorkbenchStorage dialogOpen={storageDialogOpen} onDialogOpenChange={setStorageDialogOpen} />)}
-            <section className="settings-group">
+            <section className="settings-group settings-action-row">
               <button type="button" className="settings-action" ref={restartButton} disabled={restartState !== "idle"}
                 aria-haspopup="dialog" onClick={() => void restart()}>
-                <span aria-hidden="true">↻</span>{restartState === "checking" ? t("ui.SettingsMenu.checking_sessions") : t("ui.SettingsMenu.restart")}
+                {restartState === "checking" ? t("ui.SettingsMenu.checking_sessions") : t("ui.SettingsMenu.restart")}
               </button>
+              <SelfUpdate dialogOpen={updateDialogOpen} onDialogOpenChange={setUpdateDialogOpen} onRestart={() => void restart()} />
             </section>
           </div>
         </div>

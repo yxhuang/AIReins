@@ -54,6 +54,13 @@ out = run(clone, 'pull', '-q', '--rebase');
 assert.ok(existsSync(built), out);
 rmSync(built);
 
+writeFileSync(join(upstream, 'package.json'), JSON.stringify({ name: 'fixture', scripts: { build: 'node -e "require(\'fs\').writeFileSync(\'built\', \'\')"' } }));
+run(upstream, 'commit', '-qam', 'dependency change');
+out = run(clone, 'pull', '-q', '--rebase');
+assert.match(out, /Dependencies installed/);
+assert.ok(existsSync(built), out);
+rmSync(built);
+
 run(clone, 'commit', '-q', '--amend', '-m', 'amended');
 assert.ok(!existsSync(built));
 

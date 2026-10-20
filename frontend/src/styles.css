@@ -3005,7 +3005,10 @@ body.resizing {
 .settings-action:disabled { cursor: default; opacity: 0.6; }
 
 .settings-storage { margin-bottom: 12px; }
-.settings-hosts { margin-bottom: 8px; }
+/* 两个按钮并排各占一半；文字长时在按钮内换行 */
+.settings-action-row { display: flex; gap: 8px; }
+.settings-action-row > .settings-action { flex: 1 1 0; min-width: 0; }
+.self-update-log { margin: 0; max-height: 30vh; overflow: auto; padding: 8px; border-radius: 6px; background: var(--surface-sunk); font: 13px/1.5 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
 /* 关机已排定/等待中：按钮变成取消，用 --danger 提示有一项待处理的不可逆动作 */
 .settings-power.is-pending { border-color: var(--danger); color: var(--danger); }
 .settings-power.is-pending:hover:not(:disabled) { border-color: var(--danger); }
