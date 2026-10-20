@@ -1,4 +1,5 @@
 import { normalizeProjectPath } from "../shared/project-path.js";
+import { worktreeOf } from "./worktree.js";
 import { fallbackTitleMetadata } from "./i18n/messages.js";
 import { platform, vscodeFileUri, type Platform } from "./platform.js";
 import { sessionTitle } from "../shared/session-title.js";
@@ -340,11 +341,13 @@ export class SessionManager {
     const claudeSettings = input.agent === "claude"
       ? this.claudeSettingsResolver(cwd)
       : undefined;
+    const worktree = worktreeOf(cwd);
     const record: SessionRecord = {
       id,
       agent: input.agent,
       agentId: input.agentId || "main",
       cwd,
+      ...(worktree ? { worktree } : {}),
       status: "starting",
       createdAt: now,
       lastActivityAt: now,
@@ -381,7 +384,7 @@ export class SessionManager {
       riskyMode: record.riskyMode,
     });
 
-    this.registerProject(record.cwd);
+    this.registerProject(record.worktree?.root ?? record.cwd);
 
     // 默认不快照（P1-8）：只有显式传 "auto" 才做；续接等未传该字段的入口一并跳过
     if (input.snapshot === "auto") {

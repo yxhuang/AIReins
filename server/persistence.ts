@@ -56,7 +56,7 @@ export function loadProjectOrder(sessions: SessionRecord[]): string[] {
   if (!existsSync(projectOrderPath)) {
     const latest = new Map<string, string>();
     for (const session of sessions) {
-      const path = normalizeProjectPath(session.cwd);
+      const path = normalizeProjectPath(session.worktree?.root ?? session.cwd);
       if (!latest.has(path) || session.createdAt > latest.get(path)!) latest.set(path, session.createdAt);
     }
     const paths = [...latest].sort((a, b) => b[1].localeCompare(a[1])).map(([path]) => path).slice(0, PROJECT_ORDER_LIMIT);

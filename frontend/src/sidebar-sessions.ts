@@ -55,7 +55,7 @@ export function selectSidebarSections(value: SidebarValue, query = "") {
   const directories = new Map<string, SessionRecord[]>();
   for (const session of active) {
     if (pinnedIds.has(session.id)) continue;
-    const path = normalizeProjectPath(session.cwd);
+    const path = normalizeProjectPath(session.worktree?.root ?? session.cwd);
     const sessions = directories.get(path) ?? [];
     sessions.push(session);
     directories.set(path, sessions);
@@ -67,7 +67,7 @@ export function selectSidebarSections(value: SidebarValue, query = "") {
   const olderDirectories = new Map<string, SessionRecord[]>();
   for (const session of [...value.sessions].sort(byActivity)) {
     if (session.status === "dead" || waitingIds.has(session.id) || pinnedIds.has(session.id)) continue;
-    const path = normalizeProjectPath(session.cwd);
+    const path = normalizeProjectPath(session.worktree?.root ?? session.cwd);
     // 活跃目录仍只显示 active 候选，不把超窗会话混回或再建同路径的较早组。
     if (directories.has(path)) continue;
     const sessions = olderDirectories.get(path) ?? [];

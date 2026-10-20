@@ -1235,6 +1235,16 @@ body.resizing {
   white-space: nowrap;
 }
 
+/* 链接工作树会话归在主仓库下，行尾标出分支 */
+.worktree-branch {
+  max-width: 8em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
 .agent-name {
   font-size: 15px;
   font-weight: 600;

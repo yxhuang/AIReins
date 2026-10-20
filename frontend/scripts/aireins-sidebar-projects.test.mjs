@@ -22,6 +22,12 @@ await check("目录键规范化且保留大小写、父目录与子目录各自�
   assert.deepEqual(result.projects.map(project => project.path), ["/repo/paper", "/repo/Paper", "/repo", "/"]);
   assert.deepEqual(result.projects[0].sessions.map(session => session.id), ["first", "second"]);
 });
+await check("链接工作树会话归到主仓库目录", () => {
+  const result = selectSidebarSections(value([
+    session("main", "/repo"), session("wt", "/tmp/wt-fix", 1, { worktree: { root: "/repo", branch: "fix" } }),
+  ]));
+  assert.deepEqual(result.projects.map(project => [project.path, project.sessions.map(session => session.id)]), [["/repo", ["main", "wt"]]]);
+});
 await check("服务端目录顺序优先且隐藏目录不占可见位置，异常未登记目录临时置前", () => {
   const input = value([session("a-old", "/a", 20), session("b", "/b", 1), session("a-new", "/a", 0), session("c", "/c", 3)],
     { projectOrder: ["/hidden", "/a", "/b"] });

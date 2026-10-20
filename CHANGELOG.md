@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.2.1 (2026-10-20)
+
+### Changed
+
+- Sessions started inside a linked Git worktree (`git worktree add`) are grouped in the sidebar under their main repository instead of appearing as a separate project, and each such row shows its branch name. AIReins only reads the worktree's `.git` metadata and does not create, merge or remove worktrees.
+
 ## 0.2.0 (2026-10-19)
 
 ### Added

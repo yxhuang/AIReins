@@ -341,6 +341,8 @@ Claude 额外固定返回四个字段；未显式覆盖时的初始形状如下�
 
 `riskyMode` 在 Claude 的 `bypassPermissions / dontAsk`、Codex 的 `full-access / 旧 never`、Kimi 的 `yolo` 下为 `true`。这是每会话标记，不存在全局 yolo 开关。
 
+可选字段 `worktree: {root, branch?}`：建会话时 cwd（或其上级）的 `.git` 是指向 `<主仓库>/.git/worktrees/<名>` 的文件（`git worktree add` 建的链接工作树）时写入，`root` 为主仓库工作区目录，`branch` 为检出分支（分离 HEAD 时省略）。只读 `.git`、`commondir`、`HEAD` 三个文件，不调用 git；主仓库、子模块和非仓库不带此字段。它随注册表持久化，工作树删除后仍保留；`project-order.json` 与侧栏按 `worktree.root ?? cwd` 归组，旧会话不补算。见 [worktree.ts](worktree.ts)。
+
 ### 派单只读接口
 
 `delegate` 是可选的外部派单工具，AIReins 不要求安装它。实现在 `server/dispatches.ts`，路由在 `server/index.ts`。默认读取 `~/.cache/delegate`，可用

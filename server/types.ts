@@ -173,6 +173,8 @@ export interface SessionRecord {
   agent: AgentKind;
   agentId: string;
   cwd: string;
+  /** cwd 位于 git 链接工作树时，建会话时记下的主仓库与分支；侧栏据此归组 */
+  worktree?: { root: string; branch?: string };
   status: SessionStatus;
   createdAt: string;
   lastActivityAt: string;

@@ -823,6 +823,7 @@ const SessionRow = memo(function SessionRow({
         <AgentIcon agent={session.agent} label={AGENT_LABELS[session.agent]} />
         <SidebarSessionTitle text={title} />
         <span className="row-meta">
+          {session.worktree?.branch && <span className="worktree-branch" title={session.cwd}>{session.worktree.branch}</span>}
           {pending > 0 && (
             <span className="gate-badge" title={t("ui.Sidebar.approvals_pending", { p0: (pending) })}>
               {pending}
