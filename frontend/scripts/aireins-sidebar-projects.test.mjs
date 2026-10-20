@@ -27,6 +27,12 @@ await check("链接工作树会话归到主仓库目录", () => {
     session("main", "/repo"), session("wt", "/tmp/wt-fix", 1, { worktree: { root: "/repo", branch: "fix" } }),
   ]));
   assert.deepEqual(result.projects.map(project => [project.path, project.sessions.map(session => session.id)]), [["/repo", ["main", "wt"]]]);
+  const sessions = [session("wt", "/tmp/wt-fix", 0, { title: "other", worktree: { root: "/srv/repo", branch: "fix-x" } })];
+  for (const query of ["/srv/repo", "fix-x"]) {
+    assert.deepEqual(selectSidebarSections(value(sessions), query).projects.map(project => project.path), ["/srv/repo"], query);
+  }
+  const windows = [session("win", "/tmp/wt-fix", 0, { title: "other", worktree: { root: "/mnt/c/repo/main" } })];
+  assert.equal(selectSidebarSections(value(windows, { meta: { capabilities: { windowsPaths: true } } }), "C:/repo/main").projects.length, 1);
 });
 await check("服务端目录顺序优先且隐藏目录不占可见位置，异常未登记目录临时置前", () => {
   const input = value([session("a-old", "/a", 20), session("b", "/b", 1), session("a-new", "/a", 0), session("c", "/c", 3)],

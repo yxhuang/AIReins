@@ -341,7 +341,7 @@ Claude 额外固定返回四个字段；未显式覆盖时的初始形状如下�
 
 `riskyMode` 在 Claude 的 `bypassPermissions / dontAsk`、Codex 的 `full-access / 旧 never`、Kimi 的 `yolo` 下为 `true`。这是每会话标记，不存在全局 yolo 开关。
 
-可选字段 `worktree: {root, branch?}`：建会话时 cwd（或其上级）的 `.git` 是指向 `<主仓库>/.git/worktrees/<名>` 的文件（`git worktree add` 建的链接工作树）时写入，`root` 为主仓库工作区目录，`branch` 为检出分支（分离 HEAD 时省略）。只读 `.git`、`commondir`、`HEAD` 三个文件，不调用 git；主仓库、子模块和非仓库不带此字段。它随注册表持久化，工作树删除后仍保留；`project-order.json` 与侧栏按 `worktree.root ?? cwd` 归组，旧会话不补算。见 [worktree.ts](worktree.ts)。
+可选字段 `worktree: {root, branch?}`：建会话时 cwd（或其上级）的 `.git` 是指向 `<主仓库>/.git/worktrees/<名>` 的文件（`git worktree add` 建的链接工作树）时写入，`root` 为主仓库工作区目录，`branch` 为检出分支（分离 HEAD 时省略）。cwd 先取真实路径再上溯，`root` 也是真实路径（主仓库会话若经软链别名打开，会与之分成两组）；只读 `.git`、`commondir`、`HEAD` 三个普通文件（FIFO 等特殊文件不读，避免阻塞），不调用 git。主仓库、子模块、非仓库及任何读取错误都不带此字段，也不影响建会话；共享 git 目录名不是 `.git` 的（常见的裸仓库、`--separate-git-dir`）推不出主工作区，同样不带。只看目录名，不读 git config，所以名为 `.git` 的裸仓库或元数据目录会被当作主仓库。它随注册表持久化，工作树删除后仍保留；`project-order.json` 与侧栏按 `worktree.root ?? cwd` 归组，旧会话不补算。见 [worktree.ts](worktree.ts)。
 
 ### 派单只读接口
 

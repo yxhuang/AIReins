@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 0.2.2 (2026-10-20)
+
+### Fixed
+
+- Worktree detection no longer blocks the server on a special `.git` file (such as a FIFO), and permission errors or symlink loops no longer stop a session from starting; they are treated as "not a worktree".
+- A session whose folder is a symlink into a worktree is now recognized. Bare repositories and `--separate-git-dir` repositories, whose main folder cannot be determined, are no longer grouped under the Git metadata folder.
+- Sidebar search also matches a worktree session's main repository path (including its Windows drive form) and branch name.
+
 ## 0.2.1 (2026-10-20)
 
 ### Changed

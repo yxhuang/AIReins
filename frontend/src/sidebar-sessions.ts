@@ -101,6 +101,7 @@ export function selectSidebarSections(value: SidebarValue, query = "") {
   if (!search) return { waiting, pinned, projects, olderProjects };
   const matches = (session: SessionRecord) => [
     sessionTitle(session, value.data?.get(session.id)?.events), session.cwd, projectDisplayPath(session.cwd, windowsPaths),
+    projectDisplayPath(session.worktree?.root ?? "", windowsPaths), session.worktree?.root ?? "", session.worktree?.branch ?? "",
   ].some(text => text.toLowerCase().includes(search));
   const matchingProjects = (items: typeof projects) => items.map(project => ({
     ...project, sessions: project.sessions.filter(matches),
