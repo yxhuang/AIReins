@@ -23,6 +23,7 @@
 </p>
 
 <p align="center">
+  <a href="https://yxhuang.github.io/AIReins/"><b>项目主页</b></a> ·
   <a href="#跑起来">跑起来</a> ·
   <a href="#手机远程">手机远程</a> ·
   <a href="#它是怎么工作的">它是怎么工作的</a> ·

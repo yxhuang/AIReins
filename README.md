@@ -23,6 +23,7 @@
 </p>
 
 <p align="center">
+  <a href="https://yxhuang.github.io/AIReins/"><b>Website</b></a> ·
   <a href="#get-started">Get started</a> ·
   <a href="#remote-access-from-your-phone">Phone access</a> ·
   <a href="#how-it-works">How it works</a> ·
