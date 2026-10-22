@@ -200,7 +200,7 @@ M1 就能满足「随时可以使用 terminal」。M2 之前刷新页面会断�
 REST（沿用现有 `{code, msg, data}` 包装）：
 
 - `GET /api/terminals` → `data: { terminals: TerminalInfo[] }`
-- `POST /api/terminals`，body `{ cwd?: string, shell?: "bash" | "powershell", cols: number, rows: number }` → `data: TerminalInfo`。cwd 缺省或不存在时用 server 的 defaultCwd；可选 `shell: "bash" | "powershell"`（白名单，不收路径；缺省和旧客户端 `"bash"` 均表示本机 Unix 缺省 shell，选择规则见本节「平台兼容」）。powershell 的 cwd 只在 `/mnt/<盘符>` 下才沿用，否则用 Windows 用户目录（从 WSL 追加的 Windows PATH 里取 `/mnt/c/Users/<名>`，取不到用 `/mnt/c`）；powershell 优先 `/mnt/c/Program Files/PowerShell/7/pwsh.exe`，没有则 Windows PowerShell 5.1，参数 `-NoLogo`。`TerminalInfo` 带 `kind`。
+- `POST /api/terminals`，body `{ cwd?: string, shell?: "bash" | "powershell", cols: number, rows: number }` → `data: TerminalInfo`。cwd 缺省或不存在时用 server 的 defaultCwd；可选 `shell: "bash" | "powershell"`（白名单，不收路径；缺省和旧客户端 `"bash"` 均表示本机 Unix 缺省 shell，选择规则见本节「平台兼容」）。powershell 的 cwd 只在 `/mnt/<盘符>` 下才沿用，否则用 Windows 用户目录（从 WSL 追加的 Windows PATH 里取 `/mnt/c/Users/<名>`，取不到用 `/mnt/c`）；powershell 优先 `/mnt/c/Program Files/PowerShell/7/pwsh.exe`，其次 PATH 中 `/mnt/` 目录里的 `pwsh.exe`（Store 版启动别名），都没有则 Windows PowerShell 5.1，参数 `-NoLogo`。`TerminalInfo` 带 `kind`。
 - `POST /api/terminals/:id/kill` → `data: { ok: true }`。结束进程，不是删文件；不用 DELETE 动词。
 
 `TerminalInfo = { id: string, cwd: string, kind: "bash" | "powershell", shell: string, cols: number, rows: number, createdAt: string, exited: boolean, exitCode: number | null }`

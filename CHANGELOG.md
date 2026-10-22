@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Fixed
+
+- Codex workers and configuration probes can use a machine-local `codexProxyUrl` preference even when AIReins starts without proxy variables. The endpoint stays configured while the proxy is offline, so later connections can recover when it returns; failed turns are not replayed automatically.
+
 ## 0.2.2 (2026-10-20)
 
 ### Fixed

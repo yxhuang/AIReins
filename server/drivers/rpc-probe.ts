@@ -13,10 +13,10 @@ export class StdioRpcProbe {
   private nextId = 1;
   private stderr = "";
 
-  constructor(command: string, args: string[], cwd: string) {
+  constructor(command: string, args: string[], cwd: string, env: NodeJS.ProcessEnv = process.env) {
     this.child = spawn(command, args, {
       cwd,
-      env: process.env,
+      env,
       stdio: ["pipe", "pipe", "pipe"],
     });
     createInterface({ input: this.child.stdout }).on("line", (line) => this.handleLine(line));

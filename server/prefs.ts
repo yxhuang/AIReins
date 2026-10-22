@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
-import { workbenchHome } from "./persistence.js";
+import { homedir } from "node:os";
 
 export interface WorkbenchPrefs {
   /** 空闲自动释放 worker 的分钟数；0 = 关闭 */
@@ -15,6 +15,8 @@ export interface WorkbenchPrefs {
   claudeCodeEntrypoint?: "claude-vscode";
   /** 目录浏览器主目录；省略时使用 $HOME。 */
   directoryBrowserHome?: string;
+  /** Codex HTTP(S) proxy endpoint; inherited environment is used when omitted. */
+  codexProxyUrl?: string;
 }
 
 const MAX_IDLE_RELEASE_MINUTES = 1_440;
@@ -22,7 +24,7 @@ const MAX_RETENTION_DAYS = 3_650;
 export const DEFAULT_PREFS: WorkbenchPrefs = { idleReleaseMinutes: 30, retentionDays: 30 };
 
 export function prefsPath(): string {
-  return join(workbenchHome, "prefs.json");
+  return join(process.env.WORKBENCH_HOME || join(homedir(), ".workbench"), "prefs.json");
 }
 
 export function isValidIdleReleaseMinutes(value: unknown): value is number {
@@ -55,10 +57,20 @@ export function loadPrefs(): WorkbenchPrefs {
       ...(validPath(record?.shutdownCommand) ? { shutdownCommand: record!.shutdownCommand as string } : {}),
       ...(record?.claudeCodeEntrypoint === "claude-vscode" ? { claudeCodeEntrypoint: "claude-vscode" as const } : {}),
       ...(validPath(record?.directoryBrowserHome) ? { directoryBrowserHome: record!.directoryBrowserHome as string } : {}),
+      ...(validProxyUrl(record?.codexProxyUrl) ? { codexProxyUrl: record!.codexProxyUrl as string } : {}),
     };
   } catch {
     return { ...DEFAULT_PREFS };
   }
+}
+
+function validProxyUrl(value: unknown): value is string {
+  if (typeof value !== "string" || value.length > 2048 || /\s|\u0000/.test(value)) return false;
+  try {
+    const url = new URL(value);
+    return (url.protocol === "http:" || url.protocol === "https:") && Boolean(url.hostname)
+      && !url.username && !url.password && url.pathname === "/" && !url.search && !url.hash;
+  } catch { return false; }
 }
 
 function validPath(value: unknown): value is string {

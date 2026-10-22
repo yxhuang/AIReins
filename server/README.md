@@ -128,7 +128,7 @@ webhook 地址就是密钥：文件权限设为 600，也不要写进日志或�
 | 能力字段 | WSL2 | 原生 Linux | macOS 实验性 |
 |---|---|---|---|
 | `terminal` | 本机开；远程须显式开启，默认 bash | 同左，默认用户登录 shell | 同左，默认用户登录 shell（回退 zsh） |
-| `windowsDirectoryPicker` | 本机且 PowerShell 7 存在 | false | false |
+| `windowsDirectoryPicker` | 本机且有 PowerShell：优先 PowerShell 7（`Program Files` 安装版或 PATH 中 Windows 目录里的 `pwsh.exe`，含 Store 版），没有则 Windows PowerShell 5.1 | false | false |
 | `appWindow` | 本机且 Windows Chrome 存在 | false | false |
 | `powerOff` | 可执行 `prefs.shutdownCommand` 配置后开启 | 同左 | 同左 |
 | `windowsPaths` | true | false | false |
@@ -178,7 +178,7 @@ macOS 安装时若已安装 Homebrew、stdin/stdout 都是 TTY，缺失或版本
 - `POST /api/sessions`：创建会话，统一配置见下文
 - `POST /api/snapshot/preflight`：建会话前检查 cwd 是否需要及能够自动快照
 - `GET /api/fs/dirs?path=<绝对路径>&files=1`：只读列出一级子目录；省略 `path` 时使用 `$HOME`，可由 `prefs.json` 的 `directoryBrowserHome` 覆盖；带 `files=1` 时同层普通文件一并列出，并为文件/目录补充 `size` 和 `modifiedAt`（Unix 毫秒）。普通文件大小为字节，文件夹大小为 `null`，不递归累加；无法 stat 时字段为 `null`，保留可列出的名称。只对已收集的条目读取元数据，并发最多8个；文件夹/文件分别最多1000个，超限标记 `truncated`。不带 `files=1` 的目录选择模式保持原返回与读取范围。
-- `POST /api/fs/pick-directory`：仅本机监听允许，WSL＋Windows PowerShell 7 可用时 `GET /api/meta` 返回 `capabilities.windowsDirectoryPicker:true`；远程始终为false且POST返回403。JSON `{path?:string}` 指定起点，Windows盘符与 `/mnt/<盘符>` 支持，Linux cwd/空值从 Windows 用户目录打开。通过固定 PowerShell 程序调用现代 WinForms `FolderBrowserDialog`，路径以环境变量传入，窗口前声明 PerMonitorV2 DPI 感知（否则高缩放屏幕上发虚），并临时挂接前台窗口的输入队列后激活（否则只闪任务栏）；单实例，进程内120秒自动退出（后端130秒超时，前端135秒）。取消返回 `{path:null}`；选定盘符目录后映射并检查可浏览性，返回 `{path:"/mnt/c/..."}`；已有窗口409，输入/目录不合法400，调用失败/超时503。保留所有原有 Host/Origin 检查，不启动常驻 Windows 服务。
+- `POST /api/fs/pick-directory`：仅本机监听允许，WSL＋Windows PowerShell 可用时 `GET /api/meta` 返回 `capabilities.windowsDirectoryPicker:true`；远程始终为false且POST返回403。JSON `{path?:string}` 指定起点，Windows盘符与 `/mnt/<盘符>` 支持，Linux cwd/空值从 Windows 用户目录打开。通过 PowerShell 调用 WinForms `FolderBrowserDialog`：PowerShell 7 是新式资源管理器样式窗口，只有 Windows PowerShell 5.1 时是 .NET Framework 的旧式树形窗口（选文件窗口两者相同）；路径以环境变量传入，窗口前尝试声明 PerMonitorV2 DPI 感知（否则高缩放屏幕上发虚；5.1 没有 `SetHighDpiMode`，改调 `SetProcessDpiAwarenessContext`，不检查返回值，失败只降级为发虚、不阻断弹窗），并临时挂接前台窗口的输入队列后激活（否则只闪任务栏）；单实例，进程内120秒自动退出（后端130秒超时，前端135秒）。取消返回 `{path:null}`；选定盘符目录后映射并检查可浏览性，返回 `{path:"/mnt/c/..."}`；已有窗口409，输入/目录不合法400，调用失败/超时503。保留所有原有 Host/Origin 检查，不启动常驻 Windows 服务。
 - `POST /api/fs/pick-file`：右侧文件面板的原生 Windows 浏览入口；与目录选择共享上述本机能力、起点、单窗口、取消及超时规则。调用 WinForms `OpenFileDialog`，`All files (*.*)|*.*` 显示所有扩展名，仅选一个既有文件；返回映射到 `/mnt/<盘符>/...` 并经 `stat` 确认为普通文件的路径。预览仍由工作文件接口独立检查授权根与 realpath，不因原生选择而放宽读取权限。
 - `POST /api/fs/open-system`：仅支持的本机入口可用（`GET /api/meta` 的 `capabilities.systemOpen`）；JSON `{path,root,sessionId?}`，成功返回 `{opened:true}` 表示已交给系统，不表示应用已加载完成。沿用工作文件接口的授权根、逻辑路径/realpath、会话检查，只接受普通文件或目录，不读取内容，不限制网页支持格式或 32 MiB 预览大小。WSL 用可用的 PowerShell 执行固定 ShellExecute 程序，路径经环境变量传递：Windows 盘映射为盘符，Linux 路径映射为当前发行版的 `\\wsl.localhost` 路径；无法无歧义表示的路径拒绝。macOS 调用 `/usr/bin/open`；原生 Linux 不提供（`xdg-open` 可能等应用退出）；无运行时新依赖，启动器 15 秒超时，不等待文档关闭。远程入口始终隐藏并拒绝调用，原有 Host/Origin 和 Tailscale 检查不变。不可用返回 403，路径/授权/会话错误沿用工作文件状态码，启动失败 503；默认程序由操作系统决定，不修改文件关联或 CLI 全局配置。
 - `POST /api/uploads?sessionId=<id>&name=<文件名>`：上传附件，请求体为原始字节（非 multipart）；保存到 `~/.workbench/uploads/<sessionId>/`，返回 `{path,name,size,mimeType}` 同秒同名文件通过 `wx` 原子预留路径，再用该文件描述符写流；并发上传各自保留，失败只删除自己的半截文件。
@@ -621,11 +621,12 @@ worker 的 `processId` 原本就持久化；新启动的 POSIX worker 使用独�
 
 空闲自动释放：服务端每分钟扫一次，对 `idle`、未释放、`now - lastActivityAt ≥ idleReleaseMinutes` 且满足上述前提的会话执行释放；**开着 Remote Control（connected/connecting/reconnecting）的 Claude 会话跳过**（开 RC 就是要手机能随时找到它，释放会断开）。阈值存 `~/.workbench/prefs.json`（`{"idleReleaseMinutes":30}`，缺省 30，0 = 关闭，文件缺失或无效按默认值），经 `GET/PUT /api/prefs` 读写，PUT 立即生效无需重启。
 
-本机专用行为统一放在 `${workbenchHome}/prefs.json`（默认 `~/.workbench/prefs.json`，由 `WORKBENCH_HOME` 覆盖），不写入仓库，也无需额外启动环境变量；托盘和 `aireins start` 读取同一份配置。UI 的 PUT 仅更新空闲释放阈值并保留以下字段；这些字段不在 UI 暴露。修改后重启后端生效。
+本机专用行为统一放在 `${workbenchHome}/prefs.json`（默认 `~/.workbench/prefs.json`，由 `WORKBENCH_HOME` 覆盖），不写入仓库，也无需额外启动环境变量；托盘和 `aireins start` 读取同一份配置。UI 的 PUT 更新空闲释放阈值和额度重置监控开关，并从磁盘重新读取以保留以下本机字段；这些字段不在 UI 暴露。除另行说明外，修改后重启后端生效。
 
 - `shutdownCommand`：可执行文件的绝对路径，公开默认不设。无参数应排定约 60 秒后关机，`abort` 应取消；AIReins 不经 shell 执行。未配置、文件缺失或不可执行时，`GET /api/meta` 的 `capabilities.powerOff` 为 `false`，设置隐藏关机入口，关机 API 返回 503。
 - `claudeCodeEntrypoint`：可选值 `"claude-vscode"`；公开默认不设，交给 Claude CLI 自身默认。Worker 统一带 `WORKBENCH_WORKER=1`，不传旧 `CC_FORK_GUARD`；会按发送前刷新原生记录的机制续接。
 - `directoryBrowserHome`：目录浏览器「主目录」的绝对路径，公开默认 `$HOME`。
+- `codexProxyUrl`：可选 HTTP(S) 代理地址，例如 `"http://localhost:18080"`；只接受 origin（可带末尾 `/`），不接受凭证、路径、查询或 fragment。公开默认不设，未配置时保持继承环境。每次启动 Codex worker 或配置探测进程时从本机偏好读取，将大小写的 HTTP/HTTPS/ALL_PROXY 统一为该地址，并在保留原有 NO_PROXY 规则的同时补齐 loopback；不修改 AR 主进程、Claude/Kimi 或 CLI 全局配置。代理尚未开启时仍传入地址，不做启动时可用性探测。只要代理监听地址不变，稍后开启、重开或切换节点后，同一 Codex 进程的后续连接仍可使用；已结束的失败回合须手动重发，不自动重放请求。修改代理地址后，新的 worker/配置探测使用新值；已运行的 worker 需在空闲时释放并重新发送以按原生 ID 续接，或重新连接。首次安装此后端修复需择时重启 AR。
 
 使用 `resumeSessionId` 成功建出的 session 会同时包含：
 

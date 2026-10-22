@@ -28,11 +28,17 @@ export function tailscaleExecutables(host = platform): string[] {
   return ["tailscale", ...(host === "wsl" ? ["/mnt/c/Program Files/Tailscale/tailscale.exe"]
     : host === "darwin" ? ["/Applications/Tailscale.app/Contents/MacOS/Tailscale"] : [])];
 }
-export function findPowerShell(host = platform, exists: (path: string) => boolean = existsSync): string | undefined {
-  return host === "wsl" ? powershellCandidates.find(exists) : undefined;
+/** pwsh 7 先找 MSI 安装位置，再找 PATH 里的 Windows 目录（Microsoft Store/winget 版只在 WindowsApps 留启动别名）。 */
+export function findPwsh7(host = platform, exists: (path: string) => boolean = existsSync, path = process.env.PATH ?? ""): string | undefined {
+  if (host !== "wsl") return undefined;
+  return [powershellCandidates[0]!, ...path.split(delimiter).filter(dir => dir.startsWith("/mnt/")).map(dir => join(dir, "pwsh.exe"))].find(exists);
 }
-export function windowsPickerAvailable(local: boolean, host = platform, exists: (path: string) => boolean = existsSync): boolean {
-  return local && host === "wsl" && exists(powershellCandidates[0]!);
+export function findPowerShell(host = platform, exists: (path: string) => boolean = existsSync, path = process.env.PATH): string | undefined {
+  return findPwsh7(host, exists, path) ?? (host === "wsl" ? powershellCandidates.slice(1).find(exists) : undefined);
+}
+/** 有 pwsh 7 用新式文件夹窗口，只有 Windows PowerShell 5.1 时退到旧式树形窗口。 */
+export function windowsPickerAvailable(local: boolean, host = platform, exists: (path: string) => boolean = existsSync, path = process.env.PATH): boolean {
+  return local && Boolean(findPowerShell(host, exists, path));
 }
 export function getPlatformCapabilities({ host = platform, local, remoteTerminal = false, chrome = false,
   picker = windowsPickerAvailable(local, host), powershell = Boolean(findPowerShell(host)), shellOpen = false, powerOff = false,

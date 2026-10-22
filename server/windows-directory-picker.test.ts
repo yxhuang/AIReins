@@ -14,6 +14,7 @@ assert.deepEqual(await pickWindowsFile("/mnt/c/Users", async () => '{"path":null
 assert.match(PICKER_SCRIPT, /OpenFileDialog/);
 assert.match(PICKER_SCRIPT, /All files \(\*\.\*\)\|\*\.\*/);
 assert.match(PICKER_SCRIPT, /FolderBrowserDialog/, "新建 cwd 继续支持选目录");
+assert.match(PICKER_SCRIPT, /if \(\$modern\) \{ \$dialog\.AutoUpgradeEnabled/, "5.1 不设 .NET Framework 没有的属性");
 await assert.rejects(pickWindowsFile("", async () => '{"path":"relative"}'), /盘符/);
 await assert.rejects(pickWindowsDirectory("", async () => 'garbage'), /返回无效结果/);
 await assert.rejects(pickWindowsDirectory("", async () => '{"path":"relative"}'), /盘符/);

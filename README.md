@@ -151,7 +151,7 @@ A browser on the same computer connects to `127.0.0.1` directly. Other devices j
 | Port detection | `ss` (iproute2) | `ss` (iproute2) | Built-in `lsof` |
 | At least one AI CLI | Claude Code, Codex or Kimi Code, installed and logged in | Same | Same |
 | Remote access (optional) | Tailscale on Windows, logged in | Tailscale on this machine, logged in | Tailscale on this machine, logged in |
-| Other | Google Chrome on Windows (for the app window) | | |
+| Other | Google Chrome on Windows (for the app window); PowerShell 7 recommended (`winget install --id Microsoft.PowerShell --source winget`) for the modern, sharp Windows folder picker, which falls back to the classic tree dialog with only the built-in 5.1 | | |
 
 `curl` and `python3` (full `aireins status` output) are optional; sending folders with Taildrop also needs `zip`, which the installer does not check. If Node, npm, `rg` or the port tool is missing, the installer names it and prints a fix; for the AI CLIs it only checks that they are installed, so confirm you are logged in yourself.
 

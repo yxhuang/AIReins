@@ -707,7 +707,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       }
       const watch = (input as Record<string, unknown>).codexResetWatch;
       if (watch !== undefined && typeof watch !== "boolean") throw new ApiError(400, 40065, "codexResetWatch 必须是布尔值");
-      const nextPrefs = { ...prefs, idleReleaseMinutes, ...(watch !== undefined ? { codexResetWatch: watch } : {}) };
+      const nextPrefs = { ...loadPrefs(), idleReleaseMinutes, ...(watch !== undefined ? { codexResetWatch: watch } : {}) };
       savePrefs(nextPrefs);
       prefs = nextPrefs;
       codexResets.setEnabled(prefs.codexResetWatch === true);

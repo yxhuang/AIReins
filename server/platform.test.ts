@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { detectPlatform, getPlatformCapabilities, findPowerShell, tailscaleExecutables, vscodeFileUri, windowsPickerAvailable } from "./platform.js";
+import { detectPlatform, getPlatformCapabilities, findPowerShell, findPwsh7, tailscaleExecutables, vscodeFileUri, windowsPickerAvailable } from "./platform.js";
 import { remotePolicy, checkAccess } from "./access.js";
 import { resolveShell } from "./terminals.js";
 for (const [input, expected] of [
@@ -34,6 +34,14 @@ for (const host of ["linux", "darwin"] as const) {
     assert.notEqual(checkAccess(policy, "GET", bad, true), null);
   }
 }
+const storePwsh = "/mnt/c/Users/u/AppData/Local/Microsoft/WindowsApps/pwsh.exe";
+const winPath = ["/usr/bin", "/mnt/c/WINDOWS/System32/WindowsPowerShell/v1.0/", "/mnt/c/Users/u/AppData/Local/Microsoft/WindowsApps"].join(":");
+assert.equal(findPwsh7("wsl", path => path === storePwsh, winPath), storePwsh, "Store 版 pwsh 经 PATH 找到");
+assert.equal(windowsPickerAvailable(true, "wsl", path => path === storePwsh, winPath), true);
+assert.equal(findPowerShell("wsl", path => path === storePwsh || path.endsWith("powershell.exe"), winPath), storePwsh, "Store 版 pwsh 优先于 5.1");
+assert.equal(findPwsh7("wsl", () => true, winPath), "/mnt/c/Program Files/PowerShell/7/pwsh.exe", "MSI 版优先");
+assert.equal(windowsPickerAvailable(true, "wsl", path => path.endsWith("powershell.exe"), winPath), true, "只有 5.1 时用旧式选择窗口兜底");
+assert.equal(windowsPickerAvailable(true, "wsl", () => false, winPath), false, "没有任何 PowerShell 时不开选择窗口");
 for (const host of ["wsl", "linux", "darwin"] as const) {
   const caps = getPlatformCapabilities({ ...installed, local: false, host });
   assert.equal(caps.terminal, false); assert.equal(caps.appWindow, false); assert.equal(caps.windowsDirectoryPicker, false); assert.equal(caps.systemOpen, false);

@@ -153,7 +153,7 @@ AI 越来越能干，能自己读代码、改文件、跑命令，一口气做�
 | 端口检测 | `ss`（iproute2） | `ss`（iproute2） | 系统自带 `lsof` |
 | 至少一家 AI CLI | Claude Code、Codex 或 Kimi Code，已安装并登录 | 同左 | 同左 |
 | 远程访问（可选） | Windows 上的 Tailscale，已登录 | 本机 Tailscale，已登录 | 本机 Tailscale，已登录 |
-| 其他 | Windows 上的 Google Chrome（应用窗口用） | | |
+| 其他 | Windows 上的 Google Chrome（应用窗口用）；建议装 PowerShell 7（`winget install --id Microsoft.PowerShell --source winget`），选目录时弹出新式、清晰的 Windows 窗口，只有系统自带的 5.1 时是旧式树形窗口 | | |
 
 `curl` 和 `python3`（`aireins status` 的完整输出）是可选的；用 Taildrop 发文件夹还需要自己装 `zip`（安装器不检查它）。Node、npm、`rg`、端口工具缺了，安装器会指出来并给出修复提示；AI CLI 只检查装没装，登录状态要你自己确认。
 

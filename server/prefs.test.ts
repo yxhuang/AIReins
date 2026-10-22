@@ -30,11 +30,23 @@ assert.equal(loadPrefs().codexResetWatch, false);
 
 // 0 是合法值（关闭），不能被当成缺省
 const localPrefs = { idleReleaseMinutes: 15, retentionDays: 7, shutdownCommand: "/opt/bin/power-off",
-  claudeCodeEntrypoint: "claude-vscode" as const, directoryBrowserHome: "/opt/projects", codexResetWatch: true };
+  claudeCodeEntrypoint: "claude-vscode" as const, directoryBrowserHome: "/opt/projects", codexResetWatch: true,
+  codexProxyUrl: "http://localhost:18080" };
 savePrefs(localPrefs);
 assert.deepEqual(loadPrefs(), localPrefs, "本机可选字段持久化往返");
-await writeFile(prefsPath(), JSON.stringify({ ...localPrefs, shutdownCommand: "relative", claudeCodeEntrypoint: "invalid", directoryBrowserHome: "/bad\u0000path" }));
+await writeFile(prefsPath(), JSON.stringify({ ...localPrefs, shutdownCommand: "relative", claudeCodeEntrypoint: "invalid", directoryBrowserHome: "/bad\u0000path", codexProxyUrl: "not a URL" }));
 assert.deepEqual(loadPrefs(), { idleReleaseMinutes: 15, retentionDays: 7, codexResetWatch: true }, "拒绝无效的本机字段");
+
+for (const proxy of ["http://localhost:18080", "https://proxy.example:18443/", "http://[::1]:18080"]) {
+  savePrefs({ ...DEFAULT_PREFS, codexProxyUrl: proxy });
+  assert.equal(loadPrefs().codexProxyUrl, proxy);
+}
+for (const proxy of [null, 42, "", "not a URL", "socks5://localhost:18080", "http://user:password@localhost",
+  "http://localhost/path", "http://localhost?query", "http://localhost#hash", "http://localhost:99999",
+  "http://localhost\n", "http://local\u0000host", "x".repeat(2049)]) {
+  await writeFile(prefsPath(), JSON.stringify({ ...DEFAULT_PREFS, codexProxyUrl: proxy }));
+  assert.deepEqual(loadPrefs(), DEFAULT_PREFS, "Invalid proxy must not discard unrelated preferences");
+}
 
 savePrefs({ idleReleaseMinutes: 0, retentionDays: 0 });
 assert.deepEqual(loadPrefs(), { idleReleaseMinutes: 0, retentionDays: 0 });

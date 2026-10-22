@@ -11,7 +11,9 @@
 - **侧栏**：按工作目录自动分组是唯一视图（不做时间/目录切换），组内最近活动在前，组间顺序可拖动、存服务端；不做手建分组。新建会话必须选目录，不做非项目对话、不建聊天专用目录。近 3 天无活动的目录收进「较早的项目」，与会话窗口同用 3 天线；每目录最多显示 8 个会话，运行/待审批/当前会话豁免。会话保留期仍由 `prefs.json` 的 `retentionDays` 决定。
 - **右上角面板顺序**：文件 → 派单 → 终端（手机「⋯」菜单同序）。
 - **派单入口**：会话顶栏、手机徽章即使只有一张派单也先进流程图并高亮，详情只从流程图卡片和历史派单进入。
+- **Windows 选择窗口的 PowerShell**（10-22 定）：优先 PowerShell 7（`Program Files` 安装版 → PATH 中 Windows 目录里的 `pwsh.exe`，含 Store 版），没有则 Windows PowerShell 5.1 兜底（旧式树形文件夹窗口，DPI 改调系统接口）；不统一退回 5.1。README 建议装 7 并给 `winget --source winget` 命令。终端 PowerShell 与「用系统打开」共用同一查找顺序。
 - **机器相关行为**只放 `~/.workbench/prefs.json`（关机命令、Claude 入口身份、目录浏览主目录等），公开默认保持通用。Claude 入口身份公开默认不设（用户 10-17 定），需要会话出现在 VS Code 扩展历史列表的用户自己在 `prefs.json` 设 `claudeCodeEntrypoint`，README 已写明。
+- **Codex 代理**（10-22 定）：本机可在 `prefs.json` 设置 `codexProxyUrl`，worker 和配置探测共用；代理地址持续传入，不按启动瞬间的连通性决定是否启用。代理应用开关和同地址切换节点不依赖 AR 启动环境；失败回合手动重发，不自动重放。公开默认继承环境，机器地址不入库。
 - **隐私防线**：`npm run check:privacy` 全树检查；`npm run hooks:install` 安装版本化 `pre-commit` / `commit-msg` 钩子，本地私人清单通过 `git config --local aireins.privatePatterns /absolute/path/to/private-patterns.txt` 配置，未配置或文件不存在时警告并继续通用检查。CI 用 `--range` 检查 push 的 before..sha（新分支、tag 改从默认分支起算）、PR 的 base..head 全部新提交，并保留全树检查；新增夹具用合成 ID，截图输出到临时目录，二进制和图片跳过自动内容检查，须人工核对可见文字与元数据。
 
 ## 待开发
@@ -24,6 +26,8 @@
 6. **安全低优先建议**（阶段 3 审计已做、两项发现已修；以下遗留建议尚未落实）：新建 `~/.workbench` 目录与日志用私有权限；manifest 内联 SVG 改图片；HTML 预览解析阶段的外部请求隔离。
 7. **i18n 检查补强**（可选）：把“词典片段与变量直接相邻导致丢空格”的检查并入 `check:i18n`。
 8. **测试独立性**（低优先）：`scripts/ci-smoke.mjs:38` 依赖已构建的 `frontend/dist`；`frontend/scripts/smoke-ws.mjs` 默认连本机 8790 真实例并用已登录 CLI。
+
+9. **macOS 系统选择窗口**（可选，用户未定）：现在 macOS 与手机一样只展开网页文件夹列表；可考虑 `osascript` 的 `choose folder`/`choose file`，需真机验证，作者无 Mac。
 
 暂不做：全局快捷键扩展、终端搜索/链接识别、pages 模块、跨会话收件箱。
 

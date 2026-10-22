@@ -605,319 +605,319 @@
     },
     {
       "file": "server/drivers/codex.ts",
-      "line": 78,
+      "line": 79,
       "key": "server.message087",
       "category": "Error"
     },
     {
       "file": "server/drivers/codex.ts",
-      "line": 80,
+      "line": 81,
       "key": "server.message087",
       "category": "Error"
     },
     {
       "file": "server/drivers/codex.ts",
-      "line": 206,
+      "line": 207,
       "key": "server.message091",
       "category": "Error"
     },
     {
       "file": "server/drivers/codex.ts",
-      "line": 225,
+      "line": 226,
       "key": "server.message092",
       "category": "label"
     },
     {
       "file": "server/drivers/codex.ts",
-      "line": 258,
+      "line": 259,
       "key": "server.message063",
       "category": "name"
     },
     {
       "file": "server/drivers/codex.ts",
-      "line": 260,
+      "line": 261,
       "key": "server.message092",
       "category": "label"
     },
     {
       "file": "server/drivers/codex.ts",
-      "line": 272,
+      "line": 273,
       "key": "server.message065",
       "category": "name"
     },
     {
       "file": "server/drivers/codex.ts",
-      "line": 283,
+      "line": 284,
       "key": "server.message093",
       "category": "name"
     },
     {
       "file": "server/drivers/codex.ts",
-      "line": 285,
+      "line": 286,
       "key": "server.message094",
       "category": "description"
     },
     {
       "file": "server/drivers/codex.ts",
-      "line": 286,
+      "line": 287,
       "key": "server.message095",
       "category": "description"
     },
     {
       "file": "server/drivers/codex.ts",
-      "line": 287,
+      "line": 288,
       "key": "server.message096",
       "category": "description"
     },
     {
       "file": "server/drivers/codex.ts",
-      "line": 357,
+      "line": 358,
       "key": "server.message097",
       "category": "Error"
     },
     {
       "file": "server/drivers/codex.ts",
-      "line": 370,
+      "line": 371,
       "key": "server.message098",
       "category": "warning"
     },
     {
       "file": "server/drivers/codex.ts",
-      "line": 414,
+      "line": 415,
       "key": "server.message099",
       "category": "Error"
     },
     {
       "file": "server/drivers/codex.ts",
-      "line": 455,
+      "line": 456,
       "key": "server.message100",
       "category": "Error"
     },
     {
       "file": "server/drivers/codex.ts",
-      "line": 460,
+      "line": 461,
       "key": "server.message101",
       "category": "Error"
     },
     {
       "file": "server/drivers/codex.ts",
-      "line": 467,
+      "line": 468,
       "key": "server.message102",
       "category": "Error"
     },
     {
       "file": "server/drivers/codex.ts",
-      "line": 469,
+      "line": 470,
       "key": "server.message103",
       "category": "message"
     },
     {
       "file": "server/drivers/codex.ts",
-      "line": 471,
+      "line": 472,
       "key": "server.message104",
       "category": "Error"
     },
     {
       "file": "server/drivers/codex.ts",
-      "line": 482,
+      "line": 483,
       "key": "server.message105",
       "category": "message"
     },
     {
       "file": "server/drivers/codex.ts",
-      "line": 482,
+      "line": 483,
       "key": "server.message106",
       "category": "message"
     },
     {
       "file": "server/drivers/codex.ts",
-      "line": 518,
+      "line": 519,
       "key": "server.message107",
       "category": "Error"
     },
     {
       "file": "server/drivers/codex.ts",
-      "line": 519,
+      "line": 520,
       "key": "server.message108",
       "category": "Error"
     },
     {
       "file": "server/drivers/codex.ts",
-      "line": 563,
+      "line": 564,
       "key": "server.message109",
       "category": "withTimeout"
     },
     {
       "file": "server/drivers/codex.ts",
-      "line": 564,
+      "line": 565,
       "key": "server.message110",
       "category": "Error"
     },
     {
       "file": "server/drivers/codex.ts",
-      "line": 606,
+      "line": 607,
       "key": "server.message111",
       "category": "Error"
     },
     {
       "file": "server/drivers/codex.ts",
-      "line": 609,
+      "line": 610,
       "key": "server.message112",
       "category": "Error"
     },
     {
       "file": "server/drivers/codex.ts",
-      "line": 611,
+      "line": 612,
       "key": "server.message113",
       "category": "Error"
     },
     {
       "file": "server/drivers/codex.ts",
-      "line": 615,
+      "line": 616,
       "key": "server.message114",
       "category": "Error"
     },
     {
       "file": "server/drivers/codex.ts",
-      "line": 619,
+      "line": 620,
       "key": "server.message115",
       "category": "Error"
     },
     {
       "file": "server/drivers/codex.ts",
-      "line": 628,
+      "line": 629,
       "key": "server.message116",
       "category": "Error"
     },
     {
       "file": "server/drivers/codex.ts",
-      "line": 630,
+      "line": 631,
       "key": "server.message117",
       "category": "Error"
     },
     {
       "file": "server/drivers/codex.ts",
-      "line": 718,
+      "line": 719,
       "key": "server.message118",
       "category": "warning"
     },
     {
       "file": "server/drivers/codex.ts",
-      "line": 730,
+      "line": 731,
       "key": "server.message119",
       "category": "protocolLimitations"
     },
     {
       "file": "server/drivers/codex.ts",
-      "line": 730,
+      "line": 731,
       "key": "server.message120",
       "category": "protocolLimitations"
     },
     {
       "file": "server/drivers/codex.ts",
-      "line": 751,
+      "line": 752,
       "key": "server.message107",
       "category": "Error"
     },
     {
       "file": "server/drivers/codex.ts",
-      "line": 766,
+      "line": 767,
       "key": "server.message087",
       "category": "Error"
     },
     {
       "file": "server/drivers/codex.ts",
-      "line": 773,
+      "line": 774,
       "key": "server.message087",
       "category": "Error"
     },
     {
       "file": "server/drivers/codex.ts",
-      "line": 781,
+      "line": 782,
       "key": "server.message121",
       "category": "withTimeout"
     },
     {
       "file": "server/drivers/codex.ts",
-      "line": 783,
+      "line": 784,
       "key": "server.message122",
       "category": "withTimeout"
     },
     {
       "file": "server/drivers/codex.ts",
-      "line": 798,
+      "line": 799,
       "key": "server.message087",
       "category": "Error"
     },
     {
       "file": "server/drivers/codex.ts",
-      "line": 817,
+      "line": 818,
       "key": "server.message123",
       "category": "withTimeout"
     },
     {
       "file": "server/drivers/codex.ts",
-      "line": 822,
+      "line": 823,
       "key": "server.message124",
       "category": "Error"
     },
     {
       "file": "server/drivers/codex.ts",
-      "line": 824,
+      "line": 825,
       "key": "server.message125",
       "category": "Error"
     },
     {
       "file": "server/drivers/codex.ts",
-      "line": 827,
+      "line": 828,
       "key": "server.message126",
       "category": "Error"
     },
     {
       "file": "server/drivers/codex.ts",
-      "line": 830,
+      "line": 831,
       "key": "server.message087",
       "category": "Error"
     },
     {
       "file": "server/drivers/codex.ts",
-      "line": 834,
+      "line": 835,
       "key": "server.message127",
       "category": "withTimeout"
     },
     {
       "file": "server/drivers/codex.ts",
-      "line": 842,
+      "line": 843,
       "key": "server.message128",
       "category": "Error"
     },
     {
       "file": "server/drivers/codex.ts",
-      "line": 844,
+      "line": 845,
       "key": "server.message129",
       "category": "withTimeout"
     },
     {
       "file": "server/drivers/codex.ts",
-      "line": 846,
+      "line": 847,
       "key": "server.message130",
       "category": "withTimeout"
     },
     {
       "file": "server/drivers/codex.ts",
-      "line": 867,
+      "line": 868,
       "key": "server.message131",
       "category": "Error"
     },
     {
       "file": "server/drivers/codex.ts",
-      "line": 1143,
+      "line": 1144,
       "key": "server.message132",
       "category": "Error"
     },
     {
       "file": "server/drivers/codex.ts",
-      "line": 1148,
+      "line": 1149,
       "key": "server.message133",
       "category": "Error"
     },
@@ -3095,67 +3095,67 @@
     },
     {
       "file": "server/windows-directory-picker.ts",
-      "line": 23,
+      "line": 22,
       "key": "server.message452",
       "category": "WindowsPickerError"
     },
     {
       "file": "server/windows-directory-picker.ts",
-      "line": 30,
+      "line": 29,
       "key": "server.message453",
       "category": "WindowsPickerError"
     },
     {
       "file": "server/windows-directory-picker.ts",
-      "line": 111,
+      "line": 117,
       "key": "server.message455",
       "category": "WindowsPickerError"
     },
     {
       "file": "server/windows-directory-picker.ts",
-      "line": 111,
+      "line": 117,
       "key": "server.message456",
       "category": "WindowsPickerError"
     },
     {
       "file": "server/windows-directory-picker.ts",
-      "line": 118,
+      "line": 124,
       "key": "server.message457",
       "category": "WindowsPickerError"
     },
     {
       "file": "server/windows-directory-picker.ts",
-      "line": 125,
-      "key": "server.message458",
-      "category": "WindowsPickerError"
-    },
-    {
-      "file": "server/windows-directory-picker.ts",
-      "line": 127,
-      "key": "server.message458",
-      "category": "WindowsPickerError"
-    },
-    {
-      "file": "server/windows-directory-picker.ts",
       "line": 131,
+      "key": "server.message458",
+      "category": "WindowsPickerError"
+    },
+    {
+      "file": "server/windows-directory-picker.ts",
+      "line": 133,
+      "key": "server.message458",
+      "category": "WindowsPickerError"
+    },
+    {
+      "file": "server/windows-directory-picker.ts",
+      "line": 137,
       "key": "server.message459",
       "category": "WindowsPickerError"
     },
     {
       "file": "server/windows-directory-picker.ts",
-      "line": 131,
+      "line": 137,
       "key": "server.message460",
       "category": "WindowsPickerError"
     },
     {
       "file": "server/windows-directory-picker.ts",
-      "line": 136,
+      "line": 142,
       "key": "server.message461",
       "category": "WindowsPickerError"
     },
     {
       "file": "server/windows-directory-picker.ts",
-      "line": 139,
+      "line": 145,
       "key": "server.message462",
       "category": "WindowsPickerError"
     },
@@ -3667,10 +3667,10 @@
     },
     {
       "file": "server/windows-directory-picker.ts",
-      "line": 33,
+      "line": 32,
       "text": "(embedded Windows picker script comments)",
       "reason": "内嵌 PowerShell 的中文仅位于 # 注释；精确模板摘要防止后续用户文案混入，修改脚本后须核查所有中文字面量再更新摘要。",
-      "sha256": "79beaf90743545d2687bdfb78e686a0396b59909a9ae300e039edf2cffe579c8"
+      "sha256": "26f7ad729b8d7471c03c1b02627913340a9bd81525b782837a4e26b491a48017"
     },
     {
       "file": "server/i18n/messages.ts",
