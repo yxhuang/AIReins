@@ -2,7 +2,7 @@ import { t } from "../i18n";
 import { Fragment, type ReactNode, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import type { CommandInfo, DriverConfigOption, Mention, SessionRecord } from "../types";
 import { sessionTitle, truncateDisplayWidth } from "../format";
-import { compactCwd, awayFromLatest, syncStreamViewport, showComposerInterrupt, appendRefineCommand } from "../session-ui";
+import { compactCwd, awayFromLatest, syncStreamViewport, showComposerInterrupt, appendRefineCommand, refineCommandFor } from "../session-ui";
 import { createRenderItemsBuilder } from "../render-items";
 import { filterCommands, noteCommandUsed, parseSideCommand, readRecentCommands, recentInTable, withSideCommands } from "../commands";
 import { extractMentionTokens, mentionQueryAt, mentionTokenEnd } from "../mentions";
@@ -781,7 +781,7 @@ export function Composer({ session, dead, errored }: { session: SessionRecord; d
     return mention ? [mention] : [];
   });
   const table = useMemo(() => withSideCommands(session.agent, commands ?? []), [session.agent, commands]);
-  const refineCommand = session.agent === "claude" ? "/refine-prompt" : session.agent === "codex" ? "$refine-prompt" : null;
+  const refineCommand = refineCommandFor(session.agent);
   const showRefine = !dead && Boolean(text.trim() && refineCommand);
   const appendRefine = () => {
     if (!refineCommand || dead) return;

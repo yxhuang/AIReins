@@ -13,6 +13,7 @@ import { AgentIcon } from "./AgentIcon";
 import { attachmentMention, prepareImageForUpload, type Attachment } from "../attachments";
 import { filterCommands, noteCommandUsed } from "../commands";
 import { newSessionCommands } from "../new-session-input";
+import { appendRefineCommand, refineCommandFor } from "../session-ui";
 
 type NewAttachment = Attachment & { file?: File };
 
@@ -144,6 +145,12 @@ export function NewSessionForm({ children }: { children?: ReactNode }) {
     setMessage(`${slashQuery !== null || !message ? "" : `${message}\n`}/${name} `); setSlashMenuOpen(false); setDismissed(true);
     textareaRef.current?.focus();
   };
+  const refineCommand = refineCommandFor(agent);
+  const appendRefine = () => {
+    if (!refineCommand) return;
+    setMessage(appendRefineCommand(textareaRef.current?.value ?? message, refineCommand)); setSlashMenuOpen(false); setDismissed(true);
+    textareaRef.current?.focus();
+  };
   const submit = async () => {
     if (!cwd.trim() || submitting.current) return;
     const text = message.trim();
@@ -225,24 +232,29 @@ export function NewSessionForm({ children }: { children?: ReactNode }) {
         </div>)}
         {attachments.length > 20 && <span className="mention-missing">{t("ui.SessionView.attachments_and_references_total_over_extra_items_sentence", { p0: 20 })}</span>}
       </div>}
-      <textarea ref={textareaRef} value={message} onChange={event => { setMessage(event.target.value); setDismissed(false); }} rows={3}
-        aria-label={t("ui.Sidebar.first_message_optional")} placeholder={t("ui.Sidebar.first_message_optional")}
-        disabled={busy} onCompositionStart={() => setComposing(true)} onCompositionEnd={() => setComposing(false)}
-        onPaste={event => {
-          if (!attachEnabled || !event.clipboardData.files.length) return;
-          event.preventDefault(); addFiles(Array.from(event.clipboardData.files));
-        }} onKeyDown={event => {
-          if (event.nativeEvent.isComposing || composing || event.keyCode === 229) return;
-          if (slashOpen) {
-            if (event.key === "Escape") { event.preventDefault(); setDismissed(true); setSlashMenuOpen(false); return; }
-            if (event.key === "ArrowDown" || event.key === "ArrowUp") {
-              event.preventDefault(); setSelectedCommand(value => (value + (event.key === "ArrowDown" ? 1 : -1) + filteredCommands.length) % Math.max(1, filteredCommands.length)); return;
+      <div className="composer-input">
+        <textarea ref={textareaRef} value={message} onChange={event => { setMessage(event.target.value); setDismissed(false); }} rows={3}
+          aria-label={t("ui.Sidebar.first_message_optional")} placeholder={t("ui.Sidebar.first_message_optional")}
+          disabled={busy} onCompositionStart={() => setComposing(true)} onCompositionEnd={() => setComposing(false)}
+          onPaste={event => {
+            if (!attachEnabled || !event.clipboardData.files.length) return;
+            event.preventDefault(); addFiles(Array.from(event.clipboardData.files));
+          }} onKeyDown={event => {
+            if (event.nativeEvent.isComposing || composing || event.keyCode === 229) return;
+            if (slashOpen) {
+              if (event.key === "Escape") { event.preventDefault(); setDismissed(true); setSlashMenuOpen(false); return; }
+              if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+                event.preventDefault(); setSelectedCommand(value => (value + (event.key === "ArrowDown" ? 1 : -1) + filteredCommands.length) % Math.max(1, filteredCommands.length)); return;
+              }
+              if ((event.key === "Enter" || event.key === "Tab") && activeCommand) { event.preventDefault(); insertCommand(activeCommand.name); return; }
             }
-            if ((event.key === "Enter" || event.key === "Tab") && activeCommand) { event.preventDefault(); insertCommand(activeCommand.name); return; }
-          }
-          if (event.key !== "Enter" || event.shiftKey) return;
-          event.preventDefault(); void submit();
-        }} />
+            if (event.key !== "Enter" || event.shiftKey) return;
+            event.preventDefault(); void submit();
+          }} />
+        {!busy && refineCommand && message.trim() && <button type="button" className="refine-btn"
+          title={t("ui.SessionView.append", { p0: refineCommand })} aria-label={t("ui.SessionView.append", { p0: refineCommand })}
+          onPointerDown={event => event.preventDefault()} onClick={appendRefine}>R</button>}
+      </div>
       <div className="cfg-bar">
         <button type="button" className="attach-btn" disabled={!attachEnabled}
           title={t("ui.SessionView.add_attachments_photos_screenshots_or_files_on")} aria-label={t("ui.SessionView.add_attachment")}

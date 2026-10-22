@@ -1,3 +1,5 @@
+import type { AgentKind } from "./types";
+
 /** 顶栏路径只保留末两段；完整值仍由组件放进 title。 */
 export function compactCwd(path: string): string {
   const parts = path.split(/[\\/]/).filter(Boolean);
@@ -17,6 +19,11 @@ export function syncStreamViewport(container: { scrollHeight: number; scrollTop:
 
 export function showComposerInterrupt(status: string, supported: boolean | undefined, processId: number | undefined, text: string): boolean {
   return status === "running" && Boolean(supported && processId && text.trim());
+}
+
+/** Kimi 暂无确切 skill 语法，不给 R。 */
+export function refineCommandFor(agent: AgentKind): string | null {
+  return agent === "claude" ? "/refine-prompt" : agent === "codex" ? "$refine-prompt" : null;
 }
 
 /** R 总是追加到末尾；空白输入保持原样，同一命令不重复追加。 */

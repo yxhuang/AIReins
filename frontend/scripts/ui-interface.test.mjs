@@ -18,6 +18,9 @@ test("R：末尾追加 refine 命令，去末尾空白且不重复，空输入�
     assert.equal(appendRefineCommand("", command), "");
     assert.equal(appendRefineCommand(" \n", command), " \n");
   }
+  const { refineCommandFor } = await import("../src/session-ui.ts");
+  assert.deepEqual(["claude", "codex", "kimi"].map(refineCommandFor), ["/refine-prompt", "$refine-prompt", null]);
+  assert.match(source("../src/components/NewSessionForm.tsx"), /refineCommand && message\.trim\(\) && <button type="button" className="refine-btn"/, "新建页有文字时也给 R");
 });
 
 test("D1：单行标题优先占宽，cwd 末两段且不使用 bidi", async () => {
