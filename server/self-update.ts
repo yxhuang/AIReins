@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { proxyEnvironment } from "./proxy-env.js";
 
 const REPO = fileURLToPath(new URL("..", import.meta.url));
 /** 与 scripts/git-hooks/after-pull.sh 的后端判断一致，另加启动脚本 bin/。 */
@@ -38,16 +39,22 @@ export interface UpdateResult {
 }
 
 // shortcut: 超时只杀直接子进程，after-pull 里的 npm 可能继续跑；出现卡死再改成按进程组终止。
-function run(repo: string, command: string, args: string[], timeout = 30_000, env: NodeJS.ProcessEnv = {}): Promise<string> {
+export function runUpdateCommand(repo: string, command: string, args: string[], timeout = 30_000, env: NodeJS.ProcessEnv = {}): Promise<string> {
   return new Promise((resolve, reject) => {
-    execFile(command, args, { cwd: repo, timeout, maxBuffer: 8 << 20, env: { ...process.env, GIT_TERMINAL_PROMPT: "0", ...env } }, (error, stdout, stderr) => {
+    let childEnv: NodeJS.ProcessEnv = { ...process.env, GIT_TERMINAL_PROMPT: "0", ...env };
+    if (command === "git" && (args[0] === "fetch" || args[0] === "push")) {
+      childEnv = proxyEnvironment(childEnv);
+    }
+    execFile(command, args, { cwd: repo, timeout, maxBuffer: 8 << 20, env: childEnv }, (error, stdout, stderr) => {
       const label = command === "git" ? `git ${args.find((arg) => !arg.startsWith("-") && !arg.includes("="))}` : "after-pull.sh";
-      if (error) reject(new SelfUpdateError(500, `${label} 执行失败：${(stderr || stdout || error.message).trim()}`));
+      if (error?.killed) reject(new SelfUpdateError(500, `${label} 执行超时（${timeout / 1000} 秒），请检查网络或代理后重新检查`));
+      else if (error) reject(new SelfUpdateError(500, `${label} 执行失败：${(stderr || stdout || error.message).trim()}`));
       else resolve(stdout + stderr);
     });
   });
 }
 
+const run = runUpdateCommand;
 const git = (repo: string, ...args: string[]) => run(repo, "git", args);
 const lines = (text: string) => text.split("\n").filter(Boolean);
 
@@ -112,7 +119,12 @@ export async function applyUpdate(input: unknown, repo = REPO): Promise<UpdateRe
     }
     // 显式推到被比较的上游（与 @{u} 同源解析），不受 push.default、pushRemote、followTags 等配置影响而多推或推错地方。
     const [remote, merge] = (await git(repo, "for-each-ref", "--format=%(upstream:remotename) %(upstream:remoteref)", `refs/heads/${current.branch}`)).trim().split(" ");
-    output += await run(repo, "git", ["push", "--no-follow-tags", remote, `HEAD:${merge}`], 120_000);
+    try {
+      output += await run(repo, "git", ["push", "--no-follow-tags", remote, `HEAD:${merge}`], 120_000);
+    } catch (error) {
+      if (!(error instanceof SelfUpdateError)) throw error;
+      throw new SelfUpdateError(error.status, `本地提交已保留；推送未完成。重新检查后可再次推送，无需重复提交。${error.message}`);
+    }
     return { action, output: output.trim(), restart: false };
   } finally {
     applying = false;

@@ -1,3 +1,4 @@
+import { proxyEnvironment } from "../proxy-env.js";
 import { randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
 import { closeSync, fstatSync, openSync, readFileSync, readSync, watch, type FSWatcher } from "node:fs";
@@ -114,7 +115,7 @@ export function updateClaudeModelLabels(models: unknown): void {
 /** Startup probe sends only initialize, with no user turn. Failure leaves static labels intact. */
 export async function probeClaudeModelLabels(cwd: string): Promise<void> {
   await new Promise<void>((resolve) => {
-    const env = { ...process.env };
+    const env = proxyEnvironment();
     delete env.CLAUDE_CODE_ENTRYPOINT;
     const child = spawn("claude", [
       "-p", "--input-format", "stream-json", "--output-format", "stream-json",

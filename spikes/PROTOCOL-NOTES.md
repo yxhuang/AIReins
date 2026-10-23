@@ -1,5 +1,9 @@
 # M0：三家 CLI 协议 spike 与报文抓取
 
+## CLI 子进程代理（2026-10-23）
+
+AR 通过 `proxyEnvironment` 在启动时为 Claude stream-json、Codex app-server、Kimi ACP 及其探测进程注入本机偏好 `proxyUrl`（旧名 `codexProxyUrl` 为后备）。三种会话统一经过 `BaseDriver.spawnProcess`；Kimi 的 `terminal/create` 由 AR 代为 spawn，也在合并 ACP env 后应用同一偏好，避免终端里的网络命令遗漏代理。配置离线仍传入、不自动重放失败回合，不改变协议消息或原生会话身份。NO_PROXY 的合并规则和各 HTTP 库限制见 `server/README.md`「本机专用行为」。本节是环境注入契约，尚未在当前运行实例重启后做真实 CLI 联网验收。
+
 ## 运行中插话探针（2026-10-01，steering）
 
 版本：Claude Code 2.1.285、Codex 0.159.3、Kimi 2.1.1。cwd 为 `/tmp/wb-steer-gxjL0R/{claude,codex,kimi}`，不触碰运行中的 AIReins；原始抓包未随仓库公开。NDJSON 的 `captureLine` 指向原始捕获行；思考内容、签名和凭证字段省略，Kimi 未完成的工具参数流省略。

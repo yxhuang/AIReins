@@ -1,3 +1,4 @@
+import { proxyEnvironment } from "./proxy-env.js";
 import { spawn } from "node:child_process";
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { homedir, hostname } from "node:os";
@@ -19,7 +20,7 @@ let cached: Promise<Record<string, unknown>> | undefined;
 function probeVersion(command: string): Promise<string> {
   return new Promise((resolve) => {
     const child = spawn(command, ["--version"], {
-      env: process.env,
+      env: proxyEnvironment(),
       stdio: ["ignore", "pipe", "pipe"],
     });
     let output = "";

@@ -1,14 +1,15 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { applyUpdate, defaultCommitMessage, SelfUpdateError, updateStatus } from "./self-update.js";
+import { applyUpdate, defaultCommitMessage, runUpdateCommand, SelfUpdateError, updateStatus } from "./self-update.js";
+import { DEFAULT_PREFS, savePrefs } from "./prefs.js";
 
 // 夹具：裸远端 + 另一个推送用克隆 + 被更新的克隆（带 after-pull.sh，build 只落一个标记文件）。
 const base = mkdtempSync(join(tmpdir(), "aireins-self-update-"));
 writeFileSync(join(base, "gitconfig"), "[user]\n\tname = Fixture\n\temail = fixture@example.test\n");
-Object.assign(process.env, { GIT_CONFIG_GLOBAL: join(base, "gitconfig"), GIT_CONFIG_NOSYSTEM: "1", LANG: "C", LC_ALL: "C" });
+Object.assign(process.env, { WORKBENCH_HOME: base, GIT_CONFIG_GLOBAL: join(base, "gitconfig"), GIT_CONFIG_NOSYSTEM: "1", LANG: "C", LC_ALL: "C" });
 const remote = join(base, "remote.git"), other = join(base, "other"), repo = join(base, "repo");
 const git = (cwd: string, ...args: string[]) => {
   const result = spawnSync("git", args, { cwd, encoding: "utf8" });
@@ -88,6 +89,57 @@ result = await applyUpdate({ ...status, message: "" }, repo);
 assert.equal(result.action, "push");
 assert.equal(git(remote, "log", "-1", "--format=%s", "main"), "chore: update notes.md");
 assert.equal((await updateStatus(repo)).action, "none");
+
+// Exercise the actual child environment; all network commands still use the local bare fixture.
+const realGit = spawnSync("which", ["git"], { encoding: "utf8" }).stdout.trim();
+assert.ok(realGit);
+const bin = join(base, "bin"), calls = join(base, "git-calls.jsonl");
+mkdirSync(bin);
+const proxyKeys = ["http_proxy", "https_proxy", "HTTP_PROXY", "HTTPS_PROXY", "all_proxy", "ALL_PROXY"];
+const inherited = Object.fromEntries(proxyKeys.map(key => [key, process.env[key]]));
+writeFileSync(join(bin, "git"), `#!/usr/bin/env node
+const { appendFileSync, writeSync } = require('node:fs');
+const { spawnSync } = require('node:child_process');
+const args = process.argv.slice(2);
+appendFileSync(${JSON.stringify(calls)}, JSON.stringify({args, env: Object.fromEntries(${JSON.stringify(proxyKeys)}.map(k => [k, process.env[k]]))}) + '\\n');
+if (args[0] === 'push' && process.env.AIREINS_FIXTURE_PUSH_FAIL === '1') {
+  writeSync(2, 'fixture push rejected'); process.exit(1);
+}
+const result = spawnSync(${JSON.stringify(realGit)}, args, {stdio: 'inherit'});
+process.exit(result.status ?? 1);
+`, { mode: 0o700 });
+const originalPath = process.env.PATH;
+process.env.PATH = `${bin}:${originalPath}`;
+const recorded = () => readFileSync(calls, "utf8").trim().split("\n").map(line => JSON.parse(line));
+savePrefs(DEFAULT_PREFS);
+await updateStatus(repo);
+assert.deepEqual(recorded().find(call => call.args[0] === "fetch").env, JSON.parse(JSON.stringify(inherited)), "No preference preserves the inherited environment");
+savePrefs({ ...DEFAULT_PREFS, codexProxyUrl: "http://localhost:18082", proxyUrl: "http://localhost:18083" });
+await updateStatus(repo);
+assert.ok(proxyKeys.every(key => recorded().filter(call => call.args[0] === "fetch").at(-1).env[key] === "http://localhost:18083"));
+assert.deepEqual(recorded().filter(call => call.args[0] === "status").at(-1).env, JSON.parse(JSON.stringify(inherited)), "Local commands keep their original environment");
+savePrefs({ ...DEFAULT_PREFS, proxyUrl: "http://localhost:18084" });
+await updateStatus(repo);
+assert.ok(proxyKeys.every(key => recorded().filter(call => call.args[0] === "fetch").at(-1).env[key] === "http://localhost:18084"), "Every check reads the current proxy preference");
+assert.deepEqual(Object.fromEntries(proxyKeys.map(key => [key, process.env[key]])), inherited);
+
+writeFileSync(join(repo, "retry.md"), "keep local commit\n");
+status = await updateStatus(repo);
+process.env.AIREINS_FIXTURE_PUSH_FAIL = "1";
+await assert.rejects(applyUpdate(status, repo), error => error instanceof SelfUpdateError
+  && /本地提交已保留/.test(error.message) && /fixture push rejected/.test(error.message));
+const savedHead = git(repo, "rev-parse", "HEAD");
+assert.notEqual(savedHead, status.head);
+status = await updateStatus(repo);
+assert.equal(status.ahead, 1);
+assert.deepEqual(status.changes, []);
+delete process.env.AIREINS_FIXTURE_PUSH_FAIL;
+await applyUpdate(status, repo);
+assert.equal(git(remote, "rev-parse", "main"), savedHead, "Retry pushes the saved commit without creating another one");
+assert.ok(proxyKeys.every(key => recorded().filter(call => call.args[0] === "push").at(-1).env[key] === "http://localhost:18084"));
+await assert.rejects(runUpdateCommand(repo, process.execPath, ["-e", "setTimeout(() => {}, 10000)"], 50),
+  error => error instanceof SelfUpdateError && /执行超时（0.05 秒）/.test(error.message));
+process.env.PATH = originalPath;
 
 // 两边都有新提交：只报告分叉，不执行。
 commit(other, "docs/a.md", "remote side");

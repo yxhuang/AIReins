@@ -1,3 +1,4 @@
+import { proxyEnvironment } from "./proxy-env.js";
 import { execFile } from "node:child_process";
 
 export interface ClaudePlugin {
@@ -12,7 +13,7 @@ type PluginRunner = (cwd: string, args: string[]) => Promise<unknown>;
 
 const runPluginCommand: PluginRunner = (cwd, args) => new Promise((resolve, reject) => {
   execFile("claude", ["plugin", ...args], {
-    cwd, timeout: 15_000, killSignal: "SIGKILL", maxBuffer: 4 * 1024 * 1024,
+    cwd, env: proxyEnvironment(), timeout: 15_000, killSignal: "SIGKILL", maxBuffer: 4 * 1024 * 1024,
   }, (error, stdout, stderr) => {
     if (error) return reject(new Error(`claude plugin ${args[0]} 失败：${stderr.trim() || error.message}`));
     try {

@@ -1,3 +1,4 @@
+import { proxyEnvironment } from "../proxy-env.js";
 import { createReadStream, readFileSync } from "node:fs";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { basename, join } from "node:path";
@@ -226,7 +227,7 @@ export async function cleanupKimiProbeSession(sessionId: string, root = kimiHist
 }
 
 export async function probeKimiConfigSchema(cwd: string): Promise<DriverConfigSchema> {
-  const probe = new StdioRpcProbe("kimi", ["acp"], cwd);
+  const probe = new StdioRpcProbe("kimi", ["acp"], cwd, proxyEnvironment());
   let sessionId = "";
   try {
     await probe.request("initialize", {
@@ -667,7 +668,7 @@ export class KimiDriver extends BaseDriver {
     const outputLimit = Math.max(1, Number(params.outputByteLimit) || 4 * 1024 * 1024);
     const processHandle = spawn(String(params.command), args, {
       cwd: typeof params.cwd === "string" ? params.cwd : this.cwd,
-      env,
+      env: proxyEnvironment(env),
       detached: POSIX_PROCESS_GROUPS,
       stdio: ["pipe", "pipe", "pipe"],
     });

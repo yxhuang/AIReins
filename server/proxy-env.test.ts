@@ -8,14 +8,15 @@ import type { DriverCallbacks } from "./types.js";
 
 const fixture = await mkdtemp(join(tmpdir(), "aireins-codex-proxy-"));
 const keys = ["http_proxy", "https_proxy", "HTTP_PROXY", "HTTPS_PROXY", "all_proxy", "ALL_PROXY"];
-const changed = [...keys, "no_proxy", "NO_PROXY", "PATH", "WORKBENCH_HOME", "AIREINS_PROXY_FIXTURE_LOG"];
+const changed = [...keys, "no_proxy", "NO_PROXY", "PATH", "WORKBENCH_HOME", "AIREINS_PROXY_FIXTURE_LOG", "WORKBENCH_KIMI_HISTORY_DIR"];
 const original = Object.fromEntries(changed.map(key => [key, process.env[key]]));
 process.env.WORKBENCH_HOME = fixture;
 const { DEFAULT_PREFS, loadPrefs, savePrefs } = await import("./prefs.js");
-const { codexEnvironment } = await import("./codex-env.js");
+const { proxyEnvironment } = await import("./proxy-env.js");
 const { CodexDriver, probeCodexConfigSchema } = await import("./drivers/codex.js");
 const server = createServer((_request, response) => { response.end("proxy-online"); });
 let driver: InstanceType<typeof CodexDriver> | undefined;
+const extraDrivers: { stop(): Promise<void> }[] = [];
 
 async function listen(port: number): Promise<number> {
   server.listen(port, "127.0.0.1");
@@ -27,23 +28,25 @@ async function closeProxy(): Promise<void> {
 }
 
 try {
-  const inherited = { https_proxy: "http://inherited.example:18080", NO_PROXY: "internal.example", EXTRA: "retained" };
-  assert.deepEqual(codexEnvironment(inherited), inherited, "No preference preserves the original environment");
+  const inherited = { https_proxy: "http://inherited.example:18080", no_proxy: " lower.example,localhost  lower.example ", NO_PROXY: "internal.example,localhost", EXTRA: "retained" };
+  assert.deepEqual(proxyEnvironment(inherited), inherited, "No preference preserves the original environment");
+  savePrefs({ ...DEFAULT_PREFS, codexProxyUrl: "http://legacy.example:18080" });
+  assert.equal(proxyEnvironment({}).https_proxy, "http://legacy.example:18080", "Published alias remains supported");
   const proxyPort = await listen(0);
   const proxy = `http://127.0.0.1:${proxyPort}`;
   await closeProxy();
-  savePrefs({ ...DEFAULT_PREFS, codexProxyUrl: proxy });
-  const selected = codexEnvironment(inherited);
+  savePrefs({ ...DEFAULT_PREFS, codexProxyUrl: "http://legacy.example:18080", proxyUrl: proxy });
+  const selected = proxyEnvironment(inherited);
   for (const key of keys) assert.equal(selected[key], proxy);
   assert.equal(selected.no_proxy, selected.NO_PROXY);
   assert.equal(selected.EXTRA, "retained");
-  assert.deepEqual(new Set(selected.no_proxy!.split(",")), new Set(["localhost", "127.0.0.1", "::1", "internal.example"]));
+  assert.deepEqual(new Set(selected.no_proxy!.split(",")), new Set(["localhost", "127.0.0.1", "::1", "100.64.0.0/10", ".ts.net", "lower.example", "internal.example"]));
   assert.equal(inherited.https_proxy, "http://inherited.example:18080", "Parent environment stays untouched");
   const { workbenchHome } = await import("./persistence.js");
   assert.equal(workbenchHome, fixture, "Proxy setup must not redirect persistence outside the test fixture");
-  savePrefs({ ...loadPrefs(), codexProxyUrl: "https://proxy.example:18443" });
-  assert.equal(codexEnvironment({}).https_proxy, "https://proxy.example:18443", "New children read the current preference");
-  savePrefs({ ...loadPrefs(), codexProxyUrl: proxy });
+  savePrefs({ ...loadPrefs(), proxyUrl: "https://proxy.example:18443" });
+  assert.equal(proxyEnvironment({}).https_proxy, "https://proxy.example:18443", "New children read the current preference");
+  savePrefs({ ...loadPrefs(), proxyUrl: proxy });
 
   // A local app-server fixture exercises real process inheritance without a logged-in CLI.
   const logPath = join(fixture, "children.jsonl");
@@ -107,8 +110,64 @@ lines.on('close', () => process.exit(0));
     assert.equal(child.env.no_proxy, child.env.NO_PROXY);
   }
   for (const key of keys) assert.equal(process.env[key], undefined, "AR environment must stay unchanged");
-  console.log("Codex proxy environment and offline/online process tests passed");
+  // Exercise the same spawn entry with the concrete Claude/Kimi drivers, without reading CLI settings.
+  const { ClaudeDriver, probeClaudeModelLabels } = await import("./drivers/claude.js");
+  const { KimiDriver, probeKimiConfigSchema } = await import("./drivers/kimi.js");
+  const { ClaudePlugins } = await import("./claude-plugins.js");
+  process.env.WORKBENCH_KIMI_HISTORY_DIR = fixture;
+  for (const name of ["claude", "kimi"]) {
+    await writeFile(join(fixture, name), `#!/usr/bin/env node
+import { appendFileSync } from 'node:fs';
+import { createInterface } from 'node:readline';
+const keys = ${JSON.stringify([...keys, "no_proxy", "NO_PROXY"])};
+appendFileSync(process.env.AIREINS_PROXY_FIXTURE_LOG, JSON.stringify({name: '${name}', args: process.argv.slice(2),
+  env: Object.fromEntries(keys.map(key => [key, process.env[key]]))}) + '\\n');
+if (process.argv.includes('--version')) { console.log('fixture-version'); process.exit(0); }
+if (process.argv[2] === 'plugin') { console.log('[]'); process.exit(0); }
+const lines = createInterface({input: process.stdin});
+lines.on('line', line => {
+  const m = JSON.parse(line);
+  if (m.type === 'control_request') console.log(JSON.stringify({type: 'control_response', response: {
+    subtype: 'success', request_id: m.request_id, response: {models: [], commands: []}}}));
+  else if (m.id !== undefined) console.log(JSON.stringify({jsonrpc: '2.0', id: m.id, result: {configOptions: []}}));
+});
+lines.on('close', () => process.exit(0));
+`, { mode: 0o700 });
+  }
+  for (const Driver of [ClaudeDriver, KimiDriver]) {
+    const childDriver = new Driver({ sessionId: "proxy-fixture", cwd: fixture, config: {}, callbacks });
+    extraDrivers.push(childDriver);
+    const exposed = childDriver as unknown as { spawnProcess(command: string, args: string[]): void };
+    exposed.spawnProcess(childDriver.kind, ["--version"]);
+    await once(childDriver.child!, "close");
+  }
+  await probeClaudeModelLabels(fixture);
+  await probeKimiConfigSchema(fixture);
+  await new ClaudePlugins().list(fixture);
+  // ACP terminals are spawned by AR, not by the Kimi worker.
+  const kimi = new KimiDriver({ sessionId: "terminal-fixture", cwd: fixture, config: {}, callbacks });
+  extraDrivers.push(kimi);
+  const terminal = kimi as any;
+  terminal.replyResult = () => undefined;
+  terminal.handleCreateTerminal(1, { command: "kimi", args: ["--version"],
+    env: [{name: "https_proxy", value: "http://stale.example:18080"}, {name: "no_proxy", value: "acp.example"}] });
+  await [...terminal.terminals.values()][0].done;
+  const { getMeta } = await import("./meta.js");
+  await getMeta();
+  const extraChildren = (await readFile(logPath, "utf8")).trim().split("\n").map(line => JSON.parse(line)).slice(2);
+  assert.equal(extraChildren.length, 12, "Two drivers, two probes, plugin command, ACP terminal, and six meta children");
+  for (const child of extraChildren) {
+    for (const key of keys) assert.equal(child.env[key], proxy);
+    assert.equal(child.env.no_proxy, child.env.NO_PROXY);
+    for (const rule of ["localhost", "127.0.0.1", "::1", "100.64.0.0/10", ".ts.net"]) {
+      assert.ok(child.env.no_proxy.split(",").includes(rule));
+    }
+  }
+  assert.ok(extraChildren.some(child => child.env.no_proxy.includes("acp.example")), "ACP rules survive merging");
+  for (const key of keys) assert.equal(process.env[key], undefined, "All entry points leave AR environment unchanged");
+  console.log("Unified proxy: aliases, merge, three drivers, probes, plugin, ACP terminal and offline/online tests passed");
 } finally {
+  for (const extra of extraDrivers) await extra.stop();
   await driver?.stop();
   await closeProxy();
   for (const key of changed) {

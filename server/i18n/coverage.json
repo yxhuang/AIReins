@@ -113,43 +113,43 @@
     },
     {
       "file": "server/claude-plugins.ts",
-      "line": 17,
+      "line": 18,
       "key": "server.message017",
       "category": "Error"
     },
     {
       "file": "server/claude-plugins.ts",
-      "line": 21,
+      "line": 22,
       "key": "server.message018",
       "category": "String"
     },
     {
       "file": "server/claude-plugins.ts",
-      "line": 39,
+      "line": 40,
       "key": "server.message019",
       "category": "Error"
     },
     {
       "file": "server/claude-plugins.ts",
-      "line": 57,
+      "line": 58,
       "key": "server.message020",
       "category": "Error"
     },
     {
       "file": "server/claude-plugins.ts",
-      "line": 59,
+      "line": 60,
       "key": "server.message021",
       "category": "Error"
     },
     {
       "file": "server/claude-plugins.ts",
-      "line": 61,
+      "line": 62,
       "key": "server.message022",
       "category": "Error"
     },
     {
       "file": "server/claude-plugins.ts",
-      "line": 65,
+      "line": 66,
       "key": "server.message023",
       "category": "Error"
     },
@@ -341,265 +341,265 @@
     },
     {
       "file": "server/drivers/base.ts",
-      "line": 174,
+      "line": 175,
       "key": "server.message054",
       "category": "Error"
     },
     {
       "file": "server/drivers/base.ts",
-      "line": 216,
+      "line": 217,
       "key": "server.message055",
       "category": "Error"
     },
     {
       "file": "server/drivers/base.ts",
-      "line": 227,
+      "line": 228,
       "key": "server.message055",
       "category": "Error"
     },
     {
       "file": "server/drivers/base.ts",
-      "line": 232,
+      "line": 233,
       "key": "server.message056",
       "category": "Error"
     },
     {
       "file": "server/drivers/base.ts",
-      "line": 250,
+      "line": 251,
       "key": "server.message057",
       "category": "other"
     },
     {
       "file": "server/drivers/base.ts",
-      "line": 259,
+      "line": 260,
       "key": "server.message058",
       "category": "Error"
     },
     {
       "file": "server/drivers/claude.ts",
-      "line": 54,
+      "line": 55,
       "key": "server.message059",
       "category": "fable"
     },
     {
       "file": "server/drivers/claude.ts",
-      "line": 55,
+      "line": 56,
       "key": "server.message060",
       "category": "opus"
     },
     {
       "file": "server/drivers/claude.ts",
-      "line": 56,
+      "line": 57,
       "key": "server.message061",
       "category": "sonnet"
     },
     {
       "file": "server/drivers/claude.ts",
-      "line": 57,
+      "line": 58,
       "key": "server.message062",
       "category": "haiku"
     },
     {
       "file": "server/drivers/claude.ts",
-      "line": 156,
+      "line": 157,
       "key": "server.message063",
       "category": "name"
     },
     {
       "file": "server/drivers/claude.ts",
-      "line": 158,
-      "key": "server.message064",
-      "category": "label"
-    },
-    {
-      "file": "server/drivers/claude.ts",
       "line": 159,
-      "key": "server.message059",
+      "key": "server.message064",
       "category": "label"
     },
     {
       "file": "server/drivers/claude.ts",
       "line": 160,
-      "key": "server.message060",
+      "key": "server.message059",
       "category": "label"
     },
     {
       "file": "server/drivers/claude.ts",
       "line": 161,
-      "key": "server.message061",
+      "key": "server.message060",
       "category": "label"
     },
     {
       "file": "server/drivers/claude.ts",
       "line": 162,
+      "key": "server.message061",
+      "category": "label"
+    },
+    {
+      "file": "server/drivers/claude.ts",
+      "line": 163,
       "key": "server.message062",
       "category": "label"
     },
     {
       "file": "server/drivers/claude.ts",
-      "line": 170,
+      "line": 171,
       "key": "server.message065",
       "category": "name"
     },
     {
       "file": "server/drivers/claude.ts",
-      "line": 172,
+      "line": 173,
       "key": "server.message064",
       "category": "label"
     },
     {
       "file": "server/drivers/claude.ts",
-      "line": 181,
+      "line": 182,
       "key": "server.message066",
       "category": "name"
     },
     {
       "file": "server/drivers/claude.ts",
-      "line": 344,
+      "line": 345,
       "key": "server.message067",
       "category": "warning"
     },
     {
       "file": "server/drivers/claude.ts",
-      "line": 346,
+      "line": 347,
       "key": "server.message068",
       "category": "Error"
     },
     {
       "file": "server/drivers/claude.ts",
-      "line": 358,
+      "line": 359,
       "key": "server.message069",
       "category": "Error"
     },
     {
       "file": "server/drivers/claude.ts",
-      "line": 410,
+      "line": 411,
       "key": "server.message070",
       "category": "Error"
     },
     {
       "file": "server/drivers/claude.ts",
-      "line": 413,
+      "line": 414,
       "key": "server.message071",
       "category": "Error"
     },
     {
       "file": "server/drivers/claude.ts",
-      "line": 494,
+      "line": 495,
       "key": "server.message072",
       "category": "Error"
     },
     {
       "file": "server/drivers/claude.ts",
-      "line": 498,
+      "line": 499,
       "key": "server.message073",
       "category": "Error"
     },
     {
       "file": "server/drivers/claude.ts",
-      "line": 500,
+      "line": 501,
       "key": "server.message074",
       "category": "Error"
     },
     {
       "file": "server/drivers/claude.ts",
-      "line": 503,
+      "line": 504,
       "key": "server.message075",
       "category": "Error"
     },
     {
       "file": "server/drivers/claude.ts",
-      "line": 506,
+      "line": 507,
       "key": "server.message076",
       "category": "Error"
     },
     {
       "file": "server/drivers/claude.ts",
-      "line": 514,
+      "line": 515,
       "key": "server.message077",
       "category": "Error"
     },
     {
       "file": "server/drivers/claude.ts",
-      "line": 521,
+      "line": 522,
       "key": "server.message078",
       "category": "message"
     },
     {
       "file": "server/drivers/claude.ts",
-      "line": 603,
+      "line": 604,
       "key": "server.message079",
       "category": "warning"
     },
     {
       "file": "server/drivers/claude.ts",
-      "line": 623,
+      "line": 624,
       "key": "server.message080",
       "category": "String"
     },
     {
       "file": "server/drivers/claude.ts",
-      "line": 643,
+      "line": 644,
       "key": "server.message081",
       "category": "String"
     },
     {
       "file": "server/drivers/claude.ts",
-      "line": 650,
+      "line": 651,
       "key": "server.message082",
       "category": "Error"
     },
     {
       "file": "server/drivers/claude.ts",
-      "line": 668,
+      "line": 669,
       "key": "server.message083",
       "category": "Error"
     },
     {
       "file": "server/drivers/claude.ts",
-      "line": 678,
+      "line": 679,
       "key": "server.message084",
       "category": "Error"
     },
     {
       "file": "server/drivers/claude.ts",
-      "line": 716,
+      "line": 717,
       "key": "server.message085",
       "category": "error"
     },
     {
       "file": "server/drivers/claude.ts",
-      "line": 847,
+      "line": 848,
       "key": "server.message086",
       "category": "Error"
     },
     {
       "file": "server/drivers/claude.ts",
-      "line": 860,
+      "line": 861,
       "key": "server.message087",
       "category": "Error"
     },
     {
       "file": "server/drivers/claude.ts",
-      "line": 872,
+      "line": 873,
       "key": "server.message087",
       "category": "Error"
     },
     {
       "file": "server/drivers/claude.ts",
-      "line": 903,
+      "line": 904,
       "key": "server.message088",
       "category": "Error"
     },
     {
       "file": "server/drivers/claude.ts",
-      "line": 929,
+      "line": 930,
       "key": "server.message089",
       "category": "Error"
     },
     {
       "file": "server/drivers/claude.ts",
-      "line": 930,
+      "line": 931,
       "key": "server.message090",
       "category": "Error"
     },
@@ -923,145 +923,145 @@
     },
     {
       "file": "server/drivers/kimi.ts",
-      "line": 145,
+      "line": 146,
       "key": "server.message063",
       "category": "model"
     },
     {
       "file": "server/drivers/kimi.ts",
-      "line": 146,
+      "line": 147,
       "key": "server.message065",
       "category": "effort"
     },
     {
       "file": "server/drivers/kimi.ts",
-      "line": 147,
+      "line": 148,
       "key": "server.message066",
       "category": "permissionMode"
     },
     {
       "file": "server/drivers/kimi.ts",
-      "line": 301,
+      "line": 302,
       "key": "server.message141",
       "category": "Error"
     },
     {
       "file": "server/drivers/kimi.ts",
-      "line": 322,
+      "line": 323,
       "key": "server.message142",
       "category": "Error"
     },
     {
       "file": "server/drivers/kimi.ts",
-      "line": 330,
+      "line": 331,
       "key": "server.message143",
       "category": "Error"
     },
     {
       "file": "server/drivers/kimi.ts",
-      "line": 365,
+      "line": 366,
       "key": "server.message144",
       "category": "Error"
     },
     {
       "file": "server/drivers/kimi.ts",
-      "line": 389,
+      "line": 390,
       "key": "server.message145",
       "category": "this.cancelQueuedPrompts"
     },
     {
       "file": "server/drivers/kimi.ts",
-      "line": 399,
+      "line": 400,
       "key": "server.message146",
       "category": "message"
     },
     {
       "file": "server/drivers/kimi.ts",
-      "line": 410,
+      "line": 411,
       "key": "server.message147",
       "category": "Error"
     },
     {
       "file": "server/drivers/kimi.ts",
-      "line": 412,
+      "line": 413,
       "key": "server.message148",
       "category": "Error"
     },
     {
       "file": "server/drivers/kimi.ts",
-      "line": 418,
+      "line": 419,
       "key": "server.message149",
       "category": "Error"
     },
     {
       "file": "server/drivers/kimi.ts",
-      "line": 423,
+      "line": 424,
       "key": "server.message150",
       "category": "Error"
     },
     {
       "file": "server/drivers/kimi.ts",
-      "line": 428,
+      "line": 429,
       "key": "server.message151",
       "category": "Error"
     },
     {
       "file": "server/drivers/kimi.ts",
-      "line": 430,
+      "line": 431,
       "key": "server.message152",
       "category": "Error"
     },
     {
       "file": "server/drivers/kimi.ts",
-      "line": 438,
+      "line": 439,
       "key": "server.message153",
       "category": "Error"
     },
     {
       "file": "server/drivers/kimi.ts",
-      "line": 445,
+      "line": 446,
       "key": "server.message154",
       "category": "this.cancelQueuedPrompts"
     },
     {
       "file": "server/drivers/kimi.ts",
-      "line": 456,
+      "line": 457,
       "key": "server.message155",
       "category": "this.cancelQueuedPrompts"
     },
     {
       "file": "server/drivers/kimi.ts",
-      "line": 542,
+      "line": 543,
       "key": "server.message156",
       "category": "this.replyError"
     },
     {
       "file": "server/drivers/kimi.ts",
-      "line": 588,
+      "line": 589,
       "key": "server.message157",
       "category": "warning"
     },
     {
       "file": "server/drivers/kimi.ts",
-      "line": 599,
+      "line": 600,
       "key": "server.message158",
       "category": "protocolLimitations"
     },
     {
       "file": "server/drivers/kimi.ts",
-      "line": 607,
+      "line": 608,
       "key": "server.message159",
       "category": "this.cancelQueuedPrompts"
     },
     {
       "file": "server/drivers/kimi.ts",
-      "line": 874,
+      "line": 875,
       "key": "server.message160",
       "category": "Error"
     },
     {
       "file": "server/drivers/kimi.ts",
-      "line": 876,
+      "line": 877,
       "key": "server.message161",
       "category": "Error"
     },
@@ -3515,81 +3515,93 @@
     },
     {
       "file": "server/self-update.ts",
-      "line": 45,
+      "line": 51,
       "key": "server.message507",
       "category": "SelfUpdateError"
     },
     {
       "file": "server/self-update.ts",
-      "line": 64,
+      "line": 71,
       "key": "server.message508",
       "category": "SelfUpdateError"
     },
     {
       "file": "server/self-update.ts",
-      "line": 66,
+      "line": 73,
       "key": "server.message509",
       "category": "SelfUpdateError"
     },
     {
       "file": "server/self-update.ts",
-      "line": 89,
+      "line": 96,
       "key": "server.message510",
       "category": "SelfUpdateError"
     },
     {
       "file": "server/self-update.ts",
-      "line": 92,
+      "line": 99,
       "key": "server.message512",
       "category": "SelfUpdateError"
     },
     {
       "file": "server/self-update.ts",
-      "line": 98,
+      "line": 105,
       "key": "server.message513",
+      "category": "SelfUpdateError"
+    },
+    {
+      "file": "server/self-update.ts",
+      "line": 50,
+      "key": "server.self_update.timeout",
+      "category": "SelfUpdateError"
+    },
+    {
+      "file": "server/self-update.ts",
+      "line": 126,
+      "key": "server.self_update.push_failed",
       "category": "SelfUpdateError"
     }
   ],
   "excluded": [
     {
       "file": "server/drivers/kimi.ts",
-      "line": 185,
+      "line": 186,
       "text": "[kimi probe] 保留 {p0}：{p1}",
       "reason": "日志或启动诊断，不发送到前端"
     },
     {
       "file": "server/drivers/kimi.ts",
-      "line": 186,
+      "line": 187,
       "text": "无效 sessionId",
       "reason": "日志或启动诊断，不发送到前端"
     },
     {
       "file": "server/drivers/kimi.ts",
-      "line": 199,
+      "line": 200,
       "text": "匹配目录数量 {p0}",
       "reason": "日志或启动诊断，不发送到前端"
     },
     {
       "file": "server/drivers/kimi.ts",
-      "line": 204,
+      "line": 205,
       "text": "状态或 wire 路径含软链",
       "reason": "日志或启动诊断，不发送到前端"
     },
     {
       "file": "server/drivers/kimi.ts",
-      "line": 207,
+      "line": 208,
       "text": "state.id 不匹配",
       "reason": "日志或启动诊断，不发送到前端"
     },
     {
       "file": "server/drivers/kimi.ts",
-      "line": 212,
+      "line": 213,
       "text": "wire 含对话或非探测记录",
       "reason": "日志或启动诊断，不发送到前端"
     },
     {
       "file": "server/drivers/kimi.ts",
-      "line": 217,
+      "line": 218,
       "text": "index-dirty 含软链",
       "reason": "日志或启动诊断，不发送到前端"
     },
@@ -3674,7 +3686,7 @@
     },
     {
       "file": "server/i18n/messages.ts",
-      "line": 105,
+      "line": 106,
       "text": "(?:AIReins|Workbench|workbench|工作台|WB)",
       "reason": "匹配历史产品名的兼容正则片段，仅用于识别描述符，不直接显示给用户。"
     },

@@ -10,7 +10,7 @@ import type {
   SendUserMessageOptions,
 } from "../types.js";
 import { relative, sep } from "node:path";
-import { codexEnvironment } from "../codex-env.js";
+import { proxyEnvironment } from "../proxy-env.js";
 import { isRiskyConfig, mergeSessionConfig } from "../session-config.js";
 import { BaseDriver, errorMessage, parseJsonLine, userMessageText, withTimeout } from "./base.js";
 import { StdioRpcProbe } from "./rpc-probe.js";
@@ -295,7 +295,7 @@ export function codexConfigSchemaFromModels(
 }
 
 export async function probeCodexConfigSchema(cwd: string): Promise<DriverConfigSchema> {
-  const probe = new StdioRpcProbe("codex", ["app-server", "--stdio"], cwd, codexEnvironment());
+  const probe = new StdioRpcProbe("codex", ["app-server", "--stdio"], cwd, proxyEnvironment());
   try {
     await probe.request("initialize", {
       clientInfo: { name: "workbench-meta", title: "Workbench metadata probe", version: "0.1.0" },
@@ -349,7 +349,7 @@ export class CodexDriver extends BaseDriver {
   }
 
   async start(): Promise<void> {
-    this.spawnProcess("codex", ["app-server", "--stdio"], { env: codexEnvironment() });
+    this.spawnProcess("codex", ["app-server", "--stdio"]);
     const initialized = await withTimeout(this.request("initialize", {
       clientInfo: { name: "workbench", title: "Workbench", version: "0.1.0" },
       // Temporary thread isolation uses experimental empty capability/environment fields.

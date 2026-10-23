@@ -15,7 +15,9 @@ export interface WorkbenchPrefs {
   claudeCodeEntrypoint?: "claude-vscode";
   /** 目录浏览器主目录；省略时使用 $HOME。 */
   directoryBrowserHome?: string;
-  /** Codex HTTP(S) proxy endpoint; inherited environment is used when omitted. */
+  /** Local HTTP(S) proxy for CLI children and self-update Git network commands. */
+  proxyUrl?: string;
+  /** Legacy alias for proxyUrl, used only when proxyUrl is absent or invalid. */
   codexProxyUrl?: string;
 }
 
@@ -58,6 +60,7 @@ export function loadPrefs(): WorkbenchPrefs {
       ...(record?.claudeCodeEntrypoint === "claude-vscode" ? { claudeCodeEntrypoint: "claude-vscode" as const } : {}),
       ...(validPath(record?.directoryBrowserHome) ? { directoryBrowserHome: record!.directoryBrowserHome as string } : {}),
       ...(validProxyUrl(record?.codexProxyUrl) ? { codexProxyUrl: record!.codexProxyUrl as string } : {}),
+      ...(validProxyUrl(record?.proxyUrl) ? { proxyUrl: record!.proxyUrl as string } : {}),
     };
   } catch {
     return { ...DEFAULT_PREFS };

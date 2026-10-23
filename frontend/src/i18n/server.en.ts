@@ -493,6 +493,8 @@ const messages: Record<string, string> = {
   "server.message509": "Branch {p0} has no upstream; cannot compare with the remote",
   "server.message510": "The request must include action, head, upstreamHead and changes",
   "server.message512": "An update is already in progress; please wait",
-  "server.message513": "The repository has changed; check again"
+  "server.message513": "The repository has changed; check again",
+  "server.self_update.timeout": "{p0} timed out after {p1, plural, one {# second} other {# seconds}}. Check your network or proxy, then check again",
+  "server.self_update.push_failed": "Local commits have been kept; the push did not complete. Check again to push without creating another commit. {p0}"
 };
 export default messages;

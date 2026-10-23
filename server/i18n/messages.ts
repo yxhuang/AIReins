@@ -10,6 +10,7 @@ export interface MessageDescriptor {
 export type MessageMetadata = Record<string, MessageDescriptor | (MessageDescriptor | null)[]>;
 
 const nestedParameterNames: Record<string, string[]> = {
+  "server.self_update.push_failed": ["p0"],
   "server.message000": [
     "p0",
     "p1"
