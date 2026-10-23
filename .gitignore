@@ -2,6 +2,7 @@ node_modules/
 frontend/dist/
 scratch/
 __pycache__/
+.private/
 .work-orders/
 HANDOFF.md
 .claude/

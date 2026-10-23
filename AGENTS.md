@@ -2,7 +2,7 @@
 
 AIReins: one Node process (`server/`) plus a Vite/React page (`frontend/`) that drives Claude Code, Codex and Kimi Code through their official CLIs, for one person on their own computer and tailnet.
 
-If `HANDOFF.md` exists at the repository root (a local, untracked file), read it first: it holds the maintainer's current state and open tasks.
+If `.private/` exists (the maintainer's untracked notes, its own Git repository), read `.private/HANDOFF.md` first: it holds the current state and open tasks; `.private/plan.md` is the plan document.
 
 ## Sources of truth
 
