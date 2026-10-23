@@ -37,6 +37,18 @@ using System.Collections.Generic;
 using System.Text;
 using System.Runtime.InteropServices;
 public static class WbNative {
+    [DllImport("user32.dll")] private static extern bool SetProcessDpiAwarenessContext(IntPtr context);
+    [DllImport("user32.dll")] private static extern IntPtr SetThreadDpiAwarenessContext(IntPtr context);
+    [DllImport("user32.dll")] private static extern bool SetProcessDPIAware();
+    public static void EnableDpiAwareness() {
+        // PowerShell 5.1 hosts WinForms: configure DPI before creating any tray or form handles.
+        try { if (SetProcessDpiAwarenessContext(new IntPtr(-4))) return; }
+        catch (EntryPointNotFoundException) { }
+        // The host may already have fixed its process mode; override the UI thread in that case.
+        try { if (SetThreadDpiAwarenessContext(new IntPtr(-4)) != IntPtr.Zero) return; }
+        catch (EntryPointNotFoundException) { }
+        SetProcessDPIAware();
+    }
     private delegate bool EnumProc(IntPtr h, IntPtr p);
     [DllImport("user32.dll")] private static extern bool EnumWindows(EnumProc cb, IntPtr p);
     [DllImport("user32.dll", CharSet=CharSet.Unicode)]
@@ -125,6 +137,9 @@ public class WbTrayListener : System.Windows.Forms.NativeWindow {
 }
 '@
 }
+
+[WbNative]::EnableDpiAwareness()
+[System.Windows.Forms.Application]::EnableVisualStyles()
 
 $script:BaseUrl = "http://127.0.0.1:$Port"
 $script:Tray = $null
@@ -273,6 +288,10 @@ function Show-StartupWindow {
             'HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize', 'AppsUseLightTheme', 1) -ne 0
     } catch { }
     $script:StartupWindow = New-Object System.Windows.Forms.Form
+    $script:StartupWindow.SuspendLayout()
+    $script:StartupWindow.AutoScaleDimensions = New-Object System.Drawing.SizeF(96, 96)
+    $script:StartupWindow.AutoScaleMode = [System.Windows.Forms.AutoScaleMode]::Dpi
+    $script:StartupWindow.Font = [System.Drawing.SystemFonts]::MessageBoxFont
     $script:StartupWindow.Text = $script:AppTitle
     $script:StartupWindow.ClientSize = New-Object System.Drawing.Size(480, 200)
     $script:StartupWindow.StartPosition = [System.Windows.Forms.FormStartPosition]::CenterScreen
@@ -293,6 +312,7 @@ function Show-StartupWindow {
     $status.SetBounds(34, 100, 414, 56)
     $script:StartupWindow.Controls.Add($title)
     $script:StartupWindow.Controls.Add($status)
+    $script:StartupWindow.ResumeLayout($true)
     $script:StartupWindow.Show()
     $script:StartupWindow.Refresh()
     Write-TrayLog 'startup window: shown'
@@ -315,12 +335,6 @@ function Ensure-Service {
     # 已运行时不启动 WSL；首次与关闭 Chrome 后重开都走相同捷径。
     if (Test-Service) { Write-TrayLog 'ensure service: already ready'; return }
     Show-StartupWindow
-    if ($script:Tray) {
-        Write-TrayLog 'ensure service: cold start, balloon'
-        $script:Tray.ShowBalloonTip(5000, $script:AppTitle,
-            (T '正在启动工作台，几秒后自动打开窗口，无需重复点击。' 'Starting AIReins. The window will open in a few seconds; no need to click again.'),
-            [System.Windows.Forms.ToolTipIcon]::Info)
-    }
     Invoke-Wsl "WORKBENCH_NO_OPEN=1 WORKBENCH_PORT=$Port $WbPath"
     $clock = [System.Diagnostics.Stopwatch]::StartNew()
     do {

@@ -42,7 +42,8 @@ function T([string]$zh, [string]$en) { return $en }
 function Check([bool]$ok, [string]$message) { if (-not $ok) { throw $message } }
 
 $script:steps = New-Object 'System.Collections.Generic.List[string]'
-$script:Tray = $null
+$script:Tray = New-Object PSObject
+$script:Tray | Add-Member ScriptMethod ShowBalloonTip { throw 'Startup must not submit a Windows notification' }
 $script:ready = $true
 $script:failStart = $false
 Ensure-Service
