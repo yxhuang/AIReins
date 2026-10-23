@@ -96,8 +96,11 @@ for(const mobile of [false,true]){
   assert.equal(s.newSessionOpen,true);assert.equal(s.currentId,null);
   assert.equal(s.newSessionCwd,'/project/explicit');
   s.setNewSessionCwd('/project/selected');
+  s.fileDirectory = { sessionId: null, path: '/elsewhere' };
   for(const open of [()=>s.setFilesOpen(true),()=>s.setTerminalOpen(true),()=>s.toggleDispatches()]){
-    open();f.back();
+    open();
+    if (s.filesOpen) assert.equal(s.fileDirectory.path, '/project/selected', 'desktop/mobile file opening follows the new-session directory');
+    f.back();
     assert.equal(s.newSessionOpen,true,'panel Back restores the new page');
     assert.equal(s.newSessionCwd,'/project/selected');
     assert.equal(window.location.hash,'#/new');

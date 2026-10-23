@@ -161,6 +161,7 @@ const dictionary: Record<string, string> = {
   "ui.DirectoryBrowser.open_the_most_recent_windows_directory": "Open the most recent Windows directory",
   "ui.DirectoryBrowser.refresh": "Refresh",
   "ui.DirectoryBrowser.reload_the_current_directory_including_git_status": "Reload the current directory, including Git status",
+  "ui.DirectoryBrowser.reload_new_session_directory": "Return to the new session's working directory and reload, including Git status",
   "ui.DirectoryBrowser.many_entries_found_up_to_1_000": "Many entries found. Up to 1,000 folders and 1,000 files are shown.",
   "ui.DirectoryBrowser.this_directory_has_over_1_000_subdirectories": "This directory has over 1,000 subdirectories. Only the first 1,000 are shown.",
   "ui.DirectoryBrowser.subdirectories": "Subdirectories",

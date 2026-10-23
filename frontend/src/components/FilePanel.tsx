@@ -78,9 +78,11 @@ export function FilePanel({ onClose }: { onClose: () => void }) {
   const tabId = useStore(value => value.fileTabId);
   const hasTab = tabs.length > 0;
   const fileDirectory = useStore(value => value.fileDirectory);
+  const newSessionCwd = useStore(value => value.currentId ? undefined : value.newSessionCwd);
   // 浏览中的路径由 DirectoryContents 自己维护；宿主通知不应再次初始化并读取同一目录。
   const sessionDirectory = () => store.fileDirectory && store.fileDirectory.sessionId === (session?.id ?? null) ? store.fileDirectory.path : null;
-  const directoryInitialPath = useMemo(() => sessionDirectory() ?? session?.cwd ?? "", [preview, tabId, session?.id, session?.cwd]);
+  // 新建目录变化只更新刷新目标，不打断当前标签里的手动浏览。
+  const directoryInitialPath = useMemo(() => sessionDirectory() ?? session?.cwd ?? newSessionCwd ?? "", [preview, tabId, session?.id, session?.cwd]);
   // 各标签成功访问过的目录，供侧键返回；随面板卸载清空，与单标签时一致。
   const tabHistories = useRef(new Map<number, string[]>());
   const directoryHistory = useMemo(() => {
@@ -93,7 +95,7 @@ export function FilePanel({ onClose }: { onClose: () => void }) {
     const shown = live ? preview : tab.preview;
     if (shown) return { path: shown.target.path, folder: false };
     const directory = live ? fileDirectory : tab.directory;
-    return { path: directory && directory.sessionId === (session?.id ?? null) ? directory.path : session?.cwd ?? "", folder: true };
+    return { path: directory && directory.sessionId === (session?.id ?? null) ? directory.path : session?.cwd ?? newSessionCwd ?? "", folder: true };
   };
   const registerBrowserBack = useCallback((back: () => boolean) => {
     store.fileBrowserBack = back;
@@ -241,6 +243,7 @@ export function FilePanel({ onClose }: { onClose: () => void }) {
       </div>}
       {(preview || !hasTab) && tabRow}
       {preview ? <FilePreview key={preview.target.path} preview={preview} source={source} /> : hasTab && <DirectoryContents key={tabId} initialPath={directoryInitialPath} includeFiles allowWindowsPicker
+        refreshPath={session ? undefined : newSessionCwd}
         navigationHistory={directoryHistory} registerBrowserBack={registerBrowserBack} navTarget={navSlot} afterLocation={tabRow} showHidden={showHidden}
         onPathChange={path => store.setFileDirectory(path)}
         onBrowseHistory={path => store.navigateHistory(path)}

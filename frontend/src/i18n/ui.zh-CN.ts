@@ -161,6 +161,7 @@ const dictionary: Record<string, string> = {
   "ui.DirectoryBrowser.open_the_most_recent_windows_directory": "打开最近使用的 Windows 目录",
   "ui.DirectoryBrowser.refresh": "刷新",
   "ui.DirectoryBrowser.reload_the_current_directory_including_git_status": "重新读取当前目录（含 Git 状态）",
+  "ui.DirectoryBrowser.reload_new_session_directory": "返回新建会话的工作目录并刷新（含 Git 状态）",
   "ui.DirectoryBrowser.many_entries_found_up_to_1_000": "条目较多，文件夹和文件各最多显示 1000 个。",
   "ui.DirectoryBrowser.this_directory_has_over_1_000_subdirectories": "此目录下子目录超过 1000 个，仅显示前 1000 个。",
   "ui.DirectoryBrowser.subdirectories": "子目录列表",

@@ -82,8 +82,10 @@ export function DirectoryBrowser({ initialPath, onSelect, onClose, mode = "dir",
 }
 
 /** 弹窗与右侧面板共用导航、请求和列表；宿主决定点击文件后的行为。 */
-export function DirectoryContents({ initialPath, includeFiles, onSelectFile, onEntryMenu, onSelectDirectory, allowWindowsPicker = false, onPathChange, onPathLost, onBrowseHistory, navigationHistory, registerBrowserBack, navTarget, afterLocation, showHidden = true, upIcon = false, collapsible = false }: {
+export function DirectoryContents({ initialPath, refreshPath, includeFiles, onSelectFile, onEntryMenu, onSelectDirectory, allowWindowsPicker = false, onPathChange, onPathLost, onBrowseHistory, navigationHistory, registerBrowserBack, navTarget, afterLocation, showHidden = true, upIcon = false, collapsible = false }: {
   initialPath: string;
+  /** 只在点击刷新时对齐此目录；变化时不自动导航。 */
+  refreshPath?: string;
   includeFiles: boolean;
   onSelectFile: (path: string, name: string) => void;
   /** 表格行右键/长按；root 是当前列出的目录。 */
@@ -366,7 +368,7 @@ export function DirectoryContents({ initialPath, includeFiles, onSelectFile, onE
           <button className="btn" type="button" title={windowsPaths ? t("ui.DirectoryBrowser.open_the_wsl_home_directory") : t("ui.DirectoryBrowser.open_the_home_directory")} disabled={busy} onClick={() => void load()}>{windowsPaths ? "WSL" : t("ui.DirectoryBrowser.home_directory")}</button>
           {windowsPaths && <button className="btn" type="button" title={t("ui.DirectoryBrowser.open_the_most_recent_windows_directory")} disabled={busy} onClick={openWindows}>Windows</button>}
         </div> : navTarget && createPortal(<>
-          <button className="file-nav-btn file-nav-icon" type="button" aria-label={t("ui.DirectoryBrowser.refresh")} title={t("ui.DirectoryBrowser.reload_the_current_directory_including_git_status")} disabled={busy} onClick={() => void load(listing?.path ?? (normalizePath(address) || undefined))}><NavIcon d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8 M21 3v5h-5" /></button>
+          <button className="file-nav-btn file-nav-icon" type="button" aria-label={t("ui.DirectoryBrowser.refresh")} title={t(refreshPath?.trim() ? "ui.DirectoryBrowser.reload_new_session_directory" : "ui.DirectoryBrowser.reload_the_current_directory_including_git_status")} disabled={busy} onClick={() => void load(normalizePath(refreshPath ?? "") || listing?.path || normalizePath(address) || undefined)}><NavIcon d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8 M21 3v5h-5" /></button>
           <button className="file-nav-btn file-nav-icon" type="button" aria-label={t("ui.DirectoryBrowser.parent_directory")} title={t("ui.DirectoryBrowser.go_to_the_parent_of_the_current")} disabled={!listing?.parent || busy} onClick={goUp}><NavIcon d="M12 19V5 M5 12l7-7 7 7" /></button>
           <button className="file-nav-btn" type="button" title={windowsPaths ? t("ui.DirectoryBrowser.open_the_wsl_home_directory") : t("ui.DirectoryBrowser.open_the_home_directory")} disabled={busy} onClick={() => void load()}>{windowsPaths ? "WSL" : t("ui.DirectoryBrowser.home_directory")}</button>
           {windowsPaths && <button className="file-nav-btn" type="button" title={t("ui.DirectoryBrowser.open_the_most_recent_windows_directory")} disabled={busy} onClick={openWindows}>Windows</button>}

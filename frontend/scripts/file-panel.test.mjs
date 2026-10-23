@@ -4,7 +4,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 // 先在纯 Node 环境导入，防止 store 或纯逻辑出现顶层 DOM 依赖。
 import { Store, store } from "../src/store.ts";
 import { insertFileMention, planFileMention, FilePanel } from "../src/components/FilePanel.tsx";
-import { DirectoryBrowser } from "../src/components/DirectoryBrowser.tsx";
+import { DirectoryBrowser, DirectoryContents } from "../src/components/DirectoryBrowser.tsx";
 import { directoryBreadcrumbs, directoryEntryDate, directoryEntrySize, normalizeDirectoryPath, recentDirectoryPaths, sortedDirectoryEntries } from "../src/directory-path.ts";
 import { DispatchPanel } from "../src/components/DispatchPanel.tsx";
 import { FILE_WIDTH_OPTIONS } from "../src/components/SidePanelResize.tsx";
@@ -337,3 +337,77 @@ console.log("✅ 文件面板标签页：新标签打开文件夹、切换保留
   } finally { globalThis.window = oldWindow; globalThis.fetch = oldFetch; }
 }
 console.log("✅ 空文件面板直接打开文件、关闭时中断读取与迟到结果隔离");
+
+// 执行真实组件的导航/刷新处理器，以目录接口请求作为行为断言。
+{
+  const internals = React.__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE;
+  const oldDispatcher = internals.H, oldFetch = globalThis.fetch, oldWindow = globalThis.window;
+  const previous = { currentId: store.currentId, newSessionCwd: store.newSessionCwd, filesOpen: store.filesOpen,
+    fileDirectory: store.fileDirectory, fileTabs: store.fileTabs, fileTabId: store.fileTabId, filePreview: store.filePreview, meta: store.meta };
+  function mount(Component, initialProps) {
+    const slots = [], effects = []; let cursor, tree, props = initialProps;
+    const same = (a, b) => a && b && a.length === b.length && a.every((value, i) => Object.is(value, b[i]));
+    const dispatcher = {
+      useState(initial) { const i = cursor++; if (!(i in slots)) slots[i] = typeof initial === 'function' ? initial() : initial;
+        return [slots[i], value => { slots[i] = typeof value === 'function' ? value(slots[i]) : value; render(); }]; },
+      useRef(initial) { const i = cursor++; return slots[i] ??= { current: initial }; },
+      useMemo(fn, deps) { const i = cursor++; if (!slots[i] || !same(slots[i].deps, deps)) slots[i] = { deps, value: fn() }; return slots[i].value; },
+      useCallback(fn, deps) { return this.useMemo(() => fn, deps); },
+      useSyncExternalStore(_subscribe, get) { return get(); },
+      useId() { return `fixture-${cursor++}`; },
+      useEffect(fn, deps) { const i = cursor++; if (!same(slots[i], deps)) { slots[i] = deps; effects.push(fn); } },
+      useLayoutEffect() { cursor++; },
+    };
+    function render(next = props) { props = next; internals.H = dispatcher; cursor = 0; tree = Component(props); }
+    render();
+    return { get tree() { return tree; }, render, flush() { while (effects.length) effects.shift()(); } };
+  }
+  function nodes(node) {
+    if (!node || typeof node !== 'object') return [];
+    if (Array.isArray(node)) return node.flatMap(nodes);
+    return [node, ...nodes(node.props?.children ?? node.children)];
+  }
+  const find = (tree, predicate) => nodes(tree).find(predicate);
+  const settle = () => new Promise(resolve => setImmediate(resolve));
+  const calls = [];
+  try {
+    globalThis.window = { ...oldWindow, matchMedia: () => ({ matches: false }) };
+    globalThis.fetch = async url => {
+      const path = new URL(url, 'http://localhost').searchParams.get('path') ?? '/home';
+      calls.push(path);
+      return { json: async () => ({ code: 0, data: { path, parent: path.slice(0, path.lastIndexOf('/')) || '/', dirs: [], files: [] } }) };
+    };
+    Object.assign(store, { currentId: null, newSessionCwd: '/project/initial', filesOpen: false, filePreview: null,
+      fileDirectory: { sessionId: null, path: '/elsewhere' }, fileTabs: [{ id: 1, directory: null, preview: null }], fileTabId: 1, meta: null });
+    store.setFilesOpen(true);
+    assert.equal(store.fileDirectory.path, '/project/initial', '打开文件栏对齐新建目录，覆盖旧浏览位置');
+    const panel = mount(FilePanel, { onClose() {} });
+    const directoryProps = () => ({ ...find(panel.tree, node => node.type === DirectoryContents).props, navTarget: { nodeType: 1 } });
+    const directory = mount(DirectoryContents, directoryProps()); directory.flush(); await settle();
+    assert.deepEqual(calls, ['/project/initial']);
+    const button = label => find(directory.tree, node => node.type === 'button' && node.props['aria-label'] === label);
+    button('上一级').props.onClick(); await settle();
+    assert.equal(calls.at(-1), '/project');
+    assert.equal(store.newSessionCwd, '/project/initial', '文件栏浏览不改写新建地址');
+    store.setNewSessionCwd('/project/latest');
+    panel.render(); directory.render(directoryProps()); directory.flush(); await settle();
+    assert.deepEqual(calls, ['/project/initial', '/project'], '改新建地址及宿主通知不打断手动浏览');
+    button('刷新').props.onClick(); await settle();
+    assert.equal(calls.at(-1), '/project/latest', '刷新读取最新新建地址');
+    assert.equal(store.fileDirectory.path, '/project/latest');
+    store.setFileDirectory('/elsewhere'); store.setFilesOpen(false); store.setFilesOpen(true);
+    assert.equal(store.fileDirectory.path, '/project/latest', '收起再开重新对齐新建目录');
+    directory.render({ ...directoryProps(), refreshPath: undefined });
+    button('上一级').props.onClick(); await settle();
+    button('刷新').props.onClick(); await settle();
+    assert.equal(calls.at(-1), '/project', '普通会话没有新建目录刷新目标时刷新当前浏览位置');
+    store.currentId = 'a'; panel.render();
+    assert.equal(directoryProps().refreshPath, undefined, '已有会话不使用残留的新建目录');
+    store.currentId = null;
+    store.filesOpen = false;
+    store.filePreview = { draft: 'unsaved' };
+    store.setFileDirectory('/preview'); store.setFilesOpen(true);
+    assert.equal(store.fileDirectory.path, '/preview', '重新打开文档预览时保留原目录与草稿');
+  } finally { Object.assign(store, previous); internals.H = oldDispatcher; globalThis.fetch = oldFetch; globalThis.window = oldWindow; }
+}
+console.log("✅ 新建目录与文件栏：打开/刷新同步，独立浏览、最新地址及预览保留");

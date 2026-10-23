@@ -835,6 +835,11 @@ export class Store {
   }
 
   setFilesOpen(open: boolean): void {
+    // 新建页每次打开目录列表都对齐当前工作目录；文档预览及其草稿照常保留。
+    if (open && !this.filesOpen && !this.currentId && !this.filePreview && this.newSessionCwd?.trim()) {
+      this.fileDirectory = { sessionId: null, path: this.newSessionCwd };
+      this.stashFileTab();
+    }
     if (this.isMobileNavigation()) {
       if (open) this.pushMobileRoute("#/files");
       else if (this.filesOpen) this.returnMobileRoute(this.currentId ? `#/session/${encodeURIComponent(this.currentId)}` : "#/");
