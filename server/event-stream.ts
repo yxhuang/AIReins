@@ -3,6 +3,8 @@ import { WebSocket } from "ws";
 import type { SessionManager } from "./session-manager.js";
 import type { UnifiedEvent } from "./types.js";
 
+const REPLAY_MAX_BYTES = 512 * 1024;
+
 export interface EventClient {
   socket: Pick<WebSocket, "readyState" | "send" | "bufferedAmount" | "terminate">;
   sessionId?: string;
@@ -30,9 +32,22 @@ export function replaySession(manager: Pick<SessionManager, "getEventsAfter">, c
   const replay = manager.getEventsAfter(sessionId, afterSeq);
   if (!replay) throw new Error(`会话不存在：${sessionId}`);
   client.lastSeq.set(sessionId, afterSeq);
-  if (replay.requiresSnapshot) sendWs(client, { type: "resync_required", sessionId, currentSeq: replay.currentSeq });
-  else {
-    for (const event of replay.events) sendEvent(client, event);
-    sendWs(client, { type: "replay_complete", sessionId, currentSeq: replay.currentSeq });
+  const resync = { type: "resync_required", sessionId, currentSeq: replay.currentSeq };
+  if (replay.requiresSnapshot) { sendWs(client, resync); return; }
+  const complete = { type: "replay_complete", sessionId, currentSeq: replay.currentSeq };
+  const frames: { event: UnifiedEvent; json: string }[] = [];
+  let bytes = client.socket.bufferedAmount + Buffer.byteLength(JSON.stringify(complete));
+  for (const event of replay.events) {
+    const json = JSON.stringify(withMessageMetadata(event));
+    bytes += Buffer.byteLength(json);
+    // Leave room for framing/control messages below the slow-client disconnect limit.
+    if (bytes > REPLAY_MAX_BYTES) { sendWs(client, resync); return; }
+    frames.push({ event, json });
   }
+  for (const { event, json } of frames) {
+    if (client.socket.readyState !== WebSocket.OPEN) return;
+    client.socket.send(json);
+    client.lastSeq.set(sessionId, event.seq);
+  }
+  sendWs(client, complete);
 }

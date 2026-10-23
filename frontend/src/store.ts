@@ -198,6 +198,7 @@ export class Store {
   private desktopDispatchHash = "#/dispatches";
   private sessionsLoaded = false;
   data = new Map<string, SessionData>();
+  snapshotErrors = new Map<string, string>();
   wsState: WsState = "closed";
   /** Focus view：只显示用户输入与助手回复（闸门/提问照常），按浏览器记忆 */
   focusView: boolean = readFocusView();
@@ -1131,6 +1132,7 @@ export class Store {
         ...(this.snapshotBuffers.get(candidate)?.splice(0) ?? [])];
       this.cachedSessions.delete(candidate);
       this.data.delete(candidate);
+      this.snapshotErrors.delete(candidate);
       this.snapshotGen.delete(candidate);
       this.snapshotInflight.delete(candidate);
       this.olderInflight.delete(candidate);
@@ -1166,6 +1168,7 @@ export class Store {
     // 校验处取回的仍是 undefined，新会话首次快照必被误丢（界面永远空白的根因）。
     const gen = ++this.nextSnapshotGen;
     this.snapshotGen.set(id, gen);
+    this.snapshotErrors.delete(id);
     const organizationVersion = this.organizationVersion;
     this.olderInflight.delete(id);
     const buffered = this.snapshotBuffers.get(id) ?? [];
@@ -1173,6 +1176,7 @@ export class Store {
     // 先声明再赋值（! 断言）：finally 里的所有权校验要引用 promise 自身，赋值在闭包执行前完成
     let promise!: Promise<void>;
     promise = (async () => {
+      let applied = false;
       try {
         const snapshot = await fetchSnapshot(id, true);
         if (this.snapshotGen.get(id) === gen) {
@@ -1181,6 +1185,7 @@ export class Store {
             ? { ...snapshot.session, pinned: live.pinned, customTitle: live.customTitle }
             : snapshot.session;
           this.applySnapshot(id, session, snapshot.seq, snapshot.events, snapshot.hasMore, snapshot.firstSeq);
+          applied = true;
           this.snapshotBuffers.delete(id);
           // 先解除在途状态，缓存中的缺口才可发起下一次必要的快照。
           if (this.snapshotInflight.get(id) === promise) this.snapshotInflight.delete(id);
@@ -1190,14 +1195,30 @@ export class Store {
         if (this.snapshotGen.get(id) === gen) {
           const message = error instanceof Error ? error.message : String(error);
           this.lastError = { message, sessionId: id };
+          this.snapshotErrors.set(id, message);
           const current = this.data.get(id);
           // 对齐已作废旧页；对齐本身失败时，不能把旧窗口锁在 loadingOlder。
           if (current?.loadingOlder) this.data.set(id, { ...current, loadingOlder: false, olderError: message });
+          if (current) {
+            this.snapshotInflight.delete(id);
+            this.snapshotBuffers.delete(id);
+            const pending = buffered.splice(0).sort((a, b) => a.seq - b.seq || Number(!!a.ephemeral) - Number(!!b.ephemeral));
+            for (let index = 0; index < pending.length; index++) {
+              const event = pending[index]!;
+              const currentData = this.data.get(id);
+              if (this.snapshotGen.get(id) === gen && currentData && !event.ephemeral && event.seq > currentData.seq + 1) {
+                this.snapshotBuffers.set(id, pending.slice(index));
+                break;
+              }
+              this.handleEvent(event);
+            }
+          }
         }
       } finally {
         // 所有权校验：旧请求的 finally 不得误删新请求的 in-flight 条目
         if (this.snapshotInflight.get(id) === promise) this.snapshotInflight.delete(id);
       }
+      if (!applied) { this.notify(); return; }
       // REST 首取实时命令表（覆盖快照里可能过期的 commands_updated 结果）；
       // dead 会话等失败场景保留快照内的结果，不打扰全局错误条。
       try {
@@ -1210,6 +1231,7 @@ export class Store {
       this.notify();
     })();
     this.snapshotInflight.set(id, promise);
+    this.notify();
     return promise;
   }
 
@@ -2081,6 +2103,7 @@ export class Store {
     this.removed.add(id);
     this.sessions = this.sessions.filter((s) => s.id !== id);
     this.data.delete(id);
+    this.snapshotErrors.delete(id);
     this.cachedSessions.delete(id);
     this.commands.delete(id);
     this.fileKnown.delete(id);

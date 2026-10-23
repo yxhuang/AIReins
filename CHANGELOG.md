@@ -4,6 +4,7 @@
 
 ### Changed
 
+- Replay caches use a shared byte budget and release inactive history; startup recovery scans modern Claude transcripts once and migrates legacy updates only when found.
 - The update button installs deployment, startup and dependency changes automatically, offers installation retries after a failed update, and shows when Windows tray files need to be reopened. Installation preserves the running backend and existing optional setup.
 - Windows cold starts show a local loading window while the backend starts. Opening an already running instance skips the WSL launch command.
 - Windows shortcuts use an installer-built launcher to forward requests to a running tray without starting PowerShell. Cold starts load the precompiled tray types; upgrades keep recoverable entry-file backups.
@@ -11,6 +12,10 @@
 
 ### Fixed
 
+- Large WebSocket replays fall back to snapshots before filling the send buffer, preventing repeated disconnects during recovery.
+- Failed snapshots apply contiguous live events and expose a retry action without discarding the current conversation.
+- Frontend-only update failures retain a build task that can be retried offline without repeating the pull or installation.
+- CSV and TSV source editing skips hidden table parsing, and server metadata reports the package version.
 - Codex workers and configuration probes can use a machine-local `codexProxyUrl` preference even when AIReins starts without proxy variables. The endpoint stays configured while the proxy is offline, so later connections can recover when it returns; failed turns are not replayed automatically.
 
 ## 0.2.2 (2026-10-20)

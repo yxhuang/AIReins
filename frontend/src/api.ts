@@ -190,12 +190,13 @@ export interface UpdateStatus {
   changes: string[];
   defaultMessage: string;
   install?: boolean;
+  restart?: boolean;
   trayRestart?: boolean;
-  action: "pull" | "push" | "install" | "none" | "diverged";
+  action: "pull" | "push" | "install" | "build" | "none" | "diverged";
 }
 
 export interface UpdateResult {
-  action: "pull" | "push" | "install";
+  action: "pull" | "push" | "install" | "build";
   output: string;
   restart: boolean;
   installed?: boolean;

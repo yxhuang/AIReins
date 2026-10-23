@@ -125,6 +125,8 @@ webhook 地址就是密钥：文件权限设为 600，也不要写进日志或�
 
 `GET /api/meta` 的 `data.platform` 返回上述值，`data.capabilities` 逐项声明当前入口的能力。缺字段时前端不显示对应入口；平台支持不代表可选命令已安装。
 
+`/api/meta` 和 WebSocket `ready` 的 `serverVersion` 在进程启动时读取仓库 `package.json.version`。CLI 协议握手中的客户端版本独立保留。
+
 CLI 版本与配置选项在后台探测，不阻塞 `/api/meta`：优先返回 `~/.workbench/meta-cache.json` 的最近结果，无缓存时返回三家基础能力及空 `options`，`metadataPending:true`。探测完成（包括不可用/超时）后更新内存与磁盘缓存，返回 `metadataPending:false`，并向已连接的 WebSocket 广播 `{type:"meta_updated"}` 提示重新取元数据；连接建立时仍为 pending 的前端也补取一次，覆盖建连前或断线期间漏掉的通知。能力授权始终按当前请求入口计算，不从磁盘缓存恢复。
 
 | 能力字段 | WSL2 | 原生 Linux | macOS 实验性 |
@@ -222,10 +224,10 @@ AIReins 新建的 Codex 会话在首个 `item/completed.userMessage` 后、没�
 - `POST /api/tailscale/send`：JSON `{path,root,sessionId?,target}`，`target` 为上一接口返回的 IP。`path/root/sessionId` 沿用工作文件的授权根与 realpath 检查；普通文件以 fd 流式读取，文件夹先在临时目录 `zip -r -y` 打包为 `<名称>.zip`（符号链接存为链接，10 分钟超时，发送后删除临时目录）。发送前重新取 `--targets`，只接受列表内在线 IP，再不经 shell 执行 `tailscale file cp --name=<名称> - <ip>:` 由 stdin 喂内容，30 分钟超时；请求持续到发送结束。成功 `data:{sent:true,name}`。路径错误同文件接口（`status*100+90`，空文件夹 400/`40090`，打包失败 500/`50090`）；目标不在列表或取 `--targets` 失败 400/`40091`（消息为原因），离线 409/`40991`，CLI 启动失败或非零退出 502/`50291`（附 stderr 末行），读取待发送内容出错 500/`50091`。文件夹以 `O_DIRECTORY|O_NOFOLLOW` fd 锚定并复核 realpath，zip 在 `/proc/<pid>/fd/<fd>` 内打包 `.`，条目不带顶层目录。前端请求超时 45 分钟；客户端断开不会取消服务端已开始的发送。Taildrop CLI 本身不收目录（`directories not supported`），因此由服务端打包。
 - `POST /api/restart`：无请求体，返回 HTTP 202，信封 `{code:0,msg:"accepted",data:{restarting:true},request_id}`；表示已接受，不表示重启已完成。沿用两个入口的 Host / Origin 校验，远程入口还须 Tailscale 身份白名单；不新增豁免。同一进程内重复请求仍回 202，只启动一次重启。
 - `GET|POST|DELETE /api/power-off`：关机。信封 `data:{state:"idle"|"waiting"|"scheduled",busy,remainingMs?,error?}`，`busy` 为 running、starting 或带后台任务的会话数（比重启多算 starting）。POST 时无忙会话立即执行 `prefs.json` 中的 `shutdownCommand`（无参数排定 60 秒后关机），否则进入 `waiting`，每 5 秒检查一次，全部空闲后自动执行、不再确认；重复 POST 不重复执行。`scheduled` 且命令已落地时带 `remainingMs`（距关机的剩余毫秒，前端据此倒计时）；过了关机时刻 60 秒仍在运行，回到 `idle` 并带 `error`。DELETE 取消等待；已排定时以 `abort` 参数执行同一命令，Windows 报 1116（没有正在进行的关机）按取消成功处理。失败回到 `idle` 并带 `error`。等待状态只在内存，AIReins 重启即丢失。远程入口可用，沿用同样的 Host/Origin 与 Tailscale 身份白名单。
-- `GET|POST /api/update`：设置里的「更新 AIReins」（`server/self-update.ts`）。GET 默认先 `git fetch` 当前分支上游，返回 `data:{branch,upstream,head,upstreamHead,ahead,behind,aheadLog,behindLog,changes,defaultMessage,action,install,trayRestart}`。日志各最多 20 条，`changes` 为 `git status --porcelain -uall`。`action` 为 `pull`（只落后）、`push`（只领先或有本地改动）、`install`（上次安装未完成）、`diverged`（分叉交终端）或 `none`。待安装时先处理当前代码，不 fetch，离线也可重试；分离 HEAD 或无上游回 409。
+- `GET|POST /api/update`：设置里的「更新 AIReins」（`server/self-update.ts`）。GET 默认先 `git fetch` 当前分支上游，返回 `data:{branch,upstream,head,upstreamHead,ahead,behind,aheadLog,behindLog,changes,defaultMessage,action,install,restart,trayRestart}`。日志各最多 20 条，`changes` 为 `git status --porcelain -uall`。`action` 为 `pull`（只落后）、`push`（只领先或有本地改动）、`install`（上次安装未完成）、`build`（上次普通构建未完成）、`diverged`（分叉交终端）或 `none`。当前仓库、分支及 HEAD 有待安装/待构建任务时优先处理，不 fetch，离线也可重试；HEAD 不匹配的旧待办不消费，也不阻止正常 fetch。分离 HEAD 或无上游回 409。
   - POST `{action,branch,upstream,head,upstreamHead,changes,message?,lang?}` 重新核对 action、分支、上游、两个提交号和改动列表，一项变化即 409；安装决策由服务端重新计算，不信任客户端的 install 字段，同时只允许一个更新。`pull` 关闭 Git 钩子并只快进到确认时的上游提交。
   - 改动涉及 `install.sh`、`bin/`、依赖、Git 钩子或 `deploy/` 的运行文件（不含文档、tests）时，执行 `bash install.sh --update`，不重复 after-pull 的安装/构建；其他改动沿用 `scripts/git-hooks/after-pull.sh`。两者均继承本机代理，最多 15 分钟，按 lang 输出中英文。普通 git pull 钩子仍只处理依赖与构建。
-  - 安装前将待办写到 `~/.workbench/updates/<仓库路径和分支哈希>.json`（遵守 `WORKBENCH_HOME`），记录目标提交，各分支互不清除待办；失败不清除，下一次检查提供 `install` 动作，已拉取的代码不回滚，用户不必另开终端重跑。安装成功才清除 pending。返回 `data:{action,output,restart,installed,trayRestart}`，`restart` 表示后端/共享代码/启动脚本或依赖需重启；`trayRestart` 表示改动涉及 Windows 托盘入口或图标，前端仅在 WSL 显示择时退出并重开托盘的提示。安装本身不停止、启动或重启后端。
+  - 安装或普通构建前将待办写到 `~/.workbench/updates/<仓库路径、分支和目标提交哈希>.json`（遵守 `WORKBENCH_HOME`），记录目标提交及 `stage:install|build`，兼容旧仓库路径/分支文件和无 stage 的安装待办；各分支和提交互不清除待办。失败不清除，下一次检查提供 `install` 或 `build` 动作，已拉取的代码不回滚，用户不必另开终端重跑。构建重试直接执行 `npm run build`，不重复 merge/安装，也不依赖 `ORIG_HEAD`；对应阶段成功才清除 pending。返回 `data:{action,output,restart,installed,trayRestart}`，`restart` 表示后端/共享代码/启动脚本或依赖需重启；`trayRestart` 表示改动涉及 Windows 托盘入口或图标，前端仅在 WSL 显示择时退出并重开托盘的提示。安装本身不停止、启动或重启后端。
   - `push` 保持原流程：有改动时按 message 或 defaultMessage 提交，`git add -A` 后正常经过钩子；远端和分支由 `@{u}` 同源解析，只推被比较的上游，不受其他推送配置影响。Git 失败、安装或构建失败回 500 并带命令输出；超时提示时限，推送失败保留本地提交。fetch/push 每次读取本机 `proxyUrl`，未配置时继承环境，不自动重试；原 Host/Origin 和 Tailscale 身份白名单保持不变。
 - `GET /api/pages`：启动时已注册的扩展页面列表
 - `GET /api/pages/:id/health`：限时探测一个扩展页面的目标服务
@@ -511,7 +513,7 @@ Codex 权限菜单已按当前官方三个常用预设更新（2026-10-01；本�
 
 长会话分页按需缓存 seq→字节偏移、安全切点、字节/回合前缀和派生状态，正文仅按分页偏移读取。启动全量恢复不预建分页缓存；索引按保守估算设 16MiB 总预算并执行 LRU，闲置项优先淘汰，释放 worker 时移除索引，超预算单项不常驻。追加增量更新；文件 stat 指纹变化时先重判健康和残尾边界，读取前后指纹一致才缓存；全量健康重判同步失效旧版本索引，写后确认 inode、预期大小、新增字节与读取期间版本一致才增量推进缓存。tail 快照的分页与派生状态共用一次索引读取，超预算单项也只扫描一次。返回数据隔离于缓存，工具迟到更新仍会撤销穿过工具生命周期的旧切点。同 tick 的首次 transcript 追加同步执行，其余合批写入；所有读取、释放、移除和正常退出前刷出待写批次。延迟批次写失败记录日志，并将对应会话标为 error、transcript 在当前进程内锁为只读；后续 driver 回调不再写入，读取不会解除保护，重启后按实际字节执行原有恢复校验。回归见 `server/long-session.test.ts`、`server/long-session-review.test.ts`，基准见 `frontend/scripts/long-session-bench.mjs`。
 
-单会话客户端可在快照后连接 `/ws?sessionId=<id>&afterSeq=<seq>`；当前前端使用全局 `/ws`，以 `replay` 消息传各已加载会话的 `afterSeq`（详见性能接口契约）。连接期间产生的缺口由每会话 1,000 条 ring buffer 补发；超出 ring 时服务端发送 `resync_required`，客户端重新取 `tail=1` 快照。历史分页不会改变重连的 `seq`。
+单会话客户端可在快照后连接 `/ws?sessionId=<id>&afterSeq=<seq>`；当前前端使用全局 `/ws`，以 `replay` 消息传各已加载会话的 `afterSeq`（详见性能接口契约）。连接期间产生的缺口由每会话最多 1,000 条的事件缓冲补发；所有会话共享 16 MiB 估算内存预算（UTF-8 JSON 字节两倍加每事件 256 字节，不是 RSS 硬上限），优先淘汰非运行会话；恢复为 dead/error 的历史不预热，释放 worker 后清空对应缓冲。超出缓存，或本次补发实际 UTF-8 JSON 字节加现有发送积压超过 512 KiB 时，服务端在发送任何补发事件前发送 `resync_required`，客户端重新取 `tail=1` 快照。历史分页不会改变重连的 `seq`。
 
 ## 三家 CLI 原生历史
 
@@ -996,9 +998,9 @@ Codex 输入框 `$` 在光标 token 处打开名称+描述面板，支持过滤�
 ### 性能接口契约（P0 / P1）
 
 - `GET /api/sessions` 的每个列表项增加 `title: string` 与 `pendingGateCount: number`。标题优先取手动标题、原生标题，再取首条 `user_message.payload.text`；空白压成单空格，保留完整文本，界面按可用宽度截短；首条为空或尚无消息时为“新会话”。前后端共用 `shared/session-title.ts`。审批数来自内存未决闸门集合；dead 会话固定为 0。新的 `user_message` 事件还带顶层 `title`，使用相同优先级，用于未加载会话的实时标题（包括首条为空的情况）。
-- 前端启动只取当前打开会话的 snapshot；未加载会话的标题和跨会话审批徽标以列表字段及 WS 实时事件维护，重连重新取列表校准。已加载会话在全局 `/ws` 上发送 `{type:"replay", sessionId, afterSeq}`，服务端补发 ring 内 `seq > afterSeq` 的持久事件，再发送 `{type:"replay_complete", sessionId, currentSeq}`；超出 ring 则发送 `resync_required`，客户端取 snapshot。旧 `/ws?sessionId=...&afterSeq=...` 连接补发仍可使用。
-- 首连与重连对齐期间的实时帧先缓存，补发完成后排序去重。snapshot 在途期间也缓存事件，落地后只追加大于 snapshot seq 的持久事件；普通 seq 缺口复用在途请求。仅显式强制刷新、`resync_required` 或 WS 重连可作废在途 snapshot。
-- Claude 只含 `toolCallId`、`partialInput` 的 `tool_call_updated` 标为顶层 `ephemeral:true`，`seq` 取当前持久游标，不写 transcript、不进 ring；仅 WS 实时发送，同一调用常规最多每 100ms 一次（保留最新值）。工具完成、最终 `inputComplete` 参数、审批、回合结束或错误前强制推出待发更新，该边界推出不受 100ms 限制。前端只更新实时卡片参数，跳过缺口检测且不推进游标。最终参数事件仍持久化；临时状态不支持回放或崩溃恢复。Codex/Kimi 更新保持原契约；旧 Claude transcript 在本轮启动恢复前按下面规则清理。
+- 前端启动只取当前打开会话的 snapshot；未加载会话的标题和跨会话审批徽标以列表字段及 WS 实时事件维护，重连重新取列表校准。已加载会话在全局 `/ws` 上发送 `{type:"replay", sessionId, afterSeq}`，服务端补发 ring 内 `seq > afterSeq` 的持久事件，再发送 `{type:"replay_complete", sessionId, currentSeq}`；超出 ring 或 512 KiB 补发预算（含当前发送积压）则在发送事件前发送 `resync_required`，客户端取 snapshot；补发缓存共享 16 MiB 估算内存预算，淘汰不影响 transcript。旧 `/ws?sessionId=...&afterSeq=...` 连接补发仍可使用。
+- 首连与重连对齐期间的实时帧先缓存，补发完成后排序去重。snapshot 在途期间也缓存事件，落地后只追加大于 snapshot seq 的持久事件。快照失败后已有窗口继续消费连续缓冲，缺口或首次失败保留就地重试入口；旧请求不覆盖新代次的状态。普通 seq 缺口复用在途请求。仅显式强制刷新、`resync_required` 或 WS 重连可作废在途 snapshot。
+- Claude 只含 `toolCallId`、`partialInput` 的 `tool_call_updated` 标为顶层 `ephemeral:true`，`seq` 取当前持久游标，不写 transcript、不进 ring；仅 WS 实时发送，同一调用常规最多每 100ms 一次（保留最新值）。工具完成、最终 `inputComplete` 参数、审批、回合结束或错误前强制推出待发更新，该边界推出不受 100ms 限制。前端只更新实时卡片参数，跳过缺口检测且不推进游标。最终参数事件仍持久化；临时状态不支持回放或崩溃恢复。Codex/Kimi 更新保持原契约；旧 Claude transcript 在启动恢复中识别，按下面规则清理。
 - `commands_updated` 对规范化命令表按内容去重；服务启动以 transcript 最后一条命令表为比较基线，实际内容变化仍持久化并广播。
 - `npm run build` 为 `frontend/dist/assets/` 的 JS/CSS 生成旁路 `.gz`。静态请求接受 gzip（且 q 非 0）并有对应文件时返回 gzip，带 `Content-Encoding: gzip` 和 `Vary: accept-encoding`；否则返回原文件，现有缓存策略不变。
 - 流式事件只标记会话登记表脏，最多每秒集中保存一次；创建、移除、释放、配置、状态变化及 shutdown 立即保存并刷出未写内容。transcript 仍逐条保存持久事件，恢复时以其末尾 seq 为准；未变化的 Claude 原生 session ID 元数据不触发重复保存。
@@ -1006,7 +1008,7 @@ Codex 输入框 `$` 在光标 token 处打开名称+描述面板，支持过滤�
 
 ### 性能第二轮接口与恢复契约（2026-10-01）
 
-- 启动恢复前，仅清理登记为 Claude 的 `.ndjson` 副本：结构为 `type:"tool_call_updated"`、payload 自有 `partialInput` 且 `inputComplete !== true` 的遗留行。Codex/Kimi 整份保留，末尾有效行始终保留，不重编 seq。分块读取；只有有可删行的文件才写临时文件，保留权限并 fsync 后 rename。每次记录 files / rewrittenFiles / removedLines / removedBytes 汇总，第二次无变化不重写。
+- 启动恢复读取时识别登记为 Claude 的 `.ndjson` 副本；现代 transcript 只扫描一遍，发现以下遗留行时才调用压缩并重新恢复：结构为 `type:"tool_call_updated"`、payload 自有 `partialInput` 且 `inputComplete !== true` 的遗留行。Codex/Kimi 整份保留，末尾有效行始终保留，不重编 seq。分块读取；只有有可删行的文件才写临时文件，保留权限并 fsync 后 rename。发现遗留行时记录 files / rewrittenFiles / removedLines / removedBytes 汇总；损坏或不完整尾行不改写，文件外部增加旧格式行时仍可识别，不用持久化迁移标记。
 - `getEventsAfter` 的待补发区间必须从 `afterSeq+1` 连续到当前 seq，否则 `requiresSnapshot:true` 且 `events:[]`；WS 发送 `resync_required`。snapshot 采用服务端 seq，允许事件有空号，未决审批照原事件重建。前端缺口处理不变。
 - 派单列表、详情、parent 与历史共享按 root 缓存的扫描（完成后 2 秒 TTL、并发复用同一 Promise）；详情附件仍按需读取，元数据最长约 2 秒延迟。历史多页并发刷新共用扫描。会话派单链接在 backgroundCount>0 或有链接时 3 秒刷新，否则 30 秒；重新可见立即查询。隐藏页停止列表/详情秒级时钟与链接定时器。
 - 大 JSON 响应与静态资源共享 gzip 接受判定，显式 `q=0` 不压缩；动态响应保留大小阈值、level 1、响应头及信封。gzip 使用异步 zlib，整个进程压缩并发为 1，失败不阻塞后续队列。transcript 读取与 JSON 处理仍同步。

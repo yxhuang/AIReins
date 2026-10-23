@@ -12,8 +12,8 @@ export function FilePreview({ preview, source = false }: { preview: FilePreviewS
   const { file, target, draft, loading, saving, error } = preview;
   const cwd = target.path.slice(0, target.path.lastIndexOf("/")) || "/";
   const [failedLoad, setFailedLoad] = useState<number | null>(null);
-  const table = useMemo(() => file?.kind === "csv" || file?.kind === "tsv"
-    ? parseDelimited(draft, file.kind === "tsv" ? "\t" : ",") : null, [file?.kind, draft]);
+  const table = useMemo(() => !source && (file?.kind === "csv" || file?.kind === "tsv")
+    ? parseDelimited(draft, file.kind === "tsv" ? "\t" : ",") : null, [file?.kind, draft, source]);
   const html = useMemo(() => file?.kind === "html" && !source ? isolatedHtml(draft) : "", [file?.kind, draft, source]);
   const dirty = file?.editable && draft !== file.text;
   const rich = file && ["markdown", "csv", "tsv", "html"].includes(file.kind);

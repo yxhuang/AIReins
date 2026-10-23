@@ -34,7 +34,6 @@ import {
   PROJECT_ORDER_LIMIT,
   readTranscript,
   readTranscriptState,
-  compactClaudeTranscripts,
   saveRegistry,
   saveProjectOrder,
   transcriptPathFor,
@@ -67,6 +66,7 @@ import { hasTerminalWorkerEvidence, rebootProvesWorkerGone } from "./session-rec
 import { parseProjectMove, parseOrganizationPatch, SessionOrganizationError, type SessionOrganizationFrame } from "./session-organization.js";
 
 const RING_SIZE = 1_000;
+const RING_CACHE_MAX_BYTES = 16 * 1024 * 1024;
 type DriverFactory = typeof createDriver;
 type ClaudeSettingsResolver = (cwd: string) => ClaudeEffectiveSettings;
 type SnapshotCreator = (cwd: string) => Promise<string | null>;
@@ -100,6 +100,9 @@ export class SessionManager {
   private readonly damagedTranscripts = new Set<string>();
   private readonly releases = new Map<string, Promise<unknown>>();
   private readonly rings = new Map<string, UnifiedEvent[]>();
+  private readonly ringBytes = new Map<string, number>();
+  private readonly ringEventBytes = new WeakMap<UnifiedEvent, number>();
+  private ringCacheBytes = 0;
   private readonly commands = new Map<string, UnifiedCommand[]>();
   private readonly listeners = new Set<(event: UnifiedEvent) => void>();
   private readonly organizationListeners = new Set<(frame: SessionOrganizationFrame) => void>();
@@ -143,11 +146,10 @@ export class SessionManager {
     const systemBootTime = this.systemBootTimeResolver();
     const loaded = loadRegistry();
     this.projectOrder = loadProjectOrder(loaded);
-    log("info", "legacy Claude transcript updates compacted", compactClaudeTranscripts(loaded));
     for (const stored of loaded) {
       let recovered: ReturnType<typeof readTranscriptState>;
       setTranscriptCacheIdle(stored.transcriptPath, stored.released === true || stored.status === "idle");
-      try { recovered = readTranscriptState(stored.transcriptPath); } catch (error) {
+      try { recovered = readTranscriptState(stored.transcriptPath, stored); } catch (error) {
         log("error", "transcript recovery failed", { sessionId: stored.id, file: stored.transcriptPath, message: String(error) });
         recovered = { events: [], damaged: true, incompleteTail: false };
       }
@@ -190,7 +192,9 @@ export class SessionManager {
         permissionMode: config.permissionMode,
         riskyMode: isRiskyConfig(stored.agent, config),
       });
-      this.rings.set(stored.id, events.slice(-RING_SIZE));
+      if (this.sessions.get(stored.id)!.status === "idle") {
+        for (const event of events.slice(-RING_SIZE)) this.appendEventRing(stored.id, event);
+      }
       // 还没有首条消息的会话不设标题，否则首条 user_message 到来时 titles.has 已为真、标题卡在「新会话」
       if (events.some((event) => event.type === "user_message")) this.titles.set(stored.id, sessionTitle({}, events));
       const lastCommands = [...events].reverse().find((event) => event.type === "commands_updated");
@@ -304,6 +308,7 @@ export class SessionManager {
     const session = this.sessions.get(id);
     if (!session) return undefined;
     const ring = this.rings.get(id) ?? [];
+    if (this.rings.has(id)) { this.rings.delete(id); this.rings.set(id, ring); }
     const oldest = ring[0]?.seq ?? session.seq + 1;
     const events = ring.filter((event) => event.seq > afterSeq);
     const requiresSnapshot = afterSeq < session.seq && (
@@ -321,6 +326,33 @@ export class SessionManager {
   onEvent(listener: (event: UnifiedEvent) => void): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
+  }
+
+  private dropEventRing(id: string): void {
+    this.ringCacheBytes -= this.ringBytes.get(id) ?? 0;
+    this.ringBytes.delete(id);
+    this.rings.delete(id);
+  }
+
+  private appendEventRing(id: string, event: UnifiedEvent): void {
+    // Charge UTF-16/object overhead conservatively; this is a cache budget, not an RSS limit.
+    const size = Buffer.byteLength(JSON.stringify(event)) * 2 + 256;
+    if (size > RING_CACHE_MAX_BYTES) { this.dropEventRing(id); return; }
+    this.ringEventBytes.set(event, size);
+    const ring = this.rings.get(id) ?? [];
+    const previous = this.ringBytes.get(id) ?? 0;
+    let bytes = previous + size;
+    ring.push(event);
+    if (ring.length > RING_SIZE) bytes -= this.ringEventBytes.get(ring.shift()!)!;
+    this.rings.delete(id); this.rings.set(id, ring);
+    this.ringBytes.set(id, bytes);
+    this.ringCacheBytes += bytes - previous;
+    while (this.ringCacheBytes > RING_CACHE_MAX_BYTES) {
+      const keys = [...this.rings.keys()];
+      const victim = keys.find(key => !["running", "starting"].includes(this.sessions.get(key)?.status ?? "dead"))
+        ?? keys.find(key => key !== id) ?? id;
+      this.dropEventRing(victim);
+    }
   }
 
   async create(input: CreateSessionInput): Promise<SessionRecord> {
@@ -816,7 +848,7 @@ export class SessionManager {
     const updates = this.partialUpdates.get(id);
     if (updates) for (const update of updates.values()) if (update.timer) clearTimeout(update.timer);
     this.partialUpdates.delete(id);
-    this.rings.delete(id);
+    this.dropEventRing(id);
     this.commands.delete(id);
     this.persistRegistry();
     deleteSessionFiles(record, [...this.sessions.values()]);
@@ -874,6 +906,7 @@ export class SessionManager {
       flushTranscripts(record.transcriptPath);
       releaseTranscriptCache(record.transcriptPath);
       setTranscriptCacheIdle(record.transcriptPath, true);
+      this.dropEventRing(id);
       return { session: cloneSession(record), resumeCommand, vscodeUri: buildVSCodeUri(record) };
     })();
     this.releases.set(id, releasing);
@@ -1035,10 +1068,7 @@ export class SessionManager {
       this.partialUpdates.delete(id);
       this.persistRegistry();
     });
-    const ring = this.rings.get(id) ?? [];
-    ring.push(event);
-    if (ring.length > RING_SIZE) ring.splice(0, ring.length - RING_SIZE);
-    this.rings.set(id, ring);
+    this.appendEventRing(id, event);
     this.trackPendingGate(id, event);
     if (["config_updated", "session_created", "worker_released", "process_exited"].includes(type)) this.persistRegistry();
     else this.markRegistryDirty();

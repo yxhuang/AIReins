@@ -13,7 +13,7 @@
     "dev": "vite --config frontend/vite.config.ts",
     "test:mentions": "node --import ./frontend/scripts/i18n-zh.mjs --import tsx frontend/scripts/mentions.test.mjs",
     "test:file-panel": "node --import ./frontend/scripts/i18n-zh.mjs --import tsx frontend/scripts/file-panel.test.mjs",
-    "test:store": "node --import ./frontend/scripts/i18n-zh.mjs --import tsx frontend/scripts/store-flow.test.mjs && node --import ./frontend/scripts/i18n-zh.mjs --import tsx frontend/scripts/review-fixes.test.mjs",
+    "test:store": "node --import ./frontend/scripts/i18n-zh.mjs --import tsx frontend/scripts/store-flow.test.mjs && node --import ./frontend/scripts/i18n-zh.mjs --import tsx frontend/scripts/review-fixes.test.mjs && node --import ./frontend/scripts/i18n-zh.mjs --import tsx frontend/scripts/snapshot-recovery.test.mjs",
     "test:session-titles": "node --import tsx server/session-native-title.test.ts && node --import tsx server/codex-title.test.ts && node --import tsx server/native-title-drivers.test.ts && node --import ./frontend/scripts/i18n-zh.mjs --import tsx frontend/scripts/session-organization-flow.test.mjs",
     "test:attach": "node --import ./frontend/scripts/i18n-zh.mjs --import tsx frontend/scripts/attach-flow.test.mjs",
     "test:codex-resets": "node --import ./frontend/scripts/i18n-zh.mjs --import tsx frontend/scripts/codex-resets-flow.test.mjs",

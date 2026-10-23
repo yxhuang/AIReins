@@ -5,7 +5,7 @@ import { homedir, hostname } from "node:os";
 import { dirname, join } from "node:path";
 import { DRIVER_CAPABILITIES, getDriverMetadata } from "./drivers/index.js";
 
-export const SERVER_VERSION = "0.1.0";
+export const SERVER_VERSION = (JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as { version: string }).version;
 
 export function getServerHostName(remoteOrigin?: string): string {
   try {

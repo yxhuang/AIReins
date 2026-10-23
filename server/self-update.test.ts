@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -13,7 +14,7 @@ Object.assign(process.env, { WORKBENCH_HOME: base, GIT_CONFIG_GLOBAL: join(base,
 const remote = join(base, "remote.git"), other = join(base, "other"), repo = join(base, "repo");
 const git = (cwd: string, ...args: string[]) => {
   const result = spawnSync("git", args, { cwd, encoding: "utf8" });
-  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.equal(result.status, 0, result.stdout + result.stderr + (result.error?.message ?? ""));
   return result.stdout.trim();
 };
 const commit = (cwd: string, path: string, message: string) => {
@@ -87,8 +88,15 @@ await assert.rejects(applyUpdate(status, repo), error => error instanceof SelfUp
   && /fixture-install-failed/.test(error.message));
 assert.equal(git(repo, "rev-parse", "HEAD"), status.upstreamHead);
 const beforeTrayUpdate = status.head;
+const legacyKey = createHash("sha256").update(`${repo}\0main`).digest("hex");
+const trayKey = createHash("sha256").update(`${repo}\0main\0${status.upstreamHead}`).digest("hex");
+const trayStatePath = join(base, "updates", `${trayKey}.json`);
+const legacyState = JSON.parse(readFileSync(trayStatePath, "utf8"));
+delete legacyState.stage;
+writeFileSync(join(base, "updates", `${legacyKey}.json`), JSON.stringify(legacyState));
+rmSync(trayStatePath);
 status = await updateStatus(repo);
-assert.equal(status.action, "install", "已经快进的安装失败不能显示为已最新");
+assert.equal(status.action, "install", "旧版无 stage 的安装待办保持可重试");
 assert.equal(status.install, true);
 git(remote, "branch", "older", beforeTrayUpdate);
 git(repo, "fetch", "-q");
@@ -103,6 +111,73 @@ assert.equal(result.installed, true);
 assert.equal(result.trayRestart, true);
 assert.match(result.output, /fixture-install-complete/);
 assert.equal(readFileSync(join(repo, "install-runs"), "utf8").trim().split("\n").length, 2, "一次失败、一次重试，after-pull 不重复执行");
+assert.equal((await updateStatus(repo)).action, "none");
+rmSync(built);
+
+// 普通 shared/frontend 构建失败：HEAD 已快进，待办按提交隔离，离线可直接重试构建。
+const failingBuild = join(base, "fail-build");
+writeFileSync(join(other, "package.json"), JSON.stringify({ scripts: { build: `node -e "if(require('fs').existsSync('${failingBuild}'))process.exit(1);require('fs').writeFileSync('built','')"` } }));
+git(other, "commit", "-qam", "build failure fixture");
+git(other, "push", "-q");
+await applyUpdate(await updateStatus(repo), repo);
+rmSync(built);
+writeFileSync(failingBuild, "fail\n");
+commit(other, "shared/value.ts", "shared build failure");
+git(other, "push", "-q");
+status = await updateStatus(repo);
+assert.equal(status.install, false);
+await rejects(applyUpdate(status, repo), 500);
+assert.equal(git(repo, "rev-parse", "HEAD"), status.upstreamHead);
+const failedHead = status.upstreamHead;
+status = await updateStatus(repo);
+assert.equal(status.action, "build", "普通构建失败不能显示为已最新");
+assert.equal(status.install, false);
+assert.equal(status.restart, true, "共享代码的重启要求在失败后保留");
+const branchHeadKey = (head: string) => createHash("sha256").update(`${repo}\0main\0${head}`).digest("hex");
+const pendingPath = join(base, "updates", `${branchHeadKey(failedHead)}.json`);
+const pendingState = readFileSync(pendingPath, "utf8");
+await rejects(applyUpdate(status, repo), 500);
+assert.equal(readFileSync(pendingPath, "utf8"), pendingState, "重复失败保留同一待办");
+git(repo, "switch", "-q", "older");
+assert.equal((await updateStatus(repo)).action, "none", "其他分支不消费构建待办");
+git(repo, "switch", "-q", "main");
+commit(repo, "docs/later.md", "different target commit");
+assert.equal((await updateStatus(repo)).action, "push", "相同分支的其他提交不消费旧待办");
+assert.equal(readFileSync(pendingPath, "utf8"), pendingState);
+commit(other, "docs/newer.md", "new remote during recovery");
+git(other, "push", "-q");
+assert.equal((await updateStatus(repo)).action, "diverged", "HEAD 不匹配时仍正常 fetch 发现新远端提交");
+git(repo, "update-ref", "refs/heads/main", failedHead);
+git(repo, "restore", "--source=HEAD", "--staged", "--worktree", ".");
+git(repo, "remote", "set-url", "origin", join(base, "offline.git"));
+status = await updateStatus(repo);
+assert.equal(status.action, "build", "离线检查不 fetch");
+git(repo, "update-ref", "ORIG_HEAD", failedHead);
+rmSync(failingBuild);
+result = await applyUpdate(status, repo);
+assert.equal(result.action, "build");
+assert.equal(result.restart, true);
+assert.equal(result.installed, false);
+assert.ok(existsSync(built), "重试直接构建，不依赖 ORIG_HEAD 的变化列表");
+assert.equal(git(repo, "rev-parse", "HEAD"), failedHead, "重试不重复合并");
+git(repo, "remote", "set-url", "origin", remote);
+assert.equal((await updateStatus(repo)).action, "pull", "先完成当前待办，再处理新远端提交");
+await applyUpdate(await updateStatus(repo), repo);
+assert.equal((await updateStatus(repo)).action, "none");
+rmSync(built);
+
+// 仅前端失败也保留构建待办，成功后不要求重启后端。
+writeFileSync(failingBuild, "fail\n");
+commit(other, "frontend/app.ts", "frontend build failure");
+git(other, "push", "-q");
+await rejects(applyUpdate(await updateStatus(repo), repo), 500);
+status = await updateStatus(repo);
+assert.equal(status.action, "build");
+assert.equal(status.restart, false);
+rmSync(failingBuild);
+result = await applyUpdate(status, repo);
+assert.equal(result.restart, false);
+assert.ok(existsSync(built));
 assert.equal((await updateStatus(repo)).action, "none");
 rmSync(built);
 

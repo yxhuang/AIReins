@@ -262,14 +262,8 @@ wss.on("connection", (socket, request) => {
   clients.add(client);
 
   if (sessionId) {
-    const replay = manager.getEventsAfter(sessionId, afterSeq);
-    if (!replay) {
-      sendWs(client, { type: "error", code: 40401, msg: `会话不存在：${sessionId}` });
-    } else if (replay.requiresSnapshot) {
-      sendWs(client, { type: "resync_required", sessionId, currentSeq: replay.currentSeq });
-    } else {
-      for (const event of replay.events) sendEvent(client, event);
-    }
+    try { replaySession(manager, client, sessionId, afterSeq); }
+    catch (error) { sendWs(client, { type: "error", code: 40401, msg: error instanceof Error ? error.message : String(error) }); }
   }
   sendWs(client, { type: "ready", serverVersion: SERVER_VERSION, sessionId, afterSeq });
 

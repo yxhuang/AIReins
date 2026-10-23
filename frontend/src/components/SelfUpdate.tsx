@@ -25,6 +25,18 @@ export function UpdateOutcome({ result, windowsTray }: { result: UpdateResult; w
   </>;
 }
 
+export function UpdateRecovery({ status, windowsTray }: { status: UpdateStatus; windowsTray: boolean }) {
+  return <>
+    <p>{status.action === "build" ? t("ui.SelfUpdate.build_pending") : t("ui.SelfUpdate.install_pending")}</p>
+    {status.changes.length > 0 && <>
+      <p className="settings-hint">{status.action === "build" ? t("ui.SelfUpdate.build_local_changes") : t("ui.SelfUpdate.install_local_changes")}</p>
+      <LogList items={status.changes} total={status.changes.length} />
+    </>}
+    {status.restart && <p className="settings-hint">{t("ui.SelfUpdate.restart_needed")}</p>}
+    {status.trayRestart && windowsTray && <p className="settings-hint">{t("ui.SelfUpdate.tray_restart_needed")}</p>}
+  </>;
+}
+
 /** 设置里的「更新 {product}」：先与远端对比，按结果确认拉取（并构建）或提交推送。 */
 export function SelfUpdate({ dialogOpen, onDialogOpenChange, onRestart }: {
   dialogOpen: boolean;
@@ -101,7 +113,8 @@ export function SelfUpdate({ dialogOpen, onDialogOpenChange, onRestart }: {
   };
 
   const action = status?.action;
-  const title = phase === "done" ? (result?.installed ? t("ui.SelfUpdate.installed_title") : result?.action === "pull" ? t("ui.SelfUpdate.pulled") : t("ui.SelfUpdate.pushed"))
+  const title = phase === "done" ? (result?.installed ? t("ui.SelfUpdate.installed_title") : result?.action === "build" ? t("ui.SelfUpdate.built") : result?.action === "pull" ? t("ui.SelfUpdate.pulled") : t("ui.SelfUpdate.pushed"))
+    : action === "build" ? t("ui.SelfUpdate.build_title")
     : action === "install" ? t("ui.SelfUpdate.install_title")
     : action === "pull" ? t("ui.SelfUpdate.pull_title")
     : action === "push" ? t("ui.SelfUpdate.commit_and_push")
@@ -126,14 +139,10 @@ export function SelfUpdate({ dialogOpen, onDialogOpenChange, onRestart }: {
               <LogList items={status.behindLog} total={status.behind} />
               {status.changes.length > 0 && <p className="settings-hint">{t("ui.SelfUpdate.keep_changes", { p0: status.changes.length })}</p>}
               {status.install && <p className="settings-hint">{t("ui.SelfUpdate.install_needed")}</p>}
+              {status.restart && <p className="settings-hint">{t("ui.SelfUpdate.restart_needed")}</p>}
+              {status.trayRestart && windowsTray && <p className="settings-hint">{t("ui.SelfUpdate.tray_restart_needed")}</p>}
             </>}
-            {action === "install" && <>
-              <p>{t("ui.SelfUpdate.install_pending")}</p>
-              {status.changes.length > 0 && <>
-                <p className="settings-hint">{t("ui.SelfUpdate.install_local_changes")}</p>
-                <LogList items={status.changes} total={status.changes.length} />
-              </>}
-            </>}
+            {(action === "install" || action === "build") && <UpdateRecovery status={status} windowsTray={windowsTray} />}
             {action === "diverged" && <>
               <p>{t("ui.SelfUpdate.diverged", { p0: status.upstream, p1: status.ahead, p2: status.behind })}</p>
               <LogList items={status.aheadLog} total={status.ahead} />
@@ -154,17 +163,17 @@ export function SelfUpdate({ dialogOpen, onDialogOpenChange, onRestart }: {
               </>}
             </>}
           </>}
-          {phase === "applying" && <p className="settings-hint" role="status">{action === "install" || (action === "pull" && status?.install) ? t("ui.SelfUpdate.installing") : action === "pull" ? t("ui.SelfUpdate.pulling") : t("ui.SelfUpdate.pushing")}</p>}
+          {phase === "applying" && <p className="settings-hint" role="status">{action === "build" ? t("ui.SelfUpdate.building") : action === "install" || (action === "pull" && status?.install) ? t("ui.SelfUpdate.installing") : action === "pull" ? t("ui.SelfUpdate.pulling") : t("ui.SelfUpdate.pushing")}</p>}
           {phase === "done" && result && <UpdateOutcome result={result} windowsTray={windowsTray} />}
           {error && <p className="new-error" role="alert">{error}</p>}
           <div className="dir-actions">
             <button type="button" className="btn" disabled={phase === "applying"} onClick={close}>
-              {phase === "confirm" && (action === "pull" || action === "push" || action === "install") ? t("ui.common.cancel") : t("ui.common.close")}
+              {phase === "confirm" && (action === "pull" || action === "push" || action === "install" || action === "build") ? t("ui.common.cancel") : t("ui.common.close")}
             </button>
             {phase === "failed" && <button type="button" className="btn" onClick={() => void check()}>{t("ui.SelfUpdate.check_again")}</button>}
-            {(phase === "confirm" || phase === "applying") && (action === "pull" || action === "push" || action === "install") && (
+            {(phase === "confirm" || phase === "applying") && (action === "pull" || action === "push" || action === "install" || action === "build") && (
               <button type="button" className="btn" disabled={phase === "applying"} onClick={() => void apply()}>
-                {action === "install" ? t("ui.SelfUpdate.retry_install") : action === "pull" ? (status?.install ? t("ui.SelfUpdate.pull_and_install") : t("ui.SelfUpdate.pull_and_build")) : t("ui.SelfUpdate.commit_and_push")}
+                {action === "build" ? t("ui.SelfUpdate.retry_build") : action === "install" ? t("ui.SelfUpdate.retry_install") : action === "pull" ? (status?.install ? t("ui.SelfUpdate.pull_and_install") : t("ui.SelfUpdate.pull_and_build")) : t("ui.SelfUpdate.commit_and_push")}
               </button>
             )}
             {phase === "done" && result && result.action !== "push" && <>

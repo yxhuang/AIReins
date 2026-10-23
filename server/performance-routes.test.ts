@@ -27,8 +27,13 @@ const events = Array.from({ length: 1002 }, (_, index) => ({
   payload: index === 1001 ? { requestId: "gate" } : { text: "测试标题" },
 }));
 writeFileSync(transcriptPath, events.map((event) => JSON.stringify(event)).join("\n") + "\n");
+const replayPath = join(home, "transcripts", "replay.ndjson");
+const replayEvents = events.slice(-2).map(event => ({ ...event, sessionId: "replay", type: "agent_text_delta", payload: { text: "cached reply" } }));
+writeFileSync(replayPath, replayEvents.map(event => JSON.stringify(event)).join("\n") + "\n");
 writeFileSync(join(home, "sessions.json"), JSON.stringify([{ id: "test", agent: "claude", agentId: "main", cwd: home,
-  status: "idle", createdAt: now, lastActivityAt: now, seq: 1002, transcriptPath, config: {}, riskyMode: false }]));
+  status: "idle", createdAt: now, lastActivityAt: now, seq: 1002, transcriptPath, config: {}, riskyMode: false },
+{ id: "replay", agent: "codex", agentId: "main", cwd: home, status: "idle", released: true, nativeSessionId: "fixture-native",
+  createdAt: now, lastActivityAt: now, seq: 1002, transcriptPath: replayPath, config: {}, riskyMode: false }]));
 const listener = createServer();
 await new Promise<void>((resolve) => listener.listen(0, "127.0.0.1", resolve));
 const address = listener.address(); assert(address && typeof address !== "string");
@@ -115,11 +120,15 @@ try {
   });
   ws.on("message", (data) => frames.push(JSON.parse(String(data))));
   await once(ws, "open");
-  const completed = waitFrame((frame) => frame.type === "replay_complete");
+  const deadResync = waitFrame(frame => frame.type === "resync_required" && frame.sessionId === "test");
   ws.send(JSON.stringify({ type: "replay", sessionId: "test", afterSeq: 1000 }));
+  await deadResync;
+  assert.deepEqual(frames.filter(frame => frame.seq), [], "dead archive recovery uses a snapshot without warming its ring");
+  const completed = waitFrame((frame) => frame.type === "replay_complete");
+  ws.send(JSON.stringify({ type: "replay", sessionId: "replay", afterSeq: 1000 }));
   await completed;
   assert.deepEqual(frames.filter((frame) => frame.seq).map((frame) => frame.seq), [1001,1002]);
-  assert.equal(frames.find((frame) => frame.seq === 1002)!.type, "permission_request");
+  assert.equal(frames.find((frame) => frame.seq === 1002)!.type, "agent_text_delta");
   const resync = waitFrame((frame) => frame.type === "resync_required");
   ws.send(JSON.stringify({ type: "replay", sessionId: "test", afterSeq: 0 }));
   await resync;

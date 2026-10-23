@@ -464,11 +464,20 @@ function scanTranscript(path: string, onEvent: (event: UnifiedEvent, offset: num
   return { damaged, incompleteTail: Boolean(tail), signature, stable };
 }
 
-export function readTranscriptState(path: string): { events: UnifiedEvent[]; damaged: boolean; incompleteTail: boolean } {
+export function readTranscriptState(path: string, legacySession?: Pick<SessionRecord, "id" | "agent">): { events: UnifiedEvent[]; damaged: boolean; incompleteTail: boolean } {
   flushTranscripts(path);
   // Full recovery reads remain transient; startup does not create paging caches.
   const events: UnifiedEvent[] = [];
-  const { damaged, incompleteTail } = scanTranscript(path, event => events.push(event));
+  let legacy = false;
+  const { damaged, incompleteTail, stable } = scanTranscript(path, event => {
+    events.push(event);
+    if (legacySession?.agent === "claude" && isLegacyPartial(event)) legacy = true;
+  });
+  if (legacy && stable && !damaged && !incompleteTail && path === transcriptPathFor(legacySession!.id)) {
+    const compacted = compactClaudeTranscripts([legacySession!]);
+    log("info", "legacy Claude transcript updates compacted", compacted);
+    if (compacted.rewrittenFiles) return readTranscriptState(path);
+  }
   return { events, damaged, incompleteTail };
 }
 
@@ -499,19 +508,20 @@ function* transcriptLines(fd: number): Generator<{ bytes: Buffer; offset: number
   if (parts.length) yield { bytes: Buffer.concat(parts), offset };
 }
 
+function isLegacyPartial(event: UnifiedEvent): boolean {
+  return event.type === "tool_call_updated" && Object.hasOwn(event.payload, "partialInput") && event.payload.inputComplete !== true;
+}
+
 function legacyPartial(bytes: Buffer): boolean | undefined {
   const text = bytes.toString("utf8");
   if (!text.trim()) return undefined;
   const parsed = JSON.parse(text);
   if (parsed?._wbSkippedTail) throw new Error("含尾行恢复标记的文件禁止压缩改写");
-  const event = transcriptEvent(parsed);
-  return event.type === "tool_call_updated" && event.payload !== null
-    && typeof event.payload === "object" && Object.hasOwn(event.payload, "partialInput")
-    && event.payload.inputComplete !== true;
+  return isLegacyPartial(transcriptEvent(parsed));
 }
 
 /** 启动恢复前执行；只处理登记为 Claude 的 AIReins 副本，Codex/Kimi 即使有同名字段也保留。 */
-export function compactClaudeTranscripts(sessions: SessionRecord[]): { files: number; rewrittenFiles: number; removedLines: number; removedBytes: number } {
+export function compactClaudeTranscripts(sessions: Pick<SessionRecord, "id" | "agent">[]): { files: number; rewrittenFiles: number; removedLines: number; removedBytes: number } {
   flushTranscripts();
   const result = { files: 0, rewrittenFiles: 0, removedLines: 0, removedBytes: 0 };
   const claudeIds = new Set(sessions.filter((session) => session.agent === "claude").map((session) => session.id));

@@ -44,6 +44,7 @@ export function SessionView({ session, mobileTail, usage }: { session: SessionRe
   const dead = session.status === "dead";
   const selectData = useCallback((value: Store) => value.data.get(session.id), [session.id]);
   const data = useStore(selectData);
+  const snapshotError = useStore(useCallback((value: Store) => value.snapshotErrors.get(session.id), [session.id]));
   const wsState = useStore(selectWsState);
   // 三家均按原生会话身份查询派单；后台任务计数仍由 Claude 原生事件提供。
   const backgroundCount = session.agent === "claude" ? session.backgroundTasks?.length ?? 0 : 0;
@@ -274,7 +275,10 @@ export function SessionView({ session, mobileTail, usage }: { session: SessionRe
               : t("ui.SessionView.loading_earlier_messages")}
           </div>
         )}
-        {!data && <p className="system-line">{t("ui.SessionView.loading_session")}</p>}
+        {snapshotError && <p className="system-line" role="alert">{snapshotError}{" "}
+          <button type="button" className="btn" onClick={() => void store.resync(session.id)}>{t("ui.common.retry")}</button>
+        </p>}
+        {!data && !snapshotError && <p className="system-line">{t("ui.SessionView.loading_session")}</p>}
         {data && data.dropped > 0 && (
           <p className="system-line">{t("ui.SessionView.earlier_events_omitted_due_to_the_memory_sentence", { p0: (data.dropped) })}</p>
         )}
