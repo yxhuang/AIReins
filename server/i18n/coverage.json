@@ -3515,50 +3515,56 @@
     },
     {
       "file": "server/self-update.ts",
-      "line": 51,
+      "line": 81,
       "key": "server.message507",
       "category": "SelfUpdateError"
     },
     {
       "file": "server/self-update.ts",
-      "line": 71,
+      "line": 101,
       "key": "server.message508",
       "category": "SelfUpdateError"
     },
     {
       "file": "server/self-update.ts",
-      "line": 73,
+      "line": 103,
       "key": "server.message509",
       "category": "SelfUpdateError"
     },
     {
       "file": "server/self-update.ts",
-      "line": 96,
+      "line": 132,
       "key": "server.message510",
       "category": "SelfUpdateError"
     },
     {
       "file": "server/self-update.ts",
-      "line": 99,
+      "line": 135,
       "key": "server.message512",
       "category": "SelfUpdateError"
     },
     {
       "file": "server/self-update.ts",
-      "line": 105,
+      "line": 141,
       "key": "server.message513",
       "category": "SelfUpdateError"
     },
     {
       "file": "server/self-update.ts",
-      "line": 50,
+      "line": 80,
       "key": "server.self_update.timeout",
       "category": "SelfUpdateError"
     },
     {
       "file": "server/self-update.ts",
-      "line": 126,
+      "line": 178,
       "key": "server.self_update.push_failed",
+      "category": "SelfUpdateError"
+    },
+    {
+      "file": "server/self-update.ts",
+      "line": 158,
+      "key": "server.self_update.install_failed",
       "category": "SelfUpdateError"
     }
   ],
@@ -3686,7 +3692,7 @@
     },
     {
       "file": "server/i18n/messages.ts",
-      "line": 106,
+      "line": 107,
       "text": "(?:AIReins|Workbench|workbench|工作台|WB)",
       "reason": "匹配历史产品名的兼容正则片段，仅用于识别描述符，不直接显示给用户。"
     },

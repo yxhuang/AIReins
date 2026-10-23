@@ -1,0 +1,15 @@
+import assert from "node:assert/strict";
+import React from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+globalThis.React = React;
+const { UpdateOutcome } = await import("../src/components/SelfUpdate.tsx");
+const render = (result, windowsTray = false) => renderToStaticMarkup(React.createElement(UpdateOutcome, { result, windowsTray }));
+const installed = { action: "pull", output: "fixture", installed: true, restart: false, trayRestart: true };
+assert.match(render(installed), /安装完成/);
+assert.doesNotMatch(render(installed), /Windows 托盘/);
+assert.match(render(installed, true), /Windows 托盘/);
+assert.match(render(installed, true), /停止所有会话/);
+assert.match(render({ ...installed, action: "install", restart: true }, true), /重启会中断运行中的会话/);
+assert.match(render({ action: "pull", output: "", restart: false }), /刷新页面/);
+assert.doesNotMatch(render({ action: "push", output: "fixture", restart: false }), /安装|刷新/);
+console.log("PASS: update completion, installation retry, Windows tray activation notice and old-backend compatibility");

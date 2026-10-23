@@ -189,13 +189,17 @@ export interface UpdateStatus {
   behindLog: string[];
   changes: string[];
   defaultMessage: string;
-  action: "pull" | "push" | "none" | "diverged";
+  install?: boolean;
+  trayRestart?: boolean;
+  action: "pull" | "push" | "install" | "none" | "diverged";
 }
 
 export interface UpdateResult {
-  action: "pull" | "push";
+  action: "pull" | "push" | "install";
   output: string;
   restart: boolean;
+  installed?: boolean;
+  trayRestart?: boolean;
 }
 
 /** 先 git fetch，网络慢时要等一会儿。 */

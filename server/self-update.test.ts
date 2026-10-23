@@ -31,7 +31,16 @@ git(base, "clone", "-q", remote, other);
 writeFileSync(join(other, "package.json"), JSON.stringify({ scripts: { build: "node -e \"require('fs').writeFileSync('built', '')\"" } }));
 mkdirSync(join(other, "scripts/git-hooks"), { recursive: true });
 copyFileSync(new URL("../scripts/git-hooks/after-pull.sh", import.meta.url), join(other, "scripts/git-hooks/after-pull.sh"));
-writeFileSync(join(other, ".gitignore"), "built\npackage-lock.json\n");
+writeFileSync(join(other, "install.sh"), `#!/bin/bash
+set -e
+test "$1" = --update
+printf '%s\\n' install >> install-runs
+if test -f fail-install; then echo fixture-install-failed >&2; exit 7; fi
+npm install --no-audit --no-fund > /dev/null
+if test "\${AIREINS_FIXTURE_INSTALL_RECOVERY:-}" = 1; then echo fixture-recovery; else npm run build; fi
+echo fixture-install-complete
+`);
+writeFileSync(join(other, ".gitignore"), "built\npackage-lock.json\ninstall-runs\nfail-install\n");
 git(other, "add", "-A");
 git(other, "commit", "-qm", "baseline");
 git(other, "push", "-q", "-u", "origin", "main");
@@ -48,6 +57,7 @@ git(other, "push", "-q");
 status = await updateStatus(repo);
 assert.equal(status.action, "pull");
 assert.equal(status.behind, 1);
+assert.equal(status.install, false, "普通前端更新只构建");
 assert.match(status.behindLog[0], /frontend change/);
 await rejects(applyUpdate({ ...status, head: "0".repeat(40) }, repo), 409);
 await rejects(applyUpdate({ ...status, branch: "other" }, repo), 409);
@@ -66,6 +76,46 @@ result = await applyUpdate(status, repo);
 assert.equal(result.restart, true);
 assert.ok(!existsSync(built));
 
+// 部署变化：预告并只运行安装器；失败后仓库已快进也能继续用按钮重试。
+commit(other, "deploy/windows/launcher.cs", "tray deployment");
+git(other, "push", "-q");
+status = await updateStatus(repo);
+assert.equal(status.install, true);
+assert.equal(status.trayRestart, true);
+writeFileSync(join(repo, "fail-install"), "fail\n");
+await assert.rejects(applyUpdate(status, repo), error => error instanceof SelfUpdateError
+  && /fixture-install-failed/.test(error.message));
+assert.equal(git(repo, "rev-parse", "HEAD"), status.upstreamHead);
+const beforeTrayUpdate = status.head;
+status = await updateStatus(repo);
+assert.equal(status.action, "install", "已经快进的安装失败不能显示为已最新");
+assert.equal(status.install, true);
+git(remote, "branch", "older", beforeTrayUpdate);
+git(repo, "fetch", "-q");
+git(repo, "switch", "-q", "-c", "older", "--track", "origin/older");
+assert.equal((await updateStatus(repo)).action, "none", "其他分支不能消费 main 的待安装任务");
+git(repo, "switch", "-q", "main");
+status = await updateStatus(repo);
+assert.equal(status.action, "install", "切回失败版本仍可重试安装");
+rmSync(join(repo, "fail-install"));
+result = await applyUpdate(status, repo);
+assert.equal(result.installed, true);
+assert.equal(result.trayRestart, true);
+assert.match(result.output, /fixture-install-complete/);
+assert.equal(readFileSync(join(repo, "install-runs"), "utf8").trim().split("\n").length, 2, "一次失败、一次重试，after-pull 不重复执行");
+assert.equal((await updateStatus(repo)).action, "none");
+rmSync(built);
+
+// 文档变动不安装、不构建。
+commit(other, "docs/plain.md", "documentation only");
+git(other, "push", "-q");
+status = await updateStatus(repo);
+assert.equal(status.install, false);
+result = await applyUpdate(status, repo);
+assert.equal(result.installed, false);
+assert.equal(result.trayRestart, false);
+assert.ok(!existsSync(built));
+
 // 构建失败：已快进，但不能报成功。
 writeFileSync(join(other, "package.json"), JSON.stringify({ scripts: { build: "node -e \"process.exit(1)\"" } }));
 git(other, "add", "--", "package.json");
@@ -74,6 +124,21 @@ git(other, "push", "-q");
 status = await updateStatus(repo);
 await rejects(applyUpdate(status, repo), 500);
 assert.equal(git(repo, "rev-parse", "HEAD"), status.upstreamHead);
+assert.equal((await updateStatus(repo)).action, "install", "依赖更新失败也可重试安装");
+writeFileSync(join(other, "package.json"), JSON.stringify({ scripts: { build: "node -e \"require('fs').writeFileSync('built', '')\"" } }));
+git(other, "commit", "-qam", "repair build");
+git(other, "push", "-q");
+// 先完成当前已拉代码的安装；修复夹具命令不改 Git 工作区，随后再正常拉取修复。
+const retry = await updateStatus(repo);
+assert.equal(retry.action, "install");
+process.env.AIREINS_FIXTURE_INSTALL_RECOVERY = "1";
+await applyUpdate(retry, repo);
+delete process.env.AIREINS_FIXTURE_INSTALL_RECOVERY;
+status = await updateStatus(repo);
+assert.equal(status.action, "pull");
+result = await applyUpdate(status, repo);
+assert.equal(result.installed, true);
+assert.equal(result.restart, true);
 
 // 本地未提交改动：要求提交说明，提交后推送；弹窗之后又出现的改动不能被顺带提交。
 writeFileSync(join(repo, "notes.md"), "local\n");

@@ -11,6 +11,7 @@ export type MessageMetadata = Record<string, MessageDescriptor | (MessageDescrip
 
 const nestedParameterNames: Record<string, string[]> = {
   "server.self_update.push_failed": ["p0"],
+  "server.self_update.install_failed": ["p0"],
   "server.message000": [
     "p0",
     "p1"

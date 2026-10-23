@@ -1,11 +1,16 @@
 import { execFile } from "node:child_process";
-import { join } from "node:path";
+import { createHash } from "node:crypto";
+import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { proxyEnvironment } from "./proxy-env.js";
+import { prefsPath } from "./prefs.js";
 
 const REPO = fileURLToPath(new URL("..", import.meta.url));
 /** 与 scripts/git-hooks/after-pull.sh 的后端判断一致，另加启动脚本 bin/。 */
 const NEEDS_RESTART = /^(server|shared|bin)\/|^package(-lock)?\.json$/m;
+const NEEDS_INSTALL = /^deploy\/(?!tests\/)(?!.*\/tests\/)(?!.*\.md$)|^bin\/|^install\.sh$|^package(-lock)?\.json$|^scripts\/git-hooks\//m;
+const NEEDS_TRAY_RESTART = /^deploy\/windows\/(?:wb-tray\.ps1|install-tray\.ps1|launcher\.cs)$|^deploy\/aireins\.ico$/m;
 const LOG_LIMIT = 20;
 
 export class SelfUpdateError extends Error {
@@ -28,14 +33,38 @@ export interface UpdateStatus {
   changes: string[];
   /** 不填提交说明时使用，按改动的顶层目录生成。 */
   defaultMessage: string;
-  action: "pull" | "push" | "none" | "diverged";
+  install: boolean;
+  trayRestart: boolean;
+  action: "pull" | "push" | "install" | "none" | "diverged";
 }
 
 export interface UpdateResult {
-  action: "pull" | "push";
+  action: "pull" | "push" | "install";
   output: string;
   /** 拉取到后端或依赖改动，需 aireins restart 才生效。 */
   restart: boolean;
+  installed: boolean;
+  trayRestart: boolean;
+}
+
+interface InstallState { pending: boolean; restart: boolean; trayRestart: boolean; branch: string; head: string }
+function installStatePath(repo: string, branch: string): string {
+  const key = createHash("sha256").update(`${resolve(repo)}\0${branch}`).digest("hex");
+  return join(dirname(prefsPath()), "updates", `${key}.json`);
+}
+function pendingInstall(repo: string, branch: string): InstallState | undefined {
+  try {
+    const state = JSON.parse(readFileSync(installStatePath(repo, branch), "utf8"));
+    if (state?.pending === true && state.branch === branch && typeof state.head === "string"
+      && /^[a-f0-9]{40,64}$/.test(state.head) && typeof state.restart === "boolean" && typeof state.trayRestart === "boolean") return state;
+  } catch { /* 首次检查没有待安装记录。 */ }
+  return undefined;
+}
+function saveInstallState(repo: string, state: InstallState): void {
+  const path = installStatePath(repo, state.branch);
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(`${path}.tmp`, `${JSON.stringify(state)}\n`, { mode: 0o600 });
+  renameSync(`${path}.tmp`, path);
 }
 
 // shortcut: 超时只杀直接子进程，after-pull 里的 npm 可能继续跑；出现卡死再改成按进程组终止。
@@ -46,7 +75,8 @@ export function runUpdateCommand(repo: string, command: string, args: string[], 
       childEnv = proxyEnvironment(childEnv);
     }
     execFile(command, args, { cwd: repo, timeout, maxBuffer: 8 << 20, env: childEnv }, (error, stdout, stderr) => {
-      const label = command === "git" ? `git ${args.find((arg) => !arg.startsWith("-") && !arg.includes("="))}` : "after-pull.sh";
+      const label = command === "git" ? `git ${args.find((arg) => !arg.startsWith("-") && !arg.includes("="))}`
+        : args[0]?.endsWith("install.sh") ? "install.sh" : "after-pull.sh";
       if (error?.killed) reject(new SelfUpdateError(500, `${label} 执行超时（${timeout / 1000} 秒），请检查网络或代理后重新检查`));
       else if (error) reject(new SelfUpdateError(500, `${label} 执行失败：${(stderr || stdout || error.message).trim()}`));
       else resolve(stdout + stderr);
@@ -71,27 +101,33 @@ export async function updateStatus(repo = REPO, fetch = true): Promise<UpdateSta
   if (branch === "HEAD") throw new SelfUpdateError(409, "当前不在任何分支上，无法与远端对比");
   const upstream = (await git(repo, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}").catch(() => "")).trim();
   if (!upstream) throw new SelfUpdateError(409, `分支 ${branch} 没有设置上游，无法与远端对比`);
-  if (fetch) await run(repo, "git", ["fetch", "--quiet"], 60_000);
+  const pending = pendingInstall(repo, branch);
+  // 重试当前已拉代码的安装不依赖远端网络。
+  if (fetch && !pending) await run(repo, "git", ["fetch", "--quiet"], 60_000);
   const head = (await git(repo, "rev-parse", "HEAD")).trim();
   const upstreamHead = (await git(repo, "rev-parse", "@{u}")).trim();
   const [ahead, behind] = (await git(repo, "rev-list", "--left-right", "--count", "HEAD...@{u}")).trim().split(/\s+/).map(Number);
   const aheadLog = lines(await git(repo, "log", `-n${LOG_LIMIT}`, "--format=%h %s", "@{u}..HEAD"));
   const behindLog = lines(await git(repo, "log", `-n${LOG_LIMIT}`, "--format=%h %s", "HEAD..@{u}"));
   const changes = lines(await git(repo, "status", "--porcelain", "-uall"));
-  const action = ahead > 0 && behind > 0 ? "diverged" : behind > 0 ? "pull" : ahead > 0 || changes.length ? "push" : "none";
-  return { branch, upstream, head, upstreamHead, ahead, behind, aheadLog, behindLog, changes, defaultMessage: defaultCommitMessage(changes), action };
+  const changed = behind > 0 ? await git(repo, "diff", "--name-only", "--no-renames", head, upstreamHead) : "";
+  const install = Boolean(pending) || NEEDS_INSTALL.test(changed);
+  const trayRestart = Boolean(pending?.trayRestart) || NEEDS_TRAY_RESTART.test(changed);
+  const action = ahead > 0 && behind > 0 ? "diverged" : behind > 0 ? "pull" : pending ? "install" : ahead > 0 || changes.length ? "push" : "none";
+  return { branch, upstream, head, upstreamHead, ahead, behind, aheadLog, behindLog, changes, defaultMessage: defaultCommitMessage(changes), action, install, trayRestart };
 }
 
 let applying = false;
 
 /**
  * 执行用户在弹窗里确认过的那一步：先核对 HEAD、远端引用和改动列表与弹窗一致，避免推送没看过的内容。
- * 拉取只快进到弹窗里的远端提交，再跑一次 after-pull.sh（依赖变化时 npm install，前端变化时 npm run build）。
+ * 拉取只快进到弹窗里的远端提交；安装相关变动运行 install.sh --update，普通变动运行 after-pull。
+ * 安装失败保留本机待办，下一次检查可重试，无需重复拉取。
  */
 export async function applyUpdate(input: unknown, repo = REPO): Promise<UpdateResult> {
   const body = (input && typeof input === "object" && !Array.isArray(input) ? input : {}) as Record<string, unknown>;
   const { action, head, upstreamHead, changes, message, lang } = body;
-  if ((action !== "pull" && action !== "push") || typeof head !== "string" || typeof upstreamHead !== "string"
+  if ((action !== "pull" && action !== "push" && action !== "install") || typeof head !== "string" || typeof upstreamHead !== "string"
     || !Array.isArray(changes) || !changes.every((line) => typeof line === "string")) {
     throw new SelfUpdateError(400, "请求必须包含 action、head、upstreamHead 和 changes");
   }
@@ -104,13 +140,29 @@ export async function applyUpdate(input: unknown, repo = REPO): Promise<UpdateRe
       || current.changes.join("\n") !== changes.join("\n")) {
       throw new SelfUpdateError(409, "仓库状态已变化，请重新检查");
     }
-    if (action === "pull") {
-      const changed = await git(repo, "diff", "--name-only", head, upstreamHead);
+    if (action === "pull" || action === "install") {
+      const pending = pendingInstall(repo, current.branch);
+      const changed = action === "pull" ? await git(repo, "diff", "--name-only", "--no-renames", head, upstreamHead) : "";
+      const restart = Boolean(pending?.restart) || NEEDS_RESTART.test(changed);
       // 关掉已装的钩子，避免 post-merge 与下面重复构建；未装钩子的克隆也照样构建。
-      await git(repo, "-c", "core.hooksPath=/dev/null", "merge", "--ff-only", "--quiet", upstreamHead);
+      if (action === "pull") await git(repo, "-c", "core.hooksPath=/dev/null", "merge", "--ff-only", "--quiet", upstreamHead);
       const locale = lang === "en" ? "C.UTF-8" : "zh_CN.UTF-8";
-      const output = await run(repo, "sh", [join(repo, "scripts/git-hooks/after-pull.sh")], 15 * 60_000, { LC_ALL: locale, LANG: locale });
-      return { action, output: output.trim(), restart: NEEDS_RESTART.test(changed) };
+      const env = proxyEnvironment({ ...process.env, LC_ALL: locale, LANG: locale });
+      if (current.install) {
+        const state = { pending: true, restart, trayRestart: current.trayRestart, branch: current.branch, head: action === "pull" ? upstreamHead : head };
+        saveInstallState(repo, state);
+        let output: string;
+        try {
+          output = await run(repo, "bash", [join(repo, "install.sh"), "--update"], 15 * 60_000, env);
+        } catch (error) {
+          if (error instanceof SelfUpdateError) throw new SelfUpdateError(error.status, `安装未完成；代码已保留。重新检查后可重试安装。${error.message}`);
+          throw error;
+        }
+        saveInstallState(repo, { ...state, pending: false });
+        return { action, output: output.trim(), restart, installed: true, trayRestart: state.trayRestart };
+      }
+      const output = await run(repo, "sh", [join(repo, "scripts/git-hooks/after-pull.sh")], 15 * 60_000, env);
+      return { action, output: output.trim(), restart, installed: false, trayRestart: false };
     }
     let output = "";
     if (changes.length) {
@@ -125,7 +177,7 @@ export async function applyUpdate(input: unknown, repo = REPO): Promise<UpdateRe
       if (!(error instanceof SelfUpdateError)) throw error;
       throw new SelfUpdateError(error.status, `本地提交已保留；推送未完成。重新检查后可再次推送，无需重复提交。${error.message}`);
     }
-    return { action, output: output.trim(), restart: false };
+    return { action, output: output.trim(), restart: false, installed: false, trayRestart: false };
   } finally {
     applying = false;
   }

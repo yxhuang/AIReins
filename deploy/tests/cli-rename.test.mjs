@@ -38,14 +38,15 @@ case "\${@: -1}" in
   *) exit 99 ;;
 esac
 `, { mode: 0o755 });
-const run = (home, args = [], locale = 'C.UTF-8') => {
+const run = (home, args = [], locale = 'C.UTF-8', expected = 0) => {
   const result = spawnSync('bash', [join(installerRepo, 'install.sh'), ...args], {
     encoding: 'utf8', timeout: 10_000,
     env: { ...process.env, HOME: home, WORKBENCH_HOME: join(home, '.workbench'),
       WORKBENCH_LOG: join(home, '.workbench/server.log'),
+      WSL_DISTRO_NAME: 'fixture',
       PATH: `${commands}:${home}/.local/bin:/usr/bin:/bin`, LC_ALL: locale },
   });
-  assert.equal(result.status, 0, result.stderr + result.stdout);
+  assert.equal(result.status, expected, result.stderr + result.stdout);
   return result.stdout;
 };
 const snapshot = path => readdirSync(path, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))
@@ -96,5 +97,26 @@ const missingHome = join(fixture, 'check-no-bin'); mkdirSync(missingHome);
 const missingBefore = snapshot(missingHome);
 run(missingHome, ['--check']);
 assert.deepEqual(snapshot(missingHome), missingBefore, '--check created ~/.local/bin');
+
+// --update refreshes installation without smoke-starting/stopping a backend, optional setup or alias cleanup.
+const updateHome = join(fixture, 'update-home');
+mkdirSync(join(updateHome, '.local/bin'), { recursive: true });
+symlinkSync(join(installerRepo, 'bin/workbench'), join(updateHome, '.local/bin/wb'));
+const beforeUpdateCalls = readFileSync(calls, 'utf8');
+const updateOutput = run(updateHome, ['--update']);
+assert.equal(readFileSync(calls, 'utf8'), beforeUpdateCalls, '--update must not probe/start/stop the backend');
+assert.equal(readlinkSync(join(updateHome, '.local/bin/wb')), join(installerRepo, 'bin/workbench'));
+assert(!updateOutput.includes('Configuring the Tailscale remote entry'), 'no new remote setup');
+assert(!updateOutput.includes('Smoke test'), 'no smoke server');
+assert(!existsSync(join(updateHome, '.workbench/pages/ai-usage/manifest.json')), 'no new optional page');
+
+// A required Windows tray failure is fatal in update mode (all commands below are shell fixtures).
+writeFileSync(launcher, readFileSync(launcher, 'utf8').replace('PLATFORM=linux', 'PLATFORM=wsl'));
+writeFileSync(join(commands, 'wslpath'), '#!/usr/bin/env bash\nprintf "%s\\n" "$2"\n', { mode: 0o755 });
+writeFileSync(join(commands, 'powershell.exe'), '#!/usr/bin/env bash\nexit 7\n', { mode: 0o755 });
+assert.match(run(updateHome, ['--update'], 'C.UTF-8', 1), /Windows tray installation failed/);
+writeFileSync(join(commands, 'powershell.exe'), '#!/usr/bin/env bash\nexit 0\n', { mode: 0o755 });
+assert.match(run(updateHome, ['--update']), /Windows tray and shortcuts installed/);
+assert.equal(readFileSync(calls, 'utf8'), beforeUpdateCalls);
 assert(readFileSync(calls, 'utf8').trim().split('\n').every(command => command === 'status'));
 console.log('CLI rename OK: owned absolute/relative dangling links removed, foreign links/files/directories preserved, --check read-only');

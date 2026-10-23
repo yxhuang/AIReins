@@ -32,11 +32,13 @@ summary() {
 }
 
 check=false
+update=false
 ai_usage_choice=auto
-usage() { say '用法：bash install.sh [--check] [--with-ai-usage | --without-ai-usage]' 'Usage: bash install.sh [--check] [--with-ai-usage | --without-ai-usage]' >&2; }
+usage() { say '用法：bash install.sh [--check | --update] [--with-ai-usage | --without-ai-usage]' 'Usage: bash install.sh [--check | --update] [--with-ai-usage | --without-ai-usage]' >&2; }
 for arg in "$@"; do
   case "$arg" in
     --check) check=true ;;
+    --update) update=true ;;
     --with-ai-usage)
       [[ "$ai_usage_choice" != no ]] || { usage; exit 2; }
       ai_usage_choice=yes ;;
@@ -46,6 +48,10 @@ for arg in "$@"; do
     *) usage; exit 2 ;;
   esac
 done
+if "$update"; then
+  if "$check" || [[ "$ai_usage_choice" == yes ]]; then usage; exit 2; fi
+  ai_usage_choice=no
+fi
 
 ai_usage_dir="${AI_USAGE_DIR:-$(dirname "$REPO")/ai-usage}"
 ai_usage_manifest="${WORKBENCH_HOME:-$HOME/.workbench}/pages/ai-usage/manifest.json"
@@ -281,7 +287,7 @@ node_supported() {
   [[ "$node_major" =~ ^[0-9]+$ && "$node_minor" =~ ^[0-9]+$ ]] && (( 10#$node_major > 22 || (10#$node_major == 22 && 10#$node_minor >= 12) ))
 }
 detect_node
-if [[ "$PLATFORM" == darwin && "${1:-}" != --check && -t 0 && -t 1 ]] && command -v brew >/dev/null 2>&1; then
+if [[ "$PLATFORM" == darwin && "${1:-}" != --check && -t 0 && -t 1 ]] && ! "$update" && command -v brew >/dev/null 2>&1; then
   brew_packages=()
   node_supported || brew_packages+=(node)
   command -v rg >/dev/null 2>&1 || brew_packages+=(ripgrep)
@@ -367,9 +373,11 @@ if [[ "$PLATFORM" == wsl ]]; then
   if command -v powershell.exe >/dev/null 2>&1; then
     ok "WSL ${WSL_DISTRO_NAME:-未知发行版}：powershell.exe 可用（安装时检查 interop）" "WSL ${WSL_DISTRO_NAME:-unknown distro}: powershell.exe is available (interop is checked during install)"
     if [[ -n "${WSL_DISTRO_NAME:-}" ]]; then windows=true
+    elif "$update"; then fail '缺少 WSL_DISTRO_NAME，Windows 更新未完成。' 'WSL_DISTRO_NAME is missing; the Windows update is incomplete.'
     else warn '缺少 WSL_DISTRO_NAME；跳过依赖发行版名称的 Windows 安装。' 'WSL_DISTRO_NAME is missing; skipping the Windows install steps that depend on the distro name.'; fi
   else
-    warn 'WSL 中 powershell.exe 不可用，interop 未开启或 Windows PATH 未导入；跳过托盘安装。' 'powershell.exe is not available in WSL; interop is off or the Windows PATH is not imported. Skipping tray install.'
+    if "$update"; then fail 'WSL 中 powershell.exe 不可用，无法完成 Windows 托盘更新。' 'powershell.exe is unavailable in WSL; the Windows tray update cannot complete.'
+    else warn 'WSL 中 powershell.exe 不可用，interop 未开启或 Windows PATH 未导入；跳过托盘安装。' 'powershell.exe is not available in WSL; interop is off or the Windows PATH is not imported. Skipping tray install.'; fi
   fi
 else
   say '非 WSL 环境：跳过 Windows 托盘与快捷方式安装。' 'Not a WSL environment: skipping Windows tray and shortcut install.'
@@ -435,6 +443,7 @@ elif ln -sfn "$REPO/bin/aireins" "$link"; then
 else
   fail "无法安装 ${link}，请检查路径和权限。" "Cannot install $link; check the path and permissions."
 fi
+if ! "$update"; then
 for name in wb workbench; do
   link="$HOME/.local/bin/$name"
   if [[ -L "$link" ]]; then
@@ -457,6 +466,7 @@ for name in wb workbench; do
     warn "保留 ${link}：不是本仓库的命令链接。" "Keeping $link: it is not this repository's command link."
   fi
 done
+fi
 
 if "$windows"; then
   say $'\n安装 Windows 托盘与快捷方式' $'\nInstalling Windows tray and shortcuts'
@@ -465,25 +475,37 @@ if "$windows"; then
       -File "$installer" -Distro "$WSL_DISTRO_NAME" -WbPath "$REPO/bin/aireins"); then
     ok 'Windows 托盘与快捷方式已安装 / 更新（未启动）' 'Windows tray and shortcuts installed / updated (not started)'
   else
-    warn 'Windows 安装失败；修复 interop 或上面的错误后，可在 WSL 手动重跑：' 'Windows install failed; after fixing interop or the errors above, rerun manually in WSL:'
+    if "$update"; then fail 'Windows 托盘安装失败，本次更新未完成。' 'Windows tray installation failed; this update is incomplete.'
+    else warn 'Windows 安装失败；修复 interop 或上面的错误后，可在 WSL 手动重跑：' 'Windows install failed; after fixing interop or the errors above, rerun manually in WSL:'; fi
     printf '  cd /mnt/c && powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$(wslpath -w %q)" -Distro %q -WbPath %q\n' \
       "$REPO/deploy/windows/install-tray.ps1" "$WSL_DISTRO_NAME" "$REPO/bin/aireins"
   fi
 fi
 
+if ! "$update" || [[ -f "${WORKBENCH_HOME:-$HOME/.workbench}/remote.json" ]]; then
 say $'\n配置 Tailscale 远程入口' $'\nConfiguring the Tailscale remote entry'
 if [[ "$PLATFORM" == wsl ]]; then remote_installer="$REPO/deploy/windows/install-remote.mjs"
 else remote_installer="$REPO/deploy/install-posix-remote.mjs"; fi
-node "$remote_installer"
+if "$update"; then node "$remote_installer" --check
+else node "$remote_installer"; fi
 remote_rc=$?
 case "$remote_rc" in
   0) ;;
   10) remote_created=true ;;
-  *) warn '远程入口自动配置未完成，继续其余安装。' 'Remote entry auto-configuration did not complete; continuing with the rest of the install.' ;;
+  *) if "$update"; then fail '已有远程入口检查失败，本次更新未完成。' 'Checking the existing remote entry failed; this update is incomplete.'
+     else warn '远程入口自动配置未完成，继续其余安装。' 'Remote entry auto-configuration did not complete; continuing with the rest of the install.'; fi ;;
 esac
+fi
 
 # 在任何新 AIReins 进程启动前创建扩展页，使启动扫描能发现它。
-ai_usage_integrate
+if ! "$update"; then ai_usage_integrate; fi
+
+# 更新按钮只刷新安装文件；不冒烟拉起/停止后端，不接入新的可选组件。
+if "$update"; then
+  summary
+  (( ${#errors[@]} == 0 ))
+  exit $?
+fi
 
 say $'\n冒烟测试' $'\nSmoke test'
 # status 的退出码可能受可选 python3/curl 影响；以“运行中 / Running”输出识别现有服务。

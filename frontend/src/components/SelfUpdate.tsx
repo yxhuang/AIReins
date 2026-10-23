@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { applyUpdate, fetchUpdateStatus, type UpdateResult, type UpdateStatus } from "../api";
 import { modalKeyDown } from "./useAnchoredMenu";
+import { useStore } from "../useStore";
 
 type Phase = "checking" | "confirm" | "applying" | "done" | "failed";
 
@@ -13,6 +14,15 @@ function errorMessage(error: unknown): string {
 /** 提交摘要或改动列表；服务端各最多给 20 条，total 超出时注明还有多少。 */
 function LogList({ items, total }: { items: string[]; total: number }) {
   return <pre className="self-update-log">{items.join("\n")}{total > items.length ? `\n${t("ui.SelfUpdate.more", { p0: total - items.length })}` : ""}</pre>;
+}
+
+export function UpdateOutcome({ result, windowsTray }: { result: UpdateResult; windowsTray: boolean }) {
+  return <>
+    {result.output && <pre className="self-update-log">{result.output}</pre>}
+    {result.installed && <p className="settings-hint">{t("ui.SelfUpdate.installed")}</p>}
+    {result.action !== "push" && <p className="settings-hint">{result.restart ? t("ui.SelfUpdate.restart_needed") : t("ui.SelfUpdate.refresh_hint")}</p>}
+    {result.trayRestart && windowsTray && <p className="settings-hint">{t("ui.SelfUpdate.tray_restart_needed")}</p>}
+  </>;
 }
 
 /** 设置里的「更新 {product}」：先与远端对比，按结果确认拉取（并构建）或提交推送。 */
@@ -29,6 +39,7 @@ export function SelfUpdate({ dialogOpen, onDialogOpenChange, onRestart }: {
   const button = useRef<HTMLButtonElement>(null);
   const dialog = useRef<HTMLDivElement>(null);
   const pending = useRef(false);
+  const windowsTray = useStore(value => value.meta?.capabilities.windowsTray === true || value.meta?.platform === "wsl");
 
   useEffect(() => {
     if (dialogOpen) dialog.current?.focus();
@@ -90,7 +101,8 @@ export function SelfUpdate({ dialogOpen, onDialogOpenChange, onRestart }: {
   };
 
   const action = status?.action;
-  const title = phase === "done" ? (result?.action === "pull" ? t("ui.SelfUpdate.pulled") : t("ui.SelfUpdate.pushed"))
+  const title = phase === "done" ? (result?.installed ? t("ui.SelfUpdate.installed_title") : result?.action === "pull" ? t("ui.SelfUpdate.pulled") : t("ui.SelfUpdate.pushed"))
+    : action === "install" ? t("ui.SelfUpdate.install_title")
     : action === "pull" ? t("ui.SelfUpdate.pull_title")
     : action === "push" ? t("ui.SelfUpdate.commit_and_push")
     : action === "diverged" ? t("ui.SelfUpdate.diverged_title")
@@ -113,6 +125,14 @@ export function SelfUpdate({ dialogOpen, onDialogOpenChange, onRestart }: {
               <p>{t("ui.SelfUpdate.behind", { p0: status.branch, p1: status.upstream, p2: status.behind })}</p>
               <LogList items={status.behindLog} total={status.behind} />
               {status.changes.length > 0 && <p className="settings-hint">{t("ui.SelfUpdate.keep_changes", { p0: status.changes.length })}</p>}
+              {status.install && <p className="settings-hint">{t("ui.SelfUpdate.install_needed")}</p>}
+            </>}
+            {action === "install" && <>
+              <p>{t("ui.SelfUpdate.install_pending")}</p>
+              {status.changes.length > 0 && <>
+                <p className="settings-hint">{t("ui.SelfUpdate.install_local_changes")}</p>
+                <LogList items={status.changes} total={status.changes.length} />
+              </>}
             </>}
             {action === "diverged" && <>
               <p>{t("ui.SelfUpdate.diverged", { p0: status.upstream, p1: status.ahead, p2: status.behind })}</p>
@@ -134,23 +154,20 @@ export function SelfUpdate({ dialogOpen, onDialogOpenChange, onRestart }: {
               </>}
             </>}
           </>}
-          {phase === "applying" && <p className="settings-hint" role="status">{action === "pull" ? t("ui.SelfUpdate.pulling") : t("ui.SelfUpdate.pushing")}</p>}
-          {phase === "done" && result && <>
-            {result.output && <pre className="self-update-log">{result.output}</pre>}
-            {result.action === "pull" && <p className="settings-hint">{result.restart ? t("ui.SelfUpdate.restart_needed") : t("ui.SelfUpdate.refresh_hint")}</p>}
-          </>}
+          {phase === "applying" && <p className="settings-hint" role="status">{action === "install" || (action === "pull" && status?.install) ? t("ui.SelfUpdate.installing") : action === "pull" ? t("ui.SelfUpdate.pulling") : t("ui.SelfUpdate.pushing")}</p>}
+          {phase === "done" && result && <UpdateOutcome result={result} windowsTray={windowsTray} />}
           {error && <p className="new-error" role="alert">{error}</p>}
           <div className="dir-actions">
             <button type="button" className="btn" disabled={phase === "applying"} onClick={close}>
-              {phase === "confirm" && (action === "pull" || action === "push") ? t("ui.common.cancel") : t("ui.common.close")}
+              {phase === "confirm" && (action === "pull" || action === "push" || action === "install") ? t("ui.common.cancel") : t("ui.common.close")}
             </button>
             {phase === "failed" && <button type="button" className="btn" onClick={() => void check()}>{t("ui.SelfUpdate.check_again")}</button>}
-            {(phase === "confirm" || phase === "applying") && (action === "pull" || action === "push") && (
+            {(phase === "confirm" || phase === "applying") && (action === "pull" || action === "push" || action === "install") && (
               <button type="button" className="btn" disabled={phase === "applying"} onClick={() => void apply()}>
-                {action === "pull" ? t("ui.SelfUpdate.pull_and_build") : t("ui.SelfUpdate.commit_and_push")}
+                {action === "install" ? t("ui.SelfUpdate.retry_install") : action === "pull" ? (status?.install ? t("ui.SelfUpdate.pull_and_install") : t("ui.SelfUpdate.pull_and_build")) : t("ui.SelfUpdate.commit_and_push")}
               </button>
             )}
-            {phase === "done" && result?.action === "pull" && <>
+            {phase === "done" && result && result.action !== "push" && <>
               {result.restart && <button type="button" className="btn" onClick={() => { onDialogOpenChange(false); onRestart(); }}>{t("ui.SettingsMenu.restart")}</button>}
               <button type="button" className="btn" onClick={() => window.location.reload()}>{t("ui.SelfUpdate.refresh")}</button>
             </>}

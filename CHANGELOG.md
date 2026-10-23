@@ -4,6 +4,7 @@
 
 ### Changed
 
+- The update button installs deployment, startup and dependency changes automatically, offers installation retries after a failed update, and shows when Windows tray files need to be reopened. Installation preserves the running backend and existing optional setup.
 - Windows cold starts show a local loading window while the backend starts. Opening an already running instance skips the WSL launch command.
 - Windows shortcuts use an installer-built launcher to forward requests to a running tray without starting PowerShell. Cold starts load the precompiled tray types; upgrades keep recoverable entry-file backups.
 - Page initialization loads independent requests in parallel and restores the active conversation without waiting for project ordering or extension pages. CLI metadata probes run in the background even on the first launch; connected pages refresh when probing finishes.

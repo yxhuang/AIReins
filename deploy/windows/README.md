@@ -34,6 +34,8 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File "C:\wb-tray\install-tray
 
 **仓库修改后必须重跑安装器才生效**，并退出旧托盘实例、重新启动。Windows 可能缓存任务栏图标；更新后仍显示旧图标时，取消固定再从新快捷方式固定。Chrome 的标题栏和任务栏图标行为需在 Windows 侧验收。
 
+设置里的更新按钮会在拉到安装/部署相关改动时自动执行 `bash install.sh --update`，完成后提示托盘文件已更新、需择时退出并重开。安装过程保留正在运行的托盘和后端；退出托盘会停止所有会话。安装失败会保留待办，重新检查后可点「重试安装」。普通终端 `git pull` 不自动更新 Windows 安装副本，仍需手动运行安装器。
+
 窗口标题由 `frontend/src/host-connections.ts` 的 `workbenchWindowTitle` 按界面语言输出：中文为 `AIReins · 本机` / `AIReins · 远程 <机器名>`（可带 `(n) 个闸门待处理 · ` 前缀），英文为 `AIReins · Local` / `AIReins · Remote <机器名>`（可带 `(n) pending approval(s) · ` 前缀）。托盘按 `Chrome_WidgetWin_1` 类名加整标题正则认窗口，同时识别中文、英文新格式与旧格式（`workbench` 整标题、`… · workbench` 结尾）；普通 Chrome 标签页带「 - Google Chrome」后缀，不会被误认。托盘的菜单、气泡和对话框按 Windows 界面语言（`CurrentUICulture`）显示中文或英文，日志内容不随语言变化。
 
 窗口图标仅在首次发现该窗口句柄时处理：先用 `WM_GETICON` 比较大小图标，句柄不同才发 `WM_SETICON`；两项成功后记住该窗口，定时器不再每秒重设。窗口消失后清除记录，新窗口重新检查；读取或设置超时会保留重试。此改动减少 Chrome 非客户区重绘，Ctrl+` 打开终端时的黑屏是否改善需在 Windows 实测。
