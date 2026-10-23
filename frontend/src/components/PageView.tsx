@@ -30,9 +30,13 @@ export function PageView({ page, sidebar = false, onCollapse }: {
   /** 健康检查序号：连点「重新检查」时晚到的旧响应丢弃（同 Composer @ 检索的 searchSeq 模式） */
   const checkSeq = useRef(0);
   const frameRef = useRef<HTMLIFrameElement>(null);
+  const [readySrc, setReadySrc] = useState<string | null>(null);
+  const framePaint = useRef(0);
 
   const check = useCallback(async () => {
     const seq = ++checkSeq.current;
+    cancelAnimationFrame(framePaint.current);
+    setReadySrc(null);
     setState({ phase: "checking" });
     try {
       const health = await fetchPageHealth(page.id);
@@ -50,12 +54,26 @@ export function PageView({ page, sidebar = false, onCollapse }: {
 
   useEffect(() => {
     void check();
-    return () => { checkSeq.current++; };
+    return () => {
+      checkSeq.current++;
+      cancelAnimationFrame(framePaint.current);
+    };
   }, [check]);
 
-  // 检查进行中禁用「重新检查」/「重试」（检查中视图切到下方降级面板，这里是兜底表达）
   const checking = state.phase === "checking";
   const src = pageSrc(page);
+  const frameReady = readySrc === src;
+  const mode = state.phase === "done" ? pageRenderMode(state.health) : null;
+  const revealFrame = () => {
+    const seq = checkSeq.current;
+    cancelAnimationFrame(framePaint.current);
+    // load 后再留一帧绘制，让子页样式和同步主题脚本先完成，避免手机露出白底首屏。
+    framePaint.current = requestAnimationFrame(() => {
+      framePaint.current = requestAnimationFrame(() => {
+        if (checkSeq.current === seq) setReadySrc(src);
+      });
+    });
+  };
 
   // iframe 内的键盘事件不会冒泡到父窗口；同源页（含 pages 代理）单独接上 Esc。
   // 跨源目标受浏览器同源策略限制，仍可用面板头收起按钮。
@@ -104,7 +122,6 @@ export function PageView({ page, sidebar = false, onCollapse }: {
 
   if (state.phase === "done") {
     const { health } = state;
-    const mode = pageRenderMode(health);
 
     if (mode === "blocked") {
       return (
@@ -135,32 +152,34 @@ export function PageView({ page, sidebar = false, onCollapse }: {
         </div>
       );
     }
-
-    // "iframe"（embeddable:true）：不再挂空白提示；"uncertain"（null/缺省）：保留提示与新标签页出口
-    if (mode === "iframe" || mode === "uncertain") {
-      return (
-        // maxWidth 由后端按简单 CSS 长度校验过；窄面板拉满宽屏反而难看
-        <div className={viewClass} style={!sidebar && page.maxWidth ? { maxWidth: page.maxWidth } : undefined}>
-          <div className="page-toolbar">
-            <span className="page-toolbar-title">
-              <PageIcon icon={page.icon} />
-              {page.name}
-            </span>
-            {mode === "uncertain" && (
-              <span className="page-toolbar-hint">{t("ui.PageView.if_the_area_below_is_blank_the")}</span>
-            )}
-            <a className="page-open-blank" href={src} target="_blank" rel="noreferrer">{t("ui.common.open_in_a_new_tab")}</a>
-          </div>
-          {/* 有意不加 sandbox：pages/ 里的页面（如 ai-usage）可能需要脚本/同源等完整能力，记录此决策 */}
-          <iframe ref={frameRef} className="page-frame" src={src} title={page.name} loading="lazy" />
-          {page.id === "ai-usage" && <CodexResetCard />}
-        </div>
-      );
-    }
-    // mode === "fallback"（reachable:false）：落到下方降级面板
   }
 
-  // 降级面板：检查中 / 健康接口失败 / reachable:false
+  // 健康检查与 iframe 加载共用同一块主题底色，避免切换整块面板和露出未加载的文档。
+  if (checking || mode === "iframe" || mode === "uncertain") {
+    return (
+      // maxWidth 由后端按简单 CSS 长度校验过；窄面板拉满宽屏反而难看
+      <div className={viewClass} style={!sidebar && page.maxWidth ? { maxWidth: page.maxWidth } : undefined}>
+        <div className="page-toolbar">
+          <span className="page-toolbar-title">
+            <PageIcon icon={page.icon} />
+            {page.name}
+          </span>
+          {mode === "uncertain" && (
+            <span className="page-toolbar-hint">{t("ui.PageView.if_the_area_below_is_blank_the")}</span>
+          )}
+          <a className="page-open-blank" href={src} target="_blank" rel="noreferrer">{t("ui.common.open_in_a_new_tab")}</a>
+        </div>
+        <div className="page-frame-area" aria-busy={checking || !frameReady}>
+          {(checking || !frameReady) && <div className="page-loading" role="status">{t("ui.common.loading")}</div>}
+          {/* 有意不加 sandbox：pages/ 里的页面（如 ai-usage）可能需要脚本/同源等完整能力，记录此决策 */}
+          {!checking && <iframe key={src} ref={frameRef} className={`page-frame${frameReady ? "" : " page-frame-loading"}`} src={src} title={page.name} loading="eager" onLoad={revealFrame} />}
+        </div>
+        {page.id === "ai-usage" && <CodexResetCard />}
+      </div>
+    );
+  }
+
+  // 降级面板：健康接口失败 / reachable:false
   return (
     <div className={viewClass}>
       <div className="page-fallback">
@@ -169,9 +188,6 @@ export function PageView({ page, sidebar = false, onCollapse }: {
           {page.name}
         </h2>
         {page.description && <p className="page-fallback-desc">{page.description}</p>}
-        {state.phase === "checking" && (
-          <p className="page-fallback-reason">{t("ui.PageView.checking_the_target_service")}</p>
-        )}
         {state.phase === "done" && (
           <p className="page-fallback-reason" role="alert">{t("ui.PageView.the_target_service_is_currently_unreachable_took_sentence", { p0: (state.health.reason), p1: (state.health.durationMs) })}</p>
         )}
@@ -182,10 +198,10 @@ export function PageView({ page, sidebar = false, onCollapse }: {
           <button
             type="button"
             className="btn"
-            disabled={state.phase === "checking"}
+            disabled={checking}
             onClick={() => void check()}
           >
-            {state.phase === "checking" ? t("ui.PageView.checking") : t("ui.common.retry")}
+            {t("ui.common.retry")}
           </button>
           <a className="page-open-blank" href={src} target="_blank" rel="noreferrer">{t("ui.common.open_in_a_new_tab")}</a>
         </div>

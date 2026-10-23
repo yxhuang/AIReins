@@ -231,11 +231,43 @@ console.log("✅ 文件面板浏览目录按会话归属");
     assert.equal(tabs.fileTabs.length, 2, "后台标签有未保存修改时取消即不关");
     answer = true; tabs.closeFileTab(1);
     assert.deepEqual(tabs.fileTabs.map(tab => tab.id), [2]);
-    tabs.closeFileTab(2);
-    assert.equal(tabs.fileTabs.length, 1, "最后一个标签不关闭");
+    tabs.filePreview = dirty;
+    answer = false; tabs.closeFileTab(2);
+    assert.equal(tabs.fileTabs.length, 1, "最后一个标签也保留未保存修改的关闭确认");
+    assert.equal(tabs.filePreview, dirty, "取消关闭时保留预览与草稿");
     tabs.filePreview = { ...dirty, saving: true };
+    tabs.closeFileTab(2);
     tabs.openFileTab();
-    assert.equal(tabs.fileTabs.length, 1, "保存中不切换标签");
+    assert.equal(tabs.fileTabs.length, 1, "保存中不能关闭或新建标签");
+    tabs.filePreview = dirty;
+    answer = true;
+    tabs.fileBrowserBack = () => true;
+    const directory = tabs.fileDirectory;
+    tabs.closeFileTab(2);
+    assert.equal(tabs.fileTabs.length, 1, "单标签预览点关闭会返回目录");
+    assert.equal(tabs.fileTabId, 2, "返回目录保留当前标签");
+    assert.equal(tabs.filePreview, null);
+    assert.deepEqual(tabs.fileDirectory, directory, "返回此前浏览的目录");
+    tabs.closeFileTab(2);
+    assert.equal(tabs.fileTabs.length, 0, "最后一个标签可以关闭");
+    assert.equal(tabs.fileTabId, 0);
+    assert.equal(tabs.filePreview, null);
+    assert.equal(tabs.fileDirectory, null);
+    assert.equal(tabs.fileBrowserBack, null, "空面板不保留旧目录的返回处理");
+    tabs.openFileTab();
+    assert.equal(tabs.fileTabs.length, 1, "空面板可以重新新建标签");
+    assert.equal(tabs.fileTabId, tabs.fileTabs[0].id);
+    assert.equal(tabs.filePreview, null);
+    assert.equal(tabs.fileDirectory, null, "新标签从会话 cwd 开始");
+    tabs.filePreview = dirty;
+    const firstId = tabs.fileTabId;
+    tabs.openFileTab();
+    tabs.filePreview = { ...dirty, draft: dirty.file.text };
+    const secondId = tabs.fileTabId;
+    tabs.closeFileTab(secondId);
+    assert.equal(tabs.fileTabs.length, 1, "多标签时关闭预览仍移除整个标签");
+    assert.equal(tabs.fileTabId, firstId);
+    assert.equal(tabs.filePreview, dirty, "关闭后切回其他标签的预览");
   } finally { if (hadWindow) globalThis.window = oldWindow; else delete globalThis.window; }
 
   const previous = { fileTabs: store.fileTabs, fileTabId: store.fileTabId, filePreview: store.filePreview, fileDirectory: store.fileDirectory, sessions: store.sessions, currentId: store.currentId };
@@ -247,7 +279,61 @@ console.log("✅ 文件面板浏览目录按会话归属");
     const html = renderToStaticMarkup(React.createElement(FilePanel, { onClose() {} }));
     assert.ok(html.includes('aria-label="文件标签页"') && html.includes('aria-label="新建标签页"'));
     assert.ok(html.includes(">a</span>") && html.includes(">docs</span>") && html.includes('aria-label="关闭 docs"'), "标签显示目录名，可关闭");
+    assert.equal((html.match(/class="term-tab-close"/g) ?? []).length, 2, "多个目录标签都显示关闭按钮");
     assert.ok(html.indexOf('aria-label="目录路径"') < html.indexOf('aria-label="文件标签页"') || html.indexOf("地址栏目录层级") < html.indexOf('aria-label="文件标签页"'), "标签行在地址栏下方");
+    store.closeFileTab(2);
+    const singleHtml = renderToStaticMarkup(React.createElement(FilePanel, { onClose() {} }));
+    assert.ok(!singleHtml.includes('class="term-tab-close"'), "单个目录标签隐藏关闭按钮");
+    store.fileDirectory = { sessionId: "a", path: "/proj/a" };
+    store.filePreview = { ...pdfPreview, target: { path: "/proj/a/readme.pdf", root: "/proj/a" } };
+    const previewHtml = renderToStaticMarkup(React.createElement(FilePanel, { onClose() {} }));
+    assert.ok(previewHtml.includes('aria-label="关闭 readme.pdf"'), "单个文档预览仍显示关闭按钮");
+    store.closeFileTab(1);
+    const returnedHtml = renderToStaticMarkup(React.createElement(FilePanel, { onClose() {} }));
+    assert.ok(returnedHtml.includes('aria-label="目录与文件列表"'), "单标签预览关闭后显示目录");
+    assert.ok(!returnedHtml.includes('class="term-tab-close"'), "单标签预览返回目录后隐藏关闭按钮");
+    assert.ok(!returnedHtml.includes('class="file-preview'), "返回目录后不再显示预览");
+    store.closeFileTab(1);
+    const emptyHtml = renderToStaticMarkup(React.createElement(FilePanel, { onClose() {} }));
+    assert.ok(emptyHtml.includes('aria-label="新建标签页"'), "全部关闭后保留新建入口");
+    for (const content of ['role="tab"', 'aria-label="目录与文件列表"', 'aria-label="目录导航"', 'aria-label="目录路径"', 'class="file-preview', 'class="file-notice']) {
+      assert.ok(!emptyHtml.includes(content), `空面板不显示旧内容：${content}`);
+    }
   } finally { Object.assign(store, previous); }
 }
 console.log("✅ 文件面板标签页：新标签打开文件夹、切换保留草稿、关闭确认与保存中锁定");
+
+{
+  const tabs = new Store();
+  const oldWindow = globalThis.window, oldFetch = globalThis.fetch;
+  let finish, signal;
+  const target = { path: "/p/a.txt", root: "/p" };
+  const file = { ...target, name: "a.txt", kind: "text", size: 2, editable: true, mimeType: "text/plain", text: "ok", version: "v" };
+  globalThis.window = { ...oldWindow, addEventListener() {}, matchMedia: () => ({ matches: false }) };
+  globalThis.fetch = (_url, init) => {
+    signal = init.signal;
+    return new Promise(resolve => { finish = () => resolve({ json: async () => ({ code: 0, data: file }) }); });
+  };
+  try {
+    tabs.closeFileTab(tabs.fileTabId);
+    const loading = tabs.openFilePreview(target);
+    assert.equal(tabs.fileTabs.length, 1, "从空面板直接打开文件会创建标签");
+    const loadingTabId = tabs.fileTabId;
+    tabs.closeFileTab(loadingTabId);
+    assert.ok(signal.aborted, "关闭文件预览会中断读取");
+    assert.equal(tabs.fileTabs.length, 1, "读取中的单标签预览也返回目录");
+    assert.equal(tabs.fileTabId, loadingTabId);
+    assert.deepEqual(tabs.fileDirectory, { sessionId: null, path: target.root });
+    assert.equal(tabs.filesOpen, true, "关闭标签保留文件面板");
+    finish(); await loading;
+    assert.equal(tabs.filePreview, null, "迟到的读取结果不会恢复预览");
+    tabs.closeFileTab(loadingTabId);
+    assert.equal(tabs.fileTabs.length, 0);
+    const reopened = tabs.openFilePreview(target);
+    finish(); await reopened;
+    assert.equal(tabs.fileTabs.length, 1);
+    assert.notEqual(tabs.fileTabId, loadingTabId, "重新打开文件使用新标签");
+    assert.equal(tabs.filePreview.file.text, "ok");
+  } finally { globalThis.window = oldWindow; globalThis.fetch = oldFetch; }
+}
+console.log("✅ 空文件面板直接打开文件、关闭时中断读取与迟到结果隔离");

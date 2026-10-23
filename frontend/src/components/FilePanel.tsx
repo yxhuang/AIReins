@@ -76,6 +76,7 @@ export function FilePanel({ onClose }: { onClose: () => void }) {
   const preview = useStore(value => value.filePreview);
   const tabs = useStore(value => value.fileTabs);
   const tabId = useStore(value => value.fileTabId);
+  const hasTab = tabs.length > 0;
   const fileDirectory = useStore(value => value.fileDirectory);
   // 浏览中的路径由 DirectoryContents 自己维护；宿主通知不应再次初始化并读取同一目录。
   const sessionDirectory = () => store.fileDirectory && store.fileDirectory.sessionId === (session?.id ?? null) ? store.fileDirectory.path : null;
@@ -189,14 +190,17 @@ export function FilePanel({ onClose }: { onClose: () => void }) {
             </svg>
             <span className="term-tab-label">{name}</span>
           </button>
-          {tabs.length > 1 && <button type="button" className="term-tab-close" aria-label={t("ui.FilePanel.close", { p0: (name) })} title={t("ui.FilePanel.close_tab")} onClick={() => store.closeFileTab(tab.id)}>×</button>}
+          {(tabs.length > 1 || !folder) && <button type="button" className="term-tab-close" aria-label={t("ui.FilePanel.close", { p0: (name) })} title={t("ui.FilePanel.close_tab")} onClick={() => {
+            store.closeFileTab(tab.id);
+            if (store.fileTabId !== tabId || store.filePreview !== preview) { setNotice(null); setSourcePath(null); setSendMenu(null); }
+          }}>×</button>}
         </div>;
       })}
     </div>
     <button type="button" className="term-tab-new" aria-label={t("ui.FilePanel.new_tab")} title={t("ui.FilePanel.new_tab_in_the_session_directory")} onClick={() => { setNotice(null); store.openFileTab(); }}>
       <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="M12 4v16M4 12h16" /></svg>
     </button>
-    {!preview && <button type="button" className="term-tab-toggle" aria-pressed={showHidden} onClick={toggleHidden}
+    {hasTab && !preview && <button type="button" className="term-tab-toggle" aria-pressed={showHidden} onClick={toggleHidden}
       title={showHidden ? t("ui.FilePanel.hidden_files_shown") : t("ui.FilePanel.hidden_files_not_shown")}>{t("ui.FilePanel.hidden_files")}</button>}
   </div>;
 
@@ -208,7 +212,7 @@ export function FilePanel({ onClose }: { onClose: () => void }) {
       <div className="term-titlebar file-titlebar">
         {!preview && <PanelBackButton onClick={onClose} />}
         <strong className="file-side-title">{t("ui.common.files")}</strong>
-        {!preview && <div ref={setNavSlot} className="file-nav" role="toolbar" aria-label={t("ui.FilePanel.directory_navigation")} />}
+        {hasTab && !preview && <div ref={setNavSlot} className="file-nav" role="toolbar" aria-label={t("ui.FilePanel.directory_navigation")} />}
         {preview && <div className="file-actions" role="toolbar" aria-label={t("ui.common.file_actions")}>
           <button className="file-action" type="button" aria-label={t("ui.common.back")} title={t("ui.FilePanel.back_to_directory")} disabled={preview.saving} onClick={() => {
             if (store.clearFilePreview()) { setNotice(null); setSourcePath(null); }
@@ -231,18 +235,18 @@ export function FilePanel({ onClose }: { onClose: () => void }) {
         </div>}
         <button type="button" className="btn chrome-icon-btn panel-icon-button panel-collapse" aria-label={t("ui.FilePanel.collapse_file_panel")} title={t("ui.common.collapse_panel")} onClick={onClose}><PanelRightIcon /></button>
       </div>
-      {notice && <div className="file-notice" role="status">
+      {hasTab && notice && <div className="file-notice" role="status">
         {notice.reason && <p>{notice.reason}</p>}
         {notice.copied !== null && <p className="dir-copy-status">{notice.copied ? t("ui.FilePanel.path_copied") : <>{t("ui.FilePanel.cannot_copy_automatically_copy_manually")}<span className="mono">{notice.path}</span></>}</p>}
       </div>}
-      {preview && tabRow}
-      {preview ? <FilePreview key={preview.target.path} preview={preview} source={source} /> : <DirectoryContents key={tabId} initialPath={directoryInitialPath} includeFiles allowWindowsPicker
+      {(preview || !hasTab) && tabRow}
+      {preview ? <FilePreview key={preview.target.path} preview={preview} source={source} /> : hasTab && <DirectoryContents key={tabId} initialPath={directoryInitialPath} includeFiles allowWindowsPicker
         navigationHistory={directoryHistory} registerBrowserBack={registerBrowserBack} navTarget={navSlot} afterLocation={tabRow} showHidden={showHidden}
         onPathChange={path => store.setFileDirectory(path)}
         onBrowseHistory={path => store.navigateHistory(path)}
         onSelectFile={path => { setNotice(null); void store.openFilePreview({ path, root: sessionDirectory() ?? session?.cwd ?? "/", sessionId: session?.id }); }}
         onEntryMenu={(entry, x, y) => openSendMenu({ path: entry.path, root: entry.root, sessionId: session?.id }, entry.name, entry.folder, x, y, true)} />}
-      {sendMenu && <TaildropMenu enabled={sendMenu.folder ? folderTaildrop : taildrop} position={sendMenu} folder={sendMenu.folder} onClose={() => setSendMenu(null)}
+      {hasTab && sendMenu && <TaildropMenu enabled={sendMenu.folder ? folderTaildrop : taildrop} position={sendMenu} folder={sendMenu.folder} onClose={() => setSendMenu(null)}
         leadingItems={menuItems}
         onSend={(ip, device) => sendFile(sendMenu.target, sendMenu.name, sendMenu.folder, ip, device)} />}
     </div>

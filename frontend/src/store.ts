@@ -174,7 +174,7 @@ export class Store {
   fileDirectory: { sessionId: string | null; path: string } | null = null;
   /** 当前目录浏览器注册；侧键先沿成功访问的目录返回，再退出侧栏。 */
   fileBrowserBack: (() => boolean) | null = null;
-  /** 文件面板标签页；当前标签的目录与预览就是上面两项，切走时才存回标签。 */
+  /** 文件面板标签页；当前目录与预览切走时才存回标签，全部关闭时 id 为 0。 */
   fileTabs: FileTab[] = [{ id: 1, directory: null, preview: null }];
   fileTabId = 1;
   private fileTabSequence = 1;
@@ -859,6 +859,7 @@ export class Store {
 
   async openFilePreview(target: WorkFileTarget): Promise<void> {
     if (!this.canReplaceFile()) return;
+    if (this.fileTabs.length === 0) this.openFileTab();
     if (!this.fileUnloadBound && typeof window !== "undefined") {
       window.addEventListener("beforeunload", event => {
         const previews = [this.filePreview, ...this.fileTabs.filter(tab => tab.id !== this.fileTabId).map(tab => tab.preview)];
@@ -895,9 +896,10 @@ export class Store {
     this.fileDirectory = { sessionId: this.currentId, path }; this.notify();
   }
 
-  private showFileTab(tab: FileTab): void {
+  private showFileTab(tab: FileTab | null): void {
     this.fileLoad?.abort();
-    this.fileTabId = tab.id; this.fileDirectory = tab.directory; this.filePreview = null;
+    this.fileTabId = tab?.id ?? 0; this.fileDirectory = tab?.directory ?? null; this.filePreview = null;
+    if (!tab) { this.fileBrowserBack = null; this.notify(); return; }
     // 切走时中断的读取在切回时重来。
     if (tab.preview?.loading) { void this.openFilePreview(tab.preview.target); return; }
     this.filePreview = tab.preview; this.notify();
@@ -925,10 +927,11 @@ export class Store {
 
   closeFileTab(id: number): void {
     const index = this.fileTabs.findIndex(tab => tab.id === id);
-    if (index < 0 || this.fileTabs.length < 2) return;
+    if (index < 0) return;
     if (id === this.fileTabId) {
+      if (this.fileTabs.length === 1 && this.filePreview) { this.clearFilePreview(); return; }
       if (!this.canReplaceFile()) return;
-      const next = (this.fileTabs[index + 1] ?? this.fileTabs[index - 1])!;
+      const next = this.fileTabs[index + 1] ?? this.fileTabs[index - 1] ?? null;
       this.fileTabs = this.fileTabs.filter(tab => tab.id !== id);
       this.showFileTab(next);
       return;

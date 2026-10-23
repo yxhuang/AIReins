@@ -54,8 +54,9 @@ t("选历史会话：只有主区显示预览与导入，列表仍挂载便于�
 t("页面旧链接：健康检查加载态在侧栏，仅一个面板展开", () => {
   store.navigatePage("ai-usage");
   const html = renderApp();
-  assert.ok(sidebarOf(html)?.includes("正在检查目标服务"));
-  assert.ok(!mainOf(html)?.includes("正在检查目标服务"));
+  assert.ok(sidebarOf(html)?.includes('class="page-loading" role="status">正在加载…'));
+  assert.ok(sidebarOf(html)?.includes('class="page-frame-area" aria-busy="true"'));
+  assert.ok(!mainOf(html)?.includes('class="page-loading"'));
   assert.equal((html.match(/sidebar-panel-expanded/g) ?? []).length, 1);
   assert.ok(!html.includes('class="app has-main"'));
   assert.ok(!html.includes('class="page-nav-title">页面'));
