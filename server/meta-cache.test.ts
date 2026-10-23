@@ -21,3 +21,18 @@ const refreshed = JSON.parse(readFileSync(join(home, "meta-cache.json"), "utf8")
 assert.ok(refreshed.drivers.codex, "后台探测结果写回缓存");
 assert.notDeepEqual((await getMeta()).drivers, { marker: 1 }, "探测完成后内存结果更新");
 console.log("PASS: /api/meta 先返回落盘缓存，后台探测后更新缓存");
+
+// 独立模块实例，模拟第一次安装；不调用已登录的 CLI。
+process.env.WORKBENCH_HOME = mkdtempSync(join(tmpdir(), "wb-meta-cold-"));
+const cold = await import(new URL("./meta.ts?cold-start", import.meta.url).href);
+const initial = await cold.getMeta();
+assert.equal(initial.metadataPending, true, "无缓存时先给基础信息，不等 CLI 探测");
+assert.equal(initial.defaultCwd, process.cwd());
+for (const agent of ["claude", "codex", "kimi"]) {
+  assert.equal((initial.drivers as Record<string, { interrupt: boolean }>)[agent].interrupt, true);
+  assert.deepEqual((initial.drivers as Record<string, { options: unknown[] }>)[agent].options, []);
+}
+await cold.whenMetaReady();
+assert.equal((await cold.getMeta()).metadataPending, false, "探测失败也结束 pending 状态");
+assert.ok((await cold.getMeta()).cliVersions);
+console.log("PASS: 无缓存先显示基础界面，后台探测完成或失败后可取得最终结果");

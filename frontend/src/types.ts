@@ -218,6 +218,8 @@ interface DriverMeta extends DriverCapabilities {
 
 export interface MetaInfo {
   serverVersion: string;
+  /** CLI 版本与配置仍在后台探测；旧后端省略。 */
+  metadataPending?: boolean;
   /** 执行主机的真实名称；旧后端没有此字段。 */
   hostName?: string;
   /** server 进程 cwd：新建会话表单 cwd 预填的最后一级回退 */

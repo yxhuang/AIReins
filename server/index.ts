@@ -20,7 +20,7 @@ import { normalizeFileQuery, searchFiles } from "./file-search.js";
 import { getWorkFile, getWorkContent, openWorkSendSource, saveWorkFile, WorkFileError, FILE_LIMIT } from "./work-files.js";
 import { HistoryIndex, HistoryQueryError } from "./history.js";
 import { NativeDeleteError } from "./native-session-delete.js";
-import { getMeta, getServerHostName, SERVER_VERSION } from "./meta.js";
+import { getMeta, getServerHostName, SERVER_VERSION, whenMetaReady } from "./meta.js";
 import { appWindowEnabled, findWindowsChrome, openAppWindow, AppWindowError } from "./app-window.js";
 import { getTaildropTargets, getTailscalePeers, sendTaildrop, TaildropError } from "./tailscale-peers.js";
 import { createCodexResetWatch } from "./codex-resets.js";
@@ -127,6 +127,9 @@ void getMeta(); // 启动时探测一次并缓存，不让首个 /api/meta 承�
 const wss = new WebSocketServer({ noServer: true });
 const terminalWss = new WebSocketServer({ noServer: true, maxPayload: 1024 * 1024 });
 const clients = new Set<WsClientState>();
+void whenMetaReady().then(() => {
+  for (const client of clients) sendWs(client, { type: "meta_updated" });
+});
 const terminalClients = new Map<WebSocket, boolean>();
 // 包含未完成的 HTTP 请求和已升级连接，避免遗漏不在 WS 客户端表里的 socket。
 const connections = new Set<Duplex>();

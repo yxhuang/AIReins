@@ -3,7 +3,7 @@
     安装 AIReins 托盘脚本并创建或更新快捷方式。
 .NOTES
     Windows PowerShell 5.1；本文件必须是 UTF-8 带 BOM。
-    只复制文件及更新快捷方式，不启动托盘、Chrome 或 WSL 服务。
+    编译轻量入口、复制文件及更新快捷方式，不启动托盘、Chrome 或 WSL 服务。
 #>
 [CmdletBinding()]
 param(
@@ -11,6 +11,7 @@ param(
     [string]$SourceDir,
     [ValidatePattern('^[A-Za-z0-9_.-]+$')][string]$Distro,
     [ValidatePattern('^[~/][A-Za-z0-9_./=+~-]*$')][string]$WbPath,
+    [ValidateRange(1, 65535)][int]$Port = 8790,
     # Chrome 给 --app=http://127.0.0.1:<端口>/ 窗口的任务栏 ID（与端口无关）。快捷方式带上同一个 ID，
     # 窗口才会归到固定项那一格，而不是另起一个 Chrome 图标。
     [string]$AppId = 'Chrome.127.0.0.1_/'
@@ -99,7 +100,8 @@ $iconSource = Join-Path $sourceRoot 'aireins.ico'
 if (-not (Test-Path -LiteralPath $iconSource -PathType Leaf)) {
     $iconSource = Join-Path (Split-Path -Parent $sourceRoot) 'aireins.ico'
 }
-foreach ($source in @($scriptSource, $iconSource)) {
+$launcherSource = Join-Path (Split-Path -Parent $scriptSource) 'launcher.cs'
+foreach ($source in @($scriptSource, $iconSource, $launcherSource)) {
     if (-not (Test-Path -LiteralPath $source -PathType Leaf)) { throw (T "缺少源文件：$source（用 -SourceDir 指定）" "Missing source file: $source (specify it with -SourceDir)") }
 }
 # 预先确认运行脚本编码，防止复制了会让 5.1 乱码的副本。
@@ -179,11 +181,35 @@ if (-not $ShortcutPath) {
 }
 
 New-Item -ItemType Directory -Path $installDir -Force | Out-Null
+# 在覆盖入口之前完成编译；版本化文件名避免替换正在加载的 exe。
+$native = [regex]::Match([Text.Encoding]::UTF8.GetString($bytes), "(?s)-TypeDefinition @'\r?\n(.*?)\r?\n'@")
+if (-not $native.Success) { throw 'Could not locate the tray native type definitions.' }
+$effectiveDistro = if ($Distro) { $Distro } else { 'ubuntu' }
+$effectiveWbPath = if ($WbPath) { $WbPath } else { '~/.local/bin/aireins' }
+$compiledSource = $native.Groups[1].Value + "`n" + [IO.File]::ReadAllText($launcherSource)
+$compiledSource = $compiledSource.Replace('__AIREINS_DISTRO__', $effectiveDistro).Replace('__AIREINS_WB_PATH__', $effectiveWbPath).Replace('__AIREINS_PORT__', [string]$Port)
+$digest = [Security.Cryptography.SHA256]::Create()
+try { $assemblyKey = [BitConverter]::ToString($digest.ComputeHash([Text.Encoding]::UTF8.GetBytes($compiledSource))).Replace('-', '').Substring(0, 16).ToLowerInvariant() }
+finally { $digest.Dispose() }
+$assemblyName = "aireins-launcher-$assemblyKey.exe"
+$assemblyPath = Join-Path $installDir $assemblyName
+if (-not (Test-Path -LiteralPath $assemblyPath -PathType Leaf)) {
+    Add-Type -TypeDefinition $compiledSource -ReferencedAssemblies @('System', 'System.Core', 'System.Windows.Forms') -OutputAssembly $assemblyPath -OutputType WindowsApplication
+}
+$null = [Reflection.AssemblyName]::GetAssemblyName($assemblyPath)
+# 入口文件留本次升级前快照；旧 exe 和原有快捷方式备份继续保留。
+$entryBackup = Join-Path $installDir ("entry-backup-" + (Get-Date -Format 'yyyyMMdd-HHmmss-fff'))
+New-Item -ItemType Directory -Path $entryBackup | Out-Null
+foreach ($name in @('wb-tray.ps1', 'launcher.vbs', 'aireins.ico')) {
+    $previous = Join-Path $installDir $name
+    if (Test-Path -LiteralPath $previous -PathType Leaf) { Copy-Item -LiteralPath $previous -Destination (Join-Path $entryBackup $name) }
+}
+Write-Host "Entry backup: $entryBackup"
 Copy-Item -LiteralPath $scriptSource -Destination (Join-Path $installDir 'wb-tray.ps1') -Force
 Copy-Item -LiteralPath $iconSource -Destination (Join-Path $installDir 'aireins.ico') -Force
 # 路径从 VBS 自身推导，用户名含中文时仍能保持脚本内容为纯 ASCII。
 # 显式选 System32\WindowsPowerShell，保证用系统 5.1，不被 PATH 中的 pwsh 替换。
-$trayArguments = ''
+$trayArguments = " -Port $Port"
 if ($PSBoundParameters.ContainsKey('Distro')) { $trayArguments += " -Distro $Distro" }
 if ($PSBoundParameters.ContainsKey('WbPath')) { $trayArguments += " -WbPath $WbPath" }
 $vbs = @'
@@ -191,10 +217,15 @@ Set fso = CreateObject("Scripting.FileSystemObject")
 here = fso.GetParentFolderName(WScript.ScriptFullName)
 Set sh = CreateObject("WScript.Shell")
 ps = sh.ExpandEnvironmentStrings("%SystemRoot%") & "\System32\WindowsPowerShell\v1.0\powershell.exe"
-sh.Run """" & ps & """ -NoLogo -NoProfile -NonInteractive -STA -ExecutionPolicy Bypass -File """ & here & "\wb-tray.ps1""__WB_ARGS__", 0, False
+If fso.FileExists(here & "\__WB_EXE__") Then
+  sh.Run """" & here & "\__WB_EXE__""", 0, False
+Else
+  sh.Run """" & ps & """ -NoLogo -NoProfile -NonInteractive -STA -ExecutionPolicy Bypass -File """ & here & "\wb-tray.ps1""__WB_ARGS__", 0, False
+End If
 '@
 # VBS 字符串中的双引号必须写成两个；参数校验保证生成内容仍为 ASCII。
 $vbs = $vbs.Replace('__WB_ARGS__', $trayArguments.Replace('"', '""'))
+$vbs = $vbs.Replace('__WB_EXE__', $assemblyName)
 $launcher = Join-Path $installDir 'launcher.vbs'
 Set-Content -LiteralPath $launcher -Value $vbs -Encoding ASCII
 $shell = New-Object -ComObject WScript.Shell

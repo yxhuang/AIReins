@@ -152,8 +152,8 @@ lines.on('close', () => process.exit(0));
   terminal.handleCreateTerminal(1, { command: "kimi", args: ["--version"],
     env: [{name: "https_proxy", value: "http://stale.example:18080"}, {name: "no_proxy", value: "acp.example"}] });
   await [...terminal.terminals.values()][0].done;
-  const { getMeta } = await import("./meta.js");
-  await getMeta();
+  const { whenMetaReady } = await import("./meta.js");
+  await whenMetaReady();
   const extraChildren = (await readFile(logPath, "utf8")).trim().split("\n").map(line => JSON.parse(line)).slice(2);
   assert.equal(extraChildren.length, 12, "Two drivers, two probes, plugin command, ACP terminal, and six meta children");
   for (const child of extraChildren) {

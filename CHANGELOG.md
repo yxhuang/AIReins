@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Changed
+
+- Windows cold starts show a local loading window while the backend starts. Opening an already running instance skips the WSL launch command.
+- Windows shortcuts use an installer-built launcher to forward requests to a running tray without starting PowerShell. Cold starts load the precompiled tray types; upgrades keep recoverable entry-file backups.
+- Page initialization loads independent requests in parallel and restores the active conversation without waiting for project ordering or extension pages. CLI metadata probes run in the background even on the first launch; connected pages refresh when probing finishes.
+
 ### Fixed
 
 - Codex workers and configuration probes can use a machine-local `codexProxyUrl` preference even when AIReins starts without proxy variables. The endpoint stays configured while the proxy is offline, so later connections can recover when it returns; failed turns are not replayed automatically.

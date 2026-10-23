@@ -3,7 +3,7 @@ import { spawn } from "node:child_process";
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { homedir, hostname } from "node:os";
 import { dirname, join } from "node:path";
-import { getDriverMetadata } from "./drivers/index.js";
+import { DRIVER_CAPABILITIES, getDriverMetadata } from "./drivers/index.js";
 
 export const SERVER_VERSION = "0.1.0";
 
@@ -16,6 +16,7 @@ export function getServerHostName(remoteOrigin?: string): string {
 }
 
 let cached: Promise<Record<string, unknown>> | undefined;
+let probing: Promise<void> | undefined;
 
 function probeVersion(command: string): Promise<string> {
   return new Promise((resolve) => {
@@ -38,8 +39,7 @@ function probeVersion(command: string): Promise<string> {
   });
 }
 
-// 三家模型列表探测要拉起各自 CLI，冷启动约 7 秒，期间 /api/meta 不返回，托盘和前端都卡在它上面
-// （tray.log / server.log 10-06 00:40）。启动时先用上次落盘的结果，后台探测完再更新缓存，下次启动生效。
+// 三家 CLI 探测仅后台执行；首次无缓存也先返回基础能力，完整配置就绪后通知页面补取。
 function cachePath(): string {
   return join(process.env.WORKBENCH_HOME || join(homedir(), ".workbench"), "meta-cache.json");
 }
@@ -75,7 +75,14 @@ export function getMeta(): Promise<Record<string, unknown>> {
     homeDir: homedir(),
     ...probed,
   });
-  const fresh = Promise.all([
+  const initial = readCache() ?? {
+    cliVersions: { claude: "unknown", codex: "unknown", kimi: "unknown" },
+    drivers: Object.fromEntries(Object.entries(DRIVER_CAPABILITIES).map(([agent, capabilities]) =>
+      [agent, { ...capabilities, options: [] }],
+    )),
+  };
+  cached = Promise.resolve(withLive({ ...initial, metadataPending: true }));
+  probing = Promise.all([
     probeVersion("claude"),
     probeVersion("codex"),
     probeVersion("kimi"),
@@ -83,11 +90,16 @@ export function getMeta(): Promise<Record<string, unknown>> {
   ]).then(([claude, codex, kimi, drivers]) => {
     const probed = { cliVersions: { claude, codex, kimi }, drivers };
     writeCache(probed);
-    cached = Promise.resolve(withLive(probed));
-    return cached;
+    cached = Promise.resolve(withLive({ ...probed, metadataPending: false }));
+  }).catch(() => {
+    // 不让一次失败把页面永久留在探测中，保留最近可用信息。
+    cached = Promise.resolve(withLive({ ...initial, metadataPending: false }));
   });
-  const disk = readCache();
-  if (!disk) return (cached = fresh);
-  fresh.catch(() => { /* 后台刷新失败时继续用缓存。 */ });
-  return (cached = Promise.resolve(withLive(disk)));
+  return cached;
+}
+
+/** 用于启动后广播；getMeta 本身不等待此 Promise。 */
+export function whenMetaReady(): Promise<void> {
+  void getMeta();
+  return probing!;
 }

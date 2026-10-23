@@ -146,6 +146,7 @@ export class Store {
   /** 组织更改不推进会话 seq；防止在途旧 REST 响应撤销已收到的广播。 */
   private organizationVersion = 0;
   meta: MetaInfo | null = null;
+  private metaVersion = 0;
   currentId: string | null = null;
   newSessionOpen = false;
   newSessionCwd: string | undefined;
@@ -340,14 +341,11 @@ export class Store {
       if (restored && !panelRestore) window.history.replaceState(null, "", `#/session/${encodeURIComponent(restored)}`);
     }
     this.onHashChange();
-    try {
-      this.meta = await fetchMeta();
-    } catch (error) {
-      this.lastError = { message: error instanceof Error ? error.message : String(error) };
-    }
-    // 路由先于 meta 到达；能力确认后不能留下一个无法挂载的终端全屏。
-    if (this.isMobileNavigation() || this.readMobileEntry() || this.readDesktopPanelEntry()) this.onHashChange();
-    await Promise.all([this.refreshSessions(), this.refreshProjectOrder()]);
+    // 独立配置立即发起；当前会话只依赖列表和快照，不等扩展页或项目排序。
+    const metadata = this.refreshMeta();
+    const projectOrder = this.refreshProjectOrder();
+    const pages = this.refreshPages();
+    await this.refreshSessions();
     if (panelRestore) {
       if (restored && !this.currentId && this.sessions.some((x) => x.id === restored)) {
         this.currentId = restored;
@@ -357,9 +355,24 @@ export class Store {
     } else if (restored && this.currentId === restored && !this.sessions.some((x) => x.id === restored)) this.navigate(null);
     if (!this.isMobileNavigation() && !this.readMobileEntry()) this.syncDesktopPanels();
     this.startClock();
-    await this.refreshPages();
     if (this.currentId) await this.ensureLoaded(this.currentId);
     this.connect();
+    this.notify();
+    await Promise.all([metadata, projectOrder, pages]);
+  }
+
+  private async refreshMeta(): Promise<void> {
+    const version = ++this.metaVersion;
+    try {
+      const meta = await fetchMeta();
+      if (version !== this.metaVersion) return;
+      this.meta = meta;
+      // 路由先于能力到达时，移除无法挂载的终端全屏。
+      if (this.isMobileNavigation() || this.readMobileEntry() || this.readDesktopPanelEntry()) this.onHashChange();
+    } catch (error) {
+      if (version !== this.metaVersion) return;
+      this.lastError = { message: error instanceof Error ? error.message : String(error) };
+    }
     this.notify();
   }
 
@@ -1372,6 +1385,8 @@ export class Store {
     socket.addEventListener("open", () => {
       if (this.socket !== socket) return; // 已被 reconnectNow 换掉的旧连接
       this.wsState = "open";
+      // 广播可能发生在首次连接前或断线期间，pending 状态在连接建立后补查。
+      if (!this.meta || this.meta.metadataPending) void this.refreshMeta();
       void this.refreshCodexResets();
       this.reconnectDelay = 1000;
       const reconnected = this.hasOpenedSocket;
@@ -1421,6 +1436,10 @@ export class Store {
 
   private handleFrame(frame: Record<string, unknown>): void {
     const type = String(frame.type ?? "");
+    if (type === "meta_updated") {
+      void this.refreshMeta();
+      return;
+    }
     if (type === "codex_resets_updated") {
       if (!frame.data || typeof frame.data !== "object") return;
       this.codexResetsVersion++;

@@ -228,6 +228,100 @@ await t("未加载会话标题采用 WS 权威值，空首条消息不被后续�
   assert.equal(s.data.has(session.id), false);
 });
 
+await t("慢元数据、项目排序和扩展页不阻塞当前会话与连接", async () => {
+  const previousWindow = globalThis.window;
+  const previousDocument = globalThis.document;
+  const previousStorage = globalThis.localStorage;
+  const session = makeSession("startup-fast");
+  globalThis.window = { location: { hash: `#/session/${session.id}` }, addEventListener() {} };
+  globalThis.document = { addEventListener() {} };
+  globalThis.localStorage = { getItem() { return null; }, setItem() {} };
+  const gates = new Map();
+  const requests = [];
+  let connected = false;
+  globalThis.fetch = async (path) => {
+    requests.push(path);
+    if (["/api/meta", "/api/project-order", "/api/pages"].includes(path)) {
+      return new Promise((resolve) => gates.set(path, resolve));
+    }
+    if (path === "/api/sessions") return envelope({ sessions: [session] });
+    if (path.endsWith("/snapshot?tail=1")) return envelope({ session, seq: 0, events: [] });
+    throw new Error(`未打桩 ${path}`);
+  };
+  const s = new Store();
+  s.connect = () => { connected = true; };
+  const initializing = s.init();
+  try {
+    await settle();
+    assert.ok(requests.includes("/api/sessions"), "列表不能等元数据");
+    assert.ok(gates.has("/api/project-order") && gates.has("/api/pages"), "独立请求同时开始");
+    assert.ok(s.data.has(session.id), "会话快照已可显示");
+    assert.equal(connected, true, "实时连接不能等扩展页或排序");
+  } finally {
+    // 即使断言失败也放行所有请求，让旧实现也能完整退出。
+    for (let i = 0; i < 4; i++) {
+      gates.get("/api/meta")?.(envelope({ capabilities: {} }));
+      gates.get("/api/project-order")?.(envelope({ paths: [] }));
+      gates.get("/api/pages")?.(envelope({ pages: [] }));
+      await settle();
+    }
+    await initializing;
+    clearTimeout(s.tickTimer);
+    globalThis.window = previousWindow;
+    globalThis.document = previousDocument;
+    globalThis.localStorage = previousStorage;
+  }
+});
+
+await t("CLI 探测通知会刷新元数据，迟到的旧响应不能覆盖新结果", async () => {
+  const s = new Store();
+  const pending = [];
+  globalThis.fetch = () => new Promise((resolve) => pending.push(resolve));
+  s.handleFrame({ type: "meta_updated" });
+  s.handleFrame({ type: "meta_updated" });
+  assert.equal(pending.length, 2);
+  pending[1](envelope({ metadataPending: false, drivers: { marker: "new" } }));
+  await settle();
+  pending[0](envelope({ metadataPending: true, drivers: { marker: "old" } }));
+  await settle();
+  assert.equal(s.meta.drivers.marker, "new");
+});
+
+await t("连接建立后补取 pending 元数据，覆盖错过探测通知的情况", async () => {
+  const previousSocket = globalThis.WebSocket;
+  const previousWindow = globalThis.window;
+  globalThis.window = { location: { protocol: "http:", host: "localhost" } };
+  class Socket {
+    static OPEN = 1;
+    readyState = 0;
+    listeners = new Map();
+    addEventListener(type, fn) { this.listeners.set(type, fn); }
+  }
+  globalThis.WebSocket = Socket;
+  let requests = 0;
+  globalThis.fetch = async (path) => {
+    assert.equal(path, "/api/meta");
+    requests++;
+    return envelope({ metadataPending: false, drivers: { marker: "ready" } });
+  };
+  try {
+    for (const meta of [null, { metadataPending: true }, { metadataPending: false }, {}]) {
+      const s = new Store();
+      s.meta = meta;
+      s.refreshCodexResets = async () => {};
+      s.alignAfterSocketOpen = async () => {};
+      s.connect();
+      s.socket.listeners.get("open")();
+      await settle();
+      if (meta === null || meta.metadataPending) assert.equal(s.meta.drivers.marker, "ready");
+    }
+    assert.equal(requests, 2, "最终状态和旧后端不重复请求");
+  } finally {
+    globalThis.WebSocket = previousSocket;
+    globalThis.window = previousWindow;
+  }
+});
+
 await t("启动只加载当前会话的一份快照", async () => {
   const sessions = [makeSession("active"), makeSession("unopened")];
   globalThis.window = { location: { hash: "#/session/active" }, addEventListener() {} };

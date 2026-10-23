@@ -41,6 +41,7 @@ node frontend/scripts/smoke-ws.mjs  # 需后端；会创建测试会话、批准
 
 ### 连接与恢复
 
+- 首次加载并行发起元数据、会话列表、项目排序和扩展页请求；当前会话恢复只等待列表及自己的快照，随后建立 WS，不等待排序和扩展页。元数据独立到达后校验面板能力并通知界面；后台 CLI 探测完成的 `meta_updated` 帧触发补取，建连时 pending/尚未获取的元数据也补取，迟到的旧响应不能覆盖新结果。无 pending 字段的旧后端沿用一次读取。
 - 一条全局 `/ws` 收所有会话事件。首连/重连刷新列表，对已加载会话发送 `{type:"replay", sessionId, afterSeq}`；`replay_complete` 后顺序应用缓冲帧，不再对每个会话一律重取快照。
 - 快照请求去重并带代次戳，期间实时事件先缓存；响应原子替换旧窗口后追加较新帧。只接受推进 seq 的持久事件，重复帧忽略；临时工具更新按 `toolCallId` 单独保存在 `toolFrames`，不改持久事件数组、不推进游标。render-items builder 在缓存的工具显示行上叠加临时参数，只重绘对应行；最终参数或完成事件移除临时帧，迟到临时帧不能覆盖最终值。缓存、流式摘要、临时参数和文件补全回归见 [review-fixes.test.mjs](scripts/review-fixes.test.mjs)。
 - seq 缺口、`resync_required` 或补发失败退回快照；重连作废受影响的在途快照。断线退避 1 秒起、封顶 15 秒，回前台可立即重连；见 [store.ts](src/store.ts)。

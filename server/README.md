@@ -125,6 +125,8 @@ webhook 地址就是密钥：文件权限设为 600，也不要写进日志或�
 
 `GET /api/meta` 的 `data.platform` 返回上述值，`data.capabilities` 逐项声明当前入口的能力。缺字段时前端不显示对应入口；平台支持不代表可选命令已安装。
 
+CLI 版本与配置选项在后台探测，不阻塞 `/api/meta`：优先返回 `~/.workbench/meta-cache.json` 的最近结果，无缓存时返回三家基础能力及空 `options`，`metadataPending:true`。探测完成（包括不可用/超时）后更新内存与磁盘缓存，返回 `metadataPending:false`，并向已连接的 WebSocket 广播 `{type:"meta_updated"}` 提示重新取元数据；连接建立时仍为 pending 的前端也补取一次，覆盖建连前或断线期间漏掉的通知。能力授权始终按当前请求入口计算，不从磁盘缓存恢复。
+
 | 能力字段 | WSL2 | 原生 Linux | macOS 实验性 |
 |---|---|---|---|
 | `terminal` | 本机开；远程须显式开启，默认 bash | 同左，默认用户登录 shell | 同左，默认用户登录 shell（回退 zsh） |

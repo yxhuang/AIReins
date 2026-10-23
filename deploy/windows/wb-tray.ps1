@@ -19,12 +19,17 @@
 param(
     [ValidateRange(1, 65535)][int]$Port = 8790,
     [ValidatePattern('^[A-Za-z0-9_.-]+$')][string]$Distro = 'ubuntu',
-    [ValidatePattern('^[~/][A-Za-z0-9_./=+~-]*$')][string]$WbPath = '~/.local/bin/aireins'
+    [ValidatePattern('^[~/][A-Za-z0-9_./=+~-]*$')][string]$WbPath = '~/.local/bin/aireins',
+    [ValidatePattern('^aireins-launcher-[a-f0-9]{16}\.exe$')][string]$NativeAssembly
 )
 
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
+# 安装后的入口复用预编译程序集；直接运行源脚本仍可现场编译。
+if ($NativeAssembly) {
+    [void][System.Reflection.Assembly]::LoadFrom((Join-Path $PSScriptRoot $NativeAssembly))
+} else {
 # 显式指定引用后默认引用集会丢，HashSet 在 System.Core，必须列全。
 Add-Type -ReferencedAssemblies @('System', 'System.Core', 'System.Windows.Forms') -TypeDefinition @'
 using System;
@@ -119,6 +124,7 @@ public class WbTrayListener : System.Windows.Forms.NativeWindow {
     }
 }
 '@
+}
 
 $script:BaseUrl = "http://127.0.0.1:$Port"
 $script:Tray = $null
@@ -142,6 +148,8 @@ $script:LastActionShowOnly = $false
 $script:LastShowSucceeded = $false
 $script:LastShowEndTick = $script:LastClickTick
 $script:ShowListener = $null
+$script:StartupWindow = $null
+$script:StartupTitleFont = $null
 
 # 用户可见文案按界面语言输出；日志保持原文，不走 T。
 $script:IsZh = [System.Globalization.CultureInfo]::CurrentUICulture.Name -like 'zh*'
@@ -257,18 +265,61 @@ function Test-Service {
     try { $null = Get-WbApi '/api/meta' 1; return $true } catch { return $false }
 }
 
+function Show-StartupWindow {
+    if ($script:StartupWindow -or @([WbNative]::Windows()).Count -gt 0) { return }
+    $light = $true
+    try {
+        $light = [Microsoft.Win32.Registry]::GetValue(
+            'HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize', 'AppsUseLightTheme', 1) -ne 0
+    } catch { }
+    $script:StartupWindow = New-Object System.Windows.Forms.Form
+    $script:StartupWindow.Text = $script:AppTitle
+    $script:StartupWindow.ClientSize = New-Object System.Drawing.Size(480, 200)
+    $script:StartupWindow.StartPosition = [System.Windows.Forms.FormStartPosition]::CenterScreen
+    $script:StartupWindow.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::FixedDialog
+    $script:StartupWindow.ControlBox = $false
+    $script:StartupWindow.ShowInTaskbar = $false
+    $script:StartupWindow.BackColor = [System.Drawing.ColorTranslator]::FromHtml($(if ($light) { '#FAF8F2' } else { '#1F1E1D' }))
+    $script:StartupWindow.ForeColor = [System.Drawing.ColorTranslator]::FromHtml($(if ($light) { '#292724' } else { '#EEEAE3' }))
+    if ($script:Icon) { $script:StartupWindow.Icon = $script:Icon }
+    $title = New-Object System.Windows.Forms.Label
+    $title.Text = $script:AppTitle
+    $title.AutoSize = $false
+    $title.SetBounds(32, 36, 416, 44)
+    $script:StartupTitleFont = New-Object System.Drawing.Font('Segoe UI', 20, [System.Drawing.FontStyle]::Bold)
+    $title.Font = $script:StartupTitleFont
+    $status = New-Object System.Windows.Forms.Label
+    $status.Text = T '正在启动，准备好后自动进入工作台…' 'Starting. AIReins will open when ready…'
+    $status.SetBounds(34, 100, 414, 56)
+    $script:StartupWindow.Controls.Add($title)
+    $script:StartupWindow.Controls.Add($status)
+    $script:StartupWindow.Show()
+    $script:StartupWindow.Refresh()
+    Write-TrayLog 'startup window: shown'
+}
+
+function Close-StartupWindow {
+    if ($script:StartupWindow) {
+        $script:StartupWindow.Dispose()
+        $script:StartupWindow = $null
+        Write-TrayLog 'startup window: closed'
+    }
+    if ($script:StartupTitleFont) {
+        $script:StartupTitleFont.Dispose()
+        $script:StartupTitleFont = $null
+    }
+}
+
 function Ensure-Service {
     Write-TrayLog 'ensure service'
-    # 冷启动要几秒且没有窗口；不提示的话用户会再点任务栏按钮，把随后打开的窗口点成最小化（tray.log 10-05 23:36）。
+    # 已运行时不启动 WSL；首次与关闭 Chrome 后重开都走相同捷径。
+    if (Test-Service) { Write-TrayLog 'ensure service: already ready'; return }
+    Show-StartupWindow
     if ($script:Tray) {
-        $portReady = Test-Port
-        Write-TrayLog "ensure service: portReady=$portReady trayVisible=$($script:Tray.Visible)"
-        if (-not $portReady) {
-            Write-TrayLog 'ensure service: cold start, balloon'
-            $script:Tray.ShowBalloonTip(5000, $script:AppTitle,
-                (T '正在启动工作台，几秒后自动打开窗口，无需重复点击。' 'Starting AIReins. The window will open in a few seconds; no need to click again.'),
-                [System.Windows.Forms.ToolTipIcon]::Info)
-        }
+        Write-TrayLog 'ensure service: cold start, balloon'
+        $script:Tray.ShowBalloonTip(5000, $script:AppTitle,
+            (T '正在启动工作台，几秒后自动打开窗口，无需重复点击。' 'Starting AIReins. The window will open in a few seconds; no need to click again.'),
+            [System.Windows.Forms.ToolTipIcon]::Info)
     }
     Invoke-Wsl "WORKBENCH_NO_OPEN=1 WORKBENCH_PORT=$Port $WbPath"
     $clock = [System.Diagnostics.Stopwatch]::StartNew()
@@ -457,7 +508,7 @@ function Invoke-ForwardedShow {
 
 # 两实例同时启动、或双击托盘时，串行执行找窗口/开窗口，避免重复 Chrome 窗口。
 $script:OpenMutex = New-Object System.Threading.Mutex($false, "Local\Workbench.Open.$Distro.$Port")
-function Open-Workbench([switch]$ServiceReady, [switch]$RetryService) {
+function Open-Workbench {
     if ($script:Busy -or $script:Exiting) { return }
     $script:Busy = $true
     $script:LastActionFailed = $false
@@ -468,9 +519,10 @@ function Open-Workbench([switch]$ServiceReady, [switch]$RetryService) {
         catch [System.Threading.AbandonedMutexException] { $locked = $true }
         if (-not $locked) { throw (T '另一个实例仍在打开工作台，请稍后重试。' 'Another instance is still opening AIReins. Try again later.') }
         $windows = @([WbNative]::Windows())
-        Write-TrayLog "open: windows=$($windows.Length) serviceReady=$ServiceReady retry=$RetryService"
+        Write-TrayLog "open: windows=$($windows.Length)"
         # 窗口还在但服务已停（wsl --shutdown 后页面一直断线）时不能只抬窗口，要先拉起服务，页面会自己重连。
-        if ($windows.Length -gt 0 -and -not $RetryService -and ($ServiceReady -or (Test-Service))) {
+        Ensure-Service
+        if ($windows.Length -gt 0) {
             Raise-Window $windows[0]
             # 外部 SW_SHOW 可能被 Chrome 收回（tray.log 10-03：抬完约 0.2 秒又被藏起）；补显示一次，再显示后 Chrome 不会再藏。
             Start-Sleep -Milliseconds 300
@@ -482,7 +534,6 @@ function Open-Workbench([switch]$ServiceReady, [switch]$RetryService) {
             }
             return
         }
-        if (-not $ServiceReady) { Ensure-Service }
         # 获取锁后再次枚举，避免启动期间用户从备用入口开了窗口。
         $windows = @([WbNative]::Windows())
         $launched = $false
@@ -501,6 +552,7 @@ function Open-Workbench([switch]$ServiceReady, [switch]$RetryService) {
                 # 图标推迟到 1.5 秒再设，实测不触发隐藏。
                 if ($launched) { Write-TrayLog "fresh window, skip raise $(Get-WindowState @($windows[0]))" }
                 else { Raise-Window $windows[0] }
+                Close-StartupWindow
                 $script:HadWindow = $true
                 # 兜底：3 秒内每 50ms 采样，窗口被外部隐藏（不可见且未最小化）就补显示一次；再显示后 Chrome 不会再藏。
                 # 期间泵进来的托盘单击走挂起；启动前无窗口时只补显示，其余忙段按当时状态补一次切换。
@@ -528,8 +580,9 @@ function Open-Workbench([switch]$ServiceReady, [switch]$RetryService) {
             Start-Sleep -Milliseconds 200
         } while ($clock.Elapsed.TotalSeconds -lt 15)
         throw (T '15 秒内未找到工作台窗口，请检查 Chrome 是否正常启动。' 'The AIReins window was not found within 15 seconds. Check whether Chrome started normally.')
-    } catch { $script:LastActionFailed = $true; Show-Failure $_.Exception.Message }
+    } catch { $script:LastActionFailed = $true; Close-StartupWindow; Show-Failure $_.Exception.Message }
     finally {
+        Close-StartupWindow
         if ($locked) { $script:OpenMutex.ReleaseMutex() }
         $windows = @([WbNative]::Windows())
         $script:LastShowSucceeded = -not $script:LastActionFailed -and $windows.Length -gt 0 -and
@@ -693,7 +746,7 @@ try {
     $menu = New-Object System.Windows.Forms.ContextMenuStrip
     $openItem = $menu.Items.Add((T '打开工作台' 'Open AIReins'))
     $exitItem = $menu.Items.Add((T '退出' 'Exit'))
-    $openItem.add_Click({ Open-Workbench -RetryService })
+    $openItem.add_Click({ Open-Workbench })
     $exitItem.add_Click({ Exit-Workbench })
     $script:Tray.ContextMenuStrip = $menu
     $script:Tray.add_MouseClick({ param($sender, $eventArgs)
@@ -762,21 +815,14 @@ try {
             } else { Complete-Action $false }
         }
     })
-    # 无论是否已有窗口，首次启动均确保服务就绪；失败后保留托盘供重试。
-    # Busy 包住整个启动段：STA 线程上 WaitForExit 会泵消息，启动期间投递的点击走挂起，
-    # 不再嵌套开第二个打开流程（tray.log 10-03 08:28：嵌套打开 + 启动打开连番抬窗，Chrome 把窗口藏了）。
+    # 首次启动与后续重开共用健康检查、启动窗和失败清理；Open 自己管理 Busy。
     $script:ShowOnlyPending = @([WbNative]::Windows()).Count -eq 0
-    $script:Busy = $true
-    $ready = $false
-    try { Ensure-Service; $ready = $true } catch { Show-Failure $_.Exception.Message }
-    # 先清 Busy 再开窗：Open-Workbench 开头遇 Busy 直接返回，启动时就不开窗口（tray.log 10-05 23:55）。
-    # 它自己置 Busy，并在收尾时补处理启动期间挂起的点击。
-    $script:Busy = $false
-    if ($ready) { Open-Workbench -ServiceReady } else { Complete-Action $true }
+    Open-Workbench
     $script:HadWindow = @([WbNative]::Windows()).Count -gt 0
     $timer.Start()
     [System.Windows.Forms.Application]::Run($script:Context)
 } finally {
+    Close-StartupWindow
     if ($timer) { $timer.Stop(); $timer.Dispose() }
     if ($script:Tray) { $script:Tray.Visible = $false; $script:Tray.Dispose() }
     if ($menu) { $menu.Dispose() }
