@@ -512,6 +512,16 @@ export function SettingsMenu() {
         <div className="settings-panel" ref={panelRef} role="dialog" aria-label={t("ui.common.settings")} inert={dialogOpen}>
           <div className="settings-col">
             {renderGroup(APPEARANCE_GROUP)}
+            <section className="settings-group settings-action-row">
+              <button type="button" className="settings-action" ref={restartButton} disabled={restartState !== "idle"}
+                aria-haspopup="dialog" onClick={() => void restart()}>
+                {restartState === "checking" ? t("ui.SettingsMenu.checking_sessions") : t("ui.SettingsMenu.restart")}
+              </button>
+              <SelfUpdate dialogOpen={updateDialogOpen} onDialogOpenChange={setUpdateDialogOpen} onRestart={() => void restart()} />
+            </section>
+          </div>
+          <div className="settings-col">
+            {renderGroup(SESSIONS_GROUP, <WorkbenchStorage dialogOpen={storageDialogOpen} onDialogOpenChange={setStorageDialogOpen} />)}
             <section className="settings-group">
               <h3 className="settings-group-title">{t("ui.SettingsMenu.host")}</h3>
               <div className="settings-action-row">
@@ -524,16 +534,6 @@ export function SettingsMenu() {
                 </button>}
               </div>
               {powerSupported && (power?.error || powerError) && <span className="new-error" role="alert">{power?.error || powerError}</span>}
-            </section>
-          </div>
-          <div className="settings-col">
-            {renderGroup(SESSIONS_GROUP, <WorkbenchStorage dialogOpen={storageDialogOpen} onDialogOpenChange={setStorageDialogOpen} />)}
-            <section className="settings-group settings-action-row">
-              <button type="button" className="settings-action" ref={restartButton} disabled={restartState !== "idle"}
-                aria-haspopup="dialog" onClick={() => void restart()}>
-                {restartState === "checking" ? t("ui.SettingsMenu.checking_sessions") : t("ui.SettingsMenu.restart")}
-              </button>
-              <SelfUpdate dialogOpen={updateDialogOpen} onDialogOpenChange={setUpdateDialogOpen} onRestart={() => void restart()} />
             </section>
           </div>
         </div>

@@ -2908,7 +2908,7 @@ body.resizing {
   animation: settings-pop 0.12s ease-out;
 }
 
-/* 桌面设置面板两栏（各自一个 .settings-col，免得两栏行高互相撑出空隙）：左「外观 │ 主机」，右「会话（含存储）│ 重启」。
+/* 桌面设置面板两栏（各自一个 .settings-col，免得两栏行高互相撑出空隙）：左「外观 │ 重启、更新」，右「会话（含存储）│ 主机」。
    .sidebar 有 overflow:hidden，540px 会被裁，所以改 fixed 贴左下（10 侧栏内边距 + 2 底栏内边距 + 按钮 + 8 间距） */
 @media (min-width: 721px) {
   .app:not(.sidebar-collapsed) .sidebar-foot .settings > .settings-panel,
