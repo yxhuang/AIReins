@@ -242,7 +242,7 @@ export function FilePanel({ onClose }: { onClose: () => void }) {
         {notice.copied !== null && <p className="dir-copy-status">{notice.copied ? t("ui.FilePanel.path_copied") : <>{t("ui.FilePanel.cannot_copy_automatically_copy_manually")}<span className="mono">{notice.path}</span></>}</p>}
       </div>}
       {(preview || !hasTab) && tabRow}
-      {preview ? <FilePreview key={preview.target.path} preview={preview} source={source} /> : hasTab && <DirectoryContents key={tabId} initialPath={directoryInitialPath} includeFiles allowWindowsPicker
+      {preview ? <FilePreview key={`${tabId}:${preview.target.path}`} preview={preview} source={source} /> : hasTab && <DirectoryContents key={tabId} initialPath={directoryInitialPath} includeFiles allowWindowsPicker
         refreshPath={session ? undefined : newSessionCwd}
         navigationHistory={directoryHistory} registerBrowserBack={registerBrowserBack} navTarget={navSlot} afterLocation={tabRow} showHidden={showHidden}
         onPathChange={path => store.setFileDirectory(path)}

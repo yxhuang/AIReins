@@ -10,6 +10,8 @@ import { DispatchPanel } from "../src/components/DispatchPanel.tsx";
 import { FILE_WIDTH_OPTIONS } from "../src/components/SidePanelResize.tsx";
 import { clampPanelWidth } from "../src/terminal.ts";
 import { extractMentionTokens, mentionQueryAt } from "../src/mentions.ts";
+import { FilePreview } from "../src/components/FilePreview.tsx";
+import { isolatedHtml } from "../src/file-preview.ts";
 
 const session = { cwd: "/a/b", status: "idle" };
 const sortable = { path: "/a", parent: "/", truncated: false,
@@ -411,3 +413,64 @@ console.log("✅ 空文件面板直接打开文件、关闭时中断读取与迟
   } finally { Object.assign(store, previous); internals.H = oldDispatcher; globalThis.fetch = oldFetch; globalThis.window = oldWindow; }
 }
 console.log("✅ 新建目录与文件栏：打开/刷新同步，独立浏览、最新地址及预览保留");
+
+// 执行开关的真实处理器；浏览器 CSP/sandbox 的强制执行另做真实浏览器验证。
+{
+  const internals = React.__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE;
+  const oldDispatcher = internals.H, oldParser = globalThis.DOMParser;
+  const slots = []; let cursor = 0, parses = 0;
+  const removed = [];
+  const draft = '<!doctype html><html><body><p>slide</p><script>window.slide = 1;</script></body></html>';
+  const preview = { ...pdfPreview, target: { path: '/slides/deck.html', root: '/slides' }, draft,
+    file: { ...pdfPreview.file, kind: 'html', text: draft, editable: true } };
+  function nodes(node) {
+    if (!node || typeof node !== 'object') return [];
+    if (Array.isArray(node)) return node.flatMap(nodes);
+    return [node, ...nodes(node.props?.children)];
+  }
+  function render(props = { preview }) {
+    cursor = 0;
+    const tree = FilePreview(props);
+    return { button: nodes(tree).find(node => node.type === 'button'), iframe: nodes(tree).find(node => node.type === 'iframe') };
+  }
+  try {
+    internals.H = {
+      useState(initial) { const i = cursor++; if (!(i in slots)) slots[i] = initial;
+        return [slots[i], value => { slots[i] = value; }]; },
+      useMemo(fn) { return fn(); },
+    };
+    globalThis.DOMParser = class {
+      parseFromString() { parses++; return {
+        querySelectorAll(selector) { removed.push(selector); return []; },
+        documentElement: { outerHTML: '<html><body>static</body></html>' },
+      }; }
+    };
+    let view = render();
+    assert.equal(view.iframe.props.sandbox, 'allow-scripts', '只授予脚本，不加同源或其他权限');
+    assert.equal(view.iframe.props.allowFullScreen, true);
+    assert.equal(view.button.props['aria-pressed'], true);
+    assert.equal(view.button.props.children, '停止脚本', '打开 HTML 默认运行脚本');
+    assert.equal(view.iframe.props.srcDoc, isolatedHtml(draft, true));
+    assert.ok(view.iframe.props.srcDoc.endsWith(draft), '交互模式保留脚本及执行顺序');
+    const policy = view.iframe.props.srcDoc.slice(0, view.iframe.props.srcDoc.indexOf(draft));
+    for (const directive of ["default-src 'none'", "script-src 'unsafe-inline'", "connect-src 'none'", "base-uri 'none'", "form-action 'none'", 'font-src data:']) assert.ok(policy.includes(directive));
+    assert.doesNotMatch(policy, /https?:|unsafe-eval|'self'/);
+    const beforeSource = parses;
+    assert.equal(render({ preview, source: true }).iframe, undefined, '源码视图卸载运行中的页面');
+    assert.equal(parses, beforeSource, '源码不解析 HTML');
+    view = render(); const activeKey = view.iframe.key;
+    view.button.props.onClick(); view = render();
+    assert.equal(view.iframe.props.sandbox, '');
+    assert.equal(view.button.props['aria-pressed'], false);
+    assert.equal(view.button.props.children, '运行脚本');
+    assert.ok(removed.some(selector => selector.includes('script')), '停止后静态预览继续移除脚本');
+    assert.match(view.iframe.props.srcDoc, /script-src 'none'/);
+    assert.notEqual(view.iframe.key, activeKey, '停止时重建 iframe，销毁旧脚本与计时器');
+    assert.equal(render({ preview: { ...preview, loadId: preview.loadId + 1 } }).iframe.props.sandbox, 'allow-scripts', '重新加载恢复自动运行');
+    view = render();
+    assert.equal(view.iframe.props.sandbox, '', '当前文件保持停止状态');
+    view.button.props.onClick(); view = render();
+    assert.equal(view.iframe.props.sandbox, 'allow-scripts', '停止后可重新运行');
+  } finally { internals.H = oldDispatcher; if (oldParser === undefined) delete globalThis.DOMParser; else globalThis.DOMParser = oldParser; }
+}
+console.log("✅ HTML 脚本默认运行、停止与重启、最小 sandbox 权限、前置 CSP 与源码卸载");

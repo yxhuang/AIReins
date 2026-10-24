@@ -12,9 +12,11 @@ export function FilePreview({ preview, source = false }: { preview: FilePreviewS
   const { file, target, draft, loading, saving, error } = preview;
   const cwd = target.path.slice(0, target.path.lastIndexOf("/")) || "/";
   const [failedLoad, setFailedLoad] = useState<number | null>(null);
+  const [stoppedScriptsLoadId, setStoppedScriptsLoadId] = useState<number | null>(null);
+  const runScripts = stoppedScriptsLoadId !== preview.loadId;
   const table = useMemo(() => !source && (file?.kind === "csv" || file?.kind === "tsv")
     ? parseDelimited(draft, file.kind === "tsv" ? "\t" : ",") : null, [file?.kind, draft, source]);
-  const html = useMemo(() => file?.kind === "html" && !source ? isolatedHtml(draft) : "", [file?.kind, draft, source]);
+  const html = useMemo(() => file?.kind === "html" && !source ? isolatedHtml(draft, runScripts) : "", [file?.kind, draft, source, runScripts]);
   const dirty = file?.editable && draft !== file.text;
   const rich = file && ["markdown", "csv", "tsv", "html"].includes(file.kind);
   const contentUrl = `${workFileContentUrl(target)}&v=${preview.loadId}`;
@@ -43,7 +45,15 @@ export function FilePreview({ preview, source = false }: { preview: FilePreviewS
             <table className="file-table"><tbody>{table.rows.map((row, i) => <tr key={i}>{row.map((cell, j) => <td key={j}>{cell}</td>)}</tr>)}</tbody></table>
           </div> :
           file.kind === "html" ? <div className="file-html">
-            <iframe sandbox="" referrerPolicy="no-referrer" title={t("ui.FilePreview.isolated_html_preview")} srcDoc={html} />
+            <div className="file-html-controls">
+              <button type="button" className="btn" aria-pressed={runScripts} onClick={() => setStoppedScriptsLoadId(runScripts ? preview.loadId : null)}>
+                {t(runScripts ? "ui.FilePreview.stop_scripts" : "ui.FilePreview.run_scripts")}
+              </button>
+              <span className="new-hint">{t(runScripts ? "ui.FilePreview.scripts_running" : "ui.FilePreview.scripts_disabled")}</span>
+            </div>
+            <iframe key={runScripts ? "interactive" : "static"} sandbox={runScripts ? "allow-scripts" : ""} allowFullScreen={runScripts}
+              referrerPolicy="no-referrer" title={t("ui.FilePreview.isolated_html_preview")} srcDoc={html}
+              onLoad={event => { if (runScripts) event.currentTarget.contentWindow?.focus(); }} />
           </div> :
           file.kind === "image" ? failedLoad === preview.loadId ? <p className="new-error" role="alert">{t("ui.FilePreview.cannot_display_this_image_open_it_externally")}</p> :
             <img className="file-image" src={contentUrl} alt={file.name} onError={() => setFailedLoad(preview.loadId)} /> :

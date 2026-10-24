@@ -71,11 +71,14 @@ export function parseDelimited(text: string, delimiter: string, maxRows = 200, m
   return { rows, truncated };
 }
 
-/** HTML 只呈现内联样式/data 图片。sandbox 由 iframe 再独立强制。 */
-export function isolatedHtml(text: string): string {
+/** CSP 必须先于文件内容；iframe 独立限制脚本权限，不开放同源访问。 */
+export function isolatedHtml(text: string, runScripts = false): string {
+  const policy = `default-src 'none'; script-src ${runScripts ? "'unsafe-inline'" : "'none'"}; style-src 'unsafe-inline'; img-src data:; font-src data:; media-src data:; connect-src 'none'; base-uri 'none'; form-action 'none'`;
+  const prefix = `<!doctype html><meta http-equiv="Content-Security-Policy" content="${policy}">`;
+  // 直接交给隔离 iframe 解析，保留内联脚本和文档事件的原始顺序。
+  if (runScripts) return prefix + text;
   const doc = new DOMParser().parseFromString(text, "text/html");
   doc.querySelectorAll("script,base,meta[http-equiv],iframe,object,embed,form").forEach(node => node.remove());
   doc.querySelectorAll("a,area").forEach(node => node.removeAttribute("href"));
-  const policy = "default-src 'none'; script-src 'none'; style-src 'unsafe-inline'; img-src data:; base-uri 'none'; form-action 'none'";
-  return `<!doctype html><meta http-equiv="Content-Security-Policy" content="${policy}">${doc.documentElement.outerHTML}`;
+  return prefix + doc.documentElement.outerHTML;
 }

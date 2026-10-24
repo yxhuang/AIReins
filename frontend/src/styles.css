@@ -4197,6 +4197,8 @@ body.resizing {
 .file-table { border-collapse: collapse; font-size: 13px; }
 .file-table td { border: 1px solid var(--border); padding: 5px; white-space: pre-wrap; min-width: 50px; max-width: 260px; overflow-wrap: anywhere; }
 .file-html, .file-pdf { display: flex; flex-direction: column; height: 100%; min-height: 180px; }
+.file-html-controls { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 8px; padding: 6px 8px; }
+.file-html-controls .new-hint { flex: 1; min-width: 140px; }
 .file-html iframe, .file-pdf iframe { flex: 1; width: 100%; min-height: 160px; border: 0; background: white; box-sizing: border-box; }
 @container dispatch-sidebar (max-width: 720px) {
   .dispatch-panel-head, .dispatch-section-head { flex-wrap: wrap; }
