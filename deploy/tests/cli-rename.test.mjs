@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, symlinkSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join, relative, resolve } from 'node:path';
@@ -111,12 +111,31 @@ assert(!updateOutput.includes('Smoke test'), 'no smoke server');
 assert(!existsSync(join(updateHome, '.workbench/pages/ai-usage/manifest.json')), 'no new optional page');
 
 // A required Windows tray failure is fatal in update mode (all commands below are shell fixtures).
-writeFileSync(launcher, readFileSync(launcher, 'utf8').replace('PLATFORM=linux', 'PLATFORM=wsl'));
+const windowsCwd = join(fixture, 'windows-drive');
+const trayCalls = join(fixture, 'tray-calls');
+mkdirSync(windowsCwd);
+// Native Linux/macOS runners have no /mnt/c; model it without changing other cd calls.
+writeFileSync(launcher, readFileSync(launcher, 'utf8').replace('PLATFORM=linux', `PLATFORM=wsl
+cd() {
+  if [[ "$#" == 1 && "$1" == /mnt/c ]]; then builtin cd -- ${quote(windowsCwd)}
+  else builtin cd "$@"; fi
+}`));
 writeFileSync(join(commands, 'wslpath'), '#!/usr/bin/env bash\nprintf "%s\\n" "$2"\n', { mode: 0o755 });
-writeFileSync(join(commands, 'powershell.exe'), '#!/usr/bin/env bash\nexit 7\n', { mode: 0o755 });
+const trayStub = status => `#!/usr/bin/env bash
+pwd -P >> ${quote(trayCalls)}
+printf '%s\\n' "$*" >> ${quote(trayCalls)}
+exit ${status}
+`;
+writeFileSync(join(commands, 'powershell.exe'), trayStub(7), { mode: 0o755 });
 assert.match(run(updateHome, ['--update'], 'C.UTF-8', 1), /Windows tray installation failed/);
-writeFileSync(join(commands, 'powershell.exe'), '#!/usr/bin/env bash\nexit 0\n', { mode: 0o755 });
+writeFileSync(join(commands, 'powershell.exe'), trayStub(0), { mode: 0o755 });
 assert.match(run(updateHome, ['--update']), /Windows tray and shortcuts installed/);
+const trayInvocations = readFileSync(trayCalls, 'utf8').trim().split('\n');
+assert.equal(trayInvocations.length, 4, 'both update attempts must reach the tray command');
+for (let i = 0; i < trayInvocations.length; i += 2) {
+  assert.equal(trayInvocations[i], realpathSync(windowsCwd), 'tray command must run from the simulated Windows drive');
+  assert.match(trayInvocations[i + 1], /-File .*\/deploy\/windows\/install-tray\.ps1 -Distro fixture -WbPath .*\/bin\/aireins$/);
+}
 assert.equal(readFileSync(calls, 'utf8'), beforeUpdateCalls);
 assert(readFileSync(calls, 'utf8').trim().split('\n').every(command => command === 'status'));
 console.log('CLI rename OK: owned absolute/relative dangling links removed, foreign links/files/directories preserved, --check read-only');

@@ -99,13 +99,20 @@ try {
   assert.equal(original.data.text, "original");
   const saveBody = { path: join(cwd, "a.txt"), root: cwd, sessionId, version: original.data.version, text: "changed" };
   const saved = await post(saveBody);
-  assert.equal(saved.status, 200);
-  const savedData = (await saved.json()).data;
-  assert.equal(savedData.text, "changed");
-  assert.equal(await readFile(saveBody.path, "utf8"), "changed");
-  assert.equal((await post(saveBody)).status, 409);
-  assert.equal((await post({ ...saveBody, version: savedData.version, text: "\n".repeat(FILE_LIMIT) })).status, 200, "32 MiB文本即使 JSON 转义也可保存");
-  assert.equal((await post({ ...saveBody, version: savedData.version, text: "x".repeat(FILE_LIMIT + 1) })).status, 413);
+  if (process.platform === "darwin") {
+    assert.equal(original.data.editable, false, "macOS 文件仅供预览");
+    assert.equal(saved.status, 400, "macOS 保存沿用实验性平台限制");
+    assert.equal((await saved.json()).code, 40090);
+    assert.equal(await readFile(saveBody.path, "utf8"), "original", "拒绝保存不改变文件");
+  } else {
+    assert.equal(saved.status, 200);
+    const savedData = (await saved.json()).data;
+    assert.equal(savedData.text, "changed");
+    assert.equal(await readFile(saveBody.path, "utf8"), "changed");
+    assert.equal((await post(saveBody)).status, 409);
+    assert.equal((await post({ ...saveBody, version: savedData.version, text: "\n".repeat(FILE_LIMIT) })).status, 200, "32 MiB文本即使 JSON 转义也可保存");
+    assert.equal((await post({ ...saveBody, version: savedData.version, text: "x".repeat(FILE_LIMIT + 1) })).status, 413);
+  }
   await oversizedThenPdf({ ...saveBody, text: "x".repeat(FILE_LIMIT * 2 + 128 * 1024) });
   const html = await fetch(`${base}/api/fs/content?${query("a.html")}`);
   assert.equal(html.status, 200);
