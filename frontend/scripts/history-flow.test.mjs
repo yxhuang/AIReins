@@ -613,6 +613,27 @@ await t("主页新建：Enter 空白创建后统一发送 trim 首条消息，�
   });
 });
 
+await t("主页新建：触屏回车换行，按钮与 Ctrl/⌘+Enter 创建并发送", async () => {
+  const original = window.matchMedia;
+  window.matchMedia = () => ({ matches: true });
+  try {
+    for (const shortcut of ["button", "ctrlKey", "metaKey"]) {
+      await withNewForm({ cwd: "/project" }, async f => {
+        f.textarea().props.onChange({ target: { value: "第一行" } });
+        f.textarea().props.onKeyDown({ ...key("Enter"), preventDefault() { assert.fail("触屏回车应保留默认换行"); } });
+        await finishNewCreate();
+        assert.equal(f.calls.length, 0);
+        f.textarea().props.onChange({ target: { value: "第一行\n第二行" } });
+        if (shortcut === "button") f.update().props.onSubmit({ preventDefault() {} });
+        else f.textarea().props.onKeyDown({ ...key("Enter"), [shortcut]: true });
+        await finishNewCreate();
+        assert.equal(f.calls.length, 1);
+        assert.equal(f.sends[0].text, "第一行\n第二行");
+      });
+    }
+  } finally { window.matchMedia = original; }
+});
+
 await t("主页新建：Shift+Enter/IME 不提交；空目录禁用且表单和键盘守卫均生效", async () => {
   await withNewForm({ cwd: "/project" }, async f => {
     for (const event of [

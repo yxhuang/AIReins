@@ -74,7 +74,7 @@ const fixture = (locale, theme, options = {}) => `
 // 新建页地址栏即工作目录：已读出的目录看当前面包屑，未读出或空目录看输入框。
 export const NEW_CWD = "(document.querySelector('.new-form .dir-address-crumbs [aria-current=location]')?.title ?? document.querySelector('.new-form .dir-address input')?.value ?? '')";
 
-export async function runNewSessionBrowserChecks({ send, evaluate, settle, waitFor, rect, click, key, check, base, activate, shots = defaultShots }) {
+export async function runNewSessionBrowserChecks({ send, evaluate, settle, waitFor, rect, click, key, check, base, activate, shots = defaultShots, mobileOnly = false }) {
   mkdirSync(shots, { recursive: true });
   const screenshot = async name => {
     const result = await send('Page.captureScreenshot');
@@ -109,6 +109,54 @@ export async function runNewSessionBrowserChecks({ send, evaluate, settle, waitF
     await waitFor("document.querySelector('.new-form .new-project-row .dir-address')"); await settle();
     return target.targetId;
   };
+  for (const [width, height] of [[390,844],[320,568],[844,390],[390,360]]) for (const scale of [0.9,1,1.25]) {
+    await check(`手机新建 ${width}×${height} 字号 ${scale}：长模型菜单与推理强度在视口内、回车换行`, async () => {
+      const target = await open(390, scale === 1 ? 'en' : 'zh-CN', scale === 0.9 ? 'dark' : 'light');
+      await send('Emulation.setDeviceMetricsOverride', {width,height,deviceScaleFactor:1,mobile:true});
+      await evaluate(`import('/src/store.ts').then(({store}) => {
+        document.documentElement.style.setProperty('--font-scale', ${scale});
+        for (const driver of Object.values(store.meta.drivers)) driver.options.find(option => option.id === 'model').values.push(
+          ...Array.from({length:30}, (_,i) => ({value:'extra-'+i,label:'Synthetic model '+i})));
+        store.meta={...store.meta};
+        store.notify();
+      })`);
+      await settle();
+      const outerScroll = () => evaluate("[document.scrollingElement.scrollTop,document.querySelector('.welcome-view').scrollTop]");
+      const before = await outerScroll();
+      await click('.new-form .cfg-pill-main .cfg-pill'); await settle();
+      const bounds = await evaluate(`(() => {
+        const menu=document.querySelector('.new-form .cfg-menu'), slider=menu.querySelector('[role=slider]');
+        const box=menu.getBoundingClientRect(), control=slider.getBoundingClientRect(), vv=visualViewport;
+        return {top:box.top,bottom:box.bottom,left:box.left,right:box.right,
+          viewportTop:vv.offsetTop,viewportBottom:vv.offsetTop+vv.height,viewportWidth:vv.width,
+          sliderTop:control.top,sliderBottom:control.bottom,
+          hit:slider.contains(document.elementFromPoint(control.x+control.width/2,control.y+control.height/2)),
+          scrollable:menu.scrollHeight>menu.clientHeight};
+      })()`);
+      assert.ok(bounds.top >= bounds.viewportTop && bounds.bottom <= bounds.viewportBottom, JSON.stringify(bounds));
+      assert.ok(bounds.left >= 0 && bounds.right <= bounds.viewportWidth, JSON.stringify(bounds));
+      assert.ok(bounds.sliderTop >= bounds.top && bounds.sliderBottom <= bounds.bottom && bounds.hit, JSON.stringify(bounds));
+      assert.ok(bounds.scrollable, '长模型列表在菜单内滚动');
+      assert.deepEqual(await outerScroll(), before, '打开菜单和自动聚焦不滚动页面');
+      await evaluate("document.querySelector('.new-form .cfg-menu').scrollTop=100000");
+      await send('Input.dispatchMouseEvent', {type:'mouseWheel',x:bounds.left+30,y:bounds.top+30,deltaX:0,deltaY:600});
+      await settle();
+      assert.deepEqual(await outerScroll(), before, '菜单到底后不带动外层页面');
+      await screenshot(`mobile-menu-${width}-${height}-${scale}`);
+      await key('Escape');
+      await evaluate("document.querySelector('.new-form textarea').focus()");
+      await send('Input.insertText', {text:'First line'});
+      await send('Input.dispatchKeyEvent', {type:'keyDown',key:'Enter',code:'Enter',windowsVirtualKeyCode:13,text:'\n'});
+      await send('Input.dispatchKeyEvent', {type:'keyUp',key:'Enter',code:'Enter',windowsVirtualKeyCode:13});
+      await send('Input.insertText', {text:'Second line'});
+      assert.equal(await evaluate("document.querySelector('.new-form textarea').value"), 'First line\nSecond line');
+      assert.equal(await evaluate('window.__newFixture.creates.length'), 0);
+      await click('.new-submit'); await waitFor('window.__newFixture.sent.length>0');
+      assert.equal(await evaluate('window.__newFixture.creates.length'), 1);
+      await send('Target.closeTarget', {targetId:target}, null);
+    });
+  }
+  if (mobileOnly) return;
   for (const width of [1440,390]) for (const locale of ['zh-CN','en']) for (const theme of ['light','dark']) {
     const variant=`${width}-${locale}-${theme}`;
     await check(`阶段 B ${variant}：主页输入、目录选择、组与历史预选、提交及手机路由`,async()=>{

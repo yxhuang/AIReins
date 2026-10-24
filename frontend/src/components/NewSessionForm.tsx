@@ -249,6 +249,8 @@ export function NewSessionForm({ children }: { children?: ReactNode }) {
               if ((event.key === "Enter" || event.key === "Tab") && activeCommand) { event.preventDefault(); insertCommand(activeCommand.name); return; }
             }
             if (event.key !== "Enter" || event.shiftKey) return;
+            // 与会话输入框一致：触屏回车换行，Ctrl/⌘+Enter 或发送按钮才提交。
+            if (window.matchMedia?.("(pointer: coarse)").matches && !event.ctrlKey && !event.metaKey) return;
             event.preventDefault(); void submit();
           }} />
         {!busy && refineCommand && message.trim() && <button type="button" className="refine-btn"

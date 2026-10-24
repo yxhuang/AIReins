@@ -2183,7 +2183,15 @@ body.resizing {
 .cfg-menu-cwd { display: none; font-size: 13px; color: var(--text-muted); padding: 6px 8px; overflow-wrap: anywhere; border-bottom: 1px solid var(--border); }
 
 .cfg-menu-up { bottom: calc(100% + 4px); }
-.cfg-menu-down { top: calc(100% + 4px); }
+.cfg-menu-down { top: calc(100% + 4px); overscroll-behavior-y: contain; }
+/* 新建菜单只滚动这一层；推理强度留在底部，不必穿过整张模型列表才能操作。 */
+.cfg-menu-down .cfg-group:has(.cfg-slider-row) {
+  position: sticky;
+  bottom: -4px;
+  z-index: 1;
+  background: var(--surface);
+  padding-bottom: 4px;
+}
 .cfg-menu-left { left: 6px; }
 .cfg-menu-right { right: 6px; }
 
@@ -2271,6 +2279,13 @@ body.resizing {
   cursor: pointer;
   touch-action: none; /* 触屏横拖不滚页面 */
 }
+
+/* 新建页只显示强度标签，当前档位见胶囊；省去括号说明，让标签与滑块始终同一行。 */
+.new-form .cfg-bar .cfg-slider-row { display: flex; flex-wrap: nowrap; }
+.new-form .cfg-bar .cfg-slider-label { flex: 0 1 auto; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.new-form .cfg-bar .cfg-slider-value { display: none; }
+.new-form .cfg-bar .cfg-slider-reset { flex: 0 0 auto; }
+.new-form .cfg-bar .cfg-slider { flex: 1 1 132px; width: 132px; min-width: 64px; }
 
 .cfg-slider.follow {
   background: linear-gradient(to right, color-mix(in srgb, var(--busy) 35%, var(--surface-sunk)) var(--fill), var(--surface-sunk) var(--fill));

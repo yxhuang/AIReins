@@ -1,5 +1,6 @@
 import { t } from "../i18n";
-import { useEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
+import { FONT_SCALE_EVENT } from "../font-scale";
 
 // 输入框底栏的「胶囊按钮 + 弹出菜单」：按钮直接显示当前值（如「Opus 5.5 High」「⚡ Auto」），
 // 点开是分组的单选菜单。会话输入框与新建会话表单共用。
@@ -58,11 +59,52 @@ function ConfigPill({
     if (returnFocus) triggerRef.current?.focus();
   };
 
+  // 新建页的卡片在屏幕中央，不能只按 vh 限高：菜单可能仍超出按钮下方的可见区。
+  useLayoutEffect(() => {
+    if (!open || placement !== "down") return;
+    const panel = panelRef.current;
+    const anchor = panel?.offsetParent;
+    if (!panel || !(anchor instanceof HTMLElement)) return;
+    const viewport = window.visualViewport;
+    const position = () => {
+      const rect = anchor.getBoundingClientRect();
+      const top = viewport?.offsetTop ?? 0;
+      const bottom = top + (viewport?.height ?? window.innerHeight);
+      const scale = Number(getComputedStyle(document.documentElement).getPropertyValue("--font-scale")) || 1;
+      const above = Math.max(0, rect.top - top - 16);
+      const below = Math.max(0, bottom - rect.bottom - 16);
+      const up = panel.scrollHeight * scale > below && above > below;
+      panel.style.top = up ? "auto" : "calc(100% + 4px)";
+      panel.style.bottom = up ? "calc(100% + 4px)" : "auto";
+      panel.style.maxHeight = `calc(${(up ? above : below) / scale}px - env(safe-area-inset-bottom, 0px))`;
+    };
+    const onScroll = (event: Event) => {
+      if (event.target instanceof Node && panel.contains(event.target)) return;
+      position();
+    };
+    position();
+    const observer = new ResizeObserver(position);
+    observer.observe(anchor);
+    window.addEventListener("resize", position);
+    window.addEventListener(FONT_SCALE_EVENT, position);
+    document.addEventListener("scroll", onScroll, true);
+    viewport?.addEventListener("resize", position);
+    viewport?.addEventListener("scroll", position);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", position);
+      window.removeEventListener(FONT_SCALE_EVENT, position);
+      document.removeEventListener("scroll", onScroll, true);
+      viewport?.removeEventListener("resize", position);
+      viewport?.removeEventListener("scroll", position);
+    };
+  }, [open, placement]);
+
   useEffect(() => {
     if (!open) return;
     const panel = panelRef.current;
     (panel?.querySelector<HTMLElement>('[aria-checked="true"]:not(:disabled)') ??
-      panel?.querySelector<HTMLElement>("button:not(:disabled)"))?.focus();
+      panel?.querySelector<HTMLElement>("button:not(:disabled)"))?.focus({ preventScroll: true });
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         e.preventDefault();
@@ -192,7 +234,7 @@ function StepSlider({ group }: { group: MenuGroup }) {
   const fill = shown >= 0 ? ((shown + 0.5) / steps.length) * 100 : 0;
   return (
     <div className="cfg-slider-row">
-      <span className="cfg-slider-label">
+      <span className="cfg-slider-label" title={valueText}>
         {group.title}
         <span className="cfg-slider-value">（{valueText}）</span>
       </span>
