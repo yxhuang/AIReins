@@ -2921,8 +2921,8 @@ body.resizing {
   /* 收起态侧栏窄且 overflow:hidden，设置与直达浮层贴在侧栏右侧弹出，底边对齐侧栏底部内边距 */
   .app.sidebar-collapsed .sidebar-foot .settings > .settings-panel,
   .app.sidebar-collapsed .sidebar-foot .launcher-panel { position: fixed; left: 56px; right: auto; bottom: 10px; max-height: calc(100vh - 20px); }
-  /* 异步存储明细最多按三行预留，避免底部锚定的菜单加载后向上跳。 */
-  .settings > .settings-panel .settings-storage-breakdown { min-height: 3lh; }
+  /* 异步存储明细按常见两行预留，较长内容自然撑开，减少菜单底部空白。 */
+  .settings > .settings-panel .settings-storage-breakdown { min-height: 2lh; }
 }
 
 @keyframes settings-pop {
@@ -2930,11 +2930,11 @@ body.resizing {
   to { opacity: 1; transform: translateY(0); }
 }
 
-.settings-group { padding: 12px 0 14px; }
+.settings-group { padding: 8px 0 10px; }
 .settings-group + .settings-group, .settings-col + .settings-col { border-top: 1px solid var(--border); }
 
 .settings-group-title {
-  margin: 0 0 10px;
+  margin: 0 0 6px;
   font-size: 13px;
   font-weight: 600;
   letter-spacing: 0.08em;
@@ -2944,10 +2944,10 @@ body.resizing {
 .settings-item {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 4px;
 }
 
-.settings-item + .settings-item { margin-top: 14px; }
+.settings-item + .settings-item { margin-top: 10px; }
 
 .settings-item-label {
   font-size: 14px;
@@ -2962,7 +2962,7 @@ body.resizing {
 }
 
 .settings-hint { font-size: 13px; color: var(--text-faint); line-height: 1.5; }
-.settings-range { width: 100%; margin: 6px 0 0; accent-color: var(--busy); }
+.settings-range { width: 100%; margin: 2px 0 0; accent-color: var(--busy); }
 .settings-range-value { font-size: 15px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
 
 .settings-seg { display: flex; width: 100%; }
@@ -3004,7 +3004,7 @@ body.resizing {
 .settings-action:hover:not(:disabled) { border-color: var(--border-strong); }
 .settings-action:disabled { cursor: default; opacity: 0.6; }
 
-.settings-storage { margin-bottom: 12px; }
+.settings-storage { margin-bottom: 4px; }
 /* 两个按钮并排各占一半；文字长时在按钮内换行 */
 .settings-action-row { display: flex; gap: 8px; }
 .settings-action-row > .settings-action { flex: 1 1 0; min-width: 0; }

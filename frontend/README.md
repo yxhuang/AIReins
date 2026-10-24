@@ -171,6 +171,7 @@ node frontend/scripts/smoke-ws.mjs  # 需后端；会创建测试会话、批准
 
 ## 外观与通用边界
 
+- 设置菜单通过缩小组内留白和项目间距降低高度，保留原字号和控件最小高度；桌面存储明细预留两行，较长内容自然撑开，超出视口时仍可滚动。
 - 配色裁决以 [styles.css 顶部注释](src/styles.css) 为准：`--gate` 系专属闸门/提问/待处理，消息与终端内容有明确例外；终端 chrome 中性/冷色，会话状态点红绿灯。浅色外框 chrome（`#F0EEE6`）、画布 bg（`#F5F4ED`）、输入框与浮起 surface（暖白 `#FAF8F2`）分层，滚动条使用暖灰轨道与较深滑块；显式浅色与跟随系统浅色均生效，避免大面积纯白。别把旧“暖色只用于审批”当完整规则。
 - 主题三态、整体字号四档 0.9/1/1.15/1.25 保存本机，首屏内联恢复；localStorage 不可用回退默认。sidebar/main 使用 zoom，AI 用量 iframe 抵消 zoom，终端独立 fit；手机侧栏按百分比包含块铺满，≤360px 顶栏收紧间距，窄空间底栏允许换行；设置/直达浮层尺寸受缩放后的视口约束；见 [font-scale.ts](src/font-scale.ts)、[index.html](index.html)。
 - 正文字号 13–20px、步长 0.5、默认 15，旧 22/无效值回退；作用于 stream 用户/助手/思考正文，代码块和工具细节用 `max(12px, 正文−2px)`（默认 13px），与整体 zoom 叠加；见 [body-font.ts](src/body-font.ts)、[styles.css](src/styles.css)。
