@@ -9,6 +9,16 @@ import { modalKeyDown } from "./useAnchoredMenu";
 const sourceUrl = "https://aihot.news/codex-reset";
 const typeLabel = (event?: CodexResetEvent) => t(event?.type === "reset_credit" ? "ui.CodexResets.credit" : "ui.CodexResets.reset");
 const eventUrl = (event: CodexResetEvent) => event.posts.find(post => post.url)?.url ?? event.url;
+const resetTiming = (event: CodexResetEvent): CodexResetTime | null => event.schedule?.label ? event.schedule : event.estimate ?? event.schedule;
+const resetDeadline = (timing: CodexResetTime | null): number => {
+  const through = Date.parse(timing?.through ?? "");
+  return Number.isFinite(through) ? through : Date.parse(timing?.from ?? "");
+};
+
+export function isUpcomingReset(event: CodexResetEvent, now: number): boolean {
+  const deadline = resetDeadline(resetTiming(event));
+  return event.status === "announced" && (!Number.isFinite(deadline) || deadline > now);
+}
 
 function relative(value: string | undefined, now: number): string {
   const timestamp = Date.parse(value ?? "");
@@ -20,8 +30,8 @@ function relative(value: string | undefined, now: number): string {
 }
 
 function ResetTime({ event, now }: { event: CodexResetEvent; now: number }) {
-  const timing: CodexResetTime | null = event.schedule?.label ? event.schedule : event.estimate ?? event.schedule;
-  if (!timing) return null;
+  const timing = resetTiming(event);
+  if (!timing || resetDeadline(timing) <= now) return null;
   const estimate = timing === event.estimate;
   const from = Date.parse(timing.from ?? ""), through = Date.parse(timing.through ?? "");
   const deadline = from > now ? from : Number.isFinite(through) ? through : from;
@@ -130,14 +140,14 @@ export function CodexResetCard() {
   const now = useStore(value => value.now);
   if (!state?.enabled) return null;
   // 只显示一条：待生效取预计时间最晚的那次（较早的多半已被它取代），其余在「最近事件」里。
-  const expected = (event: CodexResetEvent) => Date.parse((event.schedule ?? event.estimate)?.from ?? "") || 0;
-  const latest = state.pending.reduce<CodexResetEvent | undefined>((best, event) => !best || expected(event) > expected(best) ? event : best, undefined);
-  const events = latest ? [latest] : state.recent.slice(0, 1);
-  return <section className={`codex-reset-card${state.pending.length ? " has-pending" : ""}`} aria-label={t("ui.CodexResets.title")}>
+  const expected = (event: CodexResetEvent) => Date.parse(resetTiming(event)?.from ?? "") || 0;
+  const latest = state.pending.filter(event => isUpcomingReset(event, now)).reduce<CodexResetEvent | undefined>((best, event) => !best || expected(event) > expected(best) ? event : best, undefined);
+  const events = latest ? [latest] : state.recent.filter(event => event.status === "confirmed").slice(0, 1);
+  return <section className={`codex-reset-card${latest ? " has-pending" : ""}`} aria-label={t("ui.CodexResets.title")}>
     {events.length ? events.map(event => {
       const when = relative(event.confirmedAt ?? event.updatedAt ?? event.createdAt ?? event.posts[0]?.publishedAt, now);
       return <div className="codex-reset-card-event" key={event.id}>
-        {state.pending.length ? <>
+        {latest ? <>
           <div className="codex-reset-card-heading">
             <strong>{t("ui.CodexResets.upcoming", { type: typeLabel(event) })}</strong>
             {eventUrl(event) && <a href={eventUrl(event)} target="_blank" rel="noopener noreferrer">{t("ui.CodexResets.post")}</a>}

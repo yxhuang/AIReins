@@ -5,6 +5,12 @@ import { buildHistoryQuery, type HistoryQueryInput } from "./history";
 import type { DispatchRun } from "./dispatch-flow";
 import type { TaildropTargetsResult, TailscalePeersResult } from "../../server/tailscale-peers";
 
+class ApiError extends Error {
+  constructor(readonly code: number, message: string) {
+    super(message);
+  }
+}
+
 // REST 信封统一为 {code,msg,data,request_id}；code 非 0 时按可选 i18n 元数据翻译 msg，旧响应保留原文。
 async function call<T>(path: string, init?: RequestInit): Promise<T> {
   let response: Response;
@@ -29,7 +35,7 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
   }
   if (typeof envelope?.code !== "number") throw new Error(t("core.009"));
   if (envelope.code !== 0) {
-    const err = new Error(envelope.msg || t("core.010", { p0: envelope.code }));
+    const err = new ApiError(envelope.code, envelope.msg || t("core.010", { p0: envelope.code }));
     err.cause = envelope.request_id;
     throw err;
   }
@@ -335,10 +341,16 @@ export function createTerminal(input: {
 }
 
 /** 结束终端进程（不是删文件，故不用 DELETE 动词）。 */
-export function killTerminal(id: string): Promise<{ ok: true }> {
-  return call<{ ok: true }>(`/api/terminals/${encodeURIComponent(id)}/kill`, {
-    method: "POST",
-  });
+export async function killTerminal(id: string): Promise<{ ok: true }> {
+  try {
+    return await call<{ ok: true }>(`/api/terminals/${encodeURIComponent(id)}/kill`, {
+      method: "POST",
+    });
+  } catch (error) {
+    // 后端重启或记录淘汰后，进程已不存在，仍须允许关闭前端残留标签。
+    if (error instanceof ApiError && error.code === 40440) return { ok: true };
+    throw error;
+  }
 }
 
 /** 释放会话 worker（停进程、保留会话）；返回带 cwd 的原生续接命令。 */

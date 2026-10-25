@@ -182,8 +182,9 @@ try {
   const pdfHtml = renderToStaticMarkup(React.createElement(FilePanel, { onClose() {} }));
   assert.ok(pdfHtml.includes('title="PDF 文件预览"') && pdfHtml.includes("<iframe"), "支持 PDF 时通过 iframe 导航到原生查看器");
   assert.ok(pdfHtml.includes('role="toolbar"') && pdfHtml.indexOf("外部打开") < pdfHtml.indexOf("<iframe"), "文件操作集中在顶栏");
-  const labels = [">返回<", ">引用<", ">复制路径<", ">外部打开<"];
+  const labels = ['aria-label="返回"', 'aria-label="刷新文件"', 'aria-label="引用"', 'aria-label="复制路径"', 'aria-label="外部打开"'];
   assert.ok(labels.every((label, i) => pdfHtml.indexOf(label) >= 0 && (i === 0 || pdfHtml.indexOf(labels[i - 1]) < pdfHtml.indexOf(label))), "顶栏操作顺序符合要求");
+  assert.ok(!pdfHtml.includes('file-action-label'), "文件操作统一使用纯图标，名称保留在提示与无障碍标签中");
   for (const removed of ["重新读取", "下载", "file-preview-path", "字节", "只读", "使用浏览器 PDF"]) assert.ok(!pdfHtml.includes(removed), removed);
   store.filePreview = { ...pdfPreview, file: { ...pdfPreview.file, kind: "markdown", text: "# 内容", editable: true, version: "v1" }, draft: "# 内容" };
   const markdownHtml = renderToStaticMarkup(React.createElement(FilePanel, { onClose() {} }));
@@ -410,9 +411,47 @@ console.log("✅ 空文件面板直接打开文件、关闭时中断读取与迟
     store.filePreview = { draft: 'unsaved' };
     store.setFileDirectory('/preview'); store.setFilesOpen(true);
     assert.equal(store.fileDirectory.path, '/preview', '重新打开文档预览时保留原目录与草稿');
+
+    const target = { path: '/project/note.md', root: '/project' };
+    const file = { ...target, name: 'note.md', kind: 'markdown', text: 'old', editable: true, version: 'v1', size: 3, mimeType: 'text/markdown' };
+    const preview = { target, file, draft: 'draft', loading: false, saving: false, error: null, loadId: 20 };
+    store.fileTabs = [{ id: 1, preview }, { id: 2, preview: null }]; store.fileTabId = 2;
+    let confirmations = 0, allowDiscard = false, completeRead;
+    globalThis.window = { ...oldWindow, addEventListener() {}, matchMedia: () => ({ matches: false }), confirm() { confirmations++; return allowDiscard; } };
+    globalThis.fetch = () => {
+      calls.push(target.path);
+      return new Promise(resolve => { completeRead = () => resolve({ json: async () => ({ code: 0, data: { ...file, text: 'latest', version: 'v2' } }) }); });
+    };
+    const filePanel = mount(FilePanel, { tabId: 1, onClose() {} });
+    const refresh = () => find(filePanel.tree, node => node.type === 'button' && node.props['aria-label'] === '刷新文件');
+    const beforeRefresh = calls.length;
+    refresh().props.onClick(); await settle();
+    assert.equal(confirmations, 1, '刷新沿用未保存草稿确认');
+    assert.equal(calls.length, beforeRefresh, '取消刷新不请求文件');
+    assert.equal(store.fileTabs[0].preview.draft, 'draft', '取消刷新保留草稿');
+    allowDiscard = true;
+    refresh().props.onClick();
+    filePanel.render();
+    assert.equal(refresh().props.disabled, true, '读取期间禁用刷新');
+    completeRead(); await settle();
+    assert.equal(store.fileTabs[0].preview.draft, 'latest', '刷新读取磁盘最新内容');
+    assert.equal(store.fileTabs[1].preview, null, '刷新结果只回到发起标签');
+    assert.equal(store.fileTabId, 2, '刷新不切换当前标签');
+    store.fileTabs[0].preview = { ...preview, file: null, draft: '', error: '文件已变化' };
+    filePanel.render();
+    assert.equal(refresh().props.disabled, false, '读取失败后仍可刷新');
+    refresh().props.onClick(); completeRead(); await settle();
+    assert.equal(store.fileTabs[0].preview.error, null, '刷新成功清除旧读取错误');
+    store.fileTabs[0].preview = { ...preview, saving: true };
+    filePanel.render();
+    assert.equal(refresh().props.disabled, true, '保存期间禁用刷新');
+    const beforeSavingRefresh = calls.length;
+    refresh().props.onClick(); await settle();
+    assert.equal(calls.length, beforeSavingRefresh, '保存期间也由 store 拒绝重读');
   } finally { Object.assign(store, previous); internals.H = oldDispatcher; globalThis.fetch = oldFetch; globalThis.window = oldWindow; }
 }
 console.log("✅ 新建目录与文件栏：打开/刷新同步，独立浏览、最新地址及预览保留");
+console.log("✅ 文件刷新：草稿确认、错误重试、读取/保存保护与跨标签回包隔离");
 
 // 执行开关的真实处理器；浏览器 CSP/sandbox 的强制执行另做真实浏览器验证。
 {

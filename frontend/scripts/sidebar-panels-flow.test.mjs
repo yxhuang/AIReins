@@ -27,6 +27,24 @@ const renderApp = () => renderToStaticMarkup(React.createElement(App));
 const mainOf = (html) => html.match(/<main class="main">([\s\S]*?)<\/main>/)?.[1];
 const sidebarOf = (html) => html.match(/<aside class="sidebar(?: sidebar-page-open)?">([\s\S]*?)<\/aside>/)?.[1];
 
+t("重置预告到期后入口圆点随时钟消失", () => {
+  const previous = { state: store.codexResets, now: store.now };
+  const deadline = Date.parse("2026-10-24T14:00:00+08:00");
+  store.codexResets = {
+    enabled: true, pending: [{ status: "announced", schedule: { from: new Date(deadline).toISOString() } }],
+    recent: [], alerts: [], stale: false, lastSuccessAt: null,
+  };
+  try {
+    store.now = deadline - 1;
+    assert.match(renderApp(), /class="codex-reset-dot"/);
+    store.now = deadline;
+    assert.doesNotMatch(renderApp(), /class="codex-reset-dot"/);
+  } finally {
+    store.codexResets = previous.state;
+    store.now = previous.now;
+  }
+});
+
 t("历史旧链接：列表在侧栏，窄屏主页没有 has-main", () => {
   store.navigateHistory();
   const html = renderApp();

@@ -447,6 +447,7 @@ export function TerminalPanel({ open, onClose, area = "right" }: { open: boolean
       if (busy) return;
       const target = store.terminals.find((terminal) => terminal.id === id);
       if (!target) return;
+      setError(null);
       const neighbor = pickAdjacentTerminal(areaTerminals(), id);
       if (neighbor) { store.selectTerminal(neighbor.id, true); switchTo(neighbor.id); }
       else {

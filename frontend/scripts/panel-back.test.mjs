@@ -87,6 +87,60 @@ console.log('PASS: directory Back priority and manual/preview bypass');
 }
 console.log('PASS: navigate under synchronous popstate');
 
+for (const panel of ['filesOpen', 'termOpen', 'dispatchesOpen']) {
+  const f=fixture(),s=f.store;
+  if(panel==='filesOpen') s.setFilesOpen(true);
+  else if(panel==='termOpen') s.setTerminalOpen(true);
+  else s.navigateDispatches(['run-detail']);
+  s.filePreview={draft:'unsaved',file:{editable:true,text:'original'}};
+  const preview=s.filePreview;
+  const observed=[];
+  const unsubscribe=s.subscribe(()=>observed.push(s[panel]));
+  s.mainFileTabId=10;s.mainTerminalId='main-terminal';s.terminalMaximized=true;
+  s.navigateNew('/project/new');
+  assert.equal(s[panel],true,'desktop new page keeps the right panel open');
+  assert.equal(s.currentId,null);assert.equal(s.newSessionOpen,true);
+  assert.equal(s.mainFileTabId,0);assert.equal(s.mainTerminalId,null);assert.equal(s.terminalMaximized,false);
+  assert.equal(s.filePreview,preview,'file preview and draft retain their identity');
+  assert.ok(observed.every(Boolean),'subscribers never see the right panel temporarily close');
+  unsubscribe();
+  const length=f.history.length;
+  s.mainFileTabId=10;s.mainTerminalId='main-terminal';s.terminalMaximized=true;
+  s.navigateNew('/project/other');
+  assert.equal(f.history.length,length,'reopening new does not add panel history');
+  assert.equal(s[panel],true);assert.equal(s.newSessionCwd,'/project/other');
+  assert.equal(s.mainFileTabId,0);assert.equal(s.mainTerminalId,null);assert.equal(s.terminalMaximized,false);
+  s.onHashChange();
+  assert.equal(s[panel],true,'hash restoration retains the right panel');
+  f.back();
+  assert.equal(s[panel],false,'Back closes the panel and keeps the new form');
+  assert.equal(s.newSessionOpen,true);assert.equal(s.newSessionCwd,'/project/new');
+  f.history.forward();f.settle();
+  assert.equal(s[panel],true,'Forward restores the right panel beside the new form');
+  assert.equal(s.newSessionOpen,true);assert.equal(s.newSessionCwd,'/project/other');
+  if(panel==='dispatchesOpen') assert.equal(window.location.hash,'#/dispatches/run-detail');
+}
+console.log('PASS: desktop new page preserves right panels, drafts, repeated opening and Back/Forward');
+
+for (const mobile of [false,true]) for (const panelOpen of [false,true]) {
+  const f=fixture({mobile}),s=f.store;
+  s.sessions=[{id:'fixture',cwd:'/project/current'}];
+  s.newSessionCwd='/project/stale';
+  if(panelOpen) s.setFilesOpen(true);
+  s.navigateNew();
+  assert.equal(s.newSessionCwd,'/project/current','generic new inherits the current session project');
+  assert.equal(s.filesOpen,panelOpen && !mobile,'desktop file panel remains open');
+  s.onHashChange();
+  assert.equal(s.newSessionCwd,'/project/current','route snapshots retain the inherited project');
+}
+{
+  const f=fixture(),s=f.store;
+  s.sessions=[{id:'fixture',cwd:'/project/current'}];
+  s.navigateNew('/project/explicit');
+  assert.equal(s.newSessionCwd,'/project/explicit','project plus keeps its explicit directory priority');
+}
+console.log('PASS: generic new inherits the session project and explicit project selection takes priority');
+
 // 新建页和目录属于导航快照；面板及会话不能覆盖返回的新建目录。
 for(const mobile of [false,true]){
   const f=fixture({mobile}),s=f.store;

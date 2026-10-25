@@ -14,6 +14,7 @@ import { SettingsMenu } from "./SettingsMenu";
 import { HostSwitcher } from "./HostSwitcher";
 import { HistoryView } from "./HistoryView";
 import { PageView } from "./PageView";
+import { isUpcomingReset } from "./CodexResets";
 import { SidebarResize } from "./SidebarResize";
 import { shortSessionTitle, SidebarSessionTitle } from "./SessionTitle";
 import { PermanentDeleteConfirm } from "./PermanentDeleteConfirm";
@@ -404,7 +405,7 @@ export function PageIcon({ icon }: { icon: string }) {
 function PageNav({ collapsed, onPrepare, onClose }: PanelNavProps) {
   const pages = useStore((value) => value.pages);
   const skippedPages = useStore((value) => value.skippedPages);
-  const resetPending = useStore((value) => !!value.codexResets?.enabled && value.codexResets.pending.length > 0);
+  const resetPending = useStore((value) => !!value.codexResets?.enabled && value.codexResets.pending.some(event => isUpcomingReset(event, value.now)));
   const currentPageId = useStore((value) => value.currentPageId);
   const [desktop, setDesktop] = useState(false);
   useEffect(() => {

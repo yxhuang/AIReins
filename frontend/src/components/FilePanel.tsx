@@ -17,6 +17,7 @@ const PREVIEW_OPTIONS = [{ value: "preview", label: t("ui.FilePanel.preview"), t
 const TABLE_OPTIONS = [{ value: "preview", label: t("ui.FilePanel.table"), title: t("ui.FilePanel.view_data_as_a_table") }, { value: "source", label: t("ui.FilePanel.source"), title: t("ui.FilePanel.view_or_edit_raw_data") }] as const;
 const ACTION_PATHS = {
   back: "m15 18-6-6 6-6",
+  refresh: "M21 4v6h-6 M20.5 10a9 9 0 1 0-2.1 8.4",
   mention: "M16 8v5a3 3 0 0 0 6 0v-1a10 10 0 1 0-4 8 M16 12a4 4 0 1 1-8 0 4 4 0 0 1 8 0",
   copy: "M9 9h12v12H9z M15 5V3H3v12h2",
   open: "M15 3h6v6 M21 3 10 14 M10 3H3v18h18v-7",
@@ -310,29 +311,31 @@ export function FilePanel({ onClose: closeRight, tabId: ownTabId }: { onClose: (
     }}>
       <WorkspaceDropTarget area={area} />
       <div className="term-titlebar file-titlebar">
-        {(!preview || area === "main") && <PanelBackButton onClick={onClose} />}
+        {!preview && <PanelBackButton onClick={onClose} />}
         <strong className="file-side-title">{t("ui.common.files")}</strong>
         {hasTab && !preview && <div ref={setNavSlot} className="file-nav" role="toolbar" aria-label={t("ui.FilePanel.directory_navigation")} />}
         {preview && <div className="file-actions" role="toolbar" aria-label={t("ui.common.file_actions")}>
           <button className="file-action" type="button" aria-label={t("ui.common.back")} title={t(area === "main" ? "ui.FilePanel.return_to_session" : "ui.FilePanel.back_to_directory")} disabled={preview.saving} onClick={() => {
             if (area === "main") { store.showMainSession(); return; }
             if (store.clearFilePreview(tabId)) { setNotice(null); setSourcePath(null); }
-          }}><FileActionIcon kind="back" /><span className="file-action-label">{t("ui.common.back")}</span></button>
-          <button className="file-action" type="button" aria-label={t("ui.FilePanel.reference")} title={t("ui.FilePanel.reference_in_session")} onClick={() => referenceFile(preview.target.path)}><FileActionIcon kind="mention" /><span className="file-action-label">{t("ui.FilePanel.reference")}</span></button>
-          <button className="file-action" type="button" aria-label={t("ui.FilePanel.copy_path")} title={t("ui.FilePanel.copy_path")} onClick={() => copyFile(preview.target.path)}><FileActionIcon kind="copy" /><span className="file-action-label">{t("ui.FilePanel.copy_path")}</span></button>
+          }}><FileActionIcon kind="back" /></button>
+          <button className="file-action file-action-refresh" type="button" aria-label={t("ui.FilePanel.refresh_file")} title={t("ui.FilePanel.refresh_file")} disabled={preview.loading || preview.saving}
+            onClick={() => void store.openFilePreview(preview.target, tabId)}><FileActionIcon kind="refresh" /></button>
+          <button className="file-action" type="button" aria-label={t("ui.FilePanel.reference")} title={t("ui.FilePanel.reference_in_session")} onClick={() => referenceFile(preview.target.path)}><FileActionIcon kind="mention" /></button>
+          <button className="file-action" type="button" aria-label={t("ui.FilePanel.copy_path")} title={t("ui.FilePanel.copy_path")} onClick={() => copyFile(preview.target.path)}><FileActionIcon kind="copy" /></button>
           {taildrop && <button className="file-action" type="button" aria-label={t("ui.FilePanel.send_to_device")} title={t("ui.FilePanel.send_to_a_device_on_your_tailnet")} aria-haspopup="menu" aria-expanded={sendMenu !== null} onClick={event => {
             const rect = event.currentTarget.getBoundingClientRect();
             openSendMenu(preview.target, preview.file?.name ?? preview.target.path.split("/").pop()!, false, rect.left, rect.bottom + 4);
-          }}><FileActionIcon kind="send" /><span className="file-action-label">{t("ui.common.send")}</span></button>}
+          }}><FileActionIcon kind="send" /></button>}
           {preview.file && preview.file.kind !== "unsupported" && <a className="file-action" aria-label={downloadOnly ? t("ui.FilePanel.download") : t("ui.FilePanel.open_externally")} title={downloadOnly ? t("ui.FilePanel.download") : t("ui.FilePanel.open_externally")}
             href={downloadOnly ? workFileContentUrl(preview.target, true) : `${workFileContentUrl(preview.target)}&v=${preview.loadId}`}
             download={downloadOnly ? preview.file.name : undefined} target={downloadOnly ? undefined : "_blank"} rel={downloadOnly ? undefined : "noopener noreferrer"} onClick={downloadOnly ? confirmDownload : undefined}>
-            <FileActionIcon kind={downloadOnly ? "download" : "open"} /><span className="file-action-label">{downloadOnly ? t("ui.FilePanel.download") : t("ui.FilePanel.open_externally")}</span></a>}
+            <FileActionIcon kind={downloadOnly ? "download" : "open"} /></a>}
           {rich && <Segmented className="file-view-toggle" buttonClassName="file-view-option" ariaLabel={t("ui.FilePanel.file_display_mode")}
             options={["csv", "tsv"].includes(preview.file?.kind ?? "") ? TABLE_OPTIONS : PREVIEW_OPTIONS}
             value={source ? "source" : "preview"} onChange={value => setSourcePath(value === "source" ? preview.target.path : null)} />}
-          {preview.file?.editable && <button className="file-action file-action-save" type="button" aria-label={preview.saving ? t("ui.common.saving") : t("ui.FilePanel.save")} title={preview.saving ? t("ui.common.saving") : t("ui.FilePanel.save")} disabled={!dirty || preview.saving} onClick={() => void store.saveFilePreview(tabId)}><FileActionIcon kind="save" /><span className="file-action-label">{preview.saving ? t("ui.common.saving") : t("ui.FilePanel.save")}</span></button>}
-          {preview.file?.kind === "html" && <a className="file-action" aria-label={t("ui.FilePanel.download")} title={t("ui.FilePanel.download")} href={workFileContentUrl(preview.target, true)} download={preview.file.name} onClick={confirmDownload}><FileActionIcon kind="download" /><span className="file-action-label">{t("ui.FilePanel.download")}</span></a>}
+          {preview.file?.editable && <button className="file-action file-action-save" type="button" aria-label={preview.saving ? t("ui.common.saving") : t("ui.FilePanel.save")} title={preview.saving ? t("ui.common.saving") : t("ui.FilePanel.save")} disabled={!dirty || preview.saving} onClick={() => void store.saveFilePreview(tabId)}><FileActionIcon kind="save" /></button>}
+          {preview.file?.kind === "html" && <a className="file-action" aria-label={t("ui.FilePanel.download")} title={t("ui.FilePanel.download")} href={workFileContentUrl(preview.target, true)} download={preview.file.name} onClick={confirmDownload}><FileActionIcon kind="download" /></a>}
         </div>}
         <button type="button" className="btn chrome-icon-btn panel-icon-button panel-collapse" aria-label={t("ui.FilePanel.collapse_file_panel")} title={t("ui.common.collapse_panel")} onClick={onClose}><PanelRightIcon /></button>
       </div>

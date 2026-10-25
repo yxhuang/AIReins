@@ -377,5 +377,39 @@ t("激活 id 的 localStorage 键固定为 workbench-term-active", () => {
   assert.equal(TERM_ACTIVE_STORAGE_KEY, "workbench-term-active");
 });
 
-if (!process.exitCode) console.log(`✅ terminal 纯逻辑单测全过（${pass} 例）`);
+const { killTerminal, fetchTerminals } = await import("../src/api.ts");
+const asyncTest = async (name, fn) => {
+  try { await fn(); pass++; }
+  catch (e) { console.error(`❌ ${name}\n   ${e.message}`); process.exitCode = 1; }
+};
+const previousFetch = globalThis.fetch;
+try {
+  await asyncTest("结束终端：正常成功与终端已不存在均允许关闭标签，不依赖错误文案", async () => {
+    for (const code of [0, 40440]) {
+      globalThis.fetch = async (url, init) => {
+        assert.equal(url, "/api/terminals/stale%2Fterminal/kill");
+        assert.equal(init.method, "POST");
+        return { json: async () => ({ code, msg: "Terminal is no longer registered", data: code === 0 ? { ok: true } : null }) };
+      };
+      assert.deepEqual(await killTerminal("stale/terminal"), { ok: true });
+    }
+  });
+  await asyncTest("结束终端：权限、未知接口和其他失败仍报错，保留请求标识", async () => {
+    for (const code of [40300, 40400, 40040, 50000]) {
+      globalThis.fetch = async () => ({ json: async () => ({ code, msg: "Request failed", request_id: "kill-request" }) });
+      await assert.rejects(killTerminal("terminal"), error => error.message === "Request failed" && error.cause === "kill-request");
+    }
+    const offline = new TypeError("Failed to fetch");
+    globalThis.fetch = async () => { throw offline; };
+    await assert.rejects(killTerminal("terminal"), error => error === offline);
+  });
+  await asyncTest("只有结束终端接受不存在；列表请求仍正常抛错", async () => {
+    globalThis.fetch = async () => ({ json: async () => ({ code: 40440, msg: "Missing terminal" }) });
+    await assert.rejects(fetchTerminals(), /Missing terminal/);
+  });
+} finally {
+  globalThis.fetch = previousFetch;
+}
+
+if (!process.exitCode) console.log(`✅ terminal 单测全过（${pass} 例）`);
 else console.error(`部分用例失败（通过 ${pass} 例）`);

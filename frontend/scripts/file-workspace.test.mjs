@@ -63,6 +63,8 @@ try {
     store.mainFileTabId=71;store.mainTerminalId=null;
     const content=renderToStaticMarkup(React.createElement(FilePanel,{tabId:71,onClose(){}}));
     assert.ok(!content.includes('role="tablist"'), "主区文件只渲染页面操作，不重复顶栏标签");
+    assert.ok(!content.includes('class="panel-back"') && !content.includes('file-action-label'), "主区文件也只显示图标返回，手机不重复文字按钮");
+    assert.ok(content.includes('aria-label="刷新文件"'), "主区文件也提供刷新入口");
   } finally { reactInternals.H = previousDispatcher; Object.assign(store,headerState); }
   console.log("✅ 持久工作区顶栏、会话/文件/终端共用四个按钮与单一标签行");
   const value = makeStore(), notes = value.filePreview;

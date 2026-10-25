@@ -740,13 +740,29 @@ export class Store {
 
   navigateNew(cwd?: string): void {
     const request = this.newSessionRequest;
-    const destination = { ...this.mobileRouteFromHash("#/new"), newSessionCwd: cwd };
-    if (window.location.hash === "#/new") {
-      const entry = this.readMobileEntry();
-      if (entry) this.writeMobileEntry({ ...entry, route: destination });
-      else this.replaceMobileEntry(destination);
-      this.applyMobileRoute(destination);
-    } else this.pushMobileRoute("#/new", destination);
+    const destination = { ...this.mobileRouteFromHash("#/new"), newSessionCwd: cwd ?? (this.currentId ? this.session(this.currentId)?.cwd : undefined) };
+    const rightPanel = !this.isMobileNavigation() && this.desktopPanelActive("right")
+      ? { filesOpen: this.filesOpen, termOpen: this.termOpen, dispatchesOpen: this.dispatchesOpen }
+      : null;
+    const route = { ...destination, ...rightPanel };
+    if (rightPanel && this.newSessionOpen && this.readDesktopPanelEntry()) {
+      this.applyMobileRoute(route);
+      this.syncDesktopPanels();
+    } else {
+      if (window.location.hash === "#/new") {
+        const entry = this.readMobileEntry();
+        if (entry) this.writeMobileEntry({ ...entry, route });
+        else this.replaceMobileEntry(route);
+        this.applyMobileRoute(route);
+      } else this.pushMobileRoute("#/new", route);
+      if (rightPanel) {
+        // 面板历史的基础条目只存新建页，Back 仍先收起右侧。
+        const entry = this.readMobileEntry();
+        if (entry) this.writeMobileEntry({ ...entry, route: destination });
+        this.syncDesktopPanels();
+      }
+    }
+    this.showMainSession();
     if (this.newSessionRequest === request) { this.newSessionRequest++; this.notify(); }
   }
 
