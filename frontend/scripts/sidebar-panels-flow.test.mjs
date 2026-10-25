@@ -118,6 +118,9 @@ t("底部单行显示历史与额度，额度为加宽胶囊、直达为圆钮�
   assert.ok(foot(pageHtml).indexOf('aria-label="历史会话"') < foot(pageHtml).indexOf('aria-label="AI 用量"'));
   assert.match(css, /\.sidebar-session-area \{\s*grid-area: 1 \/ 1;/);
   assert.match(css, /\.sidebar-foot \{\s*grid-area: 2 \/ 1;/);
+  assert.match(css, /\.app:not\(\.has-main\) \.workspace-head \{ display: none; \}/, "手机列表不能显示工作区顶栏");
+  assert.match(css, /\.session:not\(:has\(> \.session-dispatch-link\)\):not\(:has\(> \.risky-banner\)\) > \.stream-region \.stream \{ padding-top: 20px; \}/);
+  assert.match(css, /\.session > \.session-dispatch-link, \.session > \.risky-banner \{ margin-top: 12px; \}/);
   const overlayCss = css.match(/\.sidebar-panel-expanded \{([\s\S]*?)\}/)[1];
   assert.ok(overlayCss.includes("grid-area: 1 / 1"));
   assert.ok(!overlayCss.includes("order:"));
@@ -208,7 +211,7 @@ t("会话、欢迎页与历史预览均有同组入口；手机列表有顶部�
   store.navigate(null);
   html = renderApp();
   assert.ok(mainOf(html).includes('class="welcome-view"'));
-  assert.ok(mainOf(html).includes('class="panel-actions"'));
+  assert.ok(html.slice(html.indexOf('class="workspace-head'), html.indexOf('<main class="main">')).includes('class="panel-actions"'), "欢迎页开关在持久工作区顶栏");
   // 手机列表页：面板开关并进侧栏顶栏同一行（桌面 CSS 隐藏）
   // 文件保持单独圆钮，派单与终端收进「⋯」菜单
   const launcher = sidebarOf(html).match(/class="mobile-panel-launcher"[\s\S]*$/)?.[0];
@@ -221,7 +224,10 @@ t("会话、欢迎页与历史预览均有同组入口；手机列表有顶部�
   const item = { agent: "claude", nativeSessionId: "preview", cwd: "/repo", title: "历史标题", source: "interactive", lastActivityAt: "2026-10-01T00:00:00Z", filePath: "/history" };
   store.navigateHistory(); store.selectHistory(item);
   html = renderApp();
-  assert.ok(mainOf(html).includes('class="panel-actions"'));
+  assert.ok(mainOf(html).includes('class="view-panel-actions"'), "历史页保留自己的返回操作");
+  const historyHead = html.slice(html.indexOf('class="workspace-head'), html.indexOf('<main class="main">'));
+  assert.ok(historyHead.includes('class="panel-actions"'), "历史预览共用全局顶栏开关");
+  assert.ok(historyHead.includes('aria-label="返回历史列表"'), "历史预览返回不回会话列表");
   assert.equal((html.match(/aria-label="终端"/g) ?? []).length, 1);
   assert.ok(!html.includes('mobile-panel-launcher'));
   const emptyPreview = renderToStaticMarkup(React.createElement(HistoryPreviewPane, { onBack() {} }));

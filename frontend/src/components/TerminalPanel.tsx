@@ -18,8 +18,8 @@ import {
   TERM_ACTIVE_STORAGE_KEY,
   TERM_SHORTCUT_KEYS,
   buildTerminalWsUrl,
-  buildTermTabs,
   initialTermState,
+  mergeTerminalSnapshot,
   pickBootTerminal,
   pickRecentTerminal,
   pickAdjacentTerminal,
@@ -28,6 +28,7 @@ import {
   type TermSessionState,
 } from "../terminal";
 import { store } from "../store";
+import { FileTabs, WorkspaceDropTarget } from "./FilePanel";
 import { FONT_SCALE_EVENT } from "../font-scale";
 import { readTermFontSize } from "../body-font";
 
@@ -94,6 +95,7 @@ interface TermRuntime {
   switchTo: (id: string) => void;
   switchShell: (kind: ShellKind) => Promise<void>;
   closeTab: (id: string) => void;
+  clear: () => void;
   reconnectNow: () => void;
 }
 
@@ -121,18 +123,21 @@ function writeSavedActiveTerminalId(id: string | null): void {
  * 切标签 = detach 旧的 + attach 新的（服务端回放 scrollback）；刷新后优先重连
  * localStorage 记的激活 id，其次第一个未退出终端，都没有就新建缺省 shell。
  */
-export function TerminalPanel({ open, onClose }: { open: boolean; onClose: () => void }) {
+export function TerminalPanel({ open, onClose, area = "right" }: { open: boolean; onClose: () => void; area?: "main" | "right" }) {
+  const selectedId = useStore(value => area === "main" ? value.mainTerminalId : value.rightTerminalId);
+  const terminalAreas = useStore(value => value.terminalAreas);
+  const closeRequest = useStore(value => value.terminalCloseRequest);
   const powershell = useStore(value => value.meta?.capabilities.powershell === true);
   const defaultShell = useStore(value => value.meta?.terminalShell ?? "bash");
   const hostRef = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useSidePanelWidth();
-  const [maximized, setMaximized] = useState(false);
+  const maximized = useStore(value => value.terminalMaximized);
   const [titlebarHidden, setTitlebarHidden] = useState(false);
   const [info, setInfo] = useState<TerminalInfo | null>(null);
   const shellOptions = terminalShellOptions(powershell, info?.kind === "bash" ? terminalShellLabel(info) : defaultShell);
-  /** 服务端注册表快照（含已退出记录）；标签条按 buildTermTabs 过滤 */
-  const [terminals, setTerminals] = useState<TerminalInfo[]>([]);
-  const terminalsRef = useRef<TerminalInfo[]>([]);
+  /** 服务端注册表快照（含已退出记录）；标签条使用共享注册表，按区域及退出状态过滤 */
+  const terminals = useStore(value => value.terminals);
+  const areaTerminals = () => store.workspaceTabKeys(area).filter(key => key.startsWith("terminal:")).map(key => store.terminals.find(item => item.id === key.slice(9))!).filter(Boolean);
   /** null = 运行中；否则已退出（exitCode 可能为 null = 服务端没给码） */
   const [exit, setExit] = useState<{ code: number | null } | null>(null);
   const [omitted, setOmitted] = useState(0);
@@ -143,8 +148,7 @@ export function TerminalPanel({ open, onClose }: { open: boolean; onClose: () =>
   const runtimeRef = useRef<TermRuntime | null>(null);
 
   const setTerminalList = (list: TerminalInfo[]) => {
-    terminalsRef.current = list;
-    setTerminals(list);
+    store.updateTerminals(list);
   };
 
   // 右键（无选区时）/ 粘贴按钮读剪贴板；拒绝授权、不支持或非安全上下文时退回手动粘贴。
@@ -281,7 +285,9 @@ export function TerminalPanel({ open, onClose }: { open: boolean; onClose: () =>
         rows: dims.rows,
       });
       if (disposed) return;
-      setTerminalList([...terminalsRef.current, created]);
+      store.terminalAreas = { ...store.terminalAreas, [created.id]: area };
+      setTerminalList([...store.terminals.filter(item => item.id !== created.id), created]);
+      store.selectTerminal(created.id, true);
       setInfo(created);
       attach(created.id);
     };
@@ -319,7 +325,7 @@ export function TerminalPanel({ open, onClose }: { open: boolean; onClose: () =>
             setExit({ code: effect.exitCode });
             // 自行退出保留输出；确认 kill 成功后由 closeTab 关闭标签。
             setTerminalList(
-              terminalsRef.current.map((t) =>
+              store.terminals.map((t) =>
                 t.id === attachedId ? { ...t, exited: true, exitCode: effect.exitCode } : t,
               ),
             );
@@ -379,6 +385,7 @@ export function TerminalPanel({ open, onClose }: { open: boolean; onClose: () =>
     const runGuarded = async (task: () => Promise<void>) => {
       if (busy) return;
       busy = true;
+      store.setTerminalBusy(area, true);
       setSwitching(true);
       setError(null);
       try {
@@ -387,20 +394,30 @@ export function TerminalPanel({ open, onClose }: { open: boolean; onClose: () =>
         if (!disposed) setError(e instanceof Error ? e.message : String(e));
       } finally {
         busy = false;
+        store.setTerminalBusy(area, false);
         if (!disposed) setSwitching(false);
       }
     };
 
+    const readTerminalList = async () => {
+      const before = store.terminals;
+      const fetched = await fetchTerminals();
+      return mergeTerminalSnapshot(before, store.terminals, fetched);
+    };
+
     // 引导：持久化的激活 id 仍存活优先重连，其次第一个未退出终端，都没有新建 bash
     const boot = async () => {
-      const list = await fetchTerminals();
+      const list = area === "main" && store.terminals.length ? store.terminals : await readTerminalList();
       if (disposed) return;
       setTerminalList(list);
-      const target = pickBootTerminal(list, readSavedActiveTerminalId());
+      const own = area === "main" ? store.mainTerminalId : store.rightTerminalId;
+      const target = list.find(item => item.id === own && store.terminalArea(item.id) === area)
+        ?? pickBootTerminal(list.filter(item => store.terminalArea(item.id) === area), readSavedActiveTerminalId());
       if (target) {
         setInfo(target);
         attach(target.id);
-      } else {
+        if (area === "right" && !store.rightTerminalId) store.selectTerminal(target.id, true);
+      } else if (area === "right") {
         await createNew("bash");
       }
     };
@@ -408,7 +425,7 @@ export function TerminalPanel({ open, onClose }: { open: boolean; onClose: () =>
     // 切标签：detach 旧的、attach 新的（服务端回放 scrollback）；无 REST，不占用 busy
     const switchTo = (id: string) => {
       if (busy || id === attachedId) return;
-      const target = terminalsRef.current.find((t) => t.id === id);
+      const target = store.terminals.find((t) => t.id === id);
       if (!target) return;
       setInfo(target);
       attach(target.id);
@@ -416,21 +433,22 @@ export function TerminalPanel({ open, onClose }: { open: boolean; onClose: () =>
       if (window.matchMedia("(pointer: fine)").matches) term.focus();
     };
     const showShell = async (kind: ShellKind) => {
-      const list = await fetchTerminals();
+      const list = await readTerminalList();
       if (disposed) return;
       setTerminalList(list);
-      const target = pickRecentTerminal(list, kind, activationOrder);
+      const target = pickRecentTerminal(list.filter(item => store.terminalArea(item.id) === area), kind, activationOrder);
       if (target) {
+        store.selectTerminal(target.id, true);
         setInfo(target);
         attach(target.id);
       } else await createNew(kind);
     };
     const closeTab = (id: string) => {
       if (busy) return;
-      const target = terminalsRef.current.find((terminal) => terminal.id === id);
+      const target = store.terminals.find((terminal) => terminal.id === id);
       if (!target) return;
-      const neighbor = pickAdjacentTerminal(terminalsRef.current, id);
-      if (neighbor) switchTo(neighbor.id);
+      const neighbor = pickAdjacentTerminal(areaTerminals(), id);
+      if (neighbor) { store.selectTerminal(neighbor.id, true); switchTo(neighbor.id); }
       else {
         if (attachedId) sendFrame({ type: "detach", terminalId: attachedId });
         attachedId = null;
@@ -442,7 +460,7 @@ export function TerminalPanel({ open, onClose }: { open: boolean; onClose: () =>
         setConfirmKill(false);
         setOmitted(0);
       }
-      setTerminalList(terminalsRef.current.filter((terminal) => terminal.id !== id));
+      setTerminalList(store.terminals.filter((terminal) => terminal.id !== id));
     };
     void runGuarded(boot);
     connect();
@@ -459,6 +477,10 @@ export function TerminalPanel({ open, onClose }: { open: boolean; onClose: () =>
       // 走 term.paste：bracketed paste 与换行归一由 xterm 处理，再经 onData 上行
       paste: (text) => term.paste(text),
       copySelection,
+      clear: () => {
+        if (attachedId) sendFrame({ type: "detach", terminalId: attachedId });
+        attachedId = null; termState = initialTermState(); term.reset(); setInfo(null); setExit(null); setOmitted(0); setConfirmKill(false);
+      },
       createNew: (kind) => runGuarded(() => createNew(kind)),
       switchTo,
       switchShell: (kind) => runGuarded(() => showShell(kind)),
@@ -469,6 +491,7 @@ export function TerminalPanel({ open, onClose }: { open: boolean; onClose: () =>
     return () => {
       disposed = true;
       runtimeRef.current = null;
+      store.setTerminalBusy(area, false);
       clearTimeout(reconnectTimer);
       clearTimeout(fontTimer);
       window.removeEventListener(FONT_SCALE_EVENT, applyFontScale);
@@ -482,6 +505,17 @@ export function TerminalPanel({ open, onClose }: { open: boolean; onClose: () =>
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // 每栏保留一个 xterm；跨栏仅 detach/attach 同一 PTY，不创建进程。
+  useEffect(() => {
+    if (selectedId && store.terminalArea(selectedId) === area) runtimeRef.current?.switchTo(selectedId);
+    else if (info && (!terminals.some(item => item.id === info.id) || store.terminalArea(info.id) !== area)) runtimeRef.current?.clear();
+  }, [selectedId, terminalAreas, terminals, switching]);
+  useEffect(() => {
+    if (!closeRequest || closeRequest !== info?.id || store.terminalArea(closeRequest) !== area || switching || killBusy) return;
+    store.requestTerminalClose(null);
+    if (store.terminals.find(item => item.id === closeRequest)?.exited) runtimeRef.current?.closeTab(info.id); else setConfirmKill(true);
+  }, [closeRequest, info, terminals, switching, killBusy, area]);
 
   // 面板从隐藏变为可见：等 CSS 生效后 fit 一次（ResizeObserver 也会补，这里是确定性兜底）
   useEffect(() => {
@@ -530,6 +564,7 @@ export function TerminalPanel({ open, onClose }: { open: boolean; onClose: () =>
   const kill = async () => {
     if (killBusy || !info) return;
     setKillBusy(true);
+    store.setTerminalBusy(area, true);
     setError(null);
     try {
       await killTerminal(info.id);
@@ -541,20 +576,37 @@ export function TerminalPanel({ open, onClose }: { open: boolean; onClose: () =>
       setConfirmKill(false);
     } finally {
       setKillBusy(false);
+      store.setTerminalBusy(area, false);
     }
   };
 
-  const tabs = buildTermTabs(terminals, info?.id ?? null);
+  const terminalTabControls = <>
+
+          <button type="button" className="term-tab-new" aria-label={t("ui.TerminalPanel.new_terminal")}
+            title={t("ui.TerminalPanel.new_terminal_2", { shell: (info?.kind === "powershell" ? terminalShellLabel(info) : defaultShell) })} disabled={switching || killBusy || confirmKill}
+            onClick={() => void runtimeRef.current?.createNew(info?.kind ?? "bash")}>
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="M12 4v16M4 12h16" /></svg>
+          </button>
+          {area === "right" && <button type="button" className="term-tab-maximize" aria-label={maximized ? t("ui.TerminalPanel.restore_terminal_window") : t("ui.TerminalPanel.maximize_terminal_window")}
+            title={maximized ? t("ui.TerminalPanel.restore_terminal_window") : t("ui.TerminalPanel.maximize_terminal_window_while_keeping_the_left")} aria-pressed={maximized}
+            onClick={() => store.setTerminalMaximized(!maximized)}>
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              {maximized ? <><path d="M8 8V4h12v12h-4" /><rect x="4" y="8" width="12" height="12" rx="1" /></> : <path d="M9 4H4v5m11-5h5v5M4 15v5h5m11-5v5h-5" />}
+            </svg>
+          </button>}
+  </>;
 
   return (
     <>
-      {open && !maximized && <SidePanelResize label={t("ui.common.terminal")} width={width} setWidth={setWidth} />}
+      {area === "right" && open && !maximized && <SidePanelResize label={t("ui.common.terminal")} width={width} setWidth={setWidth} />}
       <div
-        className={`term-panel${open ? "" : " term-hidden"}${maximized ? " term-maximized" : ""}${titlebarHidden ? " term-titlebar-hidden" : ""}`}
+        data-terminal-area={area}
+        className={`term-panel terminal-workspace-panel${area === "main" ? " terminal-main-panel" : ""}${open ? "" : " term-hidden"}${maximized ? " term-maximized" : ""}${titlebarHidden ? " term-titlebar-hidden" : ""}`}
         role="region"
         aria-label={t("ui.common.terminal")}
-        style={{ width: maximized ? undefined : `${width}px` }}
+        style={{ width: area === "main" || maximized ? undefined : `${width}px` }}
       >
+        <WorkspaceDropTarget area={area} />
         <div className="term-titlebar">
           <PanelBackButton onClick={onClose} />
           <Segmented
@@ -570,6 +622,7 @@ export function TerminalPanel({ open, onClose }: { open: boolean; onClose: () =>
             {info?.cwd ?? "…"}
           </span>
           <span className="panel-titlebar-actions">
+            {area === "main" && terminalTabControls}
             {exit && !killBusy && <span className="term-exited">{t("ui.TerminalPanel.exited_code_sentence", { p0: (exit.code ?? t("ui.common.unknown")) })}</span>}
             {confirmKill && (!exit || killBusy) ? (
               <span
@@ -622,57 +675,7 @@ export function TerminalPanel({ open, onClose }: { open: boolean; onClose: () =>
             </button>
           </span>
         </div>
-        <div className="term-tabs">
-          <div className="term-tab-list" role="tablist" aria-label={t("ui.TerminalPanel.terminal_tabs")}
-            onKeyDown={(event) => {
-              const direction = event.key === "ArrowRight" ? 1 : event.key === "ArrowLeft" ? -1 : 0;
-              if (!direction) return;
-              const items = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>("[role=tab]:not(:disabled)"));
-              const index = items.indexOf(event.target as HTMLButtonElement);
-              if (index < 0) return;
-              event.preventDefault();
-              const next = items[(index + direction + items.length) % items.length];
-              next?.focus();
-              next?.click();
-            }}>
-            {tabs.map((tab) => {
-              const active = tab.id === info?.id;
-              const showExited = tab.exited && !killBusy;
-              return <div key={tab.id} className={`term-tab${active ? " active" : ""}${showExited ? " exited" : ""}`}>
-                <button type="button" role="tab" aria-selected={active} tabIndex={active ? 0 : -1}
-                  className="term-tab-select" title={tab.cwd} disabled={switching || killBusy}
-                  onClick={() => runtimeRef.current?.switchTo(tab.id)}>
-                  <svg className="term-tab-icon" width="16" height="16" viewBox="0 0 24 24" fill="none"
-                    stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                    {tab.kind === "bash" ? <path d="m4 6 6 6-6 6m9 0h7" /> : <><path d="m7 5 7 7-9 7M15 19h5" /><path d="M3 2h18l-3 20H0z" /></>}
-                  </svg>
-                  <span className="term-tab-label">{tab.label}{showExited ? t("ui.TerminalPanel.exited") : ""}</span>
-                </button>
-                <button type="button" className="term-tab-close" aria-label={t("ui.TerminalPanel.message", { p0: (tab.exited ? t("ui.TerminalPanel.remove_detail") : t("ui.TerminalPanel.end_detail")), p1: (tab.label) })}
-                  title={tab.exited ? t("ui.TerminalPanel.remove_exited_tab") : t("ui.TerminalPanel.end_terminal_confirmation_required")} disabled={switching || killBusy}
-                  onClick={() => {
-                    if (tab.exited) runtimeRef.current?.closeTab(tab.id);
-                    else {
-                      runtimeRef.current?.switchTo(tab.id);
-                      setConfirmKill(true);
-                    }
-                  }}>×</button>
-              </div>;
-            })}
-          </div>
-          <button type="button" className="term-tab-new" aria-label={t("ui.TerminalPanel.new_terminal")}
-            title={t("ui.TerminalPanel.new_terminal_2", { shell: (info?.kind === "powershell" ? terminalShellLabel(info) : defaultShell) })} disabled={switching || killBusy || confirmKill}
-            onClick={() => void runtimeRef.current?.createNew(info?.kind ?? "bash")}>
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="M12 4v16M4 12h16" /></svg>
-          </button>
-          <button type="button" className="term-tab-maximize" aria-label={maximized ? t("ui.TerminalPanel.restore_terminal_window") : t("ui.TerminalPanel.maximize_terminal_window")}
-            title={maximized ? t("ui.TerminalPanel.restore_terminal_window") : t("ui.TerminalPanel.maximize_terminal_window_while_keeping_the_left")} aria-pressed={maximized}
-            onClick={() => setMaximized((value) => !value)}>
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-              {maximized ? <><path d="M8 8V4h12v12h-4" /><rect x="4" y="8" width="12" height="12" rx="1" /></> : <path d="M9 4H4v5m11-5h5v5M4 15v5h5m11-5v5h-5" />}
-            </svg>
-          </button>
-        </div>
+        {area === "right" && <FileTabs area="right" page="terminal" trailing={terminalTabControls} />}
         {omitted > 0 && (
           <div className="term-omitted" role="status">{t("ui.TerminalPanel.earlier_output_omitted")}</div>
         )}

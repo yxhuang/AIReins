@@ -188,7 +188,7 @@ export function HostSwitcher() {
   const choose = (origin: string, discovered = false) => {
     if (origin === currentOrigin) { close(true); return; }
     if (homeScreenHint(origin)) return;
-    if (store.filePreview?.saving) { setError(t("ui.HostSwitcher.a_file_is_being_saved_wait_before")); return; }
+    if (store.fileSaving) { setError(t("ui.HostSwitcher.a_file_is_being_saved_wait_before")); return; }
     if (hostSwitchHasUnsentInput() && !window.confirm(t("ui.HostSwitcher.you_have_unsent_input_or_attachments_switch"))) return;
     // 未保存文件继续由 store 的 beforeunload 保护；这里不清空文件、草稿，也不停止 worker。
     const next = discovered ? remember(origin) : connections;
@@ -206,7 +206,7 @@ export function HostSwitcher() {
   const canOpenApp = !standalone && !mobile && isLocal && appWindow === true;
   const openInApp = async () => {
     if (openingApp) return;
-    if (store.filePreview?.saving) { setError(t("ui.HostSwitcher.a_file_is_being_saved_wait_before_2")); return; }
+    if (store.fileSaving) { setError(t("ui.HostSwitcher.a_file_is_being_saved_wait_before_2")); return; }
     if (hostSwitchHasUnsentInput() && !window.confirm(t("ui.HostSwitcher.you_have_unsent_input_or_attachments_open"))) return;
     const target = window.location.href;
     setOpeningApp(true);

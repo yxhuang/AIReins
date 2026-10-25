@@ -8,7 +8,7 @@ import { FileLinkContext, MessageLink } from "./MarkdownMessage";
 import { store } from "../store";
 import type { FilePreviewState } from "../types";
 
-export function FilePreview({ preview, source = false }: { preview: FilePreviewState; source?: boolean }) {
+export function FilePreview({ preview, source = false, tabId }: { preview: FilePreviewState; source?: boolean; tabId?: number }) {
   const { file, target, draft, loading, saving, error } = preview;
   const cwd = target.path.slice(0, target.path.lastIndexOf("/")) || "/";
   const [failedLoad, setFailedLoad] = useState<number | null>(null);
@@ -29,12 +29,12 @@ export function FilePreview({ preview, source = false }: { preview: FilePreviewS
       {file.reason && <p className="new-hint" role="status">{file.reason}</p>}
       {file.large && file.text === undefined ? <div className="file-large">
         <p className="new-hint">{t("ui.FilePreview.large_file_sentence", { p0: (file.size / 1024 / 1024).toFixed(1) })}</p>
-        <button type="button" className="btn" onClick={() => void store.openFilePreview({ ...target, large: true })}>{t("ui.FilePreview.load_anyway")}</button>
+        <button type="button" className="btn" onClick={() => void store.openFilePreview({ ...target, large: true }, tabId)}>{t("ui.FilePreview.load_anyway")}</button>
       </div> : <div className="file-preview-body">
         {file.text !== undefined && (source || !rich) ?
           <textarea className="file-source mono" aria-label={t("ui.FilePreview.file_source")} value={draft} readOnly={!file.editable || saving} spellCheck={false} wrap="soft"
-            onChange={event => store.updateFileDraft(event.target.value)} onKeyDown={event => {
-              if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") { event.preventDefault(); void store.saveFilePreview(); }
+            onChange={event => store.updateFileDraft(event.target.value, tabId)} onKeyDown={event => {
+              if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") { event.preventDefault(); void store.saveFilePreview(tabId); }
             }} /> :
           file.kind === "markdown" ? <div className="markdown-message file-markdown"><FileLinkContext value={{ cwd, root: target.root, sessionId: target.sessionId }}><Markdown skipHtml remarkPlugins={[remarkGfm]}
             urlTransform={(url, key) => key === "href" && resolveLocalFileLink(url, cwd, store.meta?.capabilities.windowsPaths === true) ? url : defaultUrlTransform(url)}
@@ -53,7 +53,7 @@ export function FilePreview({ preview, source = false }: { preview: FilePreviewS
             </div>
             <iframe key={runScripts ? "interactive" : "static"} sandbox={runScripts ? "allow-scripts" : ""} allowFullScreen={runScripts}
               referrerPolicy="no-referrer" title={t("ui.FilePreview.isolated_html_preview")} srcDoc={html}
-              onLoad={event => { if (runScripts) event.currentTarget.contentWindow?.focus(); }} />
+              onLoad={event => { if (runScripts && event.currentTarget.getClientRects().length) event.currentTarget.contentWindow?.focus(); }} />
           </div> :
           file.kind === "image" ? failedLoad === preview.loadId ? <p className="new-error" role="alert">{t("ui.FilePreview.cannot_display_this_image_open_it_externally")}</p> :
             <img className="file-image" src={contentUrl} alt={file.name} onError={() => setFailedLoad(preview.loadId)} /> :

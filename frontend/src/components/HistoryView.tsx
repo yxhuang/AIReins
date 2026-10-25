@@ -372,7 +372,7 @@ export const HistoryRow = memo(function HistoryRow({
   );
 });
 
-export function HistoryPreviewPane({ item, onBack }: { item: HistorySession | undefined; onBack: () => void }) {
+export function HistoryPreviewPane({ item, onBack, sharedHeader = false }: { item: HistorySession | undefined; onBack: () => void; sharedHeader?: boolean }) {
   const now = useStore(selectHistoryNow);
   const selectImportedId = useCallback(
     (value: Store) => (item ? findImportedSession(value.sessions, item)?.id : undefined),
@@ -390,7 +390,7 @@ export function HistoryPreviewPane({ item, onBack }: { item: HistorySession | un
 
   const toolbar = <div className="view-panel-actions">
     {item && <button type="button" className="btn history-back" onClick={onBack}>{t("ui.HistoryView.session_history")}</button>}
-    <PanelActions />
+    {!sharedHeader && <PanelActions />}
   </div>;
 
   if (!item) {

@@ -16,6 +16,7 @@ const {
   buildTermTabs,
   clampPanelWidth,
   initialTermState,
+  mergeTerminalSnapshot,
   pickBootTerminal,
   pickRecentTerminal,
   pickAdjacentTerminal,
@@ -337,6 +338,13 @@ t("确认结束的标签：无需等待 exit 帧即可选相邻存活终端，�
   assert.equal(pickAdjacentTerminal(list.slice(0, 2), "ending")?.id, "a");
   assert.equal(pickAdjacentTerminal([term("ending", false)], "ending"), null);
   assert.deepEqual(buildTermTabs([], null), []);
+});
+
+t("双栏列表竞态：保留在途新建、退出与移除，不让旧快照覆盖", () => {
+  const a=term("a"), b=term("b"), c=term("c"), exited={...a,exited:true};
+  assert.deepEqual(mergeTerminalSnapshot([a,b],[exited,c],[a,b]),[exited,c]);
+  const refreshed={...a,cwd:"/fresh"};
+  assert.deepEqual(mergeTerminalSnapshot([a],[a],[refreshed,b]),[refreshed,b]);
 });
 
 t("标签：唯一时不带序号；同种多个按注册表顺序全体编号", () => {

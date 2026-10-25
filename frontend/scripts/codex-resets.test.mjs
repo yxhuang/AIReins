@@ -15,7 +15,12 @@ const chromium = process.env.CHROMIUM ?? join(cache,
   readdirSync(cache).filter((name) => name.startsWith("chromium_headless_shell-")).sort().at(-1),
   "chrome-headless-shell-linux64/chrome-headless-shell");
 const server = await createServer({ configFile: fileURLToPath(new URL("../vite.config.ts", import.meta.url)),
-  server: { host: "127.0.0.1", port: 0, strictPort: false }, logLevel: "error" });
+  server: { host: "127.0.0.1", port: 0, strictPort: false }, logLevel: "error",
+  // 同源代理页替身：内容比面板高，用来验证 iframe 按内容撑高、外层滚动
+  plugins: [{ name: "ai-usage-fixture", configureServer: (vite) => { vite.middlewares.use("/pages/ai-usage/", (_req, res) => {
+    res.setHeader("content-type", "text/html; charset=utf-8");
+    res.end('<!doctype html><body style="margin:0"><div style="height:1500px">usage</div></body>');
+  }); } }] });
 await server.listen();
 const base = `http://127.0.0.1:${server.httpServer.address().port}`;
 const browser = spawn(chromium, ["--no-sandbox", "--headless", "--remote-debugging-pipe", `--user-data-dir=${profile}`],
@@ -89,7 +94,7 @@ const fixtureScript = (locale) => `
   const fixtures = {
     '/api/meta': {defaultCwd:'/repo',capabilities:{terminal:false},drivers:Object.fromEntries(['claude','codex','kimi'].map(id=>[id,{configOptions:[],available:true}]))},
     '/api/sessions': {sessions:[]}, '/api/project-order': {paths:[]}, '/api/fs/dirs': {path:'/repo',parent:'/',dirs:[],files:[]},
-    '/api/pages': {pages:[{id:'ai-usage',name:'AI-Usage',icon:'📊',type:'iframe',url:'about:blank'}]},
+    '/api/pages': {pages:[{id:'ai-usage',name:'AI-Usage',icon:'📊',type:'iframe',url:'http://127.0.0.1:8788',proxy:true}]},
     '/api/pages/ai-usage/health': {reachable:true,embeddable:true,reason:'Synthetic iframe fixture',durationMs:1},
     '/api/history': {sessions:[],truncated:false,skipped:0,empty:0,discovered:0,durationMs:0},
     '/api/links': {links:[]}, '/api/prefs': {idleReleaseMinutes:0,codexResetWatch:true},
@@ -223,7 +228,9 @@ try {
     const before = await evaluate(first, "window.__writes.length");
     await click(first, ".codex-reset-open-usage");
     await waitFor(first, "document.querySelector('.codex-reset-card') && !document.querySelector('.codex-reset-dialog')");
-    await waitFor(first, "document.querySelector('.page-frame')?.getAttribute('src') === 'about:blank'");
+    await waitFor(first, "document.querySelector('.page-frame')?.getAttribute('src') === '/pages/ai-usage/'");
+    await waitFor(first, "document.querySelector('.page-frame').offsetHeight === 1500");
+    assert.ok(await evaluate(first, "(a => a.scrollHeight > a.clientHeight && getComputedStyle(a).overflowY === 'auto')(document.querySelector('.page-frame-area'))"), "AI 用量由外层滚动，iframe 不自滚");
     assert.equal(await evaluate(first, "document.querySelectorAll('.page-fallback').length"), 0, "卡片覆盖正常 iframe 路径");
     assert.ok(await evaluate(first, "document.querySelector('.codex-reset-card').compareDocumentPosition(document.querySelector('.page-frame')) & Node.DOCUMENT_POSITION_PRECEDING"), "卡片位于 iframe 下方");
     assert.equal(await evaluate(first, "window.__writes.length"), before);
@@ -243,6 +250,10 @@ try {
     const estimated = { ...event, schedule: null, estimate: { from:iso(30*60_000),through:iso(102*60_000),basis:"model",label:"预计 2 小时内" } };
     await publish(first, { ...initial, alerts: [], pending:[estimated],recent:[estimated,previous] });
     assert.match(await evaluate(first, "document.querySelector('.codex-reset-card').textContent"), /推算/);
+    const earlier = { ...event, id: "earlier", schedule: { from: iso(-120*60_000), label: "较早一次" }, estimate: null };
+    await publish(first, { ...initial, alerts: [], pending:[earlier,estimated],recent:[earlier,estimated,previous] });
+    assert.equal(await evaluate(first, "document.querySelectorAll('.codex-reset-card-event').length"), 1, "多条待生效只显示一条");
+    assert.match(await evaluate(first, "document.querySelector('.codex-reset-card-event').textContent"), /推算/, "取预计时间最晚的一条");
     for (const schedule of [{}, { from: "invalid-date", through: "invalid-date" }]) {
       const unknownTime = { ...event, schedule, estimate: null };
       await publish(first, { ...initial, alerts: [], pending:[unknownTime],recent:[unknownTime,previous] });

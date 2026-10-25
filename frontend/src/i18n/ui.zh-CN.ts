@@ -1,5 +1,12 @@
 // Interface copy. Keep keys aligned with the other locale.
 const dictionary: Record<string, string> = {
+  "ui.FilePanel.session_tab": "会话",
+  "ui.FilePanel.main_tabs": "主区域标签页",
+  "ui.FilePanel.return_to_session": "返回会话（Alt+0）",
+  "ui.FilePanel.session_updated": "会话有新动态",
+  "ui.FilePanel.tab_actions": "{name} 的标签操作",
+  "ui.FilePanel.move_to_main": "移到主区域",
+  "ui.FilePanel.move_to_right": "移到右侧",
   "ui.FilePanel.open_in_file_manager": "在文件管理器中打开",
   "ui.FilePanel.open_with_default": "用默认程序打开",
   "ui.FilePanel.opening_in_system": "正在打开…",
@@ -261,6 +268,7 @@ const dictionary: Record<string, string> = {
   "ui.FilePanel.sending_to": "正在{p0}发送 {p1} 到 {p2}…",
   "ui.FilePanel.sent_to_check_tailscale_or_the_downloads": "已发送 {p0} 到 {p1}，在该设备的 Tailscale 或下载目录查看。",
   "ui.FilePanel.copying_path": "正在复制路径…",
+  "ui.FilePanel.workspace_tabs": "文件与终端标签页",
   "ui.FilePanel.file_tabs": "文件标签页",
   "ui.FilePanel.close": "关闭 {p0}",
   "ui.FilePanel.close_tab": "关闭标签页",
@@ -310,6 +318,7 @@ const dictionary: Record<string, string> = {
   "ui.HistoryTimeline.some_older_content_or_tool_output_was": "部分较早内容或工具正文因大小限制已省略。",
   "ui.HistoryView.this_resumes_the_original_session_without_branching": "这是就地续接，不是分叉：导入后，工作台里跑的新回合会追写进这个原生会话文件；工作台里跑的 Claude 回合以 VSCode 扩展身份落盘；工作台新建的 Claude 会话可在 VSCode/CLI 的 resume 列表里找到。",
   "ui.common.session_history": "历史会话",
+  "ui.HistoryView.back_to_history_list": "返回历史列表",
   "ui.HistoryView.filter_by_agent": "按 agent 筛选",
   "ui.HistoryView.all": "全部",
   "ui.HistoryView.filter_by_source": "按来源筛选",

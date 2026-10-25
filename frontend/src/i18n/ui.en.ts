@@ -1,5 +1,12 @@
 // Interface copy. Keep keys aligned with the other locale.
 const dictionary: Record<string, string> = {
+  "ui.FilePanel.session_tab": "Session",
+  "ui.FilePanel.main_tabs": "Main area tabs",
+  "ui.FilePanel.return_to_session": "Return to session (Alt+0)",
+  "ui.FilePanel.session_updated": "Session has updates",
+  "ui.FilePanel.tab_actions": "Tab actions for {name}",
+  "ui.FilePanel.move_to_main": "Move to main area",
+  "ui.FilePanel.move_to_right": "Move to right side",
   "ui.FilePanel.open_in_file_manager": "Open in file manager",
   "ui.FilePanel.open_with_default": "Open with default app",
   "ui.FilePanel.opening_in_system": "Opening…",
@@ -261,6 +268,7 @@ const dictionary: Record<string, string> = {
   "ui.FilePanel.sending_to": "{p0}Sending {p1} to {p2}…",
   "ui.FilePanel.sent_to_check_tailscale_or_the_downloads": "Sent {p0} to {p1}. Check Tailscale or the Downloads folder on that device.",
   "ui.FilePanel.copying_path": "Copying path…",
+  "ui.FilePanel.workspace_tabs": "File and terminal tabs",
   "ui.FilePanel.file_tabs": "File tabs",
   "ui.FilePanel.close": "Close {p0}",
   "ui.FilePanel.close_tab": "Close tab",
@@ -310,6 +318,7 @@ const dictionary: Record<string, string> = {
   "ui.HistoryTimeline.some_older_content_or_tool_output_was": "Some older content or tool output was omitted due to size limits.",
   "ui.HistoryView.this_resumes_the_original_session_without_branching": "This resumes the original session without branching. New turns in this workspace are appended to its native session file. Claude turns here are saved under the VS Code extension identity. New Claude sessions created here also appear in VS Code and CLI resume lists.",
   "ui.common.session_history": "Session history",
+  "ui.HistoryView.back_to_history_list": "Back to history list",
   "ui.HistoryView.filter_by_agent": "Filter by agent",
   "ui.HistoryView.all": "All",
   "ui.HistoryView.filter_by_source": "Filter by source",

@@ -14,6 +14,7 @@ import type {
   SessionStatus,
   UnifiedEvent,
   FilePreviewState,
+  TerminalInfo,
   WorkFileTarget,
 } from "./types";
 import { createSession, deleteSession, fetchCommands, fetchEarlierEvents, fetchFiles, fetchMeta, fetchPages, fetchSessions, fetchSnapshot, releaseSession, type CreateSessionInput } from "./api";
@@ -26,6 +27,7 @@ import { sessionTitle } from "../../shared/session-title";
 import { extractMentionTokens, stripMentionCandidates } from "./mentions";
 import { partitionPages, type SkippedPage } from "./pages";
 import { normalizeHistoryDirectory } from "./history";
+import type { Attachment } from "./attachments";
 
 // 全局 WS 收全部会话实时事件；首连和重连按已加载会话的 afterSeq 补发。
 // 未加载会话只维护列表摘要；快照期间缓存事件，落地后追加更大的 seq。
@@ -64,6 +66,8 @@ export const MAX_MENTIONS = 20;
 
 /** 草稿在 localStorage 的 key 前缀：workbench-draft-<sessionId>。 */
 const DRAFT_STORAGE_PREFIX = "workbench-draft-";
+/** 新建会话页首条消息的草稿键（会话 id 是 UUID，不会撞上）。 */
+export const NEW_SESSION_DRAFT_ID = "new-session";
 const LAST_SESSION_KEY = "workbench-last-session";
 
 /** 手机的一个 history 条目包含完整视图，面板前进时无需借用当前 store 的残留状态。 */
@@ -97,6 +101,7 @@ interface DesktopPanelEntry {
 }
 export interface FileTab {
   id: number;
+  area?: "main" | "right";
   directory: { sessionId: string | null; path: string } | null;
   preview: FilePreviewState | null;
 }
@@ -169,17 +174,31 @@ export class Store {
   dispatchesOpen = false;
   termOpen = false;
   filesOpen = false;
-  /** 只保留当前文件；收起、切会话、手机后退都保留草稿，重新打开可继续。 */
-  filePreview: FilePreviewState | null = null;
+  /** 文件状态归标签所有；这些访问器保留右侧当前标签的调用契约。 */
+  get filePreview(): FilePreviewState | null { return this.fileTabs.find(tab => tab.id === this.fileTabId)?.preview ?? null; }
+  set filePreview(preview: FilePreviewState | null) { this.patchFileTab(this.fileTabId, { preview }); }
   /** 文件面板浏览位置按会话归属；切到别的会话时回到该会话 cwd。 */
-  fileDirectory: { sessionId: string | null; path: string } | null = null;
+  get fileDirectory(): FileTab["directory"] { return this.fileTabs.find(tab => tab.id === this.fileTabId)?.directory ?? null; }
+  set fileDirectory(directory: FileTab["directory"]) { this.patchFileTab(this.fileTabId, { directory }); }
   /** 当前目录浏览器注册；侧键先沿成功访问的目录返回，再退出侧栏。 */
   fileBrowserBack: (() => boolean) | null = null;
   /** 文件面板标签页；当前目录与预览切走时才存回标签，全部关闭时 id 为 0。 */
   fileTabs: FileTab[] = [{ id: 1, directory: null, preview: null }];
   fileTabId = 1;
+  /** 0 表示主区未选中文件；同时没有 mainTerminalId 时显示会话。 */
+  mainFileTabId = 0;
+  terminals: TerminalInfo[] = [];
+  terminalAreas: Record<string, "main" | "right"> = {};
+  mainTerminalId: string | null = null;
+  rightTerminalId: string | null = null;
+  terminalMaximized = false;
+  terminalCloseRequest: string | null = null;
+  terminalBusyAreas: Partial<Record<"main" | "right", boolean>> = {};
+  workspaceTabOrder: string[] = [];
+  private mainSessionReadSeq = 0;
+  private fileWorkspaceSessionId: string | null = null;
   private fileTabSequence = 1;
-  private fileLoad: AbortController | null = null;
+  private fileLoads = new Map<number, AbortController>();
   private fileUnloadBound = false;
   private fileLoadSequence = 0;
   /** 文件面板发给 Composer 的一次性请求；模块加载不依赖 DOM。 */
@@ -224,6 +243,8 @@ export class Store {
   mentionPaths = new Map<string, Map<string, string | null>>();
   /** 每会话输入框草稿：内存 + localStorage 持久化（刷新不丢），remove 时两处都清 */
   drafts = new Map<string, string>();
+  /** 新建会话页未发出的附件：File 进不了 localStorage，只在本页内存里跨页面切换保留；文字走 drafts 的 NEW_SESSION_DRAFT_ID */
+  newSessionAttachments: Array<Attachment & { file?: File }> = [];
   /** 发送被本地拦下的原因（sessionId → 文案：有待决闸门 / 配置切换中）：显示在输入框上方，× 或下次发送尝试清除 */
   sendNotices = new Map<string, string>();
   /** 服务端拒绝后还回输入框的一次性请求（Composer 消费，语义同 fileMentionRequest）；只在草稿仍为空时发布 */
@@ -281,6 +302,9 @@ export class Store {
   };
 
   private notify(): void {
+    if (this.fileWorkspaceSessionId !== this.currentId) {
+      this.fileWorkspaceSessionId = this.currentId; this.mainFileTabId = 0; this.mainTerminalId = null;
+    }
     if (this.streamFrame !== undefined) {
       cancelAnimationFrame(this.streamFrame);
       this.streamFrame = undefined;
@@ -852,7 +876,6 @@ export class Store {
     // 新建页每次打开目录列表都对齐当前工作目录；文档预览及其草稿照常保留。
     if (open && !this.filesOpen && !this.currentId && !this.filePreview && this.newSessionCwd?.trim()) {
       this.fileDirectory = { sessionId: null, path: this.newSessionCwd };
-      this.stashFileTab();
     }
     if (this.isMobileNavigation()) {
       if (open) this.pushMobileRoute("#/files");
@@ -871,111 +894,263 @@ export class Store {
     this.notify();
   }
 
-  private canReplaceFile(): boolean {
-    if (this.filePreview?.saving) return false;
-    return !unsavedFile(this.filePreview) || window.confirm(t("core.090"));
+  private patchFileTab(id: number, patch: Partial<FileTab>): void {
+    this.fileTabs = this.fileTabs.map(tab => tab.id === id ? { ...tab, ...patch } : tab);
   }
 
-  async openFilePreview(target: WorkFileTarget): Promise<void> {
-    if (!this.canReplaceFile()) return;
-    if (this.fileTabs.length === 0) this.openFileTab();
+  private canReplaceFile(id = this.fileTabId): boolean {
+    const preview = this.fileTabs.find(tab => tab.id === id)?.preview ?? null;
+    if (preview?.saving) return false;
+    return !unsavedFile(preview) || window.confirm(t("core.090"));
+  }
+
+  get fileSaving(): boolean { return this.fileTabs.some(tab => tab.preview?.saving); }
+
+  get mainSessionUnread(): boolean {
+    const current = this.currentId ? this.session(this.currentId) : undefined;
+    return (this.mainFileTabId !== 0 || this.mainTerminalId !== null) && !!current && (this.pendingCountFor(current) > 0
+      || current.status === "error" || Math.max(current.seq, this.data.get(current.id)?.seq ?? 0) > this.mainSessionReadSeq);
+  }
+
+  showMainSession(): void {
+    this.mainTerminalId = null;
+    this.mainFileTabId = 0;
+    this.terminalMaximized = false;
+    this.notify();
+  }
+
+  terminalArea(id: string): "main" | "right" { return this.terminalAreas[id] ?? "right"; }
+
+  updateTerminals(list: TerminalInfo[]): void {
+    this.terminals = list;
+    this.terminalAreas = Object.fromEntries(Object.entries(this.terminalAreas).filter(([id]) => list.some(item => item.id === id)));
+    if (this.mainTerminalId && !list.some(item => item.id === this.mainTerminalId)) this.mainTerminalId = null;
+    if (this.rightTerminalId && !list.some(item => item.id === this.rightTerminalId)) this.rightTerminalId = null;
+    this.notify();
+  }
+
+  setTerminalBusy(area: "main" | "right", busy: boolean): void {
+    if (this.terminalBusyAreas[area] === busy) return;
+    this.terminalBusyAreas = { ...this.terminalBusyAreas, [area]: busy }; this.notify();
+  }
+
+  setTerminalMaximized(maximized: boolean): void {
+    if (this.terminalMaximized === maximized) return;
+    this.terminalMaximized = maximized;
+    this.notify();
+  }
+
+  selectTerminal(id: string, internal = false): void {
+    if (!this.terminals.some(item => item.id === id) || (!internal && this.terminalBusyAreas[this.terminalArea(id)])) return;
+    if (this.terminalArea(id) === "main") {
+      this.fileWorkspaceSessionId = this.currentId;
+      if (!this.mainFileTabId && !this.mainTerminalId) {
+        const current = this.currentId ? this.session(this.currentId) : undefined;
+        this.mainSessionReadSeq = Math.max(current?.seq ?? 0, this.currentId ? this.data.get(this.currentId)?.seq ?? 0 : 0);
+      }
+      this.mainFileTabId = 0;
+      this.mainTerminalId = id;
+      this.terminalMaximized = false;
+      if (this.isMobileNavigation() && (this.filesOpen || this.termOpen)) {
+        if (this.filesOpen) this.setFilesOpen(false); else this.setTerminalOpen(false);
+      }
+    } else {
+      this.rightTerminalId = id;
+      if (!this.termOpen) this.setTerminalOpen(true);
+    }
+    this.notify();
+  }
+
+  requestTerminalClose(id: string | null): void {
+    if (id && this.terminalBusyAreas[this.terminalArea(id)]) return;
+    this.terminalCloseRequest = id;
+    if (id) this.selectTerminal(id); else this.notify();
+  }
+
+  workspaceTabKeys(area: "main" | "right"): string[] {
+    const keys = [
+      ...this.fileTabs.filter(tab => (tab.area ?? "right") === area).map(tab => `file:${tab.id}`),
+      ...this.terminals.filter(tab => this.terminalArea(tab.id) === area && (!tab.exited || tab.id === this.mainTerminalId || tab.id === this.rightTerminalId)).map(tab => `terminal:${tab.id}`),
+    ];
+    const rank = new Map(this.workspaceTabOrder.map((key, index) => [key, index]));
+    return keys.sort((a, b) => (rank.get(a) ?? Infinity) - (rank.get(b) ?? Infinity));
+  }
+
+  /** 排序只改变前端位置；文件草稿、终端注册表和后台进程均沿用原对象。 */
+  moveWorkspaceTab(key: string, area: "main" | "right", target?: string, after = false): void {
+    const file = key.startsWith("file:") ? this.fileTabs.find(tab => tab.id === Number(key.slice(5))) : undefined;
+    const terminal = key.startsWith("terminal:") ? this.terminals.find(tab => tab.id === key.slice(9)) : undefined;
+    if ((!file && !terminal) || (file && !file.preview && area === "main") || key === target) return;
+    if (terminal && (this.terminalBusyAreas[this.terminalArea(terminal.id)] || this.terminalBusyAreas[area])) return;
+    const order = [...this.workspaceTabKeys("main"), ...this.workspaceTabKeys("right")].filter(item => item !== key);
+    if (file) {
+      this.moveFileTab(file.id, area);
+    } else if (terminal) {
+      const oldArea = this.terminalArea(terminal.id);
+      if (oldArea !== area) {
+        this.terminalAreas = { ...this.terminalAreas, [terminal.id]: area };
+        if (oldArea === "main" && this.mainTerminalId === terminal.id) this.mainTerminalId = null;
+        if (oldArea === "right" && this.rightTerminalId === terminal.id) {
+          this.rightTerminalId = this.terminals.find(item => this.terminalArea(item.id) === "right" && !item.exited)?.id ?? null;
+          if (!this.rightTerminalId && this.termOpen) this.setTerminalOpen(false);
+        }
+        this.selectTerminal(terminal.id);
+      }
+    }
+    const index = target ? order.indexOf(target) : -1;
+    if (index >= 0 && this.workspaceTabKeys(area).includes(target!)) order.splice(index + (after ? 1 : 0), 0, key);
+    else order.push(key);
+    this.workspaceTabOrder = order;
+    // 文件关闭后的相邻标签选择也沿用可见顺序。
+    this.fileTabs = [...this.fileTabs].sort((a, b) => order.indexOf(`file:${a.id}`) - order.indexOf(`file:${b.id}`));
+    this.notify();
+  }
+
+  /** 每个文件组件保持在 workspace 的同一位置，只改变可见区域，保留 iframe 和滚动状态。 */
+  moveFileTab(id: number, area: "main" | "right"): void {
+    const tab = this.fileTabs.find(tab => tab.id === id);
+    if (!tab?.preview || (tab.area ?? "right") === area) return;
+    if (area === "main") {
+      if (this.fileTabId === id) this.fileTabId = this.fileTabs.find(item => item.id !== id && item.area !== "main")?.id ?? 0;
+      this.patchFileTab(id, { area });
+      this.switchFileTab(id);
+      if (this.fileTabId === 0 && this.filesOpen) this.setFilesOpen(false);
+    } else {
+      this.patchFileTab(id, { area });
+      if (this.mainFileTabId === id) this.mainFileTabId = 0;
+      this.fileTabId = id;
+      this.setFilesOpen(true);
+    }
+    this.notify();
+  }
+
+  async openFilePreview(target: WorkFileTarget, id?: number): Promise<void> {
+    const existing = this.fileTabs.find(tab => tab.preview?.target.path === target.path);
+    if (existing && (id === undefined || existing.id !== id)) {
+      this.switchFileTab(existing.id);
+      if (existing.area !== "main") this.setFilesOpen(true);
+      return;
+    }
+    if (id === undefined) {
+      if (this.filePreview) this.openFileTab();
+      id = this.fileTabId;
+    }
+    if (!this.canReplaceFile(id)) return;
+    if (!this.fileTabs.some(tab => tab.id === id)) { this.openFileTab(); id = this.fileTabId; }
     if (!this.fileUnloadBound && typeof window !== "undefined") {
       window.addEventListener("beforeunload", event => {
-        const previews = [this.filePreview, ...this.fileTabs.filter(tab => tab.id !== this.fileTabId).map(tab => tab.preview)];
-        if (previews.some(preview => preview?.saving || unsavedFile(preview))) {
+        if (this.fileTabs.some(tab => tab.preview?.saving || unsavedFile(tab.preview))) {
           event.preventDefault(); event.returnValue = "";
         }
       });
       this.fileUnloadBound = true;
     }
-    this.fileLoad?.abort();
-    const abort = new AbortController(); this.fileLoad = abort;
+    this.fileLoads.get(id)?.abort();
+    const abort = new AbortController(); this.fileLoads.set(id, abort);
     const preview: FilePreviewState = { target, file: null, draft: "", loading: true, saving: false, error: null, loadId: ++this.fileLoadSequence };
-    this.filePreview = preview;
-    this.fileDirectory = { sessionId: target.sessionId ?? this.currentId, path: target.root };
-    this.setFilesOpen(true);
+    this.patchFileTab(id, { preview, directory: { sessionId: target.sessionId ?? this.currentId, path: target.root } });
+    if (this.fileTabs.find(tab => tab.id === id)?.area !== "main") this.setFilesOpen(true);
     this.notify();
     try {
       const file = await fetchWorkFile(target, AbortSignal.any([abort.signal, AbortSignal.timeout(target.large ? 120_000 : 10_000)]));
-      if (this.filePreview !== preview) return;
-      this.filePreview = { ...preview, file, draft: file.text ?? "", loading: false };
+      if (this.fileTabs.find(tab => tab.id === id)?.preview !== preview) return;
+      this.patchFileTab(id, { preview: { ...preview, file, draft: file.text ?? "", loading: false } });
     } catch (error) {
-      if (this.filePreview !== preview || abort.signal.aborted) return;
-      this.filePreview = { ...preview, loading: false, error: error instanceof Error ? error.message : String(error) };
+      if (this.fileTabs.find(tab => tab.id === id)?.preview !== preview || abort.signal.aborted) return;
+      this.patchFileTab(id, { preview: { ...preview, loading: false, error: error instanceof Error ? error.message : String(error) } });
+    } finally {
+      if (this.fileLoads.get(id) === abort) this.fileLoads.delete(id);
     }
     this.notify();
   }
 
-  clearFilePreview(): boolean {
-    if (!this.canReplaceFile()) return false;
-    this.fileLoad?.abort(); this.filePreview = null; this.notify(); return true;
+  clearFilePreview(id = this.fileTabId): boolean {
+    const tab = this.fileTabs.find(item => item.id === id);
+    if (tab?.area === "main") { this.closeFileTab(id); return !this.fileTabs.some(item => item.id === id); }
+    if (!this.canReplaceFile(id)) return false;
+    this.fileLoads.get(id)?.abort(); this.fileLoads.delete(id);
+    this.patchFileTab(id, { preview: null }); this.notify(); return true;
   }
 
-  setFileDirectory(path: string): void {
-    this.fileDirectory = { sessionId: this.currentId, path }; this.notify();
-  }
-
-  private showFileTab(tab: FileTab | null): void {
-    this.fileLoad?.abort();
-    this.fileTabId = tab?.id ?? 0; this.fileDirectory = tab?.directory ?? null; this.filePreview = null;
-    if (!tab) { this.fileBrowserBack = null; this.notify(); return; }
-    // 切走时中断的读取在切回时重来。
-    if (tab.preview?.loading) { void this.openFilePreview(tab.preview.target); return; }
-    this.filePreview = tab.preview; this.notify();
-  }
-
-  private stashFileTab(): void {
-    this.fileTabs = this.fileTabs.map(tab => tab.id === this.fileTabId ? { ...tab, directory: this.fileDirectory, preview: this.filePreview } : tab);
+  setFileDirectory(path: string, id = this.fileTabId): void {
+    this.patchFileTab(id, { directory: { sessionId: this.currentId, path } }); this.notify();
   }
 
   switchFileTab(id: number): void {
     const next = this.fileTabs.find(tab => tab.id === id);
-    if (!next || id === this.fileTabId || this.filePreview?.saving) return;
-    this.stashFileTab(); this.showFileTab(next);
+    if (!next) return;
+    if (next.area === "main") {
+      this.fileWorkspaceSessionId = this.currentId;
+      if (this.mainFileTabId === 0) {
+        const current = this.currentId ? this.session(this.currentId) : undefined;
+        this.mainSessionReadSeq = Math.max(current?.seq ?? 0, this.currentId ? this.data.get(this.currentId)?.seq ?? 0 : 0);
+      }
+      this.mainFileTabId = id;
+      this.mainTerminalId = null;
+      this.terminalMaximized = false;
+      if (this.isMobileNavigation() && this.filesOpen) this.setFilesOpen(false);
+    } else {
+      if (this.filePreview?.saving) return;
+      this.fileTabId = id;
+    }
+    this.notify();
   }
 
   /** 无参 = 会话 cwd；文件夹在新标签浏览，文件在新标签预览（返回到其所在目录）。 */
   openFileTab(entry?: { path: string; root: string; folder: boolean }): void {
+    if (entry && !entry.folder) {
+      const existing = this.fileTabs.find(tab => tab.preview?.target.path === entry.path);
+      if (existing) {
+        this.switchFileTab(existing.id);
+        if (existing.area !== "main") this.setFilesOpen(true);
+        return;
+      }
+    }
     if (this.filePreview?.saving) return;
-    this.stashFileTab();
     const tab: FileTab = { id: ++this.fileTabSequence, directory: entry?.folder ? { sessionId: this.currentId, path: entry.path } : null, preview: null };
-    this.fileTabs = [...this.fileTabs, tab];
-    this.showFileTab(tab);
-    if (entry && !entry.folder) void this.openFilePreview({ path: entry.path, root: entry.root, sessionId: this.currentId ?? undefined });
+    this.fileTabs = [...this.fileTabs, tab]; this.fileTabId = tab.id;
+    this.notify();
+    if (entry && !entry.folder) void this.openFilePreview({ path: entry.path, root: entry.root, sessionId: this.currentId ?? undefined }, tab.id);
   }
 
   closeFileTab(id: number): void {
-    const index = this.fileTabs.findIndex(tab => tab.id === id);
-    if (index < 0) return;
-    if (id === this.fileTabId) {
-      if (this.fileTabs.length === 1 && this.filePreview) { this.clearFilePreview(); return; }
-      if (!this.canReplaceFile()) return;
-      const next = this.fileTabs[index + 1] ?? this.fileTabs[index - 1] ?? null;
-      this.fileTabs = this.fileTabs.filter(tab => tab.id !== id);
-      this.showFileTab(next);
-      return;
+    const tab = this.fileTabs.find(item => item.id === id);
+    if (!tab || tab.preview?.saving) return;
+    const areaTabs = this.fileTabs.filter(item => (item.area ?? "right") === (tab.area ?? "right"));
+    if (tab.area !== "main" && areaTabs.length === 1 && tab.preview) { this.clearFilePreview(id); return; }
+    if (unsavedFile(tab.preview) && !window.confirm(t("core.091"))) return;
+    this.fileLoads.get(id)?.abort(); this.fileLoads.delete(id);
+    const index = areaTabs.findIndex(item => item.id === id);
+    this.fileTabs = this.fileTabs.filter(item => item.id !== id);
+    if (tab.area === "main") {
+      if (this.mainFileTabId === id) this.mainFileTabId = areaTabs[index + 1]?.id ?? areaTabs[index - 1]?.id ?? 0;
+    } else if (this.fileTabId === id) {
+      this.fileTabId = areaTabs[index + 1]?.id ?? areaTabs[index - 1]?.id ?? 0;
+      this.fileBrowserBack = null;
+      // 关掉右侧最后一个目录标签时同移走一样收起文件面板（目录标签可混在终端标签栏里，用户 10-25）。
+      if (this.fileTabId === 0 && this.filesOpen) this.setFilesOpen(false);
     }
-    if (unsavedFile(this.fileTabs[index]!.preview) && !window.confirm(t("core.091"))) return;
-    this.fileTabs = this.fileTabs.filter(tab => tab.id !== id); this.notify();
+    this.notify();
   }
 
-  updateFileDraft(draft: string): void {
-    if (!this.filePreview?.file?.editable || this.filePreview.saving) return;
-    this.filePreview = { ...this.filePreview, draft }; this.notify();
+  updateFileDraft(draft: string, id = this.fileTabId): void {
+    const preview = this.fileTabs.find(tab => tab.id === id)?.preview;
+    if (!preview?.file?.editable || preview.saving) return;
+    this.patchFileTab(id, { preview: { ...preview, draft } }); this.notify();
   }
 
-  async saveFilePreview(): Promise<void> {
-    const previous = this.filePreview;
+  async saveFilePreview(id = this.fileTabId): Promise<void> {
+    const previous = this.fileTabs.find(tab => tab.id === id)?.preview;
     if (!previous?.file?.editable || !previous.file.version || previous.saving) return;
     const saving = { ...previous, saving: true, error: null };
-    this.filePreview = saving; this.notify();
+    this.patchFileTab(id, { preview: saving }); this.notify();
     try {
       const file = await saveWorkFile(previous.target, previous.file.version, previous.draft);
-      if (this.filePreview !== saving) return;
-      this.filePreview = { ...previous, file, draft: file.text ?? previous.draft, saving: false, error: null };
+      if (this.fileTabs.find(tab => tab.id === id)?.preview !== saving) return;
+      this.patchFileTab(id, { preview: { ...previous, file, draft: file.text ?? previous.draft, saving: false, error: null } });
     } catch (error) {
-      if (this.filePreview !== saving) return;
-      this.filePreview = { ...previous, saving: false, error: error instanceof Error ? error.message : String(error) };
+      if (this.fileTabs.find(tab => tab.id === id)?.preview !== saving) return;
+      this.patchFileTab(id, { preview: { ...previous, saving: false, error: error instanceof Error ? error.message : String(error) } });
     }
     this.notify();
   }

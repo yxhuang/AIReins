@@ -2,7 +2,7 @@ import { t } from "../i18n";
 import { useEffect, useRef, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
 import type { AgentKind, ConfigOptionId, DriverConfigOption, SessionRecord } from "../types";
 import type { CreateSessionInput } from "../api";
-import { store } from "../store";
+import { NEW_SESSION_DRAFT_ID, store } from "../store";
 import { shallowEqual, useStore } from "../useStore";
 import { ConfigPills, PlusIcon, SendIcon, type MenuGroup } from "./ConfigMenu";
 import { configOptionsForModel, modelConfigPatch, newSessionConfig, pillText } from "../config-view";
@@ -18,6 +18,8 @@ import { appendRefineCommand, refineCommandFor } from "../session-ui";
 type NewAttachment = Attachment & { file?: File };
 
 const CWD_STORAGE_KEY = "workbench-last-cwd";
+// 模块级计数：附件随草稿跨挂载保留，组件内计数会从 0 重来撞 id。
+let attachmentSequence = 0;
 
 // 隐私模式下 localStorage 访问器本身就会抛异常，与主题读写同一纪律：try/catch 兜底。
 function readSavedCwd(): string {
@@ -47,7 +49,8 @@ export function NewSessionForm({ children }: { children?: ReactNode }) {
   const cwdRequest = useStore(value => value.newSessionRequest);
   const [cwd, setCwd] = useState(() => initialCwd ?? pickInitialCwd());
   const [agent, setAgent] = useState<AgentKind>("claude");
-  const [message, setMessage] = useState("");
+  // 首条消息和附件离开新建页时保留，回来接着写（用户 10-25）。
+  const [message, setMessage] = useState(() => store.getDraft(NEW_SESSION_DRAFT_ID));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // 外部换到另一个目录（回填、组「+」）时换 key 重新挂载地址栏；地址栏内导航只改 cwd。
@@ -56,7 +59,7 @@ export function NewSessionForm({ children }: { children?: ReactNode }) {
   const cwdTouched = useRef(false);
   const lastCwdRequest = useRef(cwdRequest);
   const [configSel, setConfigSel] = useState<Partial<Record<ConfigOptionId, string>>>(() => newSessionConfig("claude"));
-  const [attachments, setAttachments] = useState<NewAttachment[]>([]);
+  const [attachments, setAttachments] = useState<NewAttachment[]>(() => store.newSessionAttachments);
   const [slashMenuOpen, setSlashMenuOpen] = useState(false);
   const [dismissed, setDismissed] = useState(false);
   const [composing, setComposing] = useState(false);
@@ -64,8 +67,6 @@ export function NewSessionForm({ children }: { children?: ReactNode }) {
   const createdSession = useRef<SessionRecord | null>(null);
   const submitting = useRef(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const previewUrls = useRef(new Set<string>());
-  const attachmentSequence = useRef(0);
   const commands = useStore(value => newSessionCommands(agent, cwd, value.sessions, value.commands), shallowEqual);
   const slashQuery = /^[\/、]([^\s]*)$/.exec(message)?.[1] ?? null;
   const slashOpen = !busy && !dismissed && !composing && commands.length > 0 && (slashMenuOpen || slashQuery !== null);
@@ -110,10 +111,8 @@ export function NewSessionForm({ children }: { children?: ReactNode }) {
     field.style.height = "auto";
     field.style.height = `${field.scrollHeight}px`;
   }, [message]);
-  useEffect(() => {
-    const urls = previewUrls.current;
-    return () => { for (const url of urls) URL.revokeObjectURL(url); };
-  }, []);
+  useEffect(() => { store.setDraft(NEW_SESSION_DRAFT_ID, message); }, [message]);
+  useEffect(() => { store.newSessionAttachments = attachments; }, [attachments]);
   useEffect(() => { setSelectedCommand(0); }, [message, agent]);
   useEffect(() => {
     if (!slashOpen) return;
@@ -129,15 +128,14 @@ export function NewSessionForm({ children }: { children?: ReactNode }) {
     if (!attachEnabled) return;
     setAttachments(previous => [...previous, ...files.map(file => {
       const previewUrl = file.type.startsWith("image/") ? URL.createObjectURL(file) : undefined;
-      if (previewUrl) previewUrls.current.add(previewUrl);
-      return { id: `new-att-${++attachmentSequence.current}`, source: "upload" as const,
+      return { id: `new-att-${++attachmentSequence}`, source: "upload" as const,
         status: "ready" as const, name: file.name, file, previewUrl, size: file.size };
     })]);
   };
   const removeAttachment = (id: string) => {
     setAttachments(previous => previous.filter(item => {
       if (item.id !== id) return true;
-      if (item.previewUrl) { URL.revokeObjectURL(item.previewUrl); previewUrls.current.delete(item.previewUrl); }
+      if (item.previewUrl) URL.revokeObjectURL(item.previewUrl);
       return false;
     }));
   };
@@ -195,6 +193,9 @@ export function NewSessionForm({ children }: { children?: ReactNode }) {
         else if (/^\/([^\s]+)/.test(text)) noteCommandUsed(agent, /^\/([^\s]+)/.exec(text)![1]!);
       }
       try { localStorage.setItem(CWD_STORAGE_KEY, session.cwd); } catch { /* 仅本次不记忆 */ }
+      store.clearDraft(NEW_SESSION_DRAFT_ID);
+      for (const attachment of store.newSessionAttachments) if (attachment.previewUrl) URL.revokeObjectURL(attachment.previewUrl);
+      store.newSessionAttachments = [];
       store.navigateCreatedSession(session.id);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));

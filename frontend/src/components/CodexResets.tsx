@@ -129,7 +129,10 @@ export function CodexResetCard() {
   const state = useStore(value => value.codexResets);
   const now = useStore(value => value.now);
   if (!state?.enabled) return null;
-  const events = state.pending.length ? state.pending : state.recent.slice(0, 1);
+  // 只显示一条：待生效取预计时间最晚的那次（较早的多半已被它取代），其余在「最近事件」里。
+  const expected = (event: CodexResetEvent) => Date.parse((event.schedule ?? event.estimate)?.from ?? "") || 0;
+  const latest = state.pending.reduce<CodexResetEvent | undefined>((best, event) => !best || expected(event) > expected(best) ? event : best, undefined);
+  const events = latest ? [latest] : state.recent.slice(0, 1);
   return <section className={`codex-reset-card${state.pending.length ? " has-pending" : ""}`} aria-label={t("ui.CodexResets.title")}>
     {events.length ? events.map(event => {
       const when = relative(event.confirmedAt ?? event.updatedAt ?? event.createdAt ?? event.posts[0]?.publishedAt, now);

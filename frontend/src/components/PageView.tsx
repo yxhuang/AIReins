@@ -104,6 +104,33 @@ export function PageView({ page, sidebar = false, onCollapse }: {
     };
   }, [sidebar, onCollapse, state, src]);
 
+  // AI 用量（同源代理）按内容撑高 iframe，由外层 div 滚动：iOS 上 iframe 内部滚动常被整页抢走。
+  const fitFrame = page.id === "ai-usage" && Boolean(page.proxy);
+  useEffect(() => {
+    const frame = frameRef.current;
+    if (!fitFrame || !frame) return;
+    let observer: ResizeObserver | null = null;
+    const attach = () => {
+      observer?.disconnect();
+      try {
+        const body = frame.contentDocument?.body;
+        if (!body) return;
+        const fit = () => { frame.style.height = `${body.offsetHeight}px`; }; // body 随内容伸缩，documentElement 会被视口撑满
+        observer = new ResizeObserver(fit);
+        observer.observe(body);
+        fit();
+      } catch {
+        observer = null;
+      }
+    };
+    frame.addEventListener("load", attach);
+    attach();
+    return () => {
+      frame.removeEventListener("load", attach);
+      observer?.disconnect();
+    };
+  }, [fitFrame, state, src]);
+
   // 手机经 Tailscale 打开时，127.0.0.1 指的是手机自己：这类页面只能在电脑上用。
   if (!page.proxy && !isLoopbackUrl(window.location.href) && isLoopbackUrl(page.url)) {
     return (
@@ -169,7 +196,7 @@ export function PageView({ page, sidebar = false, onCollapse }: {
           )}
           <a className="page-open-blank" href={src} target="_blank" rel="noreferrer">{t("ui.common.open_in_a_new_tab")}</a>
         </div>
-        <div className="page-frame-area" aria-busy={checking || !frameReady}>
+        <div className={`page-frame-area${fitFrame ? " page-frame-fit" : ""}`} aria-busy={checking || !frameReady}>
           {(checking || !frameReady) && <div className="page-loading" role="status">{t("ui.common.loading")}</div>}
           {/* 有意不加 sandbox：pages/ 里的页面（如 ai-usage）可能需要脚本/同源等完整能力，记录此决策 */}
           {!checking && <iframe key={src} ref={frameRef} className={`page-frame${frameReady ? "" : " page-frame-loading"}`} src={src} title={page.name} loading="eager" onLoad={revealFrame} />}

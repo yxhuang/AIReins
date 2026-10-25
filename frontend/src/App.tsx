@@ -5,7 +5,7 @@ import { NewSessionForm } from "./components/NewSessionForm";
 import { Sidebar } from "./components/Sidebar";
 import { MobilePanelLauncher, PanelActions } from "./components/PanelActions";
 import { DispatchPanel } from "./components/DispatchPanel";
-import { FilePanel } from "./components/FilePanel";
+import { FilePanels, FileTabs, WorkspaceDropTarget } from "./components/FilePanel";
 import { SessionView } from "./components/SessionView";
 import { HistoryPreviewPane } from "./components/HistoryView";
 // xterm 体积大（~300KB），第一次打开终端才按需加载，别拖慢手机首屏
@@ -44,11 +44,17 @@ const selectPendingTotal = (value: Store) =>
 
 export function App() {
   const [collapsed, setCollapsed] = useState(false);
+  const [headerTarget, setHeaderTarget] = useState<HTMLDivElement | null>(null);
   const [returnToSession, setReturnToSession] = useState(false);
   const usagePage = useStore((value) => value.pages.find((page) => page.id === "ai-usage"));
   // 终端面板：隐藏 = CSS display:none，组件一旦挂载就常驻（xterm 实例与 WS 连接不丢）
   const termOpen = useStore((value) => value.termOpen);
   const filesOpen = useStore((value) => value.filesOpen);
+  const mainFileOpen = useStore(value => value.mainFileTabId !== 0);
+  const mainTabbed = useStore(value => value.workspaceTabKeys("main").length > 0);
+  const mainTerminalOpen = useStore(value => value.mainTerminalId !== null);
+  const [mainTermMounted, setMainTermMounted] = useState(false);
+  useEffect(() => { if (mainTerminalOpen) setMainTermMounted(true); }, [mainTerminalOpen]);
   const [termMounted, setTermMounted] = useState(false);
   useEffect(() => {
     if (termOpen) setTermMounted(true);
@@ -65,6 +71,15 @@ export function App() {
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [terminalCapable]);
+  useEffect(() => {
+    const back = (event: KeyboardEvent) => {
+      if (!event.altKey || event.ctrlKey || event.metaKey || event.shiftKey || event.key !== "0" || (!store.mainFileTabId && !store.mainTerminalId && !store.terminalMaximized)) return;
+      event.preventDefault(); store.showMainSession();
+      requestAnimationFrame(() => document.querySelector<HTMLTextAreaElement>(".main .composer-box textarea:not(:disabled)")?.focus());
+    };
+    window.addEventListener("keydown", back);
+    return () => window.removeEventListener("keydown", back);
+  }, []);
   const wasTermOpen = useRef(false);
   useEffect(() => {
     const closed = wasTermOpen.current && !termOpen;
@@ -82,7 +97,7 @@ export function App() {
   );
   const pendingTotal = useStore(selectPendingTotal);
   // 手机主区是否有内容独立于右侧面板，关闭后回到原会话或主页。
-  const hasMain = Boolean(historySelection || ((newSessionOpen || current) && !historyOpen && !currentPageId));
+  const hasMain = Boolean(mainFileOpen || mainTerminalOpen || historySelection || ((newSessionOpen || current) && !historyOpen && !currentPageId));
   useEffect(() => {
     if (historyOpen || currentPageId) setCollapsed(false);
   }, [historyOpen, currentPageId]);
@@ -111,12 +126,25 @@ export function App() {
         mobileActions={hasMain ? undefined : <MobilePanelLauncher />}
       />
       {/* 主会话保持挂载，三个面板互斥占用右侧位置；窄屏沿用终端全屏规则。 */}
-      <div className={`workspace${termOpen || dispatchesOpen || filesOpen ? " term-open" : ""}`}>
+      <div className={`workspace${termOpen || dispatchesOpen || filesOpen ? " term-open" : ""}${mainFileOpen || mainTerminalOpen ? " main-file-open" : ""}${mainTabbed ? " main-tabbed" : ""}`}>
+        <div ref={setHeaderTarget} className={`workspace-head${current ? ` agent-${current.agent}` : ""}`}>
+          <WorkspaceDropTarget area="main" />
+          {(!current || historySelection) && <div className="view-panel-actions workspace-welcome-head">
+            <button type="button" className="btn mobile-round mobile-back new-session-back"
+              aria-label={t(historySelection ? "ui.HistoryView.back_to_history_list" : "ui.SessionView.back_to_session_list")}
+              onClick={() => historySelection ? store.backToHistoryList() : store.backFromSession()}>
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" aria-hidden="true"><path d="M15 5l-7 7 7 7" /></svg>
+            </button>
+            <FileTabs area="main" />
+            <PanelActions />
+          </div>}
+        </div>
         <main className="main">
+          <WorkspaceDropTarget area="main" />
           {historySelection ? (
-            <HistoryPreviewPane item={historySelection} onBack={() => store.backToHistoryList()} />
+            <HistoryPreviewPane item={historySelection} onBack={() => store.backToHistoryList()} sharedHeader />
           ) : current ? (
-            <SessionView key={current.id} session={current} mobileTail={pendingTotal > 0 ? (
+            <SessionView key={current.id} session={current} headerTarget={headerTarget} mobileTail={pendingTotal > 0 ? (
               <span className="gate-badge" title={t("core.000", { p0: pendingTotal })}>{pendingTotal}</span>
             ) : undefined} usage={usagePage && { icon: usagePage.icon, open: () => {
               setReturnToSession(true);
@@ -125,13 +153,6 @@ export function App() {
             } }} />
           ) : (
             <section className="welcome-view">
-            <div className="view-panel-actions mobile-topbar">
-              <button type="button" className="btn mobile-round mobile-back new-session-back"
-                aria-label={t("ui.SessionView.back_to_session_list")} onClick={() => store.backFromSession()}>
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7" /></svg>
-              </button>
-              <PanelActions />
-            </div>
             <div className="empty-state">
               <NewSessionForm>
                 <h1 className="empty-logo" aria-label={PRODUCT_NAME}>
@@ -146,7 +167,12 @@ export function App() {
           )}
         </main>
         {dispatchesOpen && <DispatchPanel onClose={() => store.closeDispatches()} />}
-        {filesOpen && <FilePanel key={`${current?.id ?? ""}:${current?.cwd ?? ""}`} onClose={() => store.setFilesOpen(false)} />}
+        <FilePanels />
+        {terminalCapable && mainTermMounted && (
+          <Suspense fallback={null}>
+            <TerminalPanel area="main" open={mainTerminalOpen} onClose={() => store.showMainSession()} />
+          </Suspense>
+        )}
         {terminalCapable && termMounted && (
           <Suspense fallback={null}>
             <TerminalPanel open={termOpen} onClose={() => store.setTerminalOpen(false)} />

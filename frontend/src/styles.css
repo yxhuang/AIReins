@@ -236,7 +236,38 @@ body {
 .workspace {
   flex: 1 1 auto;
   min-width: 0;
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  grid-template-rows: auto minmax(0, 1fr);
+  min-height: 0;
+}
+.workspace > .main, .workspace > .file-main-panel, .workspace > .terminal-main-panel { grid-column: 1; grid-row: 2; min-height: 0; }
+.workspace > .term-panel:not(.file-main-panel):not(.terminal-main-panel) { grid-column: 3; grid-row: 1 / span 2; min-height: 0; }
+.workspace > .term-split { grid-column: 2; grid-row: 1 / span 2; width: 6px; }
+.workspace-head { position: relative; grid-column: 1; grid-row: 1; min-width: 0; z-index: 10; zoom: var(--font-scale); }
+.workspace-head > .session-head { height: 45px; min-height: 45px; box-sizing: border-box; padding: 0 16px; }
+.workspace-head.agent-claude .session-head { border-left-color: var(--agent-claude); }
+.workspace-head.agent-codex .session-head { border-left-color: var(--agent-codex); }
+.workspace-head.agent-kimi .session-head { border-left-color: var(--agent-kimi); }
+.workspace-head .file-tabs { flex: 1 1 auto; min-width: 0; align-self: stretch; background: transparent; box-shadow: none; padding: 0; }
+.workspace-head .file-tabs .term-tab-list { padding-left: 0; }
+/* 主区有标签时整条头部当凹槽；当前标签取下方底色：会话流为 --bg，文件/终端标题栏为 --surface。 */
+.workspace.main-tabbed .workspace-head > :is(.session-head, .workspace-welcome-head) {
+  border-bottom: 0;
+  background: light-dark(color-mix(in srgb, var(--bg) 90%, var(--text)), color-mix(in srgb, var(--bg) 55%, black));
+  box-shadow: inset 0 -1px color-mix(in srgb, var(--text) 14%, transparent);
+}
+.workspace.main-file-open .workspace-head .file-tabs { --term-bg: var(--surface); }
+.workspace.main-tabbed .workspace-head .session-head-main, .workspace.main-tabbed .workspace-head .mobile-title { display: none; }
+.workspace-welcome-head { min-height: 45px; box-sizing: border-box; }
+.workspace:has(> .term-panel.term-maximized:not(.term-hidden)) > .workspace-head { grid-column: 1 / span 3; }
+.workspace > .term-panel.term-maximized:not(.term-hidden) { grid-column: 1 / span 3; grid-row: 2; width: auto; }
+@media (max-width: 720px) {
+  .workspace { grid-template-columns: minmax(0, 1fr); }
+  .workspace-head > .session-head { height: auto; min-height: 52px; padding: 4px 10px 12px 8px; }
+  .workspace-head .file-tabs { align-self: center; }
+  .workspace.term-open > .workspace-head { display: none; }
+  .workspace.term-open > .term-panel:not(.file-main-panel):not(.terminal-main-panel) { grid-column: 1; grid-row: 1 / span 2; }
 }
 
 .term-split {
@@ -272,7 +303,8 @@ body.resizing {
 }
 
 /* 最大化只占 workspace；左侧栏独立保留，主会话与终端连接仍保持挂载。 */
-.workspace:has(> .term-panel.term-maximized:not(.term-hidden)) > .main {
+.workspace:has(> .term-panel.term-maximized:not(.term-hidden)) > .main,
+.workspace:has(> .term-panel.term-maximized:not(.term-hidden)) > .file-main-panel {
   display: none;
 }
 .term-panel.term-maximized {
@@ -420,14 +452,14 @@ body.resizing {
   white-space: nowrap;
 }
 
-/* 终端标签 chrome：仅终端中性令牌，凹槽与内容区在深浅主题都可区分。 */
+/* 标签栏仿 Chrome：凹槽比下方内容区更深（深色混黑、浅色混字色），当前标签取下方内容区底色与之连成一体。 */
 .term-tabs {
   flex: 0 0 auto;
   display: flex;
   align-items: stretch;
   padding: 0 6px;
-  background: color-mix(in srgb, var(--term-bg) 92%, var(--term-fg));
-  box-shadow: inset 0 -1px color-mix(in srgb, var(--term-fg) 20%, transparent);
+  background: light-dark(color-mix(in srgb, var(--term-bg) 90%, var(--term-fg)), color-mix(in srgb, var(--term-bg) 55%, black));
+  box-shadow: inset 0 -1px color-mix(in srgb, var(--term-fg) 14%, transparent);
 }
 .term-tab-list {
   flex: 0 1 auto;
@@ -450,7 +482,7 @@ body.resizing {
   border-radius: 9px 9px 0 0;
   color: color-mix(in srgb, var(--term-fg) 75%, transparent);
 }
-.term-tab:not(.active):hover { background: color-mix(in srgb, var(--term-bg) 96%, var(--term-fg)); border-radius: 9px; }
+.term-tab:not(.active):hover { background: color-mix(in srgb, var(--term-bg) 55%, transparent); border-radius: 9px; }
 .term-tab.active { z-index: 1; background: var(--term-bg); color: var(--term-fg); }
 /* 径向挖空圆形得到向外延伸的反向圆弧脚。 */
 .term-tab.active::before, .term-tab.active::after {
@@ -484,6 +516,9 @@ body.resizing {
 .term-tab:is(.active, :hover) .term-tab-select::after,
 .term-tab:has(+ .term-tab:is(.active, :hover)) .term-tab-select::after { visibility: hidden; }
 .term-tab-icon { flex: 0 0 auto; }
+/* 目录标签的文件夹图标用文件列表同款黄色，淡填充，一眼区分于文档标签。 */
+.file-tab-folder { color: var(--folder-edge); }
+.file-tab-folder path { fill: color-mix(in srgb, var(--folder-fill) 40%, transparent); }
 .term-tab-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .term-tab.exited { color: color-mix(in srgb, var(--term-fg) 65%, transparent); }
 .term-tab-close, .term-tab-new, .term-tab-maximize, .term-tab-toggle {
@@ -1371,8 +1406,8 @@ body.resizing {
   @media (display-mode: standalone) {
     .session-head { padding-top: 10px; } /* 用户 10-02：少量虚化可接受，按钮上移 */
   }
-  .session-head + .stream-region .stream { padding-top: 20px; }
-  .session-head + .session-dispatch-link, .session-head + .risky-banner { margin-top: 12px; }
+  .session:not(:has(> .session-dispatch-link)):not(:has(> .risky-banner)) > .stream-region .stream { padding-top: 20px; }
+  .session > .session-dispatch-link, .session > .risky-banner { margin-top: 12px; }
   .session-head-main, .session-head .panel-actions { display: none; }
   .session-head .mobile-back { display: inline-flex; }
   .session-head .btn.mobile-round, .session-head .btn.session-more-trigger {
@@ -3188,6 +3223,10 @@ body.resizing {
 
 .page-frame-loading { visibility: hidden; }
 
+/* 高度由 PageView 按 iframe 内容写入，滚动交给这层 */
+.page-frame-fit { overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
+.page-frame-fit > .page-frame { flex: 0 0 auto; display: block; }
+
 .page-frame {
   flex: 1 1 auto;
   min-height: 0;
@@ -3827,6 +3866,7 @@ body.resizing {
   .app:not(.has-main) { flex-direction: column; }
   .app:not(.has-main) .sidebar { flex: 1 1 auto; min-height: 0; }
   .app:not(.has-main) .workspace { flex: 0 0 auto; min-height: 0; }
+  .app:not(.has-main) .workspace-head { display: none; }
   .app:not(.has-main).term-open .workspace { flex: 1 1 auto; }
   /* 主屏幕 PWA 里内容会铺到 iPhone 状态栏与底部横条下面（viewport-fit=cover 让 env() 报出真实值），
      四周让出安全区；非全面屏或浏览器里 env() 为 0，不受影响 */
@@ -4131,6 +4171,32 @@ body.resizing {
 .dispatch-side-panel .dispatch-view { padding-top: 10px; }
 
 .file-side-panel { background: var(--bg); container: file-sidebar / inline-size; }
+.file-side-panel[hidden] { display: none; }
+.workspace.main-file-open > .main { display: none; }
+.file-main-panel { order: 0; flex: 1 1 auto; min-width: 0; border-left: none; zoom: var(--font-scale); }
+.workspace > .file-side-panel:not(.file-main-panel) { order: 2; }
+.workspace > .term-split { order: 1; }
+.workspace > .term-panel:not(.file-side-panel) { order: 2; }
+.main-file-tabs-empty { display: none; }
+body.file-tab-dragging .main-file-tabs-empty { display: flex; min-height: 40px; }
+body.file-tab-dragging .workspace-head .main-file-tabs-empty { display: none; }
+.main, .file-side-panel, .terminal-workspace-panel { position: relative; }
+.workspace > .terminal-workspace-panel.terminal-main-panel { order: 0; flex: 1 1 auto; min-width: 0; border-left: none; }
+.workspace > .terminal-workspace-panel:not(.terminal-main-panel) { order: 2; }
+.workspace:has(> .term-panel.term-maximized:not(.term-hidden)) > .terminal-main-panel { display: none; }
+.workspace-tab-drop-target { display: none; position: absolute; inset: 0; z-index: 30; }
+body.file-tab-dragging .workspace-tab-drop-target { display: block; }
+body.file-tab-dragging .file-tabs { position: relative; z-index: 31; }
+.workspace-tab-drop-target[data-drop-active] { outline: 2px solid var(--busy); outline-offset: -2px; }
+.term-tab[data-drop-edge="before"] { box-shadow: inset 3px 0 var(--busy); }
+.term-tab[data-drop-edge="after"] { box-shadow: inset -3px 0 var(--busy); }
+.file-session-unread { flex: 0 0 7px; width: 7px; height: 7px; border-radius: 50%; background: var(--busy); }
+.file-tab-menu { min-width: 22px; }
+.file-hidden-toggle { align-self: flex-end; margin: -34px 0 4px; z-index: 1; }
+@media (max-width: 720px) {
+  .workspace.term-open > .file-main-panel, .workspace.term-open > .terminal-main-panel { display: none; }
+  .file-main-panel { flex: 1 1 auto; width: auto; }
+}
 .file-titlebar { gap: 4px; padding: 4px 6px; height: 44px; box-sizing: border-box; flex-wrap: nowrap; }
 .file-side-title { flex: 0 0 auto; font-size: 14px; font-weight: 600; }
 .term-titlebar.file-titlebar > .panel-collapse { margin-left: auto; }
@@ -4171,8 +4237,9 @@ body.resizing {
   .file-view-option { min-height: 42px; }
 }
 .file-side-panel .dir-contents { padding: 6px 8px 10px; gap: 6px; overflow: hidden; }
-/* 文件标签沿用终端标签外形，换成面板底色；触屏也比地址栏一行矮。 */
-.file-tabs { --term-bg: var(--bg); --term-fg: var(--text); padding: 0 4px; }
+/* 文件标签沿用终端标签外形，换成面板底色（终端面板里的保留终端底色，当前标签才与终端连成一体）；触屏也比地址栏一行矮。 */
+.file-tabs { padding: 0 4px; }
+.file-side-panel .file-tabs, .workspace-head .file-tabs { --term-bg: var(--bg); --term-fg: var(--text); }
 .dir-contents > .file-tabs { margin-inline: -8px; }
 .file-tabs .term-tab-list { padding: 4px 8px 0; }
 .file-tabs .term-tab-select { min-height: 30px; }

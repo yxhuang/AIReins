@@ -1,4 +1,5 @@
 import { t } from "../i18n";
+import { createPortal } from "react-dom";
 import { Fragment, type ReactNode, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import type { CommandInfo, DriverConfigOption, Mention, SessionRecord } from "../types";
 import { sessionTitle, truncateDisplayWidth } from "../format";
@@ -18,7 +19,7 @@ import { ExternalHistoryView } from "./HistoryTimeline";
 import { ResumedHistory } from "./ResumedHistory";
 import { ClockIcon, ConfigPills, PlusIcon, SendIcon, StopIcon, type MenuGroup, type MenuItem } from "./ConfigMenu";
 import { DirectoryBrowser } from "./DirectoryBrowser";
-import { insertFileMention, planFileMention } from "./FilePanel";
+import { FileTabs, insertFileMention, planFileMention } from "./FilePanel";
 import { InfoDialog, SlashMenu } from "./SlashMenu";
 import { SideQuestionDialog } from "./ClaudeMenuPanels";
 import { AgentIcon, VSCodeIcon } from "./AgentIcon";
@@ -37,9 +38,43 @@ const selectNow = (value: Store) => value.now;
 /** 触屏设备（手机、平板）：软键盘的回车只换行，发送靠按钮或 Ctrl/⌘+Enter。 */
 const TOUCH = typeof window !== "undefined" && window.matchMedia?.("(pointer: coarse)").matches === true;
 
+/** 顶栏内容可挂到工作区的持久容器；切换文件/终端不隐藏原会话操作。 */
+export function SessionWorkspaceHeader({ session, title, dispatchRuns, backgroundCount, wsState, mobileTail, usage, tabs }: {
+  session: SessionRecord; title: string; dispatchRuns: ReturnType<typeof useSessionDispatches>; backgroundCount: number;
+  wsState: Store["wsState"]; mobileTail?: ReactNode; usage?: UsageEntry; tabs?: ReactNode;
+}) {
+  return (
+      <header className="session-head">
+        <button type="button" className="btn mobile-round mobile-back" aria-label={t("ui.SessionView.back_to_session_list")} title={t("ui.SessionView.session_list")} onClick={() => store.backFromSession()}>
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7" /></svg>
+        </button>
+        {tabs}
+        <div className="session-head-main">
+          <AgentIcon agent={session.agent} label={session.agent} />
+          <span className="session-title" title={title}>{title}</span>
+          <span className="session-model mono"><ConfigSummary session={session} /></span>
+          <span className="session-cwd mono" title={session.cwd}>{compactCwd(session.cwd)}</span>
+        </div>
+        <div className="mobile-title">
+          <span className="mobile-title-text">{title}</span>
+        </div>
+        <div className="session-head-actions">
+          <SessionDispatchLink runs={dispatchRuns} backgroundCount={backgroundCount} desktop />
+          <div className="session-panel-controls">
+            <PanelActions dispatchRuns={dispatchRuns} />
+            {mobileTail && <div className="mobile-tail">{mobileTail}</div>}
+            <SessionDispatchBadge runs={dispatchRuns} backgroundCount={backgroundCount} />
+            <SessionMoreMenu session={session} usage={usage} />
+          </div>
+          {wsState !== "open" && <span className="ws-note" role="status">{wsState === "connecting" ? t("ui.SessionView.reconnecting") : t("ui.SessionView.disconnected")}</span>}
+        </div>
+      </header>
+  );
+}
+
 /** 手机顶栏（参照 Claude App）：返回 · 标题 · 「⋯」。mobileTail 是「⋯」左侧的闸门计数；
  *  usage 是收进「⋯」的 AI 用量入口，两者由 App 提供。 */
-export function SessionView({ session, mobileTail, usage }: { session: SessionRecord; mobileTail?: ReactNode; usage?: UsageEntry }) {
+export function SessionView({ session, mobileTail, usage, headerTarget }: { session: SessionRecord; mobileTail?: ReactNode; usage?: UsageEntry; headerTarget?: HTMLElement | null }) {
   const running = session.status === "running" || session.status === "starting";
   const dead = session.status === "dead";
   const selectData = useCallback((value: Store) => value.data.get(session.id), [session.id]);
@@ -233,30 +268,12 @@ export function SessionView({ session, mobileTail, usage }: { session: SessionRe
 
   return (
     <div className={`session agent-${session.agent}`}>
-      <header className="session-head">
-        <button type="button" className="btn mobile-round mobile-back" aria-label={t("ui.SessionView.back_to_session_list")} title={t("ui.SessionView.session_list")} onClick={() => store.backFromSession()}>
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7" /></svg>
-        </button>
-        <div className="session-head-main">
-          <AgentIcon agent={session.agent} label={session.agent} />
-          <span className="session-title" title={title}>{title}</span>
-          <span className="session-model mono"><ConfigSummary session={session} /></span>
-          <span className="session-cwd mono" title={session.cwd}>{compactCwd(session.cwd)}</span>
-        </div>
-        <div className="mobile-title">
-          <span className="mobile-title-text">{title}</span>
-        </div>
-        <div className="session-head-actions">
-          <SessionDispatchLink runs={dispatchRuns} backgroundCount={backgroundCount} desktop />
-          <div className="session-panel-controls">
-            <PanelActions dispatchRuns={dispatchRuns} />
-            {mobileTail && <div className="mobile-tail">{mobileTail}</div>}
-            <SessionDispatchBadge runs={dispatchRuns} backgroundCount={backgroundCount} />
-            <SessionMoreMenu session={session} usage={usage} />
-          </div>
-          {wsState !== "open" && <span className="ws-note" role="status">{wsState === "connecting" ? t("ui.SessionView.reconnecting") : t("ui.SessionView.disconnected")}</span>}
-        </div>
-      </header>
+      {headerTarget ? createPortal(
+        <SessionWorkspaceHeader session={session} title={title} dispatchRuns={dispatchRuns} backgroundCount={backgroundCount}
+          wsState={wsState} mobileTail={mobileTail} usage={usage} tabs={<FileTabs area="main" />} />, headerTarget,
+      ) : <SessionWorkspaceHeader session={session} title={title} dispatchRuns={dispatchRuns} backgroundCount={backgroundCount}
+          wsState={wsState} mobileTail={mobileTail} usage={usage} />}
+
 
       <SessionDispatchLink runs={dispatchRuns} backgroundCount={backgroundCount} />
 

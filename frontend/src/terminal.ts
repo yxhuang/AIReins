@@ -166,6 +166,16 @@ export function pickBootTerminal(terminals: TerminalInfo[], persistedId: string 
   return terminals.find((t) => !t.exited) ?? null;
 }
 
+/** 列表请求期间，另一栏新建、退出或移除的记录优先于较早的服务端快照。 */
+export function mergeTerminalSnapshot(before: TerminalInfo[], current: TerminalInfo[], fetched: TerminalInfo[]): TerminalInfo[] {
+  const previous = new Map(before.map(item => [item.id, item]));
+  const now = new Map(current.map(item => [item.id, item]));
+  const merged = fetched.filter(item => !previous.has(item.id) || now.has(item.id)).map(item =>
+    now.has(item.id) && now.get(item.id) !== previous.get(item.id) ? now.get(item.id)! : item);
+  const seen = new Set(merged.map(item => item.id));
+  return [...merged, ...current.filter(item => !seen.has(item.id) && (!previous.has(item.id) || previous.get(item.id) !== item))];
+}
+
 /** 标签条上的一个终端标签。 */
 export interface TermTab {
   id: string;

@@ -4,6 +4,10 @@
 
 ### Changed
 
+- Opening a file from a directory keeps the directory tab and opens the file in its own tab. The main toolbar stays visible across conversation, file and terminal tabs, with tabs replacing the title and page actions below.
+
+- File and terminal tabs can be reordered together and moved between the main and right panes. Drops work throughout each pane, including HTML/PDF previews, while terminal processes and file drafts are preserved.
+
 - Replay caches use a shared byte budget and release inactive history; startup recovery scans modern Claude transcripts once and migrates legacy updates only when found.
 - The update button installs deployment, startup and dependency changes automatically, offers installation retries after a failed update, and shows when Windows tray files need to be reopened. Installation preserves the running backend and existing optional setup.
 - Windows cold starts show a local loading window while the backend starts. Opening an already running instance skips the WSL launch command.
@@ -12,6 +16,7 @@
 
 ### Fixed
 
+- Mobile list pages no longer show misplaced workspace controls, and conversation spacing and history Back behavior are preserved with the shared header. Switching to a main tab or pressing Alt+0 restores a maximized terminal so the selected content is visible.
 - Large WebSocket replays fall back to snapshots before filling the send buffer, preventing repeated disconnects during recovery.
 - Failed snapshots apply contiguous live events and expose a retry action without discarding the current conversation.
 - Frontend-only update failures retain a build task that can be retried offline without repeating the pull or installation.
