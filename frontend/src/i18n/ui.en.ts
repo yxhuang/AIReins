@@ -360,7 +360,7 @@ const dictionary: Record<string, string> = {
   "ui.HostSwitcher.connected_host": "Connected host",
   "ui.HostSwitcher.remove_from_connection_list": "Remove from connection list",
   "ui.common.remove": "Remove",
-  "ui.HostSwitcher.switching_inside_a_home_screen_app_shows": "Switching inside a Home Screen app shows browser controls. Open {p0} from its Home Screen icon. If needed, open {p1} in Safari, then Share → Add to Home Screen.",
+  "ui.HostSwitcher.switching_inside_a_home_screen_app_shows": "Use the Home Screen icon for {p0}. To add it, open {p1} in Safari → Add to Home Screen.",
   "ui.HostSwitcher.a_file_is_being_saved_wait_before": "A file is being saved. Wait before switching hosts.",
   "ui.HostSwitcher.you_have_unsent_input_or_attachments_switch": "You have unsent input or attachments. Switch hosts anyway?",
   "ui.HostSwitcher.local": "{p0} (Local)",

@@ -165,7 +165,11 @@ try {
 globalThis.React = (await import('react')).default;
 globalThis.WebSocket = { CONNECTING: 0, OPEN: 1, CLOSING: 2, CLOSED: 3 };
 const { renderToStaticMarkup } = await import('react-dom/server');
-const { HostSwitcher, HostConnectionSettings, hostSwitchHasUnsentInput, openNewWindow } = await import('../src/components/HostSwitcher.tsx');
+const { HostSwitcher, HostConnectionSettings, hostSwitchHasUnsentInput, openNewWindow, browserNavigationUrl } = await import('../src/components/HostSwitcher.tsx');
+const browserTarget = `${home}/path?next=https://example.com/#/session/a`;
+assert.equal(browserNavigationUrl(browserTarget, true), `x-safari-https://${browserTarget.slice('https://'.length)}`, 'iOS 主屏 App 交给 Safari，完整保留路径、查询和会话');
+assert.equal(browserNavigationUrl(browserTarget, false), browserTarget, '桌面 App 和其他平台保留普通新标签链接');
+assert.equal(browserNavigationUrl(`${local}/#/session/a`, true), `${local}/#/session/a`, '不改写 HTTP 本机入口');
 let popups = 0, prevented = false;
 globalThis.window.open = (href, name, features) => {
   popups++;

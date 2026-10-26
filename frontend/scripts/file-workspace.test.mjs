@@ -42,6 +42,7 @@ try {
     const workspace = treeNodes(app).find(node => node.props?.className?.split(" ").includes("workspace"));
     const sharedHead = workspace.props.children.find(node => node?.props?.className?.split(" ").includes("workspace-head"));
     assert.ok(sharedHead, "全局顶栏必须独立于切标签时隐藏的会话/文件/终端内容页");
+    assert.ok(treeNodes(sharedHead).some(node => node.props?.className?.includes("workspace-welcome-head mobile-topbar")), "欢迎/新建顶栏必须复用手机圆钮及质感样式");
     assert.equal(treeNodes(workspace.props.children.find(node => node?.type === "main")).includes(sharedHead), false);
     reactInternals.H = previousDispatcher;
     const session = { id: "head-session", cwd: "/project", agent: "codex", status: "idle", config: {} };

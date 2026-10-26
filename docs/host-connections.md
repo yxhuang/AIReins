@@ -53,6 +53,8 @@ iOS 主屏 App 只在添加时的源内全屏，跳到另一台电脑的地址�
 
 AIReins App 窗口的主机菜单底部显示「在 Chrome 中打开」（其他浏览器显示「在浏览器中打开」），将当前主机和会话作为普通标签页打开，原 AIReins 窗口保留。
 
+iOS 主屏 App 的该入口使用 `x-safari-https:` 交给外部 Safari（iOS 17+），避免普通 HTTPS 新标签链接仍停留在 App 内置页面；只改 URL 开头的协议，保留路径、查询和会话 hash。桌面及其他平台沿用普通新标签链接。
+
 普通桌面标签页在本机 `/api/meta.capabilities.appWindow` 为 true 时显示「在 AIReins 窗口中打开」。点击后，本机后端用 Windows Chrome 的 `--app=http://127.0.0.1:<本机端口>/#wb-goto=<目标>` 打开窗口，再尝试关闭当前标签页。浏览器拒绝关闭时保留标签页，不显示关闭错误。目标的路径、查询及会话 hash 会在加载会话前还原；localhost 和开发入口的路径还原到 App 的 127.0.0.1 origin，保证启动 host 和根路径与托盘一致。
 
 「在 AIReins 窗口中打开」只显示在本机普通桌面标签页；远程页、手机、非 WSL 或未找到 Windows Chrome 时不显示。后端启动目标只接受本机 AIReins 入口；主机切换仍只携带原有连接上下文，不传递 App 能力位或页面路由。

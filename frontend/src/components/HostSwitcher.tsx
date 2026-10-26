@@ -46,6 +46,11 @@ export function openNewWindow(event: MouseEvent<HTMLAnchorElement>, standalone: 
   window.open(event.currentTarget.href, "_blank", `popup,noopener,noreferrer,width=${window.outerWidth},height=${window.outerHeight}`);
 }
 
+export function browserNavigationUrl(url: string, iosStandalone: boolean): string {
+  // iOS 主屏 App 会把普通 HTTPS 链接留在内置页面；Safari scheme 交给外部 Safari。
+  return iosStandalone ? url.replace(/^https:/i, "x-safari-https:") : url;
+}
+
 export function hostSwitchHasUnsentInput(): boolean {
   const draft = store.currentId ? store.getDraft(store.currentId).trim() : "";
   const firstMessage = document.querySelector<HTMLTextAreaElement>(".new-form textarea")?.value.trim();
@@ -177,8 +182,9 @@ export function HostSwitcher() {
   };
   // Chrome/Edge 的 --app 与安装的 PWA 都报 standalone。
   const standalone = typeof window !== "undefined" && window.matchMedia?.("(display-mode: standalone)").matches;
-  const mobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent) ||
+  const ios = /iPhone|iPad|iPod/i.test(navigator.userAgent) ||
     (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+  const mobile = ios || /Android/i.test(navigator.userAgent);
   // 手机主屏 App 只在添加时的源内全屏，跳到别的电脑会被系统套上浏览器栏：改为提示用那台电脑自己的主屏图标。
   const homeScreenHint = (origin: string) => {
     if (!standalone || !mobile || origin === currentOrigin) return false;
@@ -280,7 +286,7 @@ export function HostSwitcher() {
         {connections.remotes.length === 0 && <p className="settings-hint">{t("ui.HostSwitcher.add_another_computer_s_tailscale_address_to")}</p>}
         {!connections.localOrigin && <p className="settings-hint">{t("ui.HostSwitcher.after_entering_a_remote_host_from_your")}</p>}
         {currentUnsaved && <p className="settings-hint" role="status">{t("ui.HostSwitcher.the_list_is_full_the_current_host")}</p>}
-        {standalone && <a role="menuitem" className="host-menu-manage host-menu-browser" href={window.location.href}
+        {standalone && <a role="menuitem" className="host-menu-manage host-menu-browser" href={browserNavigationUrl(window.location.href, ios)}
           target="_blank" rel="noopener noreferrer" onClick={() => close(false)}>{browserLabel}</a>}
         {canOpenApp && <button type="button" role="menuitem" className="host-menu-manage host-menu-browser"
           title={t("ui.HostSwitcher.open_this_page_in_a_separate_window")} disabled={openingApp} onClick={() => void openInApp()}>

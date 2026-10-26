@@ -1432,6 +1432,7 @@ body.resizing {
   .mobile-tail { display: flex; align-items: center; }
   .session-head-actions .session-more-mobile { display: flex; }
   .session-head-actions hr.session-more-mobile { display: block; }
+  .session-more-menu { width: 190px; }
   .session-more-menu .session-more-item { min-height: 44px; }
 }
 

@@ -45,7 +45,7 @@ function fakeCli(kind: AgentKind, options: DriverOptions) {
   };
   driver.stop = async () => { internal.cancelQueuedPrompts?.("测试 worker 停止"); };
   const finish = (error = false) => {
-    if (kind === "codex") receive({ method: "turn/completed", params: { turn: { id: `turn-${turn}`, status: "completed" } } });
+    if (kind === "codex") receive({ method: "turn/completed", params: { threadId: "thread-test", turn: { id: `turn-${turn}`, status: "completed" } } });
     else if (kind === "claude") receive({ type: "result", subtype: "success", result: "OK" });
     else {
       const prompt = frames.filter(frame => frame.method === "session/prompt").at(-1);
@@ -112,6 +112,39 @@ try {
     assert.equal(h.frames.length, before); assert.equal(messages(session.id).length, beforeMessages);
     h.options.callbacks.emit("permission_resolved", { requestId: "gate-1" });
     h.options.callbacks.status("idle");
+  }
+
+  // Subagent notifications must not change the main turn or leak into its transcript.
+  for (const scope of [{ threadId: "thread-child" }, { thread: { id: "thread-child" } }]) {
+    const s = await manager.create({ agent: "codex", cwd: fixture, snapshot: "skip" });
+    const h = fakes.at(-1)!;
+    await manager.sendUserMessage(s.id, { text: "主线程工作" });
+    await settle();
+    h.receive({ method: "turn/started", params: { threadId: "thread-test", turn: { id: "turn-1" } } });
+    const before = events.filter(event => event.sessionId === s.id).length;
+    h.receive({ method: "turn/started", params: { ...scope, turn: { id: "child-turn" } } });
+    await manager.sendUserMessage(s.id, { text: "主线程插话" });
+    assert.equal(h.frames.at(-1).method, "turn/steer");
+    assert.equal(h.frames.at(-1).params.expectedTurnId, "turn-1", "子代理启动不能覆盖主线程插话目标");
+    await manager.interrupt(s.id);
+    assert.equal(h.frames.at(-1).params.turnId, "turn-1", "子代理启动不能覆盖主线程中断目标");
+    h.receive({ method: "item/agentMessage/delta", params: { ...scope, itemId: "child-message", delta: "子线程文本" } });
+    h.receive({ method: "item/reasoning/summaryTextDelta", params: { ...scope, itemId: "child-reasoning", delta: "子线程思考" } });
+    h.receive({ method: "item/started", params: { ...scope, item: { id: "child-tool", type: "commandExecution" } } });
+    h.receive({ method: "item/completed", params: { ...scope, item: { id: "child-tool", type: "commandExecution", status: "completed" } } });
+    h.receive({ method: "thread/tokenUsage/updated", params: { ...scope, tokenUsage: { total: { totalTokens: 999 } } } });
+    h.receive({ method: "turn/completed", params: { ...scope, turn: { id: "child-turn", status: "failed" } } });
+    assert.equal(manager.get(s.id)!.status, "running", "子代理结束不能结束主线程");
+    const added = events.filter(event => event.sessionId === s.id).slice(before);
+    assert.equal(added.some(event => ["agent_text_delta", "thought_delta", "tool_call_started", "tool_call_completed", "usage_updated", "turn_completed"].includes(event.type)), false, "子线程通知不能混入主线程记录");
+    await manager.sendUserMessage(s.id, { text: "子代理结束后插话" });
+    assert.equal(h.frames.at(-1).method, "turn/steer");
+    assert.equal(h.frames.at(-1).params.expectedTurnId, "turn-1");
+    assert.equal(h.frames.filter(frame => frame.method === "turn/start").length, 1, "不能误开新回合");
+    h.receive({ method: "item/agentMessage/delta", params: { threadId: "thread-test", itemId: "main-message", delta: "主线程文本" } });
+    assert.equal(events.at(-1)!.payload.text, "主线程文本", "主线程通知仍正常转发");
+    h.finish(); await settle();
+    assert.equal(manager.get(s.id)!.status, "idle");
   }
 
   // Start acknowledgment race, attachments, pending config, and steer rejection stay in one turn.

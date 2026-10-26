@@ -1034,6 +1034,7 @@ Codex 输入框 `$` 在光标 token 处打开名称+描述面板，支持过滤�
 - 三家的插话方式：
   - **Claude**：沿用 stream-json 的默认 priority，CLI 会在当前回合的下一个工具间隙注入消息。
   - **Codex**：用 `turn/steer{threadId,expectedTurnId,input}`。不得附带新回合配置，也不得回退到 `turn/start`。
+    - 侧聊和标题通知先单独分流；其余带 `threadId`（或 `thread.id`）的通知仅在属于当前主线程时处理。子代理通知不得改写主线程的回合 ID、运行状态、用量或输出，以免插话/中断目标串线；不带线程标识的通知保持原兼容行为。
   - **Kimi**：不支持在当前回合内插话（运行中再发 `session/prompt` 会返回 `-32600 turn.agent_busy`）。插话消息进入 worker 的先进先出队列，事件带 `queued=true`，等原 `session/prompt` 响应后再按顺序发出；队列期间会话保持 running。
 - Kimi 队列只存在内存里，重启后不恢复。停止、进程退出或 RPC 失败时，剩余消息全部取消，并产生 `source=steer_queue` 的 `session_error`。
 - 有待审批闸门时，普通发送和插话一律拒绝：不调用 CLI，也不写 `user_message`。

@@ -129,7 +129,7 @@ export function App() {
       <div className={`workspace${termOpen || dispatchesOpen || filesOpen ? " term-open" : ""}${mainFileOpen || mainTerminalOpen ? " main-file-open" : ""}${mainTabbed ? " main-tabbed" : ""}`}>
         <div ref={setHeaderTarget} className={`workspace-head${current ? ` agent-${current.agent}` : ""}`}>
           <WorkspaceDropTarget area="main" />
-          {(!current || historySelection) && <div className="view-panel-actions workspace-welcome-head">
+          {(!current || historySelection) && <div className="view-panel-actions workspace-welcome-head mobile-topbar">
             <button type="button" className="btn mobile-round mobile-back new-session-back"
               aria-label={t(historySelection ? "ui.HistoryView.back_to_history_list" : "ui.SessionView.back_to_session_list")}
               onClick={() => historySelection ? store.backToHistoryList() : store.backFromSession()}>

@@ -983,6 +983,9 @@ export class CodexDriver extends BaseDriver {
   }
 
   private handleNotification(method: string, params: Record<string, any>): void {
+    // 子代理也会发通知，不能覆盖主线程的回合、状态或输出；侧聊和标题已单独分流。
+    const threadId = params.threadId ?? params.thread?.id;
+    if (threadId && threadId !== this.threadId) return;
     if (method === "thread/name/updated") {
       if (params.threadId === this.threadId && typeof params.threadName === "string") {
         if (params.threadName.trim()) {

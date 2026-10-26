@@ -360,7 +360,7 @@ const dictionary: Record<string, string> = {
   "ui.HostSwitcher.connected_host": "当前连接的主机",
   "ui.HostSwitcher.remove_from_connection_list": "从连接列表移除",
   "ui.common.remove": "移除",
-  "ui.HostSwitcher.switching_inside_a_home_screen_app_shows": "主屏 App 内切换会出现浏览器栏。请从 {p0} 的主屏图标进入；还没有的话，在 Safari 打开 {p1}，分享 → 添加到主屏幕。",
+  "ui.HostSwitcher.switching_inside_a_home_screen_app_shows": "请用 {p0} 的主屏图标。首次请在 Safari 打开 {p1}，添加到主屏幕。",
   "ui.HostSwitcher.a_file_is_being_saved_wait_before": "文件正在保存，完成后再切换主机。",
   "ui.HostSwitcher.you_have_unsent_input_or_attachments_switch": "当前有未发送的输入或附件，仍要切换主机？",
   "ui.HostSwitcher.local": "{p0}（本机）",
