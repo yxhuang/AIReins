@@ -1106,7 +1106,6 @@ export class Store {
       this.terminalMaximized = false;
       if (this.isMobileNavigation() && this.filesOpen) this.setFilesOpen(false);
     } else {
-      if (this.filePreview?.saving) return;
       this.fileTabId = id;
     }
     this.notify();
@@ -1122,7 +1121,6 @@ export class Store {
         return;
       }
     }
-    if (this.filePreview?.saving) return;
     const tab: FileTab = { id: ++this.fileTabSequence, directory: entry?.folder ? { sessionId: this.currentId, path: entry.path } : null, preview: null };
     this.fileTabs = [...this.fileTabs, tab]; this.fileTabId = tab.id;
     this.notify();
@@ -1975,7 +1973,7 @@ export class Store {
 
   /** 新建首条消息本地未上行与服务端拒绝共用完整输入回填。 */
   restoreComposerSend(sessionId: string, text: string, mentions: Mention[]): void {
-    if (this.getDraft(sessionId).trim()) return;
+    if (this.removed.has(sessionId) || this.getDraft(sessionId).trim()) return;
     this.setDraft(sessionId, text);
     this.sendTextRestore = { sessionId, text, mentions, version: ++this.sendRestoreSequence };
     this.notify();

@@ -21,7 +21,7 @@ function gate() {
   return { promise, resolve };
 }
 
-await test("R1: 部分追加失败后重试不得重复旧尾段标记", async t => {
+await test("R1: 同步追加失败后保留原始字节并禁止同进程重试", async t => {
   for (const cut of ["repair", "none", "event-tail", "newline", "partial-marker"]) await t.test(cut, () => {
     const id = `partial-${cut}`;
     const path = join(home, "transcripts", `${id}.ndjson`);
@@ -40,21 +40,11 @@ await test("R1: 部分追加失败后重试不得重复旧尾段标记", async t
     syncBuiltinESMExports();
     try { assert.throws(() => appendTranscript(path, event(id, 2)), /ENOSPC/); }
     finally { fs.appendFileSync = append; syncBuiltinESMExports(); }
-    if (cut === "newline" || cut === "partial-marker") {
-      const failedBytes = fs.readFileSync(path);
-      assert.throws(() => appendTranscript(path, event(id, 2)), /transcript 损坏/);
-      assert.deepEqual(fs.readFileSync(path), failedBytes, "缺少完整隔离标记时保守禁写，不追加失配标记");
-    } else {
-      appendTranscript(path, event(id, 2));
-      const bytes = fs.readFileSync(path, "utf8");
-      assert.ok(bytes.startsWith(original));
-      const markers = bytes.split("\n").filter(line => line.startsWith('{"_wbSkippedTail":')).map(line => JSON.parse(line)._wbSkippedTail);
-      const offset = Buffer.byteLength(original.slice(0, original.indexOf("\n") + 1));
-      assert.equal(markers.filter(marker => marker.offset === offset).length, 1, "原尾段只隔离一次");
-      const recovered = readTranscriptState(path);
-      assert.equal(recovered.damaged, false);
-      assert.deepEqual(recovered.events.map(item => item.seq), [1, 2]);
-    }
+    const failedBytes = fs.readFileSync(path);
+    assert.throws(() => appendTranscript(path, event(id, 2)), /transcript 损坏/);
+    assert.equal(readTranscriptState(path).damaged, true);
+    assert.throws(() => appendTranscript(path, event(id, 2)), /transcript 损坏/);
+    assert.deepEqual(fs.readFileSync(path), failedBytes, "追加失败后不得再改动原尾段或追加恢复标记");
   });
 });
 

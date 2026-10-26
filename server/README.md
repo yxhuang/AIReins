@@ -21,6 +21,8 @@ npm run server
 
 活动事件触发的定时注册表保存失败时记录日志并保留 dirty，按 2、4、8 秒递增重试，最长间隔 30 秒，成功后恢复 1 秒合并窗口。driver 的 IO/退出回调中发生的注册表写入错误采用同样的后台重试，避免未捕获异常；直接同步调用 `emit`、`setStatus` 等路径仍向调用方抛出写入错误。
 
+统一 transcript 的同步追加和延迟批量追加任一失败后，该文件在当前后端进程内保持只读，对应会话标为 `error` 并忽略后续 driver 回调。同步追加被拒绝的事件不推进 seq，也不进入事件缓存或 WS 广播；直接调用仍收到原始写入错误，driver 的异步 IO/退出回调只记录错误，不使其他会话或整个后端退出。延迟批量写失败前可能已广播的事件不可视为已持久化，刷新或重启后以实际磁盘记录为准。
+
 服务启动会把已释放或符合安全恢复条件的异常退出记录载入为 `idle + released`，下一次发送原地续接；包括原状态已被旧代码写成 `dead`、PID 已清空，但能通过系统启动时间证明旧 worker 全部消失的记录。不会接管旧进程。其余记录保持 `dead`，transcript 损坏优先为 `error`。新建续接也可传原生 `resumeSessionId`；Claude 使用 `--resume`，Codex 使用 `thread/resume`，Kimi 使用 `session/resume`。续接前若另一条 AIReins 会话仍有 worker 占着同一原生会话：它空闲或出错（如上一轮因模型满载失败、进程仍在）时先停掉它的 worker，旧会话随进程退出标 `dead`；它正在执行、有待处理闸门或后台任务、正在续接/重启/检查时返回 400 / 40063。三家都只留一个进程写同一原生会话（Codex 有单写者锁，Claude `--resume` 追加同一 jsonl）。
 
 ### Claude Remote Control 契约（M23）
@@ -193,6 +195,7 @@ macOS 安装时若已安装 Homebrew、stdin/stdout 都是 TTY，缺失或版本
 - `GET /api/sessions/:id/events?beforeSeq=<firstSeq>`
 - `GET /api/sessions/:id/commands`：当前活动会话的实时归一命令表
 - `POST /api/sessions/:id/release`：释放会话 worker（见「三家 CLI 原生历史」末尾「释放」小节）
+- `POST /api/sessions/:id/compact`：手动压缩当前上下文，无请求体；成功返回 `{accepted:true}`，只表示原生请求已接受，进度与结果仍走现有会话事件。三家均须 `idle` 且无待审批闸门、后台任务、发送/续接检查、配置切换、Thinking 切换或侧问；同一请求尚在提交时拒绝重复操作，非法状态返回 400 / 40067，不存在为 404 / 40401。Codex 复用原生 `thread/compact/start` 命令，Claude/Kimi 经既有命令消息链路发送 `/compact`，不发送普通文字总结。已释放会话先按原生 ID 续接，并保留原生单写者检查；不改 CLI 全局配置。
 - `PATCH /api/sessions/:id`：侧栏会话组织字段。请求体只接受 `{pinned?: boolean, customTitle?: string}`，逐字段校验类型，未知字段 400 / 40070；`customTitle` trim 后 ≤200 字符，空串删除该键（恢复自动标题，显示标题始终是 `customTitle` 优先，集中取标题在 `shared/session-title.ts`）。会话不存在 404 / 40401。响应 `{session}`。组织变更不推进会话 seq、不更新 `lastActivityAt`、不广播 transcript 事件，也不写三家原生记录；`pinned/customTitle` 直接存 `sessions.json` 注册表条目，沿用现有原子写/延迟刷盘。
 
 原生标题通过 driver metadata 的 `nativeTitle` 同步，折叠空白、最多200字符，非字符串、空串与重复通知忽略；注册表持久化，并复用 `session_organization_updated` 控制帧同步所有页面，不推进 seq 或活动时间。显示优先级为手动 `customTitle` → `nativeTitle` → 首条输入。原生标题晚于列表/快照请求到达时，客户端保留更新后的标题和较新的运行状态。Codex 读取新建/续接响应的 `thread.name` 并接收 `thread/name/updated.threadName`；Kimi 接收 `session_info_update.title`。Claude 接收人工标题通知，并按当前 cwd 和原生 UUID 精确定位 `.jsonl`，只读尾部最多256KiB的 `ai-title.aiTitle`；首轮结果后短期监听该文件的变化，75ms防抖，找到标题立即关闭，最多30秒，进程停止/退出也关闭，不轮询。超过监听窗口的标题留待下轮读取。Kimi ACP 未开放概括接口，其原生标题可能仍为首条输入。

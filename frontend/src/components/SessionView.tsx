@@ -768,6 +768,7 @@ export function Composer({ session, dead, errored }: { session: SessionRecord; d
   const [sideQuestion, setSideQuestion] = useState<{ question: string } | null>(null);
   const [mcpOpen, setMcpOpen] = useState(false);
   const codexBusy = useRef(false);
+  const composerMounted = useRef(true);
   const closeCodexResult = useCallback(() => setCodexResult(null), []);
   const listRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -790,6 +791,7 @@ export function Composer({ session, dead, errored }: { session: SessionRecord; d
   const attachSeq = useRef(0);
   /** 图片卡片的 createObjectURL 预览：移除卡片/卸载组件时必须 revoke，防泄漏 */
   const previewUrls = useRef(new Set<string>());
+  const activeUploads = useRef(new Set<string>());
 
   const caps = meta?.drivers[session.agent];
   const commandsSupported = caps?.commands === true;
@@ -1014,9 +1016,13 @@ export function Composer({ session, dead, errored }: { session: SessionRecord; d
 
   // 卸载时回收全部本地预览 URL
   useEffect(() => {
+    composerMounted.current = true;
     const urls = previewUrls.current;
     return () => {
+      composerMounted.current = false;
+      activeUploads.current.clear();
       for (const url of urls) URL.revokeObjectURL(url);
+      urls.clear();
     };
   }, []);
 
@@ -1047,6 +1053,7 @@ export function Composer({ session, dead, errored }: { session: SessionRecord; d
   };
 
   const removeAttachment = (id: string) => {
+    activeUploads.current.delete(id);
     setAttachments((list) => {
       const target = list.find((att) => att.id === id);
       if (target?.previewUrl) {
@@ -1061,6 +1068,7 @@ export function Composer({ session, dead, errored }: { session: SessionRecord; d
   const uploadFiles = (picked: File[]) => {
     for (const file of picked) {
       const id = `att-${++attachSeq.current}`;
+      activeUploads.current.add(id);
       setAttachments((list) => [
         ...list,
         { id, source: "upload", name: file.name || t("ui.SessionView.attachments"), status: "uploading", size: file.size },
@@ -1068,6 +1076,7 @@ export function Composer({ session, dead, errored }: { session: SessionRecord; d
       void (async () => {
         try {
           const prepared = await prepareImageForUpload({ blob: file, name: file.name || "image", type: file.type });
+          if (!activeUploads.current.has(id)) return;
           if (prepared.type.startsWith("image/")) {
             const previewUrl = URL.createObjectURL(prepared.blob);
             previewUrls.current.add(previewUrl);
@@ -1086,6 +1095,8 @@ export function Composer({ session, dead, errored }: { session: SessionRecord; d
             status: "error",
             error: error instanceof Error ? error.message : String(error),
           });
+        } finally {
+          activeUploads.current.delete(id);
         }
       })();
     }
@@ -1117,11 +1128,14 @@ export function Composer({ session, dead, errored }: { session: SessionRecord; d
       if (name === "new" && data.session) {
         const next = data.session as SessionRecord;
         await store.resync(next.id);
-        store.navigate(next.id);
+        if (composerMounted.current && store.currentId === session.id) store.navigate(next.id);
       }
     } catch (error) {
       setCodexResult(current => current ? { name, error: error instanceof Error ? error.message : String(error) } : null);
-      if (submittedText !== undefined) setText(current => current === "" ? submittedText : current);
+      if (submittedText !== undefined) {
+        if (composerMounted.current && store.currentId === session.id) setText(current => current === "" ? submittedText : current);
+        else store.restoreComposerSend(session.id, submittedText, []);
+      }
     } finally { codexBusy.current = false; }
   };
 

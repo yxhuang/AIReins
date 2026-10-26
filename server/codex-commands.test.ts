@@ -4,7 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CODEX_COMMANDS, codexSkillInputs, codexSkillsForCwd, parseCodexCommand } from "./codex-commands.js";
 import { CodexDriver } from "./drivers/codex.js";
-import type { DriverCallbacks, DriverOptions } from "./types.js";
+import type { DriverCallbacks, DriverOptions, UserMessageInput } from "./types.js";
+import type { NativeConversationReader } from "./native-conversation.js";
 
 assert.equal(CODEX_COMMANDS.length, 8);
 for (const name of ["undo", "init", "diff", "prompts:mine", "config/value/write"]) {
@@ -119,3 +120,76 @@ try {
   await assert.rejects(manager.sendUserMessage(session.id, { text: "mixed", command: { name: "review" } }), /不能附带/);
 } finally { await manager.shutdown(); }
 console.log("✅ Codex 命令 RPC、分页、状态限制、skill 路径解析与白名单");
+
+const compactCalls: { agent: string; method: string; input: unknown }[] = [];
+const compactWorkers: DriverOptions[] = [];
+let compactWait = Promise.resolve();
+const compactor = new SessionManager((agent, opts) => {
+  compactWorkers.push(opts);
+  const invoke = async (method: string, input: unknown) => {
+    compactCalls.push({ agent, method, input });
+    await compactWait;
+    opts.callbacks.status("running");
+  };
+  return {
+    kind: agent,
+    start: async () => {
+      opts.callbacks.metadata({ nativeSessionId: opts.resumeSessionId ?? `native-${opts.sessionId}` });
+      opts.callbacks.status("idle");
+    },
+    getConfigSchema: () => ({ options: [], source: "test" }), setConfig: async config => config,
+    executeCommand: name => invoke("executeCommand", name),
+    sendUserMessage: (message: UserMessageInput) => invoke("sendUserMessage", message),
+    askSideQuestion: async () => { await compactWait; return {}; },
+    resolvePermission: async () => {}, interrupt: async () => {}, stop: async () => {},
+  };
+}, () => ({ model: null, effort: null }), undefined, {
+  capture: async () => ({ path: "/fixture", identity: "saved", offset: 0, size: 0 }),
+  changed: async () => undefined,
+} as unknown as NativeConversationReader);
+try {
+  for (const agent of ["claude", "codex", "kimi"] as const) {
+    const session = await compactor.create({ agent, cwd, snapshot: "skip" });
+    await new Promise<void>(resolve => setImmediate(resolve));
+    const originalWorker = compactWorkers.at(-1)!;
+    originalWorker.callbacks.status("running");
+    await assert.rejects(compactor.compactContext(session.id), /执行与审批/);
+    originalWorker.callbacks.status("idle");
+    originalWorker.callbacks.emit("permission_request", { requestId: "compact-gate" });
+    await assert.rejects(compactor.compactContext(session.id), /执行与审批/);
+    originalWorker.callbacks.emit("permission_resolved", { requestId: "compact-gate" });
+    originalWorker.callbacks.metadata({ backgroundTasks: [{ id: "compact-background", type: "agent", description: "running" }] });
+    await assert.rejects(compactor.compactContext(session.id), /执行与审批/);
+    originalWorker.callbacks.metadata({ backgroundTasks: [] });
+    assert.equal(compactCalls.filter(call => call.agent === agent).length, 0);
+
+    let finish!: () => void;
+    compactWait = new Promise<void>(resolve => { finish = resolve; });
+    const compressing = compactor.compactContext(session.id);
+    await new Promise<void>(resolve => setImmediate(resolve));
+    await assert.rejects(compactor.compactContext(session.id), /执行与审批/);
+    finish();
+    await compressing;
+    assert.deepEqual(compactCalls.at(-1), { agent, method: agent === "codex" ? "executeCommand" : "sendUserMessage",
+      input: agent === "codex" ? "compact" : { command: { name: "compact" } } });
+    assert.equal(compactCalls.filter(call => call.agent === agent).length, 1, "duplicate requests cannot reach the native worker");
+    const command = compactor.getSnapshot(session.id)!.events.filter(event => event.type === "user_message").at(-1)!;
+    assert.deepEqual(command.payload, { command: { name: "compact" } }, "compression uses native commands without summary text");
+
+    originalWorker.callbacks.status("idle");
+    if (agent !== "kimi") {
+      compactWait = new Promise<void>(resolve => { finish = resolve; });
+      const side = compactor.askSideQuestion(session.id, { question: "side" }, new AbortController().signal);
+      await assert.rejects(compactor.compactContext(session.id), /执行与审批/);
+      finish();
+      await side;
+    }
+    compactWait = Promise.resolve();
+    await compactor.release(session.id, "manual");
+    await compactor.compactContext(session.id);
+    assert.equal(compactWorkers.at(-1)!.resumeSessionId, `native-${session.id}`, "released sessions resume the same native conversation");
+    assert.equal(compactor.get(session.id)!.released, undefined);
+  }
+  await assert.rejects(compactor.compactContext("missing"), /会话不存在/);
+} finally { await compactor.shutdown(); }
+console.log("✅ 三家原生压缩路由、运行/审批/重复/侧问守卫与已释放会话原地续接");

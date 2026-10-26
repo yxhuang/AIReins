@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Added
+
+- Click the context usage ring to request native context compaction for Claude, Codex or Kimi. The menu preserves message drafts, prevents repeated submissions, and shows acceptance or retryable errors.
+
 ### Changed
 
 - Opening a file from a directory keeps the directory tab and opens the file in its own tab. The main toolbar stays visible across conversation, file and terminal tabs, with tabs replacing the title and page actions below.
@@ -15,6 +19,11 @@
 - Page initialization loads independent requests in parallel and restores the active conversation without waiting for project ordering or extension pages. CLI metadata probes run in the background even on the first launch; connected pages refresh when probing finishes.
 
 ### Fixed
+
+- Failed Codex commands restore the original conversation draft after switching sessions, and delayed `/new` results no longer change the active conversation.
+- Removing an image attachment or leaving its composer cancels follow-up preview creation and uploads after image preprocessing.
+- Saving one file no longer blocks opening or editing other file tabs; save results stay with the original tab.
+- Transcript write failures isolate the affected session instead of crashing the backend; synchronous failures do not advance event sequence numbers or broadcast unsaved events.
 
 - Mobile list pages no longer show misplaced workspace controls, and conversation spacing and history Back behavior are preserved with the shared header. Switching to a main tab or pressing Alt+0 restores a maximized terminal so the selected content is visible.
 - Large WebSocket replays fall back to snapshots before filling the send buffer, preventing repeated disconnects during recovery.

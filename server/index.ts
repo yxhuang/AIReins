@@ -776,6 +776,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       const eventsMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/events$/);
       const commandsMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/commands$/);
       const codexCommandMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/codex\/command$/);
+      const compactMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/compact$/);
       const filesMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/files$/);
       const releaseMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/release$/);
       const infoMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/info\/([a-z]+)$/);
@@ -812,6 +813,15 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
           if (error instanceof InvalidEventPageCursor) throw new ApiError(400, 40068, error.message);
           throw error;
         }
+      } else if (method === "POST" && compactMatch) {
+        const id = decodeURIComponent(compactMatch[1]);
+        if (!manager.get(id)) throw new ApiError(404, 40401, `会话不存在：${id}`);
+        try {
+          await manager.compactContext(id);
+        } catch (error) {
+          throw new ApiError(400, 40067, error instanceof Error ? error.message : String(error));
+        }
+        await respond(response, 200, 0, "success", { accepted: true }, requestId);
       } else if (method === "POST" && codexCommandMatch) {
         const id = decodeURIComponent(codexCommandMatch[1]);
         if (!manager.get(id)) throw new ApiError(404, 40401, `会话不存在：${id}`);

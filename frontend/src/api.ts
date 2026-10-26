@@ -46,6 +46,13 @@ export function fetchMeta(): Promise<MetaInfo> {
   return call<MetaInfo>("/api/meta");
 }
 
+/** 只确认原生压缩请求已接受；完成与用量由当前会话事件更新。 */
+export function compactSessionContext(id: string): Promise<{ accepted: true }> {
+  return call(`/api/sessions/${encodeURIComponent(id)}/compact`, {
+    method: "POST", signal: AbortSignal.timeout(60_000),
+  });
+}
+
 export function openAppWindow(target: string): Promise<{ opened: boolean }> {
   return call("/api/open-app-window", { method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ target }) });

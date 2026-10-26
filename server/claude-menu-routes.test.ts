@@ -84,5 +84,14 @@ try {
   const side = cancelledFrames.find(frame => frame.request?.question === "cancel"); assert(side);
   assert(cancelledFrames.some(frame => frame.type === "control_cancel_request" && frame.request_id === side.request_id));
   assert.equal((await api("/api/sessions/missing/thinking", "PUT", { enabled: true })).status, 404);
+  assert.equal((await api("/api/sessions/missing/compact", "POST")).status, 404);
+  const compact = await api(`${base}/compact`, "POST");
+  assert.equal(compact.status, 200);
+  assert.deepEqual(compact.envelope.data, { accepted: true });
+  const compactFrames = readFileSync(wire, "utf8").trim().split("\n").map(line => JSON.parse(line));
+  assert(compactFrames.some(frame => frame.type === "user" && frame.message?.content?.some((item: any) => item.text === "/compact")), "HTTP compact uses the native command in the same session");
+  const duplicate = await api(`${base}/compact`, "POST");
+  assert.equal(duplicate.status, 400, "a running compaction cannot be submitted twice");
+  assert.equal(duplicate.envelope.code, 40067);
 } finally { clearTimeout(timeout); child.kill("SIGTERM"); await exited; }
 console.log("✅ Claude 菜单 HTTP：Thinking 参数/状态、能力、task 白名单、侧问隔离与断连取消");

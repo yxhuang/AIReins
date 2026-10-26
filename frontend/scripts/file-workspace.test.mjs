@@ -115,6 +115,26 @@ try {
   assert.equal(saving.filePreview.draft, "draft");
   assert.equal(saving.fileSaving, false);
 
+  const independent = makeStore(); independent.fileTabId = 11;
+  let finishIndependentSave;
+  globalThis.fetch = () => new Promise(resolve => {
+    finishIndependentSave = () => resolve({ json: async () => ({ code: 0, data: { ...notes.file, text: notes.draft, version: "v2" } }) });
+  });
+  const independentSave = independent.saveFilePreview(11);
+  independent.switchFileTab(10);
+  assert.equal(independent.fileTabId, 10, "保存 A 时可选择 B，不把保存锁扩大到其他标签");
+  independent.updateFileDraft("independent B", 10);
+  independent.switchFileTab(11);
+  independent.openFileTab();
+  assert.equal(independent.fileTabs.length, 3, "保存 A 时仍可新建目录标签");
+  const newTab = independent.fileTabId;
+  independent.closeFileTab(11);
+  assert.ok(independent.fileTabs.some(tab => tab.id === 11), "A 自身仍不可关闭");
+  finishIndependentSave(); await independentSave;
+  assert.equal(independent.fileTabId, newTab, "A 保存完成不抢走新标签");
+  assert.equal(independent.fileTabs.find(tab => tab.id === 10).preview.draft, "independent B");
+  assert.equal(independent.fileTabs.find(tab => tab.id === 11).preview.file.version, "v2");
+
   const loading = new Store(), completions = new Map();
   globalThis.fetch = (url, init) => {
     const path = new URL(url, "http://localhost").searchParams.get("path");

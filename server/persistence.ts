@@ -179,6 +179,14 @@ const transcriptTick = new Set<string>();
 // read-only for the rest of this process, even if its surviving bytes parse cleanly.
 const transcriptWriteFailures = new Set<string>();
 
+function transcriptWriteFailed(path: string, error: unknown, onError?: (error: unknown) => void): void {
+  transcriptWriteFailures.add(path);
+  transcriptHealth.set(path, { readOnly: true });
+  try { onError?.(error); } catch (notificationError) {
+    log("error", "transcript failure notification failed", { file: path, message: String(notificationError) });
+  }
+}
+
 export function flushTranscripts(path?: string): void {
   const paths = path === undefined ? [...pendingTranscripts.keys()] : [path];
   for (const file of paths) {
@@ -187,11 +195,7 @@ export function flushTranscripts(path?: string): void {
     clearImmediate(pending.timer);
     pendingTranscripts.delete(file);
     try { writeTranscriptBatch(file, pending.lines); } catch (error) {
-      transcriptWriteFailures.add(file);
-      transcriptHealth.set(file, { readOnly: true });
-      try { pending.onError?.(error); } catch (notificationError) {
-        log("error", "transcript failure notification failed", { file, message: String(notificationError) });
-      }
+      transcriptWriteFailed(file, error, pending.onError);
       throw error;
     }
   }
@@ -264,7 +268,10 @@ export function appendTranscript(path: string, event: UnifiedEvent, onError?: (e
   const pending = pendingTranscripts.get(path);
   if (pending) { pending.lines.push(line); pending.onError ??= onError; }
   else if (!transcriptTick.has(path)) {
-    writeTranscriptBatch(path, [line]);
+    try { writeTranscriptBatch(path, [line]); } catch (error) {
+      transcriptWriteFailed(path, error, onError);
+      throw error;
+    }
     transcriptTick.add(path);
     setImmediate(() => transcriptTick.delete(path));
   } else {

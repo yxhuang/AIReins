@@ -190,6 +190,45 @@ try {
 await manager.shutdown();
 console.log('✅ delayed failure marks session error, ignores driver callbacks and rejects further writes');
 
+for (const mode of ['io', 'exit', 'direct'] as const) {
+  const id = `sync-manager-${mode}`;
+  const file = p.transcriptPathFor(id);
+  p.appendTranscript(file, { ...ev(1, 'user_message', { text: 'saved' }), sessionId: id });
+  p.saveRegistry([{ id, agent: 'codex', agentId: 'a', cwd: process.cwd(), config: {}, riskyMode: false,
+    status: 'idle', seq: 1, createdAt: '2026-10-05T00:00:00Z', lastActivityAt: '2026-10-05T00:00:00Z', transcriptPath: file }]);
+  const current = new SessionManager();
+  const state = current as any;
+  const driver = { stop: async () => {} };
+  state.workers.set(id, driver);
+  const io = state.driverCallbacks(id, () => driver);
+  const published: unknown[] = [];
+  current.onEvent(event => published.push(event));
+  await new Promise<void>(resolve => setImmediate(resolve)); // Exercise the synchronous first append of a tick.
+  const original = fs.appendFileSync;
+  fs.appendFileSync = ((path, data, options) => {
+    if (path === file) throw new Error('sync manager ENOSPC');
+    return original(path, data, options);
+  }) as typeof fs.appendFileSync;
+  syncBuiltinESMExports();
+  try {
+    const emit = () => mode === 'exit' ? io.exited({ code: 1 })
+      : mode === 'direct' ? state.emit(id, 'agent_text_delta', { text: 'lost' })
+      : io.emit('agent_text_delta', { text: 'lost' });
+    if (mode === 'direct') assert.throws(emit, /sync manager ENOSPC/);
+    else assert.doesNotThrow(emit, 'driver IO must not turn one transcript failure into a server crash');
+    assert.equal(current.get(id)!.status, 'error');
+    assert.equal(current.get(id)!.seq, 1, 'a rejected synchronous append cannot advance the published cursor');
+    assert.deepEqual(published, [], 'unwritten events cannot reach event listeners');
+    assert.equal(p.readTranscriptState(file).damaged, true, 'even a zero-byte synchronous failure stays read-only');
+    assert.throws(() => p.appendTranscript(file, { ...ev(2, 'turn_completed'), sessionId: id }), /损坏|只读/);
+    assert.doesNotThrow(() => { io.status('idle'); io.metadata({ nativeTitle: 'late' }); io.exited({ code: 0 }); });
+    assert.equal(current.get(id)!.seq, 1);
+    assert.throws(() => current.updateOrganization(id, { customTitle: 'late' }), /损坏|只读/);
+  } finally { fs.appendFileSync = original; syncBuiltinESMExports(); }
+  await current.shutdown();
+}
+console.log('✅ synchronous transcript failure is isolated from driver IO/exit, reported to direct callers and never published');
+
 const orderPath = p.transcriptPathFor('batch-order');
 p.appendTranscript(orderPath, ev(1, 'agent_text_delta'));
 const interleaved = new Promise<void>(resolve => setImmediate(() => {

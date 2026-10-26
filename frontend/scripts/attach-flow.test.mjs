@@ -237,6 +237,142 @@ await t("Composer 发送成功不得整栏清空附件条：只移除本次提�
   assert.ok(source.includes("submittedIds"), "应按本次提交的附件 id（submittedIds）过滤移除");
 });
 
+// 执行真实 Composer 的事件与 effect；仅替代 DOM 挂载和外部 HTTP。
+const React = (await import("react")).default;
+globalThis.React = React;
+const { Composer } = await import("../src/components/SessionView.tsx");
+const { store } = await import("../src/store.ts");
+const nodes = node => !node || typeof node !== "object" ? [] : Array.isArray(node) ? node.flatMap(nodes) : [node, ...nodes(node.props?.children)];
+const flush = async () => { for (let index = 0; index < 16; index++) await Promise.resolve(); };
+function mountComposer(session) {
+  const slots = [], effects = new Map();
+  let cursor = 0, mounted = true, pending = [];
+  const state = initial => {
+    const index = cursor++;
+    if (!(index in slots)) slots[index] = typeof initial === "function" ? initial() : initial;
+    return [slots[index], value => { if (mounted) slots[index] = typeof value === "function" ? value(slots[index]) : value; }];
+  };
+  const effect = (fn, deps) => {
+    const index = cursor++, previous = effects.get(index);
+    if (!previous || !deps || deps.some((value, at) => !Object.is(value, previous.deps?.[at]))) pending.push(() => {
+      previous?.cleanup?.(); effects.set(index, { deps, cleanup: fn() });
+    });
+  };
+  const dispatcher = {
+    useState: state,
+    useRef: initial => { const index = cursor++; return slots[index] ?? (slots[index] = { current: initial }); },
+    useMemo: fn => fn(), useCallback: fn => fn, useEffect: effect, useLayoutEffect: effect,
+    useId: () => ":composer-test:", useSyncExternalStore: (_subscribe, get) => get(),
+  };
+  return {
+    render() {
+      cursor = 0; pending = [];
+      const internals = React.__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE, previous = internals.H;
+      internals.H = dispatcher;
+      let tree;
+      try { tree = Composer({ session, dead: false, errored: false }); } finally { internals.H = previous; }
+      for (const run of pending) run();
+      return tree;
+    },
+    unmount() { mounted = false; for (const effect of effects.values()) effect.cleanup?.(); },
+  };
+}
+const originalWindow = globalThis.window, originalFetch = globalThis.fetch;
+const originalCreateUrl = URL.createObjectURL, originalRevokeUrl = URL.revokeObjectURL;
+const originalNavigate = store.navigate;
+const commandSession = { ...makeSession("composer-a"), agent: "codex" };
+try {
+  globalThis.window = { matchMedia: () => ({ matches: false }), addEventListener() {}, location: { hash: "#/" } };
+  store.sessions = [commandSession, { ...commandSession, id: "composer-b" }];
+  store.meta = { drivers: { codex: { commands: true, mentions: true, options: [] } } };
+  store.commands.set(commandSession.id, [{ name: "compact" }]);
+  for (const nextDraft of ["", "new A draft"]) await t(`Codex 命令切会话后失败：恢复原会话且保留后续草稿 ${JSON.stringify(nextDraft)}`, async () => {
+    store.currentId = commandSession.id; store.sendTextRestore = null;
+    store.setDraft(commandSession.id, "/compact keep these instructions");
+    let rejectCommand;
+    globalThis.fetch = () => new Promise((_resolve, reject) => { rejectCommand = reject; });
+    const component = mountComposer(commandSession);
+    const tree = component.render();
+    nodes(tree).find(node => node.type === "button" && node.props.className === "send-btn").props.onClick();
+    component.render(); component.unmount();
+    store.currentId = "composer-b";
+    if (nextDraft) store.setDraft(commandSession.id, nextDraft);
+    rejectCommand(new Error("offline")); await flush();
+    assert.equal(store.getDraft(commandSession.id), nextDraft || "/compact keep these instructions");
+    assert.equal(store.currentId, "composer-b");
+  });
+  await t("Codex 命令失败不恢复已移除会话的草稿", async () => {
+    const removedSession = { ...commandSession, id: "composer-removed" };
+    store.sessions = [...store.sessions, removedSession];
+    store.commands.set(removedSession.id, [{ name: "compact" }]);
+    store.currentId = removedSession.id; store.sendTextRestore = null;
+    store.setDraft(removedSession.id, "/compact removed session");
+    let rejectCommand;
+    globalThis.fetch = (_path, init) => init?.method === "DELETE" ? Promise.resolve(envelope({}))
+      : new Promise((_resolve, reject) => { rejectCommand = reject; });
+    const component = mountComposer(removedSession), tree = component.render();
+    nodes(tree).find(node => node.type === "button" && node.props.className === "send-btn").props.onClick();
+    component.render(); component.unmount(); store.currentId = "composer-b";
+    await store.remove(removedSession.id);
+    rejectCommand(new Error("offline")); await flush();
+    assert.equal(store.getDraft(removedSession.id), "");
+    assert.equal(store.sendTextRestore, null);
+  });
+  for (const leave of [false, true]) await t(`Codex /new 只在仍查看来源会话时导航 ${leave}`, async () => {
+    store.currentId = commandSession.id; store.setDraft(commandSession.id, ""); store.sendTextRestore = null;
+    const next = { ...commandSession, id: `composer-created-${leave}` };
+    let completeCommand;
+    globalThis.fetch = path => String(path).endsWith("/codex/command")
+      ? new Promise(resolve => { completeCommand = () => resolve(envelope({ session: next })); })
+      : Promise.resolve(envelope(String(path).endsWith("/commands") ? { commands: [] } : { session: next, seq: 0, events: [] }));
+    store.navigate = id => { store.currentId = id; };
+    const component = mountComposer(commandSession), tree = component.render();
+    nodes(tree).find(node => node.type?.name === "SlashMenu").props.onCodexCommand("new");
+    if (leave) { component.unmount(); store.currentId = "composer-b"; }
+    completeCommand(); await flush();
+    assert.equal(store.currentId, leave ? "composer-b" : next.id);
+    assert.ok(store.session(next.id), "新会话结果仍应进入 store，可稍后打开");
+    if (!leave) component.unmount();
+  });
+  for (const cancel of ["unmount", "remove"]) await t(`图片预处理期间 ${cancel} 不遗留 URL 或继续上传`, async () => {
+    store.currentId = commandSession.id; store.setDraft(commandSession.id, ""); store.sendTextRestore = null;
+    const created = [], revoked = [], requests = [];
+    URL.createObjectURL = () => { const url = `blob:test-${created.length}`; created.push(url); return url; };
+    URL.revokeObjectURL = url => revoked.push(url);
+    globalThis.fetch = (path) => { requests.push(path); return Promise.resolve(envelope({ path: "/upload/p.png", name: "p.png", size: 1, mimeType: "image/png" })); };
+    const component = mountComposer(commandSession), tree = component.render();
+    nodes(tree).find(node => node.type === "input" && node.props.type === "file").props.onChange({ target: { files: [{ name: "p.png", type: "image/png", size: 1 }], value: "" } });
+    if (cancel === "unmount") component.unmount();
+    else nodes(component.render()).find(node => node.type === "button" && node.props.className === "attach-remove").props.onClick();
+    await flush();
+    assert.equal(created.length, revoked.length, "取消后的所有预览 URL 均被回收");
+    assert.equal(requests.length, 0, "预处理完成前已取消，不再上传");
+    component.unmount();
+  });
+  for (const cancel of ["unmount", "remove"]) await t(`图片上传期间 ${cancel} 回收已创建的预览且迟到结果不恢复卡片`, async () => {
+    store.currentId = commandSession.id; store.setDraft(commandSession.id, ""); store.sendTextRestore = null;
+    const revoked = [];
+    URL.createObjectURL = () => "blob:upload-pending";
+    URL.revokeObjectURL = url => revoked.push(url);
+    let completeUpload;
+    globalThis.fetch = () => new Promise(resolve => { completeUpload = () => resolve(envelope({ path: "/upload/p.png", name: "p.png", size: 1, mimeType: "image/png" })); });
+    const component = mountComposer(commandSession), tree = component.render();
+    nodes(tree).find(node => node.type === "input" && node.props.type === "file").props.onChange({ target: { files: [{ name: "p.png", type: "image/png", size: 1 }], value: "" } });
+    await flush();
+    if (cancel === "unmount") component.unmount();
+    else nodes(component.render()).find(node => node.type === "button" && node.props.className === "attach-remove").props.onClick();
+    assert.deepEqual(revoked, ["blob:upload-pending"]);
+    completeUpload(); await flush();
+    if (cancel === "remove") {
+      assert.equal(nodes(component.render()).filter(node => node.props?.className === "attach-card").length, 0);
+      component.unmount();
+    }
+  });
+} finally {
+  globalThis.window = originalWindow; globalThis.fetch = originalFetch;
+  URL.createObjectURL = originalCreateUrl; URL.revokeObjectURL = originalRevokeUrl; store.navigate = originalNavigate;
+}
+
 if (!process.exitCode) console.log(`✅ attach 流程回归全过（${pass} 例）`);
 else console.error(`部分用例失败（通过 ${pass} 例）`);
 // store 内部有 2s 防抖计时器，直接退出不等它

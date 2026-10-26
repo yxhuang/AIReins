@@ -578,6 +578,19 @@ export class SessionManager {
     return result;
   }
 
+  async compactContext(id: string): Promise<void> {
+    this.assertWritableTranscript(id);
+    const session = this.sessions.get(id);
+    if (!session) throw new Error(`会话不存在：${id}`);
+    if (session.status !== "idle" || this.pendingGates.get(id)?.size
+      || this.checkingSessions.has(id) || this.restartingSessions.has(id)
+      || this.sideQuestions.has(id) || this.thinkingUpdates.has(id) || session.backgroundTasks?.length) {
+      throw new Error("请等当前执行与审批结束后再操作");
+    }
+    if (session.agent === "codex") await this.executeCodexCommand(id, { name: "compact" });
+    else await this.sendUserMessage(id, { command: { name: "compact" } });
+  }
+
   async executeCodexCommand(id: string, input: unknown): Promise<unknown> {
     this.assertWritableTranscript(id);
     const session = this.sessions.get(id);
@@ -1048,7 +1061,7 @@ export class SessionManager {
       type,
       sessionId: id,
       agentId: session.agentId,
-      seq: ephemeral ? session.seq : ++session.seq,
+      seq: ephemeral ? session.seq : session.seq + 1,
       ...(ephemeral ? { ephemeral: true as const } : {}),
       timestamp,
       payload,
@@ -1057,17 +1070,18 @@ export class SessionManager {
       for (const listener of this.listeners) listener(event);
       return event;
     }
-    if (type === "user_message" && !this.titles.has(id)) this.titles.set(id, sessionTitle({}, [event]));
-    if (type === "user_message") event.title = sessionTitle({ ...session, title: this.titles.get(id) });
-    session.lastActivityAt = timestamp;
+    if (type === "user_message") event.title = sessionTitle({ ...session, title: this.titles.get(id) ?? sessionTitle({}, [event]) });
     appendTranscript(session.transcriptPath, event, () => {
       this.damagedTranscripts.add(id);
       session.status = "error";
       const updates = this.partialUpdates.get(id);
       if (updates) for (const update of updates.values()) if (update.timer) clearTimeout(update.timer);
       this.partialUpdates.delete(id);
-      this.persistRegistry();
+      this.persistRegistry(true);
     });
+    session.seq = event.seq;
+    session.lastActivityAt = timestamp;
+    if (type === "user_message" && !this.titles.has(id)) this.titles.set(id, sessionTitle({}, [event]));
     this.appendEventRing(id, event);
     this.trackPendingGate(id, event);
     if (["config_updated", "session_created", "worker_released", "process_exited"].includes(type)) this.persistRegistry();
@@ -1417,10 +1431,13 @@ export class SessionManager {
 
   private driverCallbacks(id: string, worker: () => Driver): DriverCallbacks {
     const current = () => !this.damagedTranscripts.has(id) && this.workers.get(id) === worker();
-    // CLI 的 IO/退出回调没有同步调用方；仅注册表写失败在这里转为后台重试。
+    // CLI 的 IO/退出回调没有同步调用方；落盘失败已隔离该会话，不能再冒泡使整个进程退出。
     const background = <A extends unknown[], R>(callback: (...args: A) => R) => (...args: A): R => {
       this.driverCallbackDepth++;
-      try { return callback(...args); } finally { this.driverCallbackDepth--; }
+      try { return callback(...args); } catch (error) {
+        log("error", "driver callback failed", { sessionId: id, message: String(error) });
+        return undefined as R;
+      } finally { this.driverCallbackDepth--; }
     };
     return {
       emit: background((type, payload = {}) => {

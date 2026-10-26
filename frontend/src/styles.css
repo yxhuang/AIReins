@@ -2134,8 +2134,8 @@ body.resizing {
 /* 审批模式胶囊靠右，挨着发送键；不收缩，模型名过长时只截模型 */
 .cfg-pills > .cfg-pill-wrap + .cfg-pill-wrap { margin-left: auto; flex-shrink: 0; }
 
-.cfg-pills > .context-usage { margin-left: auto; }
-.cfg-pills > .context-usage + .cfg-pill-wrap { margin-left: 0; flex-shrink: 0; }
+.cfg-pills > .context-usage-wrap { margin-left: auto; flex-shrink: 0; display: inline-flex; }
+.cfg-pills > .context-usage-wrap + .cfg-pill-wrap { margin-left: 0; flex-shrink: 0; }
 .context-usage {
   position: relative;
   display: inline-flex;
@@ -2144,6 +2144,10 @@ body.resizing {
   flex: 0 0 26px;
   width: 26px;
   height: 26px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
   color: var(--text-muted);
   border-radius: 50%;
 }
@@ -2151,6 +2155,13 @@ body.resizing {
 .context-usage-fill { stroke: currentColor; }
 .context-usage.unknown { color: var(--text-faint); }
 .context-usage:focus-visible { outline: 2px solid var(--busy); outline-offset: 2px; }
+.context-usage:hover { background: var(--surface-sunk); }
+.cfg-menu.context-usage-menu { left: auto; right: 6px; bottom: calc(100% + 4px); width: min(300px, calc(100vw - 32px)); padding: 14px; }
+.context-usage-menu p { margin: 8px 0; color: var(--text-muted); font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
+.context-usage-menu .context-compact { width: 100%; min-height: 44px; margin-top: 4px; }
+@media (pointer: coarse) {
+  .context-usage { width: 44px; height: 44px; flex-basis: 44px; }
+}
 .context-usage::after {
   content: attr(data-tooltip);
   position: absolute;
@@ -4588,6 +4599,8 @@ button:disabled { box-shadow: none !important; }
 .sidebar-foot-usage { position: relative; }
 .codex-reset-dot { position: absolute; right: 4px; top: 3px; width: 6px; height: 6px; border-radius: 50%; background: var(--agent-codex); box-shadow: 0 0 0 2px var(--chrome); pointer-events: none; }
 @media (max-width: 720px) {
+  .codex-reset-card,
+  .codex-reset-card :is(.codex-reset-card-heading a, .codex-reset-source, .codex-reset-scope, .codex-reset-stale, .codex-reset-relative, .codex-reset-history, .codex-reset-time) { font-size: 13.5px; }
   .dir-dialog.codex-reset-dialog { padding: 22px 18px; max-height: calc(100dvh - 12px); }
   .codex-reset-dialog h2 { font-size: 21px; }
   .codex-reset-actions .btn { min-height: 42px; flex: 1 1 auto; }
