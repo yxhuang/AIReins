@@ -202,7 +202,7 @@ export class Store {
   private fileUnloadBound = false;
   private fileLoadSequence = 0;
   /** 文件面板发给 Composer 的一次性请求；模块加载不依赖 DOM。 */
-  fileMentionRequest: { sessionId: string; path: string; version: number } | null = null;
+  fileMentionRequest: { sessionId: string | null; path: string; version: number } | null = null;
   private fileMentionSequence = 0;
   private beforeDispatches: { hash: string; currentId: string | null; selection: HistorySession | null } | null = null;
   /** 只相信本次运行亲自 push 的相邻关系；刷新后的来源仍可 replace，但不盲目 back。 */
@@ -905,7 +905,7 @@ export class Store {
     this.notify();
   }
 
-  requestFileMention(sessionId: string, path: string): void {
+  requestFileMention(sessionId: string | null, path: string): void {
     this.fileMentionRequest = { sessionId, path, version: ++this.fileMentionSequence };
     this.notify();
   }

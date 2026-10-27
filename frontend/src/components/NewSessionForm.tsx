@@ -14,6 +14,7 @@ import { attachmentMention, prepareImageForUpload, type Attachment } from "../at
 import { filterCommands, noteCommandUsed } from "../commands";
 import { newSessionCommands } from "../new-session-input";
 import { appendRefineCommand, refineCommandFor } from "../session-ui";
+import { insertFileMention, planFileMention } from "./FilePanel";
 
 type NewAttachment = Attachment & { file?: File };
 
@@ -47,6 +48,7 @@ export function NewSessionForm({ children }: { children?: ReactNode }) {
   const sessions = useStore(value => value.sessions);
   const initialCwd = useStore(value => value.newSessionCwd);
   const cwdRequest = useStore(value => value.newSessionRequest);
+  const fileMentionRequest = useStore(value => value.fileMentionRequest);
   const [cwd, setCwd] = useState(() => initialCwd ?? pickInitialCwd());
   const [agent, setAgent] = useState<AgentKind>("claude");
   // 首条消息和附件离开新建页时保留，回来接着写（用户 10-25）。
@@ -56,6 +58,7 @@ export function NewSessionForm({ children }: { children?: ReactNode }) {
   // 外部换到另一个目录（回填、组「+」）时换 key 重新挂载地址栏；地址栏内导航只改 cwd。
   const [browse, setBrowse] = useState(() => ({ key: 0, from: cwd }));
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const pendingMentionCursor = useRef<number | null>(null);
   const cwdTouched = useRef(false);
   const lastCwdRequest = useRef(cwdRequest);
   const [configSel, setConfigSel] = useState<Partial<Record<ConfigOptionId, string>>>(() => newSessionConfig("claude"));
@@ -110,7 +113,24 @@ export function NewSessionForm({ children }: { children?: ReactNode }) {
     if (!field) return;
     field.style.height = "auto";
     field.style.height = `${field.scrollHeight}px`;
+    if (pendingMentionCursor.current !== null) {
+      field.focus();
+      field.setSelectionRange(pendingMentionCursor.current, pendingMentionCursor.current);
+      pendingMentionCursor.current = null;
+    }
   }, [message]);
+  useEffect(() => {
+    if (!fileMentionRequest || fileMentionRequest.sessionId !== null || store.currentId !== null) return;
+    if (!store.consumeFileMention(fileMentionRequest.version) || busy) return;
+    const plan = planFileMention({ cwd: normalizeDirectoryPath(cwd, windowsPaths), status: "idle" }, attachEnabled, fileMentionRequest.path);
+    if (plan.path === null) { setError(plan.reason); return; }
+    const next = insertFileMention(message, textareaRef.current?.selectionStart ?? message.length, plan.path);
+    pendingMentionCursor.current = next.cursor;
+    setMessage(next.text);
+    setError(null);
+    setSlashMenuOpen(false);
+    setDismissed(true);
+  }, [fileMentionRequest, busy, cwd, windowsPaths, attachEnabled, message]);
   useEffect(() => { store.setDraft(NEW_SESSION_DRAFT_ID, message); }, [message]);
   useEffect(() => { store.newSessionAttachments = attachments; }, [attachments]);
   useEffect(() => { setSelectedCommand(0); }, [message, agent]);

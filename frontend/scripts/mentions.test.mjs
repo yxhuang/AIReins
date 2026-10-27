@@ -12,6 +12,7 @@ const t = (name, fn) => { try { fn(); pass++; } catch (e) { console.error(`❌ $
 
 // --- extractMentionTokens ---
 t("行首引用", () => assert.deepEqual(extractMentionTokens("@a.ts 看看"), ["a.ts"]));
+t("目录引用保留文本但不作为普通文件附件", () => assert.deepEqual(extractMentionTokens("查看 @src/ 和 @src/a.ts"), ["src/a.ts"]));
 t("句中引用", () => assert.deepEqual(extractMentionTokens("看看 @server/index.ts 这个"), ["server/index.ts"]));
 t("多个引用保持顺序", () => assert.deepEqual(extractMentionTokens("@b.ts 和 @a.ts"), ["b.ts", "a.ts"]));
 t("重复引用去重", () => assert.deepEqual(extractMentionTokens("@a.ts @a.ts"), ["a.ts"]));

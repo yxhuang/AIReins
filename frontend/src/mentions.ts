@@ -51,7 +51,8 @@ export function extractMentionTokens(text: string): string[] {
   const seen = new Set<string>();
   for (const match of text.matchAll(MENTION_RE)) {
     const path = match[1];
-    if (path === undefined || seen.has(path)) continue;
+    // 目录引用保留在文本中交给 agent 按需读取，不作为普通文件附件解析。
+    if (path === undefined || path.endsWith("/") || seen.has(path)) continue;
     seen.add(path);
     out.push(path);
   }

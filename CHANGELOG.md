@@ -2,16 +2,19 @@
 
 ## Unreleased
 
+## 0.3.0 (2026-10-27)
+
 ### Added
 
 - Click the context usage ring to request native context compaction for Claude, Codex or Kimi. The menu preserves message drafts, prevents repeated submissions, and shows acceptance or retryable errors.
+- File and folder context menus offer an `@` reference action. Both these menus and the file preview toolbar can insert references into a new conversation's first message, preserving the draft and cursor position. Folder references insert a path hint for the agent to read as needed.
 
 ### Changed
 
 - Opening a file from a directory keeps the directory tab and opens the file in its own tab. The main toolbar stays visible across conversation, file and terminal tabs, with tabs replacing the title and page actions below.
-
 - File and terminal tabs can be reordered together and moved between the main and right panes. Drops work throughout each pane, including HTML/PDF previews, while terminal processes and file drafts are preserved.
-
+- Opening a new conversation preserves the desktop side panel and inherits the current project directory. File browsing stays independent until the panel is opened or refreshed.
+- Context usage and compaction messages use shorter English and Simplified Chinese wording.
 - Replay caches use a shared byte budget and release inactive history; startup recovery scans modern Claude transcripts once and migrates legacy updates only when found.
 - The update button installs deployment, startup and dependency changes automatically, offers installation retries after a failed update, and shows when Windows tray files need to be reopened. Installation preserves the running backend and existing optional setup.
 - Windows cold starts show a local loading window while the backend starts. Opening an already running instance skips the WSL launch command.
@@ -24,7 +27,6 @@
 - Removing an image attachment or leaving its composer cancels follow-up preview creation and uploads after image preprocessing.
 - Saving one file no longer blocks opening or editing other file tabs; save results stay with the original tab.
 - Transcript write failures isolate the affected session instead of crashing the backend; synchronous failures do not advance event sequence numbers or broadcast unsaved events.
-
 - Mobile list pages no longer show misplaced workspace controls, and conversation spacing and history Back behavior are preserved with the shared header. Switching to a main tab or pressing Alt+0 restores a maximized terminal so the selected content is visible.
 - Large WebSocket replays fall back to snapshots before filling the send buffer, preventing repeated disconnects during recovery.
 - Failed snapshots apply contiguous live events and expose a retry action without discarding the current conversation.

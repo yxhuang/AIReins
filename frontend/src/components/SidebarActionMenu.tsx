@@ -2,12 +2,12 @@ import { useEffect, useLayoutEffect, useRef, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { sidebarMenuKey } from '../sidebar-menu';
 export interface SidebarMenuItem {
-  id: string; label: string; icon?: 'pin' | 'rename' | 'folder' | 'delete' | 'send' | 'plus' | 'up' | 'down' | 'open';
+  id: string; label: string; icon?: 'pin' | 'rename' | 'folder' | 'delete' | 'send' | 'plus' | 'up' | 'down' | 'open' | 'mention';
   shortcut?: string; trailing?: string; danger?: boolean; divider?: boolean; disabled?: boolean; onSelect: () => void;
 }
 function MenuIcon({ name }: { name: SidebarMenuItem['icon'] }) {
   const paths = { open: 'M15 3h6v6 M21 3 10 14 M10 3H3v18h18v-7', pin: 'm8 3 8 0-1 6 3 3-5 0-1 9-1-9-5 0 3-3Z', rename: 'm4 16 0 4 4 0L20 8 16 4Z M14 6l4 4', folder: 'M3 5h7l2 3h9v12H3Z', delete: 'M3 6h18 M9 6V3h6v3 M6 6l1 15h10l1-15 M10 10v7 M14 10v7', send: 'M22 2 11 13 M22 2l-7 20-4-9-9-4Z', plus: 'M12 4v16 M4 12h16', up: 'm6 14 6-6 6 6', down: 'm6 10 6 6 6-6' };
-  return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={paths[name ?? 'folder']} /></svg>;
+  return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={name === 'mention' ? 'M16 8v5a3 3 0 0 0 6 0v-1a10 10 0 1 0-4 8 M16 12a4 4 0 1 1-8 0 4 4 0 0 1 8 0' : paths[name ?? 'folder']} /></svg>;
 }
 export function SidebarActionMenu({ position, label, items, description, children, error, onClose }: {
   position: { x: number; y: number }; label: string; items: SidebarMenuItem[]; description?: string;

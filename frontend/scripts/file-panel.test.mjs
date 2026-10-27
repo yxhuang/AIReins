@@ -52,6 +52,7 @@ for (const [input, expected] of [
   ["", ""],
 ]) assert.equal(normalizeDirectoryPath(input), expected, input);
 assert.deepEqual(planFileMention(session, true, "/a/b/src/x.ts"), { path: "src/x.ts", reason: null });
+assert.deepEqual(planFileMention(session, true, "/a/b/src/"), { path: "src/", reason: null });
 assert.equal(planFileMention({ ...session, cwd: "/a/b/" }, true, "/a/b/x.ts").path, "x.ts");
 assert.equal(planFileMention({ ...session, cwd: "/" }, true, "/src/x.ts").path, "src/x.ts");
 assert.equal(planFileMention({ ...session, cwd: "/mnt/c/Users/u" }, true, "/mnt/c/Users/u/src/x.ts").path, "src/x.ts");
@@ -125,6 +126,11 @@ assert.equal(s.consumeFileMention(latest), false);
 s.requestFileMention("one", "/a/b/x.ts");
 s.navigate("two");
 assert.equal(s.fileMentionRequest, null, "切会话不能留下旧插入请求");
+s.currentId = null;
+s.requestFileMention(null, "/a/b/src/");
+assert.equal(s.fileMentionRequest.sessionId, null, "新建页引用以 null 为目标");
+s.navigate("one");
+assert.equal(s.fileMentionRequest, null, "离开新建页不遗留引用请求");
 
 const storage = new Map([["workbench-term-width", "600"]]);
 globalThis.localStorage = { getItem: (key) => storage.get(key) ?? null };

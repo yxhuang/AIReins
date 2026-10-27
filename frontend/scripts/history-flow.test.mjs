@@ -553,7 +553,7 @@ await t("已加载条目仍未完成扫描时不显示没有更多；完成后�
 
 // 无 DOM 的真实主页组件交互；只替换会话 API/导航和浏览器存储，不代替截图验收。
 async function withNewForm({ saved = "", cwd, sessions = [], meta = { defaultCwd: "/meta", drivers: {}, capabilities: {} }, create } = {}, run) {
-  const fields = ["meta", "sessions", "newSessionCwd", "newSessionRequest", "create", "navigateCreatedSession", "setNewSessionCwd", "sendComposerInput", "commands"];
+  const fields = ["meta", "sessions", "currentId", "fileMentionRequest", "newSessionCwd", "newSessionRequest", "create", "navigateCreatedSession", "setNewSessionCwd", "sendComposerInput", "commands"];
   const previous = Object.fromEntries(fields.map(name => [name, store[name]]));
   const storageDescriptor = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
   const storage = new Map(saved ? [["workbench-last-cwd", saved]] : []);
@@ -562,7 +562,7 @@ async function withNewForm({ saved = "", cwd, sessions = [], meta = { defaultCwd
     setItem: (name, value) => storage.set(name, String(value)),
   } });
   const calls = [], navigations = [], sends = [];
-  Object.assign(store, { meta, sessions, newSessionCwd: cwd, newSessionRequest: 0, commands: new Map() });
+  Object.assign(store, { meta, sessions, currentId: null, fileMentionRequest: null, newSessionCwd: cwd, newSessionRequest: 0, commands: new Map() });
   store.create = async input => { calls.push(input); return create ? create(input) : { id: "created-home", cwd: input.cwd }; };
   store.sendComposerInput = async (sessionId, text, mentions) => { sends.push({ sessionId, text, mentions }); return true; };
   store.navigateCreatedSession = id => navigations.push(id);
@@ -587,6 +587,55 @@ async function withNewForm({ saved = "", cwd, sessions = [], meta = { defaultCwd
   }
 }
 const finishNewCreate = () => new Promise(resolve => setImmediate(resolve));
+
+await t("新建页：文件顶栏与文件/文件夹右键引用写入首条消息，保留光标与草稿", async () => {
+  await withNewForm({ cwd: "/project", meta: { drivers: { claude: { mentions: true } }, capabilities: {} } }, async f => {
+    f.textarea().props.onChange({ target: { value: "查看尾文" } });
+    const field = { selectionStart: 2, style: {}, scrollHeight: 80, focus() { this.focused = true; }, setSelectionRange(start, end) { this.selectionStart = start; this.selectionEnd = end; } };
+    f.textarea().props.ref.current = field;
+    // 顶栏按钮复用与实际文件面板相同的状态与回调。
+    const panel = componentFixture(() => FilePanel({ onClose() {} }));
+    const tab = store.fileTabs.find(tab => tab.id === store.fileTabId);
+    const originalPreview = tab.preview;
+    try {
+      tab.preview = { target: { path: "/project/a.ts", root: "/project" }, loading: true };
+      treeButtons(panel()).find(button => button.props["aria-label"] === "引用").props.onClick();
+      assert.equal(f.textarea().props.value, "查看 @a.ts 尾文");
+      assert.equal(field.focused, true);
+      assert.equal(field.selectionStart, "查看 @a.ts ".length);
+      tab.preview = null;
+      for (const folder of [false, true]) {
+        const contents = treeFind(panel(), node => node.type === DirectoryContents);
+        contents.props.onEntryMenu({ path: folder ? "/project/src" : "/project/b.ts", root: "/project", name: folder ? "src" : "b.ts", folder }, 20, 20);
+        const menu = treeFind(panel(), node => node.type?.name === "TaildropMenu");
+        menu.props.leadingItems.find(item => item.id === "reference").onSelect();
+        f.update();
+      }
+      assert.equal(f.textarea().props.value, "查看 @a.ts @b.ts @src/ 尾文");
+      assert.equal(store.fileMentionRequest, null, "请求只消费一次");
+      f.update();
+      assert.equal(f.textarea().props.value, "查看 @a.ts @b.ts @src/ 尾文");
+      f.update().props.onSubmit({ preventDefault() {} });
+      await finishNewCreate();
+      assert.equal(f.sends[0].text, "查看 @a.ts @b.ts @src/ 尾文");
+    } finally { tab.preview = originalPreview; panel.dispose(); }
+  });
+});
+
+await t("新建页：目录外、空白路径和不支持引用均拒绝，不改草稿", async () => {
+  await withNewForm({ cwd: "/project", meta: { drivers: { claude: { mentions: true }, codex: { mentions: false } }, capabilities: {} } }, async f => {
+    f.textarea().props.onChange({ target: { value: "保留草稿" } });
+    for (const path of ["/other/a.ts", "/project/a b.ts"]) {
+      store.requestFileMention(null, path);
+      assert.equal(f.textarea().props.value, "保留草稿");
+      assert.ok(treeFind(f.update(), node => node.props?.className === "new-error"));
+    }
+    f.agent("codex").props.onClick();
+    store.requestFileMention(null, "/project/a.ts");
+    assert.equal(f.textarea().props.value, "保留草稿");
+    assert.ok(treeFind(f.update(), node => node.props?.className === "new-error"));
+  });
+});
 
 await t("主页新建：Enter 空白创建后统一发送 trim 首条消息，保留目录与配置并导航", async () => {
   await withNewForm({ cwd: " /project/child " }, async f => {

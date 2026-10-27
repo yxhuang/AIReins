@@ -54,7 +54,7 @@ export function planFileMention(session: Pick<SessionRecord, "cwd" | "status"> |
   }
   const relative = file.slice(prefix.length);
   if (/\s/u.test(relative)) return { path: null, reason: t("ui.FilePanel.the_relative_path_contains_whitespace_which_truncates") };
-  return { path: relative, reason: null };
+  return { path: relative + (path.endsWith("/") ? "/" : ""), reason: null };
 }
 
 /** 复用 mentionQueryAt 的边界判定，避免另存一份标点表。 */
@@ -253,6 +253,12 @@ export function FilePanel({ onClose: closeRight, tabId: ownTabId }: { onClose: (
     copyId.current += 1;
     // 点击时读当前状态，继续沿用 cwd/driver/会话状态边界。
     const current = store.currentId ? store.session(store.currentId) : undefined;
+    if (!store.currentId) {
+      store.requestFileMention(null, path);
+      store.showMainSession();
+      setNotice(null);
+      return;
+    }
     const supported = current ? store.meta?.drivers[current.agent]?.mentions === true : false;
     const plan = planFileMention(current, supported, path);
     if (current && plan.path !== null) {
@@ -287,6 +293,10 @@ export function FilePanel({ onClose: closeRight, tabId: ownTabId }: { onClose: (
   const menuItems: SidebarMenuItem[] = [];
   if (sendMenu?.row) {
     const menu = sendMenu;
+    menuItems.push({ id: "reference", icon: "mention", label: t("ui.FilePanel.reference_in_session"), onSelect: () => {
+      setSendMenu(null);
+      referenceFile(menu.target.path + (menu.folder && !menu.target.path.endsWith("/") ? "/" : ""));
+    } });
     menuItems.push({ id: "new-tab", icon: "plus", label: t("ui.FilePanel.open_in_a_new_tab"), onSelect: () => {
       setSendMenu(null); setNotice(null);
       store.openFileTab({ path: menu.target.path, root: menu.target.root, folder: menu.folder });
