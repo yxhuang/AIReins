@@ -66,6 +66,8 @@ export const MAX_MENTIONS = 20;
 
 /** 草稿在 localStorage 的 key 前缀：workbench-draft-<sessionId>。 */
 const DRAFT_STORAGE_PREFIX = "workbench-draft-";
+const PENDING_SEND_PREFIX = "workbench-pending-send-";
+type PendingSend = { sessionId: string; text: string; mentions?: Mention[] };
 /** 新建会话页首条消息的草稿键（会话 id 是 UUID，不会撞上）。 */
 export const NEW_SESSION_DRAFT_ID = "new-session";
 const LAST_SESSION_KEY = "workbench-last-session";
@@ -251,7 +253,30 @@ export class Store {
   sendTextRestore: ComposerSendRestore | null = null;
   private sendRestoreSequence = 0;
   /** clientRequestId → 暂存的发送内容：同 id ack / user_message 回显丢弃，同 id error 还回文本与引用；不自动重发 */
-  private sendStash = new Map<string, { sessionId: string; text: string; mentions?: Mention[] }>();
+  private sendStash = readPendingSends();
+  private restoredPending = new Set<string>();
+  private permissionRequests = new Map<string, { sessionId: string; requestId: string }>();
+  pendingMessages(sessionId: string) {
+    return [...this.sendStash].filter(([, message]) => message.sessionId === sessionId)
+      .map(([id, message]) => ({ id, ...message, restored: this.restoredPending.has(id) }));
+  }
+  private confirmSend(id: string): void {
+    this.sendStash.delete(id);
+    this.restoredPending.delete(id);
+    try { localStorage.removeItem(PENDING_SEND_PREFIX + id); } catch { /* 仅内存 */ }
+  }
+  restorePendingMessage(id: string): boolean {
+    const message = this.sendStash.get(id);
+    if (!message || this.restoredPending.has(id) || this.getDraft(message.sessionId).trim()) return false;
+    this.restoreComposerSend(message.sessionId, message.text, message.mentions ?? []);
+    this.restoredPending.add(id);
+    this.notify();
+    return true;
+  }
+  dismissPendingMessage(id: string): void { this.confirmSend(id); this.notify(); }
+  permissionSubmitting(sessionId: string, requestId: string): boolean {
+    return [...this.permissionRequests.values()].some(value => value.sessionId === sessionId && value.requestId === requestId);
+  }
   private nextClientRequestId = 0;
   /** 全局时钟：有 running/starting 会话时每秒 tick，否则每 30 秒 tick。 */
   now = Date.now();
@@ -1508,6 +1533,7 @@ export class Store {
     hasMore?: boolean,
     firstSeq?: number,
   ): void {
+    for (const event of events) this.confirmEventSend(event);
     const pendingGates = new Map<string, number>();
     let latestUsage = session.snapshotState?.latestUsage;
     let commands = session.snapshotState?.commands;
@@ -1586,6 +1612,8 @@ export class Store {
 
   private connect(): void {
     if (this.socket && this.socket.readyState <= WebSocket.OPEN) return;
+    // 强制重连会忽略旧 close 回调；新连接也须解除旧传输的提交锁。
+    this.permissionRequests.clear();
     this.wsState = "connecting";
     this.notify();
     const protocol = window.location.protocol === "https:" ? "wss" : "ws";
@@ -1617,6 +1645,7 @@ export class Store {
       if (this.socket !== socket) return; // 已被 reconnectNow 换掉的旧连接
       this.wsState = "closed";
       this.socket = null;
+      this.permissionRequests.clear();
       this.notify();
       this.reconnectTimer = setTimeout(() => this.connect(), this.reconnectDelay);
       this.reconnectDelay = Math.min(this.reconnectDelay * 2, 15_000);
@@ -1676,11 +1705,16 @@ export class Store {
       return;
     }
     if (type === "ack") {
+      const operationId = String(frame.clientRequestId ?? "");
+      const operation = this.permissionRequests.get(operationId);
+      if (operation && frame.sessionId === operation.sessionId && frame.action === "permission_resolved") {
+        this.permissionRequests.delete(operationId); this.notify();
+      }
       // 服务端受理回执：丢弃对应发送暂存（回显随后到，或已先到）
       const requestId = typeof frame.clientRequestId === "string" ? frame.clientRequestId : "";
       const stashed = this.sendStash.get(requestId);
       if (stashed && (frame.sessionId === undefined || frame.sessionId === stashed.sessionId)
-        && (frame.action === undefined || frame.action === "user_message")) this.sendStash.delete(requestId);
+        && (frame.action === undefined || frame.action === "user_message")) { this.confirmSend(requestId); this.notify(); }
       return;
     }
     if (type === "resync_required") {
@@ -1696,11 +1730,13 @@ export class Store {
       // 带 clientRequestId 的发送拒绝：按 id 归因（不进 configPending 的配置错误路径），
       // 暂存丢弃、错误照告；仅当草稿仍为空（发送间隙没有新输入）才把文本写回草稿并请 Composer 还回文本与引用。
       const requestId = typeof frame.clientRequestId === "string" ? frame.clientRequestId : "";
+      const operation = this.permissionRequests.get(requestId);
+      if (operation && operation.sessionId === sid && frame.action === "permission_resolved") this.permissionRequests.delete(requestId);
       const stashed = requestId ? this.sendStash.get(requestId) : undefined;
-      if (stashed) {
-        this.sendStash.delete(requestId);
+      if (stashed && (!sid || sid === stashed.sessionId)) {
         if (this.getDraft(stashed.sessionId).trim() === "") {
           this.restoreComposerSend(stashed.sessionId, stashed.text, stashed.mentions ?? []);
+          this.restoredPending.add(requestId);
         }
         this.lastError = { message: msg, sessionId: stashed.sessionId };
         this.notify();
@@ -1710,7 +1746,7 @@ export class Store {
       if (sid && frame.action === "replay" && this.replayBuffers.delete(sid)) void this.resync(sid);
       // set_config 在等结果的会话：配置相关错误归到配置控件旁，不进全局提示条；
       // user_message 等其他动作的报错按 action 归因进全局条，不再误落配置控件。
-      if (sid && this.configPending.has(sid) && frame.action !== "user_message") {
+      if (sid && this.configPending.has(sid) && (frame.action === undefined || frame.action === "set_config")) {
         this.configPending.delete(sid);
         this.configErrors.set(sid, msg);
         this.trimSessionCache();
@@ -1722,6 +1758,16 @@ export class Store {
     }
     if (typeof frame.seq !== "number" || typeof frame.sessionId !== "string") return;
     this.handleEvent(frame as unknown as UnifiedEvent);
+  }
+
+  private confirmEventSend(event: UnifiedEvent): void {
+    const id = event.payload.clientRequestId;
+    if (event.type === "user_message" && typeof id === "string" && this.sendStash.get(id)?.sessionId === event.sessionId) this.confirmSend(id);
+    if (event.type === "permission_resolved") {
+      for (const [key, operation] of this.permissionRequests) {
+        if (operation.sessionId === event.sessionId && operation.requestId === event.payload.requestId) this.permissionRequests.delete(key);
+      }
+    }
   }
 
   private handleEvent(event: UnifiedEvent): void {
@@ -1804,14 +1850,8 @@ export class Store {
       this.configErrors.set(event.sessionId, String(event.payload.message ?? t("core.095")));
     }
 
-    // 去重和补发缓存处理之后才确认回显；不以相同文本猜测是哪一次发送。
-    // 当前服务端的受理确认走 ack；若回显也带请求 id，只清掉同会话同 id 暂存。
-    if (event.type === "user_message") {
-      const requestId = event.payload.clientRequestId ?? (event as UnifiedEvent & { clientRequestId?: unknown }).clientRequestId;
-      if (typeof requestId === "string" && this.sendStash.get(requestId)?.sessionId === event.sessionId) {
-        this.sendStash.delete(requestId);
-      }
-    }
+    // 去重和补发缓存处理之后才确认回显。
+    this.confirmEventSend(event);
 
     const streamDelta = STREAM_DELTA_TYPES.has(event.type);
     const previous = this.session(event.sessionId);
@@ -1929,12 +1969,14 @@ export class Store {
 
   /** 文本和结构化命令共用请求 id 与完整输入暂存；断线失败不暂存。 */
   private sendTrackedMessage(sessionId: string, text: string, content: Record<string, unknown>, mentions?: Mention[]): boolean {
-    const clientRequestId = `wb-${Date.now()}-${++this.nextClientRequestId}`;
+    const clientRequestId = `wb-${globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${++this.nextClientRequestId}-${Math.random()}`}`;
     const sent = this.send({ type: "user_message", sessionId, ...content, clientRequestId });
-    if (sent) this.sendStash.set(clientRequestId, {
-      sessionId, text,
-      ...(mentions?.length ? { mentions: mentions.map((mention) => ({ ...mention })) } : {}),
-    });
+    if (sent) {
+      const pending = { sessionId, text, ...(mentions?.length ? { mentions: mentions.map(mention => ({ ...mention })) } : {}) };
+      this.sendStash.set(clientRequestId, pending);
+      try { localStorage.setItem(PENDING_SEND_PREFIX + clientRequestId, JSON.stringify(pending)); } catch { /* 仅内存 */ }
+      this.notify();
+    }
     return sent;
   }
 
@@ -2180,14 +2222,19 @@ export class Store {
     /** AskUserQuestion 的回答：key 逐字 = 问题原文；与 updatedInput 互斥（后端同时拒绝两者同发） */
     questionAnswers?: Record<string, string>,
   ): boolean {
-    return this.send({
+    if (this.permissionSubmitting(sessionId, requestId)) return false;
+    const clientRequestId = `gate-${Date.now()}-${++this.nextClientRequestId}`;
+    const sent = this.send({
       type: "permission_resolved",
+      clientRequestId,
       sessionId,
       requestId,
       decision,
       ...(updatedInput !== undefined ? { updatedInput } : {}),
       ...(questionAnswers !== undefined ? { questionAnswers } : {}),
     });
+    if (sent) { this.permissionRequests.set(clientRequestId, { sessionId, requestId }); this.notify(); }
+    return sent;
   }
 
   interrupt(sessionId: string): void {
@@ -2306,7 +2353,7 @@ export class Store {
     this.sendNotices.delete(id);
     if (this.sendTextRestore?.sessionId === id) this.sendTextRestore = null;
     for (const [requestId, stashed] of this.sendStash) {
-      if (stashed.sessionId === id) this.sendStash.delete(requestId);
+      if (stashed.sessionId === id) this.confirmSend(requestId);
     }
     const hintTimer = this.configHintTimers.get(id);
     if (hintTimer) {
@@ -2441,3 +2488,21 @@ function statusFromEvent(event: UnifiedEvent): SessionStatus | null {
 }
 
 export const store = new Store();
+
+function readPendingSends(): Map<string, PendingSend> {
+  const result = new Map<string, PendingSend>();
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (!key?.startsWith(PENDING_SEND_PREFIX)) continue;
+      try {
+        const value = JSON.parse(localStorage.getItem(key) ?? "null");
+        if (!value || typeof value.sessionId !== "string" || typeof value.text !== "string") continue;
+        const mentions = Array.isArray(value.mentions) ? value.mentions.filter((item: Mention) => item && typeof item.path === "string" &&
+          (item.type === "file" || item.type === "image" && typeof item.mimeType === "string")) : undefined;
+        result.set(key.slice(PENDING_SEND_PREFIX.length), { sessionId: value.sessionId, text: value.text, mentions });
+      } catch { /* 损坏项不影响其他待确认消息 */ }
+    }
+  } catch { /* 存储不可用时仅内存 */ }
+  return result;
+}

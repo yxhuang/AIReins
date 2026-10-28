@@ -70,7 +70,7 @@ try {
   assert.equal(s.pendingCount("c"), 2, "摘要 seq 去重");
   s.handleFrame({ type: "error", clientRequestId: "sent-c", action: "user_message", sessionId: "c", msg: "rejected" });
   assert.equal(s.getDraft("c"), "restore after eviction");
-  assert.equal(s.sendStash.size, 0);
+  assert.equal(s.sendStash.size, 1, "恢复后保留完整输入备份直到用户核对");
   s.handleEvent(event("c", 5, "session_error", { message: "switch failed" }));
   assert.equal(s.configSwitching.has("c"), false);
   assert.equal(s.configPending.has("c"), false);

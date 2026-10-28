@@ -1559,6 +1559,15 @@ body.resizing {
 
 .stream > *, .composer > :not(.cmd-panel) { width: min(100%, 820px); margin-inline: auto; box-sizing: border-box; min-width: 0; }
 
+/* 保留完整正文 DOM 与浏览器查找，只跳过离屏文字的布局/绘制。
+   已显示正文记住实际高度；时间线连接线留在外层，避免 paint containment 裁断。 */
+@media screen {
+  .timeline-deferred-text > .text-block {
+    content-visibility: auto;
+    contain-intrinsic-size: auto 120px;
+  }
+}
+
 .timeline-item { position: relative; padding-left: 30px; min-width: 0; }
 .timeline-item::before {
   content: "";
@@ -1653,6 +1662,7 @@ body.resizing {
 }
 
 .markdown-message { min-width: 0; max-width: 100%; font-size: 15px; line-height: 1.65; overflow-wrap: anywhere; }
+.markdown-streaming-plain { white-space: pre-wrap; }
 .markdown-message > :first-child { margin-top: 0; }
 .markdown-message > :last-child { margin-bottom: 0; }
 .markdown-message p, .markdown-message ul, .markdown-message ol, .markdown-message blockquote { margin: 0.6em 0; }

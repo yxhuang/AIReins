@@ -8,6 +8,7 @@ import { useStore } from "../useStore";
 import type { DirectoryListing, HistorySession } from "../types";
 import { useAnchoredMenu } from "./useAnchoredMenu";
 import { DirectoryTable } from "./DirectoryTable";
+import { useModalFocus } from "./modal-focus";
 
 const WINDOWS_FALLBACK = "/mnt/c/Users";
 
@@ -65,11 +66,12 @@ interface DirectoryBrowserProps {
 export function DirectoryBrowser({ initialPath, onSelect, onClose, mode = "dir", onSelectFile, allowWindowsPicker = false }: DirectoryBrowserProps) {
   const fileMode = mode === "file";
   const closeButton = useRef<HTMLButtonElement>(null);
-  useEffect(() => { closeButton.current?.focus(); }, []);
+  const dialog = useRef<HTMLDivElement>(null);
+  useModalFocus(dialog, closeButton);
   return <div className="dir-overlay" onKeyDown={(event) => {
-    if (event.key === "Escape") { event.stopPropagation(); onClose(); }
+    if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); onClose(); }
   }}>
-    <div className="dir-dialog" role="dialog" aria-modal="true" aria-label={fileMode ? t("ui.DirectoryBrowser.select_file") : t("ui.DirectoryBrowser.browse_working_directory")}>
+    <div ref={dialog} tabIndex={-1} className="dir-dialog" role="dialog" aria-modal="true" aria-label={fileMode ? t("ui.DirectoryBrowser.select_file") : t("ui.DirectoryBrowser.browse_working_directory")}>
       <div className="dir-heading">
         <h2>{fileMode ? t("ui.DirectoryBrowser.select_file") : t("ui.DirectoryBrowser.select_working_directory")}</h2>
         <button ref={closeButton} className="btn" type="button" title={t("ui.DirectoryBrowser.cancel_and_return")} onClick={onClose}>{t("ui.common.cancel")}</button>

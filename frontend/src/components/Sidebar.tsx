@@ -12,12 +12,14 @@ import { useStore } from "../useStore";
 import { LauncherMenu } from "./LauncherMenu";
 import { SettingsMenu } from "./SettingsMenu";
 import { HostSwitcher } from "./HostSwitcher";
-import { HistoryView } from "./HistoryView";
+import { RecoverableLazy } from "./RecoverableLazy";
 import { PageView } from "./PageView";
 import { isUpcomingReset } from "./CodexResets";
 import { SidebarResize } from "./SidebarResize";
 import { shortSessionTitle, SidebarSessionTitle } from "./SessionTitle";
 import { PermanentDeleteConfirm } from "./PermanentDeleteConfirm";
+
+const loadHistoryView = () => import("./HistoryView").then(module => ({ default: module.HistoryView }));
 
 const AGENT_LABELS: Record<AgentKind, string> = {
   claude: "claude",
@@ -323,7 +325,7 @@ export function Sidebar({ collapsed, onToggle, returnToSession = false, mobileAc
         )}
         {panelOpen && !collapsed && (
           <section className="sidebar-panel-expanded" aria-label={historyOpen ? t("ui.Sidebar.session_history_content") : currentPage?.name || t("ui.Sidebar.page_not_found")}>
-            {historyOpen ? <div id="sidebar-history-panel" className="sidebar-panel-content"><HistoryView /></div>
+            {historyOpen ? <div id="sidebar-history-panel" className="sidebar-panel-content"><RecoverableLazy load={loadHistoryView} componentProps={{}} label={t("ui.Sidebar.session_history_content")} onClose={closePanel} /></div>
               : currentPage ? <div id={`sidebar-page-${currentPage.id}`} className="sidebar-panel-content"><PageView page={currentPage} sidebar onCollapse={closePanel} /></div>
               : <div className="sidebar-panel-content sidebar-panel-missing">{t("ui.Sidebar.this_page_may_have_been_removed_from")}</div>}
           </section>

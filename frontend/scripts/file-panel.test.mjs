@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import { renderSettled } from "./render-settled.mjs";
 // 先在纯 Node 环境导入，防止 store 或纯逻辑出现顶层 DOM 依赖。
 import { Store, store } from "../src/store.ts";
 import { insertFileMention, planFileMention, FilePanel } from "../src/components/FilePanel.tsx";
@@ -185,7 +186,7 @@ const pdfPreview = { target: { path: "/a/b/中文.pdf", root: "/a/b" }, loadId: 
 try {
   store.filePreview = pdfPreview;
   Object.defineProperty(globalThis, "navigator", { configurable: true, value: { language: "zh-CN", pdfViewerEnabled: true } });
-  const pdfHtml = renderToStaticMarkup(React.createElement(FilePanel, { onClose() {} }));
+  const pdfHtml = await renderSettled(React.createElement(FilePanel, { onClose() {} }));
   assert.ok(pdfHtml.includes('title="PDF 文件预览"') && pdfHtml.includes("<iframe"), "支持 PDF 时通过 iframe 导航到原生查看器");
   assert.ok(pdfHtml.includes('role="toolbar"') && pdfHtml.indexOf("外部打开") < pdfHtml.indexOf("<iframe"), "文件操作集中在顶栏");
   const labels = ['aria-label="返回"', 'aria-label="刷新文件"', 'aria-label="引用"', 'aria-label="复制路径"', 'aria-label="外部打开"'];
@@ -193,12 +194,12 @@ try {
   assert.ok(!pdfHtml.includes('file-action-label'), "文件操作统一使用纯图标，名称保留在提示与无障碍标签中");
   for (const removed of ["重新读取", "下载", "file-preview-path", "字节", "只读", "使用浏览器 PDF"]) assert.ok(!pdfHtml.includes(removed), removed);
   store.filePreview = { ...pdfPreview, file: { ...pdfPreview.file, kind: "markdown", text: "# 内容", editable: true, version: "v1" }, draft: "# 内容" };
-  const markdownHtml = renderToStaticMarkup(React.createElement(FilePanel, { onClose() {} }));
+  const markdownHtml = await renderSettled(React.createElement(FilePanel, { onClose() {} }));
   assert.ok(markdownHtml.includes('aria-label="文件显示方式"') && markdownHtml.includes("segmented-slider"), "文本预览使用终端同款滑动切换");
   assert.ok(markdownHtml.includes('aria-label="下载"') && !markdownHtml.includes('aria-label="外部打开"'), "普通文本只保留一个下载入口");
   store.filePreview = pdfPreview;
   Object.defineProperty(globalThis, "navigator", { configurable: true, value: { language: "zh-CN", pdfViewerEnabled: false } });
-  const fallbackHtml = renderToStaticMarkup(React.createElement(FilePanel, { onClose() {} }));
+  const fallbackHtml = await renderSettled(React.createElement(FilePanel, { onClose() {} }));
   assert.ok(!fallbackHtml.includes("<iframe") && !fallbackHtml.includes("<object"), "不支持内嵌时不留下空白查看区");
   assert.ok(fallbackHtml.includes("未启用内嵌 PDF") && fallbackHtml.includes("外部打开"));
 } finally {

@@ -1,5 +1,11 @@
 // Interface copy. Keep keys aligned with the other locale.
 const dictionary: Record<string, string> = {
+  "ui.RecoverableLazy.failed": "Could not load {panel}",
+  "ui.RecoverableLazy.loading": "Loading {panel}…",
+  "ui.RecoverableLazy.retry": "Retry",
+  "ui.RecoverableLazy.refresh": "Refresh page…",
+  "ui.RecoverableLazy.refresh_hint": "Retry without leaving this page. If it still fails, save your work before refreshing.",
+  "ui.RecoverableLazy.refresh_confirm": "Refreshing may discard unsaved file changes and unsent attachments. Refresh this page now?",
   "ui.FilePanel.session_tab": "Session",
   "ui.FilePanel.main_tabs": "Main area tabs",
   "ui.FilePanel.return_to_session": "Return to session (Alt+0)",

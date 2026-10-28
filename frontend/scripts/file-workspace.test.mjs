@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import { renderSettled } from "./render-settled.mjs";
 import { Store, store } from "../src/store.ts";
 import { FilePanel, FileTabs, FilePanels, WorkspaceDropTarget } from "../src/components/FilePanel.tsx";
 
@@ -178,7 +179,7 @@ try {
     assert.ok(html.includes('class="term-panel file-side-panel file-main-panel"'));
     assert.ok(!html.includes('sandbox="allow-same-origin'), "预览安全边界不变");
     store.showMainSession();
-    const hiddenHtml = renderToStaticMarkup(React.createElement(FilePanel, { tabId: firstId, onClose() {} }));
+    const hiddenHtml = await renderSettled(React.createElement(FilePanel, { tabId: firstId, onClose() {} }));
     assert.ok(hiddenHtml.includes('hidden=""') && hiddenHtml.includes("unsaved"), "回会话时文件内容仍挂载");
     const tabs = renderToStaticMarkup(React.createElement(FileTabs, { area: "main" }));
     assert.ok(tabs.includes("会话") && tabs.includes("Alt+0"));

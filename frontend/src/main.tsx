@@ -7,17 +7,7 @@ import { applyBodyFontSize, readBodyFontSize } from "./body-font";
 import { initializeHostConnections, workbenchWindowTitle } from "./host-connections";
 import "./styles.css";
 
-// 重新 build 后旧页面按需加载的 chunk（如 TerminalPanel）已不存在，import 失败会让整页白屏/黑屏：
-// 自动刷新一次换到新版本；10 秒内再失败就不刷新，免得循环。
-window.addEventListener("vite:preloadError", (event) => {
-  const key = "wb-chunk-reload-at";
-  try {
-    if (Date.now() - Number(sessionStorage.getItem(key) ?? 0) < 10_000) return;
-    sessionStorage.setItem(key, String(Date.now()));
-  } catch { return; } // 记不住刷新时间就不冒循环刷新的险
-  event.preventDefault();
-  location.reload();
-});
+// 按需模块加载失败由各面板错误边界恢复；禁止自动刷新丢失文件草稿和未发送附件。
 
 // iOS 弹键盘不缩 100dvh，而是平移可视视口，输入框下面会剩一截空白：
 // 手机键盘打开时把 .app 钉到可视视口（styles.css 的 html[data-keyboard]）；双指缩放时不跟。

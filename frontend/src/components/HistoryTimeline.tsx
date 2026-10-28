@@ -20,7 +20,7 @@ export const HistoryTimeline = memo(function HistoryTimeline({ messages: all, ag
     const next = items[index + 1];
     const continues = Boolean(next && next.kind !== "user");
     if (item.kind === "tool-group") return <ReadOnlyToolGroup key={item.key} item={item} agent={agent} cwd={cwd} continues={continues} />;
-    return <div key={item.key} className={`timeline-item${continues ? " timeline-continues" : ""}${item.kind === "tool" ? ` timeline-${item.status}` : ""}`}>
+    return <div key={item.key} className={`timeline-item${continues ? " timeline-continues" : ""}${item.kind === "tool" ? ` timeline-${item.status}` : ""}${item.kind === "text" ? " timeline-deferred-text" : ""}`}>
       {item.kind === "tool" ? <ToolCard item={item} agent={agent} cwd={cwd} sessionId={sessionId} />
         : item.kind === "thought" ? <ThoughtBlockView item={item} />
         : item.kind === "text" && <div className="text-block"><MarkdownMessage text={item.text} cwd={cwd} sessionId={sessionId} /></div>}

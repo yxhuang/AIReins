@@ -1,4 +1,10 @@
 export default {
+  "core.pendingSend": "消息尚未收到服务端确认。请先核对会话记录，再决定是否恢复重发；恢复后保留备份，核对后可移除提示。",
+  "core.pendingContent": "查看待确认内容",
+  "core.restoreSend": "恢复到输入框",
+  "core.dismissSend": "已核对，移除提示",
+  "core.restoreBlocked": "输入框已有新草稿，请先保存或清空后再恢复。",
+
   "core.readCount": "（{count} 次）",
   "core.commands": "条命令",
   "core.calls": "项调用",

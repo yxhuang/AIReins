@@ -8,10 +8,12 @@ import type { SessionRecord, WorkFileTarget } from "../types";
 import { shallowEqual, useStore } from "../useStore";
 import { DirectoryContents } from "./DirectoryBrowser";
 import { FILE_WIDTH_OPTIONS, PanelBackButton, PanelRightIcon, SidePanelResize, useSidePanelWidth } from "./SidePanelResize";
-import { FilePreview } from "./FilePreview";
+import { RecoverableLazy } from "./RecoverableLazy";
 import { Segmented } from "./Segmented";
 import { TaildropMenu } from "./TaildropMenu";
 import { SidebarActionMenu, type SidebarMenuItem } from "./SidebarActionMenu";
+
+const loadFilePreview = () => import("./FilePreview").then(module => ({ default: module.FilePreview }));
 
 const PREVIEW_OPTIONS = [{ value: "preview", label: t("ui.FilePanel.preview"), title: t("ui.FilePanel.view_the_rendered_document") }, { value: "source", label: t("ui.FilePanel.source"), title: t("ui.FilePanel.view_or_edit_the_document_source") }] as const;
 const TABLE_OPTIONS = [{ value: "preview", label: t("ui.FilePanel.table"), title: t("ui.FilePanel.view_data_as_a_table") }, { value: "source", label: t("ui.FilePanel.source"), title: t("ui.FilePanel.view_or_edit_raw_data") }] as const;
@@ -354,7 +356,7 @@ export function FilePanel({ onClose: closeRight, tabId: ownTabId }: { onClose: (
         {notice.copied !== null && <p className="dir-copy-status">{notice.copied ? t("ui.FilePanel.path_copied") : <>{t("ui.FilePanel.cannot_copy_automatically_copy_manually")}<span className="mono">{notice.path}</span></>}</p>}
       </div>}
       {area === "right" && (preview || !hasTab) && tabRow}
-      {preview ? <FilePreview key={preview.target.path} preview={preview} source={source} tabId={tabId} /> : hasTab && visible && <DirectoryContents key={`${tabId}:${session?.id ?? ""}`} initialPath={directoryInitialPath} includeFiles allowWindowsPicker
+      {preview ? <RecoverableLazy key={preview.target.path} load={loadFilePreview} componentProps={{ preview, source, tabId }} label={t("ui.FilePanel.preview")} onClose={onClose} /> : hasTab && visible && <DirectoryContents key={`${tabId}:${session?.id ?? ""}`} initialPath={directoryInitialPath} includeFiles allowWindowsPicker
         refreshPath={session ? undefined : newSessionCwd}
         navigationHistory={directoryHistory} registerBrowserBack={registerBrowserBack} navTarget={navSlot} afterLocation={area === "right" ? tabRow : undefined} showHidden={showHidden}
         onPathChange={path => store.setFileDirectory(path, tabId)}

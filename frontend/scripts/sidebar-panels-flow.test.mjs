@@ -4,6 +4,7 @@ import { strict as assert } from "node:assert";
 import React from "react";
 import { readFileSync } from "node:fs";
 import { renderToStaticMarkup } from "react-dom/server";
+import { renderSettled } from "./render-settled.mjs";
 
 globalThis.React = React;
 globalThis.WebSocket = { CONNECTING: 0, OPEN: 1, CLOSING: 2, CLOSED: 3 };
@@ -17,8 +18,8 @@ const { PanelActions } = await import("../src/components/PanelActions.tsx");
 const { HistoryPreviewPane } = await import("../src/components/HistoryView.tsx");
 
 let pass = 0;
-const t = (name, fn) => {
-  try { fn(); pass++; }
+const t = async (name, fn) => {
+  try { await fn(); pass++; }
   catch (error) { console.error(`❌ ${name}\n   ${error.message}`); process.exitCode = 1; }
 };
 const page = { id: "ai-usage", name: "AI 用量", icon: "📊", type: "iframe", url: "http://127.0.0.1:8788", maxWidth: "33%" };
@@ -27,7 +28,7 @@ const renderApp = () => renderToStaticMarkup(React.createElement(App));
 const mainOf = (html) => html.match(/<main class="main">([\s\S]*?)<\/main>/)?.[1];
 const sidebarOf = (html) => html.match(/<aside class="sidebar(?: sidebar-page-open)?">([\s\S]*?)<\/aside>/)?.[1];
 
-t("重置预告到期后入口圆点随时钟消失", () => {
+await t("重置预告到期后入口圆点随时钟消失", () => {
   const previous = { state: store.codexResets, now: store.now };
   const deadline = Date.parse("2026-10-24T14:00:00+08:00");
   store.codexResets = {
@@ -45,7 +46,7 @@ t("重置预告到期后入口圆点随时钟消失", () => {
   }
 });
 
-t("历史旧链接：列表在侧栏，窄屏主页没有 has-main", () => {
+await t("历史旧链接：列表在侧栏，窄屏主页没有 has-main", () => {
   store.navigateHistory();
   const html = renderApp();
   assert.ok(sidebarOf(html)?.includes('aria-label="历史会话"'));
@@ -56,20 +57,20 @@ t("历史旧链接：列表在侧栏，窄屏主页没有 has-main", () => {
   assert.ok(!html.includes('sidebar-page-open'), "历史面板不加宽");
 });
 
-t("选历史会话：只有主区显示预览与导入，列表仍挂载便于手机返回", () => {
+await t("选历史会话：只有主区显示预览与导入，列表仍挂载便于手机返回", async () => {
   store.selectHistory({ agent: "claude", nativeSessionId: "native-id", cwd: "/repo", title: "预览标题", source: "interactive", lastActivityAt: "2026-10-01T00:00:00Z", filePath: "/history" });
-  const html = renderApp();
+  const html = await renderSettled(React.createElement(App));
   assert.ok(html.includes('class="app has-main"'));
   assert.ok(mainOf(html)?.includes('aria-label="会话预览"'));
   assert.ok(mainOf(html)?.includes("导入并续接"));
   assert.ok(sidebarOf(html)?.includes('aria-label="历史会话"'));
   store.backToHistoryList();
-  const back = renderApp();
+  const back = await renderSettled(React.createElement(App));
   assert.ok(!back.includes('class="app has-main"'));
   assert.ok(sidebarOf(back)?.includes('sidebar-panel-expanded'));
 });
 
-t("页面旧链接：健康检查加载态在侧栏，仅一个面板展开", () => {
+await t("页面旧链接：健康检查加载态在侧栏，仅一个面板展开", () => {
   store.navigatePage("ai-usage");
   const html = renderApp();
   assert.ok(sidebarOf(html)?.includes('class="page-loading" role="status">正在加载…'));
@@ -85,7 +86,7 @@ t("页面旧链接：健康检查加载态在侧栏，仅一个面板展开", ()
   assert.ok(!collapsed.includes("sidebar-page-open"), "页面路由下收起态不加宽");
 });
 
-t("AI 用量打开后入口变后退，图标态也保留返回语义，收起后恢复原入口", () => {
+await t("AI 用量打开后入口变后退，图标态也保留返回语义，收起后恢复原入口", () => {
   store.navigatePage("ai-usage");
   const html = renderApp();
   assert.ok(sidebarOf(html).includes('aria-label="后退：收起AI 用量"'));
@@ -101,7 +102,7 @@ t("AI 用量打开后入口变后退，图标态也保留返回语义，收起�
   assert.ok(!sidebarOf(back).includes('aria-label="后退：收起AI 用量"'));
 });
 
-t("收起面板恢复会话列表；图标态保留历史/页面/设置/直达入口", () => {
+await t("收起面板恢复会话列表；图标态保留历史/页面/设置/直达入口", () => {
   store.closeSidebarPanel();
   const html = renderApp();
   assert.ok(!html.includes("sidebar-panel-expanded"));
@@ -117,7 +118,7 @@ t("收起面板恢复会话列表；图标态保留历史/页面/设置/直达�
   assert.ok(!icons.includes('<span>直达</span>'), "收起态只显示直达图标");
 });
 
-t("底部单行显示历史与额度，额度为加宽胶囊、直达为圆钮；内容仍在覆盖区", () => {
+await t("底部单行显示历史与额度，额度为加宽胶囊、直达为圆钮；内容仍在覆盖区", () => {
   const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
   const foot = (html) => sidebarOf(html)?.match(/<div class="sidebar-foot">([\s\S]*)/)?.[1];
   store.navigateHistory();
@@ -162,23 +163,23 @@ t("底部单行显示历史与额度，额度为加宽胶囊、直达为圆钮�
   assert.match(closed, /class="launcher-button"[^>]*title="直达" aria-label="直达"/);
 });
 
-t("派单打开不替换主区历史预览，收起保留侧栏展开状态", () => {
+await t("派单打开不替换主区历史预览，收起保留侧栏展开状态", async () => {
   store.navigateHistory();
   store.selectHistory({ agent: "claude", nativeSessionId: "preview", cwd: "/repo", title: "保留预览", source: "interactive", lastActivityAt: "2026-10-01T00:00:00Z", filePath: "/history" });
   store.toggleDispatches();
-  const html = renderApp();
+  const html = await renderSettled(React.createElement(App));
   assert.ok(mainOf(html).includes('aria-label="会话预览"'));
   assert.ok(!mainOf(html).includes('aria-label="派单面板"'));
   assert.ok(sidebarOf(html).includes('id="sidebar-history-panel"'));
   assert.ok(html.indexOf('aria-label="派单面板"') > html.indexOf('</main>'));
   store.closeDispatches();
-  const back = renderApp();
+  const back = await renderSettled(React.createElement(App));
   assert.ok(mainOf(back).includes('aria-label="会话预览"'));
   assert.ok(sidebarOf(back).includes('sidebar-panel-expanded'));
   assert.ok(!back.includes('aria-label="派单面板"'));
 });
 
-t("共用入口按文件/派单/终端排列，能力位控制终端，打开状态高亮", () => {
+await t("共用入口按文件/派单/终端排列，能力位控制终端，打开状态高亮", () => {
   store.meta = { capabilities: { terminal: true }, drivers: {} };
   const renderActions = () => renderToStaticMarkup(React.createElement(PanelActions));
   let html = renderActions();
@@ -204,12 +205,12 @@ t("共用入口按文件/派单/终端排列，能力位控制终端，打开状
   assert.equal((html.match(/<button/g) ?? []).length, 2);
 });
 
-t("会话、欢迎页与历史预览均有同组入口；手机列表有顶部入口且不重复终端快捷按钮", () => {
+await t("会话、欢迎页与历史预览均有同组入口；手机列表有顶部入口且不重复终端快捷按钮", async () => {
   store.meta = { capabilities: { terminal: true }, drivers: {} };
   store.ensureLoaded = async () => {};
   store.sessions = [{ id: "header", agent: "claude", cwd: "/repo", status: "idle", config: {}, createdAt: "2026-10-01T00:00:00Z", lastActivityAt: "2026-10-01T00:00:00Z" }];
   store.navigate("header");
-  let html = renderApp();
+  let html = await renderSettled(React.createElement(App));
   const head = mainOf(html).match(/<header class="session-head">([\s\S]*?)<\/header>/)?.[1];
   assert.ok(head.includes('class="panel-actions"'));
   assert.ok(!head.includes('ws-dot'));
@@ -227,7 +228,7 @@ t("会话、欢迎页与历史预览均有同组入口；手机列表有顶部�
   for (const label of ["文件", "派单", "AI 用量"]) assert.ok(more.includes(label), label);
   assert.ok(!html.includes('<div class="mobile-topbar">'));
   store.navigate(null);
-  html = renderApp();
+  html = await renderSettled(React.createElement(App));
   assert.ok(mainOf(html).includes('class="welcome-view"'));
   assert.ok(html.slice(html.indexOf('class="workspace-head'), html.indexOf('<main class="main">')).includes('class="panel-actions"'), "欢迎页开关在持久工作区顶栏");
   // 手机列表页：面板开关并进侧栏顶栏同一行（桌面 CSS 隐藏）
@@ -241,7 +242,7 @@ t("会话、欢迎页与历史预览均有同组入口；手机列表有顶部�
   assert.equal((html.match(/aria-label="派单"/g) ?? []).length, 1);
   const item = { agent: "claude", nativeSessionId: "preview", cwd: "/repo", title: "历史标题", source: "interactive", lastActivityAt: "2026-10-01T00:00:00Z", filePath: "/history" };
   store.navigateHistory(); store.selectHistory(item);
-  html = renderApp();
+  html = await renderSettled(React.createElement(App));
   assert.ok(mainOf(html).includes('class="view-panel-actions"'), "历史页保留自己的返回操作");
   const historyHead = html.slice(html.indexOf('class="workspace-head'), html.indexOf('<main class="main">'));
   assert.ok(historyHead.includes('class="panel-actions"'), "历史预览共用全局顶栏开关");
@@ -252,7 +253,7 @@ t("会话、欢迎页与历史预览均有同组入口；手机列表有顶部�
   assert.ok(emptyPreview.includes('class="panel-actions"'));
 });
 
-t("更多菜单保留复制会话 ID 与 VSCode 继续，按各自条件禁用", () => {
+await t("更多菜单保留复制会话 ID 与 VSCode 继续，按各自条件禁用", () => {
   store.ensureLoaded = async () => {};
   const base = { id: "more", agent: "claude", cwd: "/repo", status: "idle", nativeSessionId: "native", config: {}, createdAt: "2026-10-01T00:00:00Z", lastActivityAt: "2026-10-01T00:00:00Z" };
   for (const [overrides, reason] of [
@@ -384,7 +385,7 @@ for (const [name, open, close, flag, hash] of panelCases) {
     h.forward(); assert.ok(s[flag]); assert.equal(window.location.hash, hash);
   });
 }
-t("手机主页→会话→后退=主页→前进=会话，顶栏返回不新增条目", () => {
+await t("手机主页→会话→后退=主页→前进=会话，顶栏返回不新增条目", () => {
   const h = navigationHarness(); const { s } = h;
   s.navigate("session-a"); h.back(); assert.equal(s.currentId, null);
   h.forward(); assert.equal(s.currentId, "session-a");
@@ -406,7 +407,7 @@ for (const [name, open, isOpen] of [
     h.forward(); assert.ok(isOpen(s));
   });
 }
-t("手机面板切换、派单详情与前往新会话都 push；同 hash 前进恢复正确来源", () => {
+await t("手机面板切换、派单详情与前往新会话都 push；同 hash 前进恢复正确来源", () => {
   const h = navigationHarness(); const { s } = h;
   s.navigate("session-a"); s.setTerminalOpen(true); s.setFilesOpen(true); s.navigateDispatches(["one"]);
   assert.equal(h.history.length, 5); assert.ok(s.dispatchesOpen); assert.equal(s.filesOpen, false);
@@ -419,13 +420,13 @@ t("手机面板切换、派单详情与前往新会话都 push；同 hash 前进
   h.forward(); h.forward(); h.forward(); assert.ok(s.filesOpen); assert.equal(s.currentId, "session-b");
   s.setFilesOpen(false); h.flush(); assert.equal(s.currentId, "session-b"); noRightPanel(s);
 });
-t("手机派单详情的返回按钮 back，前进仍可回详情", () => {
+await t("手机派单详情的返回按钮 back，前进仍可回详情", () => {
   const h = navigationHarness(); const { s } = h;
   s.navigate("session-a"); s.navigateDispatches(); s.navigateDispatches(["one"]);
   s.navigateDispatches(); h.flush(); assert.equal(window.location.hash, "#/dispatches");
   assert.equal(h.history.length, 4); h.forward(); assert.equal(window.location.hash, "#/dispatches/one");
 });
-t("手机派单详情顶栏返回 → 流程图 → 会话；会话直达详情时原地换成流程图", () => {
+await t("手机派单详情顶栏返回 → 流程图 → 会话；会话直达详情时原地换成流程图", () => {
   const h = navigationHarness(); const { s } = h;
   s.navigate("session-a"); s.navigateDispatches(); s.navigateDispatches(["one"]);
   s.backFromDispatchDetail("one"); h.flush(); assert.equal(window.location.hash, "#/dispatches");
@@ -441,7 +442,7 @@ t("手机派单详情顶栏返回 → 流程图 → 会话；会话直达详情�
   assert.equal(window.location.hash, "#/dispatches");
   reloaded.closeDispatches(); r.flush(); assert.equal(window.location.hash, "#/session/session-a"); noRightPanel(reloaded);
 });
-t("刷新恢复面板和来源；未知相邻关系的关闭 replace，不误 back", () => {
+await t("刷新恢复面板和来源；未知相邻关系的关闭 replace，不误 back", () => {
   const h = navigationHarness();
   h.s.navigate("session-a"); h.s.navigatePage("ai-usage"); h.s.setFilesOpen(true);
   const reloaded = h.reload(); assert.ok(reloaded.filesOpen); assert.equal(reloaded.currentId, "session-a");
@@ -451,7 +452,7 @@ t("刷新恢复面板和来源；未知相邻关系的关闭 replace，不误 ba
   reloaded.closeSidebarPanel(); assert.equal(window.location.hash, "#/session/session-a");
   assert.equal(h.history.length, 4); assert.equal(h.backCalls, 0);
 });
-t("手机冷启动面板/会话旧链接关闭 replace 到主页；不碰外部上一条", () => {
+await t("手机冷启动面板/会话旧链接关闭 replace 到主页；不碰外部上一条", () => {
   for (const hash of ["#/terminal", "#/files", "#/dispatches/one", "#/page/ai-usage", "#/history", "#/session/cold"]) {
     const h = navigationHarness({ hash: "#/external" });
     h.history.pushState({ unrelated: true }, "", hash); h.s.onHashChange();
@@ -464,7 +465,7 @@ t("手机冷启动面板/会话旧链接关闭 replace 到主页；不碰外部�
     noRightPanel(h.s); assert.ok(h.history.state.unrelated);
   }
 });
-t("同 hash 条目只发 popstate 也恢复会话；外部 hash 不沿用旧 state", () => {
+await t("同 hash 条目只发 popstate 也恢复会话；外部 hash 不沿用旧 state", () => {
   const h = navigationHarness(); const { s } = h;
   s.navigate("session-a"); s.setFilesOpen(true);
   const route = { ...h.history.state.workbenchNavigation.route, currentId: "session-b" };
@@ -475,7 +476,7 @@ t("同 hash 条目只发 popstate 也恢复会话；外部 hash 不沿用旧 sta
   assert.equal(s.currentId, "external"); noRightPanel(s);
   s.backFromSession(); assert.equal(window.location.hash, "#/"); // 外部 hash 不能证明来源
 });
-t("桌面面板关闭消耗本次面板历史，再次后退可继续正常导航", () => {
+await t("桌面面板关闭消耗本次面板历史，再次后退可继续正常导航", () => {
   const h = navigationHarness({ mobile: false }); const { s } = h;
   s.navigate("session-a"); const length = h.history.length;
   for (let i = 0; i < 3; i++) {
@@ -514,7 +515,7 @@ await asyncTest("复核1：终端能力关闭时冷启动或刷新终端路由 r
     }
   } finally { globalThis.fetch = previousFetch; globalThis.document = previousDocument; }
 });
-t("复核2：异步后退跨到桌面后解锁，缩回手机仍可导航", () => {
+await t("复核2：异步后退跨到桌面后解锁，缩回手机仍可导航", () => {
   const h = navigationHarness(); const { s } = h;
   s.navigate("session-a"); s.setFilesOpen(true); s.setFilesOpen(false);
   h.setMobile(false); h.step(); // 桌面 popstate
@@ -525,7 +526,7 @@ t("复核2：异步后退跨到桌面后解锁，缩回手机仍可导航", () =
   h.setMobile(true); s.navigate("session-c");
   assert.equal(s.currentId, "session-c"); s.setTerminalOpen(true); assert.ok(s.termOpen);
 });
-t("复核2：两事件之间再次返回，旧 hashchange 不解除新 back 的锁", () => {
+await t("复核2：两事件之间再次返回，旧 hashchange 不解除新 back 的锁", () => {
   const h = navigationHarness(); const { s } = h;
   s.navigate("session-a"); s.setFilesOpen(true); s.setFilesOpen(false);
   h.step(); s.backFromSession(); // popstate 已回会话，但旧 hashchange 还未到达
@@ -594,7 +595,7 @@ await asyncTest("桌面开着派单/历史/页面面板刷新，主区仍停在�
     }
   } finally { globalThis.fetch = previousFetch; globalThis.document = previousDocument; globalThis.localStorage = previousStorage; }
 });
-t("复核5：刷新后文件→Q→P→会话逐层 replace 保留全部来源", () => {
+await t("复核5：刷新后文件→Q→P→会话逐层 replace 保留全部来源", () => {
   const h = navigationHarness();
   h.s.navigate("session-a"); h.s.navigatePage("P"); h.s.navigatePage("Q"); h.s.setFilesOpen(true);
   const length = h.history.length;
@@ -609,7 +610,7 @@ const previewItem = (nativeSessionId, title = nativeSessionId) => ({
   agent: "claude", nativeSessionId, title, cwd: "/repo", source: "interactive",
   lastActivityAt: "2026-10-01T00:00:00Z", filePath: "/history",
 });
-t("复核6：列表→预览 push 同 hash，back 回列表、forward 回预览，列表再退回来源", () => {
+await t("复核6：列表→预览 push 同 hash，back 回列表、forward 回预览，列表再退回来源", () => {
   const h = navigationHarness(); const { s } = h;
   s.navigate("session-a"); s.navigateHistory(); const length = h.history.length;
   const listId = h.history.state.workbenchNavigation.id;
@@ -625,7 +626,7 @@ t("复核6：列表→预览 push 同 hash，back 回列表、forward 回预览�
   h.forward(); assert.equal(s.historySelection, null); assert.ok(s.historyOpen);
   h.forward(); assert.equal(s.historySelection?.nativeSessionId, "first");
 });
-t("复核6：预览换选 replace 当前条目，back 一次回列表、forward 恢复最新选择", () => {
+await t("复核6：预览换选 replace 当前条目，back 一次回列表、forward 恢复最新选择", () => {
   const h = navigationHarness(); const { s } = h;
   s.navigateHistory(); s.selectHistory(previewItem("first"));
   const length = h.history.length; const entryId = h.history.state.workbenchNavigation.id;
@@ -634,7 +635,7 @@ t("复核6：预览换选 replace 当前条目，back 一次回列表、forward 
   h.back(); assert.equal(s.historySelection, null); assert.ok(s.historyOpen);
   h.forward(); assert.equal(s.historySelection?.nativeSessionId, "second"); assert.equal(s.historySelection?.title, "更新标题");
 });
-t("复核6：预览打开面板后返回预览，再返回列表不丢前进记录", () => {
+await t("复核6：预览打开面板后返回预览，再返回列表不丢前进记录", () => {
   const h = navigationHarness(); const { s } = h;
   s.navigateHistory(); s.selectHistory(previewItem("first")); s.setFilesOpen(true);
   h.back(); assert.equal(s.historySelection?.nativeSessionId, "first"); noRightPanel(s);
@@ -644,7 +645,7 @@ t("复核6：预览打开面板后返回预览，再返回列表不丢前进记�
   h.forward(); assert.equal(s.historySelection?.nativeSessionId, "first");
   h.forward(); assert.equal(s.filesOpen, true); assert.equal(h.history.length, length);
 });
-t("复核6：刷新恢复预览，主动返回无法确认前条则 replace 回列表", () => {
+await t("复核6：刷新恢复预览，主动返回无法确认前条则 replace 回列表", () => {
   const h = navigationHarness();
   h.s.navigate("session-a"); h.s.navigateHistory(); h.s.selectHistory(previewItem("first"));
   const length = h.history.length;
@@ -654,7 +655,7 @@ t("复核6：刷新恢复预览，主动返回无法确认前条则 replace 回�
   assert.equal(h.reload().historySelection, null);
   assert.equal(h.history.state.workbenchNavigation.source.route.currentId, "session-a");
 });
-t("复核6：冷启动预览 state（无来源或旧版会话来源）返回只清预览，不退外部页", () => {
+await t("复核6：冷启动预览 state（无来源或旧版会话来源）返回只清预览，不退外部页", () => {
   for (const withLegacySource of [false, true]) {
     const route = { hash: "#/history", currentId: "session-a", currentPageId: null,
       historyOpen: true, historySelection: previewItem("cold"), dispatchesOpen: false, termOpen: false, filesOpen: false };
@@ -667,7 +668,7 @@ t("复核6：冷启动预览 state（无来源或旧版会话来源）返回只�
     assert.equal(h.reload().historySelection, null);
   }
 });
-t("复核6：桌面选择、换选和返回列表不写 history", () => {
+await t("复核6：桌面选择、换选和返回列表不写 history", () => {
   const h = navigationHarness({ mobile: false }); const { s } = h;
   s.navigateHistory(); const length = h.history.length;
   s.selectHistory(previewItem("first")); s.selectHistory(previewItem("second"));
@@ -702,7 +703,7 @@ const withSidebarSessions = (sessions, fn, { currentId = null, pending = {}, ope
   finally { Object.assign(store, previous); globalThis.localStorage = previousStorage; }
 };
 
-t("主列表：72 小时内及恰好边界保留，超过 1ms 隐藏", () => {
+await t("主列表：72 小时内及恰好边界保留，超过 1ms 隐藏", () => {
   withSidebarSessions([
     sidebarSession("inside", recentWindow - 1), sidebarSession("boundary", recentWindow),
     sidebarSession("outside", recentWindow + 1), sidebarSession("old-error", recentWindow + 1, "error"),
@@ -714,14 +715,14 @@ t("主列表：72 小时内及恰好边界保留，超过 1ms 隐藏", () => {
     assert.ok(!html.includes("sidebar-old-error"));
   }, { openProjects: ["/repo"] });
 });
-t("主列表：dead 即使最近活动或当前打开也不显示", () => {
+await t("主列表：dead 即使最近活动或当前打开也不显示", () => {
   withSidebarSessions([sidebarSession("dead-recent", 1, "dead"), sidebarSession("dead-old", recentWindow + 1, "dead")], (render) => {
     const html = render();
     assert.ok(!html.includes("sidebar-dead-recent"));
     assert.ok(!html.includes("sidebar-dead-old"));
   }, { currentId: "dead-recent" });
 });
-t("主列表：旧 running、starting 与当前打开的非 dead 会话仍在，保持活动时间倒序", () => {
+await t("主列表：旧 running、starting 与当前打开的非 dead 会话仍在，保持活动时间倒序", () => {
   withSidebarSessions([
     sidebarSession("old-starting", recentWindow + 3, "starting"),
     sidebarSession("old-current", recentWindow + 4),
@@ -736,7 +737,7 @@ t("主列表：旧 running、starting 与当前打开的非 dead 会话仍在，
     assert.ok(html.includes('class="session-row agent-claude active"'), "打开的旧会话保留选中项");
   }, { currentId: "old-current" });
 });
-t("等待处理：旧会话未决闸门优先且不重复，异常 dead 未决计数也不隐藏", () => {
+await t("等待处理：旧会话未决闸门优先且不重复，异常 dead 未决计数也不隐藏", () => {
   withSidebarSessions([
     sidebarSession("recent", 1), sidebarSession("old-gate", recentWindow + 2),
     sidebarSession("dead-gate", recentWindow + 1, "dead"),
@@ -750,7 +751,7 @@ t("等待处理：旧会话未决闸门优先且不重复，异常 dead 未决�
     }
   }, { pending: { "old-gate": 1, "dead-gate": 1 }, currentId: "old-gate", openProjects: ["/repo"] });
 });
-t("主列表：当前旧会话切走后移出活跃候选，越过72h后目录进入默认收起的较早区", () => {
+await t("主列表：当前旧会话切走后移出活跃候选，越过72h后目录进入默认收起的较早区", () => {
   withSidebarSessions([sidebarSession("old-current", recentWindow + 1), sidebarSession("boundary", recentWindow)], (render) => {
     assert.ok(render().includes("sidebar-old-current"));
     store.currentId = null;
@@ -771,7 +772,7 @@ t("主列表：当前旧会话切走后移出活跃候选，越过72h后目录�
     assert.ok(!older.includes("sidebar-boundary") && !older.includes("sidebar-old-current"), "旧会话行不因进入较早区自动展开");
   }, { currentId: "old-current", openProjects: ["/repo"] });
 });
-t("侧栏：工作台会话折叠及其专用样式已移除，历史入口保留", () => {
+await t("侧栏：工作台会话折叠及其专用样式已移除，历史入口保留", () => {
   withSidebarSessions([sidebarSession("dead", 1, "dead")], (render) => {
     const html = render();
     assert.ok(!html.includes("个工作台会话"));
@@ -783,7 +784,7 @@ t("侧栏：工作台会话折叠及其专用样式已移除，历史入口保�
   assert.ok(!css.includes(".session-dead-toggle"));
   assert.ok(!css.includes(".session-dead-group"));
 });
-t("历史打开：主列表外 released / dead 会话保留打开入口与现有会话页控件", () => {
+await t("历史打开：主列表外 released / dead 会话保留打开入口与现有会话页控件", () => {
   for (const status of ["idle", "dead"]) {
     const session = { ...sidebarSession(`history-${status}`, recentWindow + 1, status),
       nativeSessionId: `native-${status}`, ...(status === "idle" ? { released: true } : {}) };

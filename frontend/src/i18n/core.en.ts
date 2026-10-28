@@ -1,4 +1,10 @@
 export default {
+  "core.pendingSend": "The server has not confirmed this message. Check the conversation before restoring and resending. Restored content remains backed up until you dismiss it.",
+  "core.pendingContent": "View unconfirmed content",
+  "core.restoreSend": "Restore to composer",
+  "core.dismissSend": "Checked, dismiss",
+  "core.restoreBlocked": "There is a newer draft. Save or clear it before restoring.",
+
   "core.readCount": " ({count} reads)",
   "core.commands": "commands",
   "core.calls": "calls",

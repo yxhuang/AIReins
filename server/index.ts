@@ -1057,7 +1057,7 @@ async function handleWsMessage(client: WsClientState, text: string): Promise<voi
       if (!Number.isSafeInteger(message.afterSeq) || message.afterSeq < 0) throw new Error("afterSeq 必须是非负整数");
       replaySession(manager, client, sessionId, message.afterSeq);
     } else if (message.type === "user_message") {
-      await manager.sendUserMessage(sessionId, validateUserMessage(message));
+      await manager.sendUserMessage(sessionId, validateUserMessage(message), message.clientRequestId);
     } else if (message.type === "permission_resolved") {
       const decisions = new Set(["allow", "deny", "always"]);
       if (!decisions.has(message.decision)) throw new Error("decision 必须是 allow、deny 或 always");

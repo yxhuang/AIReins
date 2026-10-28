@@ -29,6 +29,7 @@ import { PageIcon } from "./Sidebar";
 import { shortSessionTitle } from "./SessionTitle";
 import { MarkdownCommitContext } from "./MarkdownMessage";
 import { ContextUsage } from "./ContextUsage";
+import { PendingMessages } from "./PendingMessages";
 
 const selectMeta = (value: Store) => value.meta;
 const selectWsState = (value: Store) => value.wsState;
@@ -215,10 +216,12 @@ export function SessionView({ session, mobileTail, usage, headerTarget }: { sess
     if (item.kind === "text" || item.kind === "thought" || item.kind === "tool") {
       const continues = (next?.kind === "text" || next?.kind === "thought" || next?.kind === "tool" || next?.kind === "tool-group") && next.turn === item.turn;
       const dot = item.kind === "tool" ? ` timeline-${item.status}` : "";
+      // 仅静态助手正文交给浏览器跳过离屏布局；审批、工具和流式尾块保持原样。
+      const deferred = item.kind === "text" && !(isLast && running) ? " timeline-deferred-text" : "";
       const view = item.kind === "text"
         ? <TextBlockView item={item} streaming={isLast && running} cwd={session.cwd} sessionId={session.id} />
         : item.kind === "thought" ? <ThoughtBlockView item={item} /> : <ToolCard item={item} agent={session.agent} cwd={session.cwd} sessionId={session.id} />;
-      return <div key={item.key} className={`timeline-item${continues ? " timeline-continues" : ""}${dot}`}>{view}</div>;
+      return <div key={item.key} className={`timeline-item${continues ? " timeline-continues" : ""}${dot}${deferred}`}>{view}</div>;
     }
     switch (item.kind) {
       case "user":
@@ -316,6 +319,7 @@ export function SessionView({ session, mobileTail, usage, headerTarget }: { sess
         <button type="button" className="pending-bar" onClick={scrollToFirstPending}>{t("ui.SessionView.approvals_pending_sentence", { p0: (pendingGateIds.length) })}</button>
       )}
 
+      <PendingMessages sessionId={session.id} />
       <Composer session={session} dead={dead} errored={session.status === "error"} />
     </div>
   );

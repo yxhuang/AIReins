@@ -70,7 +70,10 @@ try {
   for (const kind of ["claude", "codex", "kimi"] as const) {
     const session = await manager.create({ agent: kind, cwd: fixture, snapshot: "skip" });
     const h = fakes.at(-1)!;
-    await manager.sendUserMessage(session.id, { text: "第一轮" });
+    await manager.sendUserMessage(session.id, { text: "第一轮" }, `request-${kind}`);
+    assert.equal(messages(session.id).at(-1)!.payload.clientRequestId, `request-${kind}`);
+    assert.equal(manager.getSnapshot(session.id)!.events.find(event => event.type === "user_message")!.payload.clientRequestId, `request-${kind}`);
+    assert.equal(JSON.stringify(h.frames).includes(`request-${kind}`), false, "关联标识不传给原生CLI");
     await settle();
     assert.equal(messages(session.id).at(-1)!.payload.steer, undefined, "空闲发送不标插话");
     const count = h.frames.length;

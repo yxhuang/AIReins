@@ -2,13 +2,15 @@ import { t, getLocale } from "../i18n";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { askSessionSideQuestion, stopSessionTask, type SessionInfoKind, type SideQuestionTurn } from "../api";
 import type { SessionRecord } from "../types";
+import { useModalFocus } from "./modal-focus";
 
 function MenuDialog({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
   const close = useRef<HTMLButtonElement>(null);
-  useEffect(() => { close.current?.focus(); }, []);
+  const dialog = useRef<HTMLDivElement>(null);
+  useModalFocus(dialog, close);
   return <div className="dir-overlay" onPointerDown={event => { if (event.target === event.currentTarget) onClose(); }}
-    onKeyDown={event => { if (event.key === "Escape") { event.stopPropagation(); onClose(); } }}>
-    <div className="dir-dialog info-dialog" role="dialog" aria-modal="true" aria-label={title}>
+    onKeyDown={event => { if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); onClose(); } }}>
+    <div ref={dialog} tabIndex={-1} className="dir-dialog info-dialog" role="dialog" aria-modal="true" aria-label={title}>
       <div className="dir-heading"><h2>{title}</h2><button ref={close} type="button" className="btn" onClick={onClose}>{t("ui.common.close")}</button></div>
       <div className="dir-list info-body">{children}</div>
     </div>

@@ -1,5 +1,11 @@
 // Interface copy. Keep keys aligned with the other locale.
 const dictionary: Record<string, string> = {
+  "ui.RecoverableLazy.failed": "无法加载{panel}",
+  "ui.RecoverableLazy.loading": "正在加载{panel}…",
+  "ui.RecoverableLazy.retry": "重试",
+  "ui.RecoverableLazy.refresh": "刷新页面…",
+  "ui.RecoverableLazy.refresh_hint": "可以留在本页重试。仍失败时，请先保存当前工作再刷新页面。",
+  "ui.RecoverableLazy.refresh_confirm": "刷新可能丢失未保存的文件修改和未发送的附件。现在刷新页面？",
   "ui.FilePanel.session_tab": "会话",
   "ui.FilePanel.main_tabs": "主区域标签页",
   "ui.FilePanel.return_to_session": "返回会话（Alt+0）",

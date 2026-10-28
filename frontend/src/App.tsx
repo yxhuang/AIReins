@@ -1,5 +1,5 @@
 import { PRODUCT_NAME, t } from "./i18n";
-import { lazy, Suspense, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { isTerminalToggleKey } from "./terminal";
 import { NewSessionForm } from "./components/NewSessionForm";
 import { Sidebar } from "./components/Sidebar";
@@ -7,9 +7,10 @@ import { MobilePanelLauncher, PanelActions } from "./components/PanelActions";
 import { DispatchPanel } from "./components/DispatchPanel";
 import { FilePanels, FileTabs, WorkspaceDropTarget } from "./components/FilePanel";
 import { SessionView } from "./components/SessionView";
-import { HistoryPreviewPane } from "./components/HistoryView";
+import { RecoverableLazy } from "./components/RecoverableLazy";
 // xterm 体积大（~300KB），第一次打开终端才按需加载，别拖慢手机首屏
-const TerminalPanel = lazy(() => import("./components/TerminalPanel").then((m) => ({ default: m.TerminalPanel })));
+const loadTerminalPanel = () => import("./components/TerminalPanel").then((m) => ({ default: m.TerminalPanel }));
+const loadHistoryPreview = () => import("./components/HistoryView").then((m) => ({ default: m.HistoryPreviewPane }));
 import { sessionTitle } from "./format";
 import { store, type Store } from "./store";
 import { shallowEqual, useStore } from "./useStore";
@@ -142,7 +143,8 @@ export function App() {
         <main className="main">
           <WorkspaceDropTarget area="main" />
           {historySelection ? (
-            <HistoryPreviewPane item={historySelection} onBack={() => store.backToHistoryList()} sharedHeader />
+            <RecoverableLazy load={loadHistoryPreview} label={t("ui.Sidebar.session_history_content")} onClose={() => store.backToHistoryList()}
+              componentProps={{ item: historySelection, onBack: () => store.backToHistoryList(), sharedHeader: true }} />
           ) : current ? (
             <SessionView key={current.id} session={current} headerTarget={headerTarget} mobileTail={pendingTotal > 0 ? (
               <span className="gate-badge" title={t("core.000", { p0: pendingTotal })}>{pendingTotal}</span>
@@ -169,14 +171,14 @@ export function App() {
         {dispatchesOpen && <DispatchPanel onClose={() => store.closeDispatches()} />}
         <FilePanels />
         {terminalCapable && mainTermMounted && (
-          <Suspense fallback={null}>
-            <TerminalPanel area="main" open={mainTerminalOpen} onClose={() => store.showMainSession()} />
-          </Suspense>
+          <RecoverableLazy load={loadTerminalPanel} label={t("ui.common.terminal")} visible={mainTerminalOpen}
+            failureClassName="term-panel terminal-workspace-panel terminal-main-panel" onClose={() => store.showMainSession()}
+            componentProps={{ area: "main", open: mainTerminalOpen, onClose: () => store.showMainSession() }} />
         )}
         {terminalCapable && termMounted && (
-          <Suspense fallback={null}>
-            <TerminalPanel open={termOpen} onClose={() => store.setTerminalOpen(false)} />
-          </Suspense>
+          <RecoverableLazy load={loadTerminalPanel} label={t("ui.common.terminal")} visible={termOpen}
+            failureClassName="term-panel terminal-workspace-panel" onClose={() => store.setTerminalOpen(false)}
+            componentProps={{ open: termOpen, onClose: () => store.setTerminalOpen(false) }} />
         )}
       </div>
       {lastError && (

@@ -354,7 +354,8 @@ await t("resolvePermission：questionAnswers 随帧上行；不带时不出现�
   assert.deepEqual(frame.questionAnswers, { "早餐吃粥还是吃面？": "吃面" });
   assert.ok(!("updatedInput" in frame), "questionAnswers 与 updatedInput 不能同发");
 
-  s.resolvePermission("s1", "req-ask-1", "deny");
+  assert.equal(s.resolvePermission("s1", "req-ask-1", "deny"), false, "提交中的同一审批不能重复发送");
+  s.resolvePermission("s1", "req-ask-2", "deny");
   const denied = sent.at(-1);
   assert.equal(denied.decision, "deny");
   assert.ok(!("questionAnswers" in denied), "deny 不应带 questionAnswers");

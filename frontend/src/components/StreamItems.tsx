@@ -23,6 +23,7 @@ import {
   selectedOptions,
 } from "../ask";
 import { store } from "../store";
+import { useStore } from "../useStore";
 import { uploadsFileUrl } from "../api";
 import type { AgentKind, ImageMention } from "../types";
 import { summarizeTool, type ToolSummary } from "../tool-summary";
@@ -306,11 +307,11 @@ export const GateBlock = forwardRef<HTMLDivElement, { item: GateView; sessionId:
     const [contentOpen, setContentOpen] = useState(false);
     // 发送成功才进提交中态：禁用所有决策按钮，直到 permission_resolved 到达；
     // 断线发送失败时不进提交中态（按钮保持可点，错误由全局 lastError 条提示），避免永久卡死。
-    const [submitting, setSubmitting] = useState(false);
+    const submitting = useStore(value => value.permissionSubmitting(sessionId, item.requestId));
 
     const decide = (decision: "allow" | "deny") => {
       if (submitting || dead) return;
-      if (store.resolvePermission(sessionId, item.requestId, decision)) setSubmitting(true);
+      store.resolvePermission(sessionId, item.requestId, decision);
     };
 
     if (item.decision) {
@@ -394,7 +395,7 @@ export const QuestionBlock = forwardRef<HTMLDivElement, { item: GateView; sessio
     // 「其他…」自由文本：key 逐字 = 问题原文，键存在即选中（与选项互斥，见 ask.ts）
     const [other, setOther] = useState<AskOther>({});
     // 提交后进入提交中态：禁用全部控件，直到 permission_resolved 到达
-    const [submitting, setSubmitting] = useState(false);
+    const submitting = useStore(value => value.permissionSubmitting(sessionId, item.requestId));
 
     if (item.decision) {
       const answers = item.questionAnswers ? Object.values(item.questionAnswers) : [];
@@ -421,21 +422,19 @@ export const QuestionBlock = forwardRef<HTMLDivElement, { item: GateView; sessio
     const submit = () => {
       if (submitting || !allAnswered(questions, selection, other)) return;
       // 发送成功才进提交中态（断线失败时不禁用按钮，错误走全局 lastError 条）
-      if (
-        store.resolvePermission(
-          sessionId,
-          item.requestId,
-          "allow",
-          undefined,
-          buildQuestionAnswers(questions, selection, other),
-        )
-      ) setSubmitting(true);
+      store.resolvePermission(
+        sessionId,
+        item.requestId,
+        "allow",
+        undefined,
+        buildQuestionAnswers(questions, selection, other),
+      );
     };
 
     const skip = () => {
       if (submitting) return;
       // 跳过 = deny：模型收到「用户拒绝了此操作」，可继续别的路径
-      if (store.resolvePermission(sessionId, item.requestId, "deny")) setSubmitting(true);
+      store.resolvePermission(sessionId, item.requestId, "deny");
     };
 
     const ready = allAnswered(questions, selection, other);

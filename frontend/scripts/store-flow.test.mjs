@@ -1005,7 +1005,7 @@ await t("服务端带 id 的 error：文字写回草稿并发布还回请求，�
     type: "error", code: 40003, sessionId: session.id, action: "user_message",
     msg: "会话有待处理的审批闸门，处理后才能发送或插话", clientRequestId,
   });
-  assert.equal(s.sendStash.size, 0, "error 后暂存应丢弃");
+  assert.equal(s.sendStash.size, 1, "拒绝后的完整输入备份保留到用户核对");
   assert.equal(s.getDraft(session.id), "别丢我", "被拒文本应写回草稿");
   assert.equal(s.sendTextRestore?.sessionId, session.id, "应发布输入框还回请求");
   assert.equal(s.sendTextRestore?.text, "别丢我", "还回文本应为被拒原文");
@@ -1030,7 +1030,7 @@ await t("发送间隙用户新打的字不被覆盖：草稿不动、不发布�
   s.handleFrame({ type: "error", code: 40003, sessionId: session.id, action: "user_message", msg: "boom", clientRequestId });
   assert.equal(s.getDraft(session.id), "间隙新打的", "间隙新草稿不得被被拒原文覆盖");
   assert.equal(s.sendTextRestore, null, "间隙有输入时不应发布还回请求");
-  assert.equal(s.sendStash.size, 0, "error 后暂存仍应丢弃");
+  assert.equal(s.sendStash.size, 1, "新草稿存在时被拒内容保留在恢复入口");
   assert.equal(s.lastError?.message, "boom", "拒绝原因仍应告知用户");
 });
 
@@ -1222,11 +1222,11 @@ await t("K11复核：直接发送命令被拒可恢复，断线失败不暂存",
   assert.equal(s.sendCommand(session.id, "compact", "note"), true);
   s.handleFrame({ type: "error", sessionId: session.id, action: "user_message", clientRequestId: sent[0].clientRequestId, msg: "启动失败" });
   assert.equal(s.getDraft(session.id), "/compact note");
-  assert.equal(s.sendStash.size, 0);
+  assert.equal(s.sendStash.size, 1, "已恢复命令保留完整备份待核对");
   s.clearDraft(session.id);
   s.socket.readyState = WebSocket.CLOSED;
   assert.equal(s.sendCommand(session.id, "compact", "again"), false);
-  assert.equal(s.sendStash.size, 0, "socket 未接收的命令没有待确认暂存");
+  assert.equal(s.sendStash.size, 1, "断线发送不新增待确认暂存，已有备份保留");
   assert.equal(sent.length, 1, "被拒或断线都不能自动重发");
 });
 

@@ -490,7 +490,7 @@ export class SessionManager {
     return cloneSession(record);
   }
 
-  async sendUserMessage(id: string, input: UserMessageInput): Promise<void> {
+  async sendUserMessage(id: string, input: UserMessageInput, clientRequestId?: string): Promise<void> {
     this.assertWritableTranscript(id);
     if (this.sessions.get(id)?.agent === "codex" && input.command) {
       if (input.text || input.mentions?.length) throw new Error("Codex 命令不能附带文本或附件");
@@ -516,7 +516,7 @@ export class SessionManager {
       if (record.status === "starting") throw new Error("会话正在启动，请稍候再发送消息");
       const receipt = await worker.sendUserMessage(message, { steer });
       this.promptedSessions.add(id);
-      this.emit(id, "user_message", {
+      this.emit(id, "user_message", { ...(clientRequestId ? { clientRequestId } : {}),
         ...(message.text !== undefined ? { text: message.text } : {}),
         ...(message.command ? { command: message.command } : {}),
         ...(message.mentions?.length ? { mentions: message.mentions } : {}),

@@ -5,7 +5,7 @@ import remarkGfm from "remark-gfm";
 import { mentionSegments } from "../mentions";
 import { highlightCode, highlightLanguage } from "../code-highlight";
 import { fileRoot, resolveLocalFileLink } from "../file-preview";
-import { createStreamingTextThrottle } from "../streaming-text";
+import { createStreamingTextThrottle, STREAMING_MARKDOWN_PLAIN_TEXT_THRESHOLD } from "../streaming-text";
 import { store } from "../store";
 
 function codeText(node: ReactNode): string {
@@ -98,7 +98,11 @@ export const MarkdownMessage = memo(function MarkdownMessage(props: { text: stri
   useEffect(() => { throttle.current!.update(props.text, props.streaming === true); }, [props.text, props.streaming]);
   useEffect(() => () => throttle.current!.cancel(), []);
   const displayedText = props.streaming ? text : props.text;
-  useLayoutEffect(() => { onCommit?.(); }, [displayedText, onCommit]);
+  // 纯文本切回 Markdown 时即使内容未变，高度也会变化，仍需更新贴底状态。
+  useLayoutEffect(() => { onCommit?.(); }, [displayedText, props.streaming, onCommit]);
+  if (props.streaming && displayedText.length >= STREAMING_MARKDOWN_PLAIN_TEXT_THRESHOLD) {
+    return <div className="markdown-message markdown-streaming-plain">{displayedText}</div>;
+  }
   return <ParsedMarkdownMessage {...props} text={displayedText} />;
 });
 

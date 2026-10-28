@@ -1127,3 +1127,7 @@ Codex 输入框 `$` 在光标 token 处打开名称+描述面板，支持过滤�
 - `POST /api/codex-resets/ack {id}`：幂等标记已读。新的快照/提醒、ack 或开关变化通过全局 WS 控制帧 `{type:"codex_resets_updated",data:状态快照}` 同步所有页面；前端连接/重连也拉取一次。任一端 ack 后其他端同步关闭该提醒。
 
 UI 在额度页 iframe 下方（降级面板时在面板下方）显示 AIReins 自己的重置信息卡；数据仅供提醒，额度数值仍由原有 AI-Usage 提供。每个展示位置保留「数据来源 AIHOT」链接到 <https://aihot.news/codex-reset>。此公开 API 限个人非商业使用，须保留来源信息。
+
+### 消息提交确认
+
+WS user_message 的 clientRequestId 在受理 ack / error 中原样关联，并写入成功的持久 user_message.payload.clientRequestId，供快照和 replay 核对丢失的确认；不传给原生 CLI。此标识用于关联，不提供幂等重试，前端不得自动重发。审批和提问沿用 WS 操作 clientRequestId 的错误归因。
