@@ -29,7 +29,7 @@ node frontend/scripts/smoke-ws.mjs  # 需后端；会创建测试会话、批准
 - [types.ts](src/types.ts) 对应后端类型，[api.ts](src/api.ts) 处理 REST 信封与错误；后端是会话记录、能力位、配置选项的事实源。
 - [render-items.ts](src/render-items.ts) 统一事件归一、工具配对/分组、闸门与提问；[StreamItems.tsx](src/components/StreamItems.tsx) 渲染实时块，[HistoryTimeline.tsx](src/components/HistoryTimeline.tsx) 复用到历史和外部续聊。
 - 终端和派单视图按需加载；主会话在右侧面板打开时保持挂载。终端、文件、派单互斥，窄屏 ≤720px 面板全屏；入口共用 [PanelActions.tsx](src/components/PanelActions.tsx)，从左到右为文件、派单、终端（用户 10-16 把派单换到终端前面），手机会话入口在「更多」菜单（同序）；手机列表页顶栏只留文件大圆钮，派单、终端收进其右侧「⋯」（`MobilePanelLauncher`，用户 10-17，新建行多了搜索钮后三颗放不下）。
-- 手机会话顶栏（实际 `.session-head`）与新建顶栏（`.view-panel-actions.workspace-welcome-head.mobile-topbar`，位于持久 `.workspace-head` 内）共用 44px 圆钮、22px 图标，以及手机底栏的 `--raised-bg`、`--raised-shadow-soft`、`--border-strong` 描边；悬停用 `--raised-bg-hover`，按下/展开用 `--sunk-bg` 与 `--sunk-shadow`。品牌按钮及桌面会话按钮不变，菜单条目不套用圆钮。手机会话「更多」菜单宽度为 190px（仍受视口上限约束），条目保持至少 44px 点击高度。新建页复用 `PanelActions`，保留返回、文件、派单、终端（按能力位显示）；三项面板均为工作区级，无需会话 ID，不加入复制会话 ID、续接等会话专属操作。
+- 手机会话顶栏（实际 `.session-head`）与新建顶栏（`.view-panel-actions.workspace-welcome-head.mobile-topbar`，位于持久 `.workspace-head` 内）共用 44px 圆钮、22px 图标，以及手机底栏的 `--raised-bg`、`--raised-shadow-soft`、`--border-strong` 描边；悬停用 `--raised-bg-hover`，按下/展开用 `--sunk-bg` 与 `--sunk-shadow`。品牌按钮及桌面会话按钮不变，菜单条目不套用圆钮。手机深色顶底栏（含列表主机/刷新/搜索/面板入口）采用石墨按键：上亮下暗表面、内高光、下沿厚度和黑色短投影，展开态凹陷；浅色材质与桌面保持既有令牌。手机底栏四钮整体靠左，间距随视口从 8px 增到 12px（360px 起 12px），空间不足沿用换行。手机会话「更多」菜单宽度为 190px（仍受视口上限约束），条目保持至少 44px 点击高度。新建页复用 `PanelActions`，保留返回、文件、派单、终端（按能力位显示）；三项面板均为工作区级，无需会话 ID，不加入复制会话 ID、续接等会话专属操作。
 - 桌面顶栏共用的圆钮保留 32px 视觉外观，使用 40×40px 点击区域且不增加顶栏高度；水平按钮预留空间，视觉间距约 12px、点击区域之间保留 4px 空隙，覆盖侧栏刷新/收起、会话面板入口/更多及右侧面板圆钮。窄侧栏品牌文字可省略，按钮保持可点；手机尺寸规则沿用现有布局。
 
 ### 状态模型
