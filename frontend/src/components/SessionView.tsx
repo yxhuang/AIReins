@@ -8,7 +8,7 @@ import { createRenderItemsBuilder } from "../render-items";
 import { filterCommands, noteCommandUsed, parseSideCommand, readRecentCommands, recentInTable, withSideCommands } from "../commands";
 import { extractMentionTokens, mentionQueryAt, mentionTokenEnd } from "../mentions";
 import { configOptionsForModel, modelConfigPatch, needsRestartNote, effectiveFor, modelShortName, pillText, EFFECTIVE_SOURCE_LABELS, ALIAS_NOTE, RESTART_NOTE } from "../config-view";
-import { fetchFiles, uploadAttachment, fetchCodexSkills, runCodexCommand, type CodexSkillInfo } from "../api";
+import { fetchFiles, uploadAttachment, fetchCodexSkills, runCodexCommand, type CodexSkillInfo, type SessionInfoKind } from "../api";
 import { filterSkills, insertSkill, skillQueryAt } from "../codex-skills";
 import { CodexCommandPanel, type CodexCommandResult } from "./CodexCommandPanel";
 import { attachmentMention, localImageMimeType, prepareImageForUpload, type Attachment } from "../attachments";
@@ -770,7 +770,13 @@ export function Composer({ session, dead, errored }: { session: SessionRecord; d
   const [codexResult, setCodexResult] = useState<CodexCommandResult | null>(null);
   // /btw、/side 侧问面板（question 为输入框带入的首问，可为空）
   const [sideQuestion, setSideQuestion] = useState<{ question: string } | null>(null);
-  const [mcpOpen, setMcpOpen] = useState(false);
+  const [infoKind, setInfoKind] = useState<SessionInfoKind | null>(null);
+  const infoRequest = useStore(value => value.sessionInfoRequest);
+  useEffect(() => {
+    if (infoRequest?.sessionId !== session.id) return;
+    const kind = store.consumeSessionInfo(session.id);
+    if (kind) setInfoKind(kind);
+  }, [infoRequest, session.id]);
   const codexBusy = useRef(false);
   const composerMounted = useRef(true);
   const closeCodexResult = useCallback(() => setCodexResult(null), []);
@@ -1155,7 +1161,7 @@ export function Composer({ session, dead, errored }: { session: SessionRecord; d
   const confirm = (cmd: CommandInfo, fillOnly: boolean) => {
     if (!fillOnly && session.agent === "claude" && cmd.name === "mcp") {
       noteCommandUsed(session.agent, cmd.name);
-      setText(""); setDismissed(false); setMcpOpen(true);
+      setText(""); setDismissed(false); setInfoKind("mcp");
       return;
     }
     if (!fillOnly && parseSideCommand(session.agent, `/${cmd.name}`) !== null) {
@@ -1199,7 +1205,7 @@ export function Composer({ session, dead, errored }: { session: SessionRecord; d
     if (!trimmed && readyMentions.length === 0) return;
     if (session.agent === "claude" && trimmed === "/mcp") {
       noteCommandUsed(session.agent, "mcp");
-      setText(""); setDismissed(false); setMcpOpen(true);
+      setText(""); setDismissed(false); setInfoKind("mcp");
       return;
     }
     const side = parseSideCommand(session.agent, trimmed);
@@ -1479,7 +1485,7 @@ export function Composer({ session, dead, errored }: { session: SessionRecord; d
         </div>
       )}
       {codexResult && <CodexCommandPanel result={codexResult} onClose={closeCodexResult} />}
-      {mcpOpen && <InfoDialog session={session} kind="mcp" onClose={() => { setMcpOpen(false); textareaRef.current?.focus(); }} />}
+      {infoKind && <InfoDialog key={`${session.id}:${infoKind}`} session={session} kind={infoKind} onClose={() => { setInfoKind(null); textareaRef.current?.focus(); }} />}
       {sideQuestion && <SideQuestionDialog sessionId={session.id} agent={session.agent} initialQuestion={sideQuestion.question}
         onClose={() => { setSideQuestion(null); textareaRef.current?.focus(); }} />}
       {session.agent === "kimi" && session.status === "running" && (

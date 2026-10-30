@@ -553,7 +553,7 @@ await t("已加载条目仍未完成扫描时不显示没有更多；完成后�
 
 // 无 DOM 的真实主页组件交互；只替换会话 API/导航和浏览器存储，不代替截图验收。
 async function withNewForm({ saved = "", cwd, sessions = [], meta = { defaultCwd: "/meta", drivers: {}, capabilities: {} }, create } = {}, run) {
-  const fields = ["meta", "sessions", "currentId", "fileMentionRequest", "newSessionCwd", "newSessionRequest", "create", "navigateCreatedSession", "setNewSessionCwd", "sendComposerInput", "commands"];
+  const fields = ["meta", "sessions", "currentId", "fileMentionRequest", "newSessionCwd", "newSessionRequest", "create", "navigateCreatedSession", "setNewSessionCwd", "sendComposerInput", "commands", "drafts", "newSessionAttachments", "sendTextRestore", "sessionInfoRequest"];
   const previous = Object.fromEntries(fields.map(name => [name, store[name]]));
   const storageDescriptor = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
   const storage = new Map(saved ? [["workbench-last-cwd", saved]] : []);
@@ -562,10 +562,13 @@ async function withNewForm({ saved = "", cwd, sessions = [], meta = { defaultCwd
     setItem: (name, value) => storage.set(name, String(value)),
   } });
   const calls = [], navigations = [], sends = [];
-  Object.assign(store, { meta, sessions, currentId: null, fileMentionRequest: null, newSessionCwd: cwd, newSessionRequest: 0, commands: new Map() });
+  Object.assign(store, { meta, sessions, currentId: null, fileMentionRequest: null, newSessionCwd: cwd, newSessionRequest: 0, commands: new Map(), drafts: new Map(), newSessionAttachments: [], sendTextRestore: null, sessionInfoRequest: null });
   store.create = async input => { calls.push(input); return create ? create(input) : { id: "created-home", cwd: input.cwd }; };
   store.sendComposerInput = async (sessionId, text, mentions) => { sends.push({ sessionId, text, mentions }); return true; };
-  store.navigateCreatedSession = id => navigations.push(id);
+  store.navigateCreatedSession = (id, info) => {
+    if (info) store.sessionInfoRequest = { sessionId: id, kind: info };
+    navigations.push(id);
+  };
   store.setNewSessionCwd = path => { store.newSessionCwd = path; };
   const render = componentFixture(() => NewSessionForm({}));
   const update = () => {
@@ -587,6 +590,77 @@ async function withNewForm({ saved = "", cwd, sessions = [], meta = { defaultCwd
   }
 }
 const finishNewCreate = () => new Promise(resolve => setImmediate(resolve));
+
+await t("新建页：冷启动可打开插件/MCP，先建空会话并保留首条消息与附件，不发给模型", async () => {
+  const oldDocument = globalThis.document;
+  globalThis.document = { addEventListener() {}, removeEventListener() {} };
+  try {
+    for (const [name, kind] of [["plugin", "plugins"], ["mcp", "mcp"]]) {
+      await withNewForm({ cwd: "/project", meta: { drivers: { claude: { mentions: true } }, capabilities: {} } }, async f => {
+        const attachment = { id: "fixture-file", source: "upload", status: "ready", name: "file.txt", path: "/fixture/file.txt" };
+        const input = treeFind(f.update(), node => node.type === "input" && node.props.type === "file");
+        const oldFetch = globalThis.fetch;
+        globalThis.fetch = async (url, init) => {
+          const parsed = new URL(String(url), "http://fixture");
+          assert.equal(parsed.pathname, "/api/uploads");
+          assert.equal(parsed.searchParams.get("sessionId"), "created-home");
+          assert.equal(init.body, file);
+          return envelope({ path: attachment.path, name: attachment.name });
+        };
+        const file = new Blob(["abc"], { type: "text/plain" });
+        Object.defineProperty(file, "name", { value: "file.txt" });
+        input.props.onChange({ target: { files: [file], value: "file.txt" } });
+        try {
+          f.textarea().props.onChange({ target: { value: "  保留首条消息  " } });
+          treeButtons(f.update()).find(node => node.props.className?.includes("new-slash")).props.onClick();
+          const command = treeButtons(f.update()).find(node => treeFind(node, child => child.props?.className === "cmd-name mono" && child.props.children?.join("") === `/${name}`));
+          assert.ok(command, "没有缓存也有管理入口");
+          command.props.onClick();
+          command.props.onClick();
+          await finishNewCreate();
+          assert.equal(f.calls.length, 1, "重复点击只创建一次");
+          assert.equal(f.calls[0].cwd, "/project");
+          assert.deepEqual(f.sends, []);
+          assert.equal(store.getDraft("created-home"), "  保留首条消息  ");
+          assert.deepEqual(store.sendTextRestore.mentions, [{ type: "file", path: attachment.path, name: attachment.name }]);
+          assert.equal(store.newSessionAttachments.length, 0);
+          assert.deepEqual(store.sessionInfoRequest, { sessionId: "created-home", kind });
+          assert.deepEqual(f.navigations, ["created-home"]);
+        } finally { globalThis.fetch = oldFetch; }
+      });
+    }
+  } finally { globalThis.document = oldDocument; }
+});
+
+await t("新建页：/mcp 补全、Tab 后发送、整行发送打开管理面板；创建失败保留输入", async () => {
+  const oldDocument = globalThis.document;
+  globalThis.document = { addEventListener() {}, removeEventListener() {} };
+  try {
+    for (const mode of ["completion", "tab", "text", "failure"]) await withNewForm({ cwd: "/project",
+      ...(mode === "failure" ? { create: async () => { throw new Error("fixture create failed"); } } : {}),
+    }, async f => {
+      f.textarea().props.onChange({ target: { value: mode === "completion" || mode === "tab" ? "/mc" : "/mcp " } });
+      if (mode === "text" || mode === "failure") f.update().props.onSubmit({ preventDefault() {} });
+      else {
+        f.textarea().props.onKeyDown(key(mode === "tab" ? "Tab" : "Enter"));
+        if (mode === "tab") {
+          assert.equal(f.textarea().props.value, "/mcp ");
+          assert.equal(f.calls.length, 0, "Tab 只填充，不创建会话");
+          f.update().props.onSubmit({ preventDefault() {} });
+        }
+      }
+      await finishNewCreate();
+      assert.deepEqual(f.sends, []);
+      if (mode === "failure") {
+        assert.equal(f.textarea().props.value, "/mcp ");
+        assert.deepEqual(f.navigations, []);
+      } else {
+        assert.deepEqual(store.sessionInfoRequest, { sessionId: "created-home", kind: "mcp" });
+        assert.equal(store.getDraft("created-home"), "");
+      }
+    });
+  } finally { globalThis.document = oldDocument; }
+});
 
 await t("新建页：文件顶栏与文件/文件夹右键引用写入首条消息，保留光标与草稿", async () => {
   await withNewForm({ cwd: "/project", meta: { drivers: { claude: { mentions: true } }, capabilities: {} } }, async f => {

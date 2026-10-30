@@ -94,15 +94,15 @@ export function SlashMenu({ session, commandsSupported, onBrowseCommands, onSide
         <SlashIcon />
       </button>
       {open && (
-        <div className="attach-menu slash-menu" role="menu" aria-label={t("ui.SlashMenu.commands_and_settings")}>
+        <div className="cmd-panel slash-menu" role="menu" aria-label={t("ui.SlashMenu.commands_and_settings")}>
           {session.agent === "codex" && commandsSupported && onCodexCommand && <>
             <div className="slash-group">{t("ui.SlashMenu.codex_commands")}</div>
-            {(commands ?? []).map(command => <button key={command.name} type="button" className="attach-item" role="menuitem"
+            {(commands ?? []).map(command => <button key={command.name} type="button" className="attach-item cmd-item" role="menuitem"
               disabled={!workerReady || (["compact", "review", "new"].includes(command.name) && session.status !== "idle")
                 || (command.name === "review" && !canInsertCommand)
                 || (command.name === "interrupt" && session.status !== "running")}
               title={command.description} onClick={() => { setOpen(false); onCodexCommand(command.name); }}>
-              /{command.name} · {command.description}
+              <span className="cmd-name mono">/{command.name}</span><span className="cmd-desc">{command.description}</span>
             </button>)}
           </>}
           {claude && (

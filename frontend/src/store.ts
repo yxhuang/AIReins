@@ -17,7 +17,7 @@ import type {
   TerminalInfo,
   WorkFileTarget,
 } from "./types";
-import { createSession, deleteSession, fetchCommands, fetchEarlierEvents, fetchFiles, fetchMeta, fetchPages, fetchSessions, fetchSnapshot, releaseSession, type CreateSessionInput } from "./api";
+import { createSession, deleteSession, fetchCommands, fetchEarlierEvents, fetchFiles, fetchMeta, fetchPages, fetchSessions, fetchSnapshot, releaseSession, type CreateSessionInput, type SessionInfoKind } from "./api";
 import { fetchProjectOrder, moveProjectOrder, patchSession } from "./api";
 import { selectSidebarSections } from "./sidebar-sessions";
 import type { CodexResetStatus } from "../../server/codex-resets";
@@ -247,6 +247,8 @@ export class Store {
   drafts = new Map<string, string>();
   /** 新建会话页未发出的附件：File 进不了 localStorage，只在本页内存里跨页面切换保留；文字走 drafts 的 NEW_SESSION_DRAFT_ID */
   newSessionAttachments: Array<Attachment & { file?: File }> = [];
+  /** 新建页准备好会话后，由目标输入框接手打开管理面板。 */
+  sessionInfoRequest: { sessionId: string; kind: SessionInfoKind } | null = null;
   /** 发送被本地拦下的原因（sessionId → 文案：有待决闸门 / 配置切换中）：显示在输入框上方，× 或下次发送尝试清除 */
   sendNotices = new Map<string, string>();
   /** 服务端拒绝后还回输入框的一次性请求（Composer 消费，语义同 fileMentionRequest）；只在草稿仍为空时发布 */
@@ -745,7 +747,8 @@ export class Store {
     this.onHashChange();
   }
 
-  navigateCreatedSession(id: string): void {
+  navigateCreatedSession(id: string, info?: SessionInfoKind): void {
+    if (info) this.sessionInfoRequest = { sessionId: id, kind: info };
     if (this.isMobileNavigation() && this.newSessionOpen) {
       const entry = this.readMobileEntry();
       if (entry?.source?.route.hash === "#/") {
@@ -761,6 +764,14 @@ export class Store {
       this.applyMobileRoute(home);
     }
     this.navigate(id);
+  }
+
+  consumeSessionInfo(sessionId: string): SessionInfoKind | null {
+    if (this.sessionInfoRequest?.sessionId !== sessionId) return null;
+    const { kind } = this.sessionInfoRequest;
+    this.sessionInfoRequest = null;
+    this.notify();
+    return kind;
   }
 
   navigateNew(cwd?: string): void {
@@ -2352,6 +2363,7 @@ export class Store {
     this.configHints.delete(id);
     this.sendNotices.delete(id);
     if (this.sendTextRestore?.sessionId === id) this.sendTextRestore = null;
+    if (this.sessionInfoRequest?.sessionId === id) this.sessionInfoRequest = null;
     for (const [requestId, stashed] of this.sendStash) {
       if (stashed.sessionId === id) this.confirmSend(requestId);
     }

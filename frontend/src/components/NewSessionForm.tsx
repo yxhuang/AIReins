@@ -1,7 +1,7 @@
 import { t } from "../i18n";
 import { useEffect, useRef, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
 import type { AgentKind, ConfigOptionId, DriverConfigOption, SessionRecord } from "../types";
-import type { CreateSessionInput } from "../api";
+import type { CreateSessionInput, SessionInfoKind } from "../api";
 import { NEW_SESSION_DRAFT_ID, store } from "../store";
 import { shallowEqual, useStore } from "../useStore";
 import { ConfigPills, PlusIcon, SendIcon, type MenuGroup } from "./ConfigMenu";
@@ -12,7 +12,7 @@ import { uploadAttachment } from "../api";
 import { AgentIcon } from "./AgentIcon";
 import { attachmentMention, prepareImageForUpload, type Attachment } from "../attachments";
 import { filterCommands, noteCommandUsed } from "../commands";
-import { newSessionCommands } from "../new-session-input";
+import { newSessionCommands, newSessionInfoKind } from "../new-session-input";
 import { appendRefineCommand, refineCommandFor } from "../session-ui";
 import { insertFileMention, planFileMention } from "./FilePanel";
 
@@ -159,7 +159,9 @@ export function NewSessionForm({ children }: { children?: ReactNode }) {
       return false;
     }));
   };
-  const insertCommand = (name: string) => {
+  const insertCommand = (name: string, fillOnly = false) => {
+    const info = newSessionInfoKind(agent, `/${name}`);
+    if (info && !fillOnly) { void submit(info, slashQuery !== null); return; }
     setMessage(`${slashQuery !== null || !message ? "" : `${message}\n`}/${name} `); setSlashMenuOpen(false); setDismissed(true);
     textareaRef.current?.focus();
   };
@@ -169,9 +171,11 @@ export function NewSessionForm({ children }: { children?: ReactNode }) {
     setMessage(appendRefineCommand(textareaRef.current?.value ?? message, refineCommand)); setSlashMenuOpen(false); setDismissed(true);
     textareaRef.current?.focus();
   };
-  const submit = async () => {
+  const submit = async (requestedInfo?: SessionInfoKind, consumeCommand = false) => {
     if (!cwd.trim() || submitting.current) return;
     const text = message.trim();
+    const typedInfo = newSessionInfoKind(agent, text);
+    const info = requestedInfo ?? typedInfo;
     if (agent === "codex" && text.startsWith("/") && (!/^\/review(?:\s|$)/.test(text) || attachments.length > 0)) {
       setError(t("ui.SessionView.unknown_codex_command_or_command_with_attachments")); return;
     }
@@ -205,7 +209,9 @@ export function NewSessionForm({ children }: { children?: ReactNode }) {
         }
       }
       const mentions = uploaded.flatMap(attachment => { const mention = attachmentMention(attachment); return mention ? [mention] : []; });
-      if (text || mentions.length) {
+      if (info) {
+        store.restoreComposerSend(session.id, consumeCommand || typedInfo ? "" : message, mentions);
+      } else if (text || mentions.length) {
         // 启动期间命令表可能尚未到达；复用本次选命令的表，服务端仍负责校验。
         if (!store.commands.get(session.id)?.length && commands.length) store.commands.set(session.id, commands);
         const sent = await store.sendComposerInput(session.id, text, mentions);
@@ -216,7 +222,7 @@ export function NewSessionForm({ children }: { children?: ReactNode }) {
       store.clearDraft(NEW_SESSION_DRAFT_ID);
       for (const attachment of store.newSessionAttachments) if (attachment.previewUrl) URL.revokeObjectURL(attachment.previewUrl);
       store.newSessionAttachments = [];
-      store.navigateCreatedSession(session.id);
+      store.navigateCreatedSession(session.id, info ?? undefined);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -267,7 +273,7 @@ export function NewSessionForm({ children }: { children?: ReactNode }) {
               if (event.key === "ArrowDown" || event.key === "ArrowUp") {
                 event.preventDefault(); setSelectedCommand(value => (value + (event.key === "ArrowDown" ? 1 : -1) + filteredCommands.length) % Math.max(1, filteredCommands.length)); return;
               }
-              if ((event.key === "Enter" || event.key === "Tab") && activeCommand) { event.preventDefault(); insertCommand(activeCommand.name); return; }
+              if ((event.key === "Enter" || event.key === "Tab") && activeCommand) { event.preventDefault(); insertCommand(activeCommand.name, event.key === "Tab"); return; }
             }
             if (event.key !== "Enter" || event.shiftKey) return;
             // 与会话输入框一致：触屏回车换行，Ctrl/⌘+Enter 或发送按钮才提交。
@@ -294,6 +300,7 @@ export function NewSessionForm({ children }: { children?: ReactNode }) {
         {slashOpen && <div className="cmd-panel new-command-panel" role="listbox" aria-label={t("ui.common.slash_commands")}>
           {!filteredCommands.length && <div className="cmd-empty">{t("ui.SessionView.no_matching_commands")}</div>}
           {filteredCommands.map((command, index) => <button key={command.name} type="button" role="option"
+            disabled={!!newSessionInfoKind(agent, `/${command.name}`) && !cwd.trim()}
             aria-selected={command === activeCommand} className={`cmd-item${command === activeCommand ? " selected" : ""}`}
             onMouseEnter={() => setSelectedCommand(index)} onMouseDown={event => event.preventDefault()} onClick={() => insertCommand(command.name)}>
             <span className="cmd-name mono">/{command.name}</span><span className="cmd-desc">{command.description}</span>

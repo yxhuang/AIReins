@@ -53,6 +53,21 @@ globalThis.fetch = async (url, options) => {
   return { json: async () => ({ code: 0, data }) };
 };
 try {
+  for (const kind of ['plugins', 'mcp']) {
+    store.drafts.delete(session.id);
+    store.restoreComposerSend(session.id, 'prepared draft', [{ type: 'file', path: '/fixture/file.txt', name: 'file.txt' }]);
+    store.sessionInfoRequest = { sessionId: session.id, kind };
+    const composer = mount(Composer, { session, dead: false, errored: false }, true);
+    composer.flush();
+    const dialog = find(composer.tree, n => n.type === InfoDialog && n.props.kind === kind);
+    assert.ok(dialog, 'new-session handoff opens ' + kind);
+    assert.equal(store.sessionInfoRequest, null, 'panel request consumed once');
+    assert.equal(store.consumeSessionInfo(session.id), null, 'consumed request cannot reopen the panel');
+    assert.equal(find(composer.tree, n => n.type === 'textarea').props.value, 'prepared draft');
+    assert.ok(find(composer.tree, n => n.props?.className === 'attach-name mono' && n.props.children === 'file.txt'), 'prepared attachment survives composer mount');
+    dialog.props.onClose(); composer.flush();
+    assert.equal(find(composer.tree, n => n.type === InfoDialog), undefined, 'closing a handed-off panel does not reopen it');
+  }
   const command = withSideCommands('claude', store.commands.get(session.id)).find(c => c.name === 'mcp');
   assert.equal(command.argHint, undefined, '/mcp completion should open the local panel immediately');
   let sent = 0; const oldSend = store.sendCommand; store.sendCommand = () => { sent++; return true; };

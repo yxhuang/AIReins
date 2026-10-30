@@ -777,9 +777,7 @@ body.resizing {
 .new-form .composer-box .attach-bar { margin: 16px 16px 0; }
 .new-form .cfg-bar { padding: 4px 12px 8px; gap: 4px; }
 .new-form .cfg-bar .send-btn { width: 36px; height: 36px; }
-.new-form .new-command-panel { bottom: calc(100% + 4px); left: 8px; right: 8px; max-height: 260px; }
 .new-command-panel .cmd-item { width: 100%; border: none; background: transparent; color: var(--text); font: inherit; text-align: left; }
-.new-command-panel .cmd-item.selected { background: var(--chrome); }
 /* 项目选择：内嵌地址栏即工作目录；WSL/Windows 在左下，列表开关在右下，列表默认收起、内部滚动 */
 .new-project-row { min-width: 0; margin: 0; padding: 0; border: 0; }
 .new-project-row .dir-contents { gap: 8px; }
@@ -808,7 +806,7 @@ body.resizing {
   .new-form .cfg-bar .cfg-pills { flex-basis: auto; order: 0; margin-right: 0; }
   .new-form .cfg-bar .cfg-pill { min-height: 44px; }
   .new-form .attach-remove { width: 44px; height: 44px; }
-  .new-command-panel .cmd-item { min-height: 44px; }
+  .cmd-item { min-height: 44px; align-items: center; }
   .new-form .cfg-bar .new-submit { margin-left: auto; }
 }
 @media (pointer: coarse) {
@@ -2109,6 +2107,7 @@ body.resizing {
 
 /* 输入框 + 底栏（胶囊 + 发送）合成一个框，参照 Claude Code VSCode 扩展的输入框 */
 .composer-box {
+  position: relative; /* 「/」菜单锚定在整个输入框上方 */
   container: composer / inline-size;
   display: flex;
   flex-direction: column;
@@ -2160,6 +2159,8 @@ body.resizing {
   gap: 2px;
   padding: 2px 6px 6px;
 }
+/* 「/」菜单与新建页命令列表改相对整个输入框定位，与输入框等宽（Claude 扩展同款） */
+.cfg-bar:has(.slash-menu, .new-command-panel), .attach-menu-wrap:has(> .slash-menu) { position: static; }
 
 .cfg-pills {
   flex: 1;
@@ -2525,13 +2526,11 @@ body.resizing {
 }
 
 /* 「/」菜单：分组小标题、Focus view 开关；查看弹窗复用 .dir-overlay / .dir-dialog */
-.slash-menu { min-width: 220px; max-height: min(68dvh, 540px); overflow-y: auto; }
 .slash-menu a.attach-item { text-decoration: none; }
 .slash-subtitle { display: block; font-size: 13px; color: var(--text-muted); margin-top: 2px; }
 .side-question-form { display: grid; gap: 8px; padding: 10px; font-size: 14px; }
 .side-question-form textarea { width: 100%; min-width: 0; resize: vertical; font: inherit; font-size: 15px; color: var(--text); background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 8px; }
 .side-answer { margin-top: 8px; }
-.slash-group { padding: 6px 8px 2px; font-size: 13px; color: var(--text-muted); }
 .slash-toggle { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .slash-switch {
   position: relative; flex: 0 0 auto; width: 28px; height: 16px; border-radius: 8px;
@@ -2630,7 +2629,7 @@ body.resizing {
 /* 斜杠命令面板：与设置浮层同一套面板语言（冷色，不用暖色） */
 .cmd-panel {
   position: absolute;
-  bottom: calc(100% + 6px);
+  bottom: calc(100% + 8px);
   left: max(16px, (100% - 820px) / 2); /* 与输入框同列 */
   right: max(16px, (100% - 820px) / 2);
   z-index: 20;
@@ -2638,26 +2637,34 @@ body.resizing {
   overflow-y: auto;
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 4px;
+  border-radius: 12px;
+  padding: 6px;
   box-shadow: var(--shadow-pop);
   animation: settings-pop 0.12s ease-out;
+}
+
+/* 「/」菜单与新建页命令列表：在输入框内部，直接贴框的左右边 */
+.slash-menu, .new-form .new-command-panel { left: 0; right: 0; max-height: min(56dvh, 480px); }
+/* 会话「/」动作菜单不铺满：贴输入框左边，窄屏时仍不超出输入框 */
+.slash-menu { right: auto; width: min(320px, 100%); box-sizing: border-box; }
+
+.cmd-item, .slash-menu .attach-item {
+  padding: 7px 10px;
+  border-radius: 8px;
 }
 
 .cmd-item {
   display: flex;
   align-items: baseline;
   gap: 10px;
-  padding: 6px 8px;
-  border-radius: 6px;
   font-size: 13px;
   cursor: pointer;
 }
 
-/* 选中态用冷色 --busy 系（同设置浮层选中项的纪律） */
-.cmd-item.selected {
-  background: var(--surface-sunk);
-  box-shadow: inset 2px 0 0 var(--busy);
+/* 选中/悬停：三家原生都是整行实底高亮，这里用冷色 --busy 淡底，不用竖条 */
+.cmd-item.selected, .slash-menu .attach-item:not(:disabled):hover, .slash-menu .attach-item:focus-visible {
+  background: color-mix(in srgb, var(--busy) 16%, transparent);
+  box-shadow: none;
 }
 
 .cmd-name {
@@ -2693,13 +2700,14 @@ body.resizing {
   color: var(--text-faint);
 }
 
-/* 命令面板分段标签（「最近使用」/「全部命令」）：中性小字，与 settings-group-title 同一语言 */
-.cmd-section {
-  padding: 4px 8px 2px;
+/* 分段标签（「最近使用」/「全部命令」、「/」菜单分组）：中性小字，组间细分隔线 */
+.cmd-section, .slash-group {
+  padding: 8px 10px 4px;
   font-size: 13px;
   letter-spacing: 0.04em;
   color: var(--text-faint);
 }
+.slash-group:not(:first-child) { margin-top: 4px; padding-top: 10px; border-top: 1px solid var(--border); }
 
 /* 已确认命令的参数提示行（argHint） */
 .composer-hint {

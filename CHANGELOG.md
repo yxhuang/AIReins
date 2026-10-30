@@ -4,6 +4,8 @@
 
 ### Fixed
 
+- New Claude conversations offer plugin, MCP and settings panels from the slash menu before the first message. Opening a panel prepares the conversation and preserves unsent text and attachments.
+- The slash menu in a conversation and the command list on the new-session page now open in the same panel style above the input box, with matching rows, section headers and selection highlight.
 - Unconfirmed-message notices wait five seconds before appearing in a centered floating card, avoiding flashes during normal sends while preserving message recovery.
 
 ## 0.3.0 (2026-10-27)
