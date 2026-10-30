@@ -12,6 +12,8 @@ assert.equal(s.pendingMessages('a').length, 1);
 const requestId = frames[0].clientRequestId;
 const refreshed = new Store();
 assert.equal(refreshed.pendingMessages('a')[0].text, 'hello');
+assert.ok(s.pendingMessages('a')[0].sentAt > 0);
+assert.equal(refreshed.pendingMessages('a')[0].sentAt, s.pendingMessages('a')[0].sentAt, 'reload preserves the original send time');
 refreshed.setDraft('a', 'new input');
 assert.equal(refreshed.restorePendingMessage(requestId), false);
 assert.equal(refreshed.getDraft('a'), 'new input');
@@ -67,3 +69,84 @@ const imageRecoveryId = restoredImage.pendingMessages('image-only')[0].id;
 assert.equal(restoredImage.restorePendingMessage(imageRecoveryId),true);
 assert.equal(restoredImage.restorePendingMessage(imageRecoveryId),false,'cannot repeatedly append image attachments');
 assert.equal(new Store().pendingMessages('image-only')[0].mentions[0].path,'/tmp/recover.png','restoring image-only input preserves a durable backup across reload');
+
+// 验证真实组件的延时、确认清理与每条消息独立计时，不等待墙钟时间。
+const { default: React } = await import('react');
+globalThis.React = React;
+const { PendingMessages } = await import('../src/components/PendingMessages.tsx');
+const { store } = await import('../src/store.ts');
+const originalNow = Date.now;
+const originalWindow = globalThis.window;
+let now = 100000;
+const timers = new Map();
+const slots = [];
+let cursor = 0;
+let effect;
+let cleanup;
+const internals = React.__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE;
+const originalDispatcher = internals.H;
+const dispatcher = {
+  useState(initial) {
+    const index = cursor++;
+    if (!(index in slots)) slots[index] = typeof initial === 'function' ? initial() : initial;
+    return [slots[index], value => { slots[index] = typeof value === 'function' ? value(slots[index]) : value; }];
+  },
+  useEffect(callback, deps) {
+    const index = cursor++;
+    if (!slots[index] || !Object.is(slots[index][0], deps[0])) { slots[index] = deps; effect = callback; }
+  },
+  useRef(initial) { const index = cursor++; return slots[index] ??= { current: initial }; },
+  useCallback: fn => fn,
+  useSyncExternalStore: (_subscribe, get) => get(),
+};
+function render(sessionId = 'notice') {
+  cursor = 0; effect = null; internals.H = dispatcher;
+  const tree = PendingMessages({ sessionId });
+  internals.H = originalDispatcher;
+  if (effect) { cleanup?.(); cleanup = effect(); }
+  return tree;
+}
+function advance(ms) {
+  now += ms;
+  for (const [id, timer] of timers) if (timer.at <= now) { timers.delete(id); timer.callback(); }
+}
+try {
+  Date.now = () => now;
+  globalThis.window = {
+    setTimeout(callback, delay) { const id = Symbol(); timers.set(id, { callback, at: now + delay }); return id; },
+    clearTimeout(id) { timers.delete(id); },
+  };
+  store.socket = { readyState: 1, send() {} };
+  assert.equal(render(), null);
+  await store.sendComposerInput('notice', 'normal send');
+  assert.equal(render(), null, 'no notice on send');
+  advance(4999);
+  assert.equal(render(), null, 'no notice before five seconds');
+  store.dismissPendingMessage(store.pendingMessages('notice')[0].id);
+  assert.equal(render(), null);
+  assert.equal(timers.size, 0, 'confirmation before deadline cancels the timer');
+  await store.sendComposerInput('notice', 'slow send');
+  assert.equal(render(), null);
+  advance(5000);
+  assert.equal(render().props.className, 'pending-message-notice');
+  const first = store.pendingMessages('notice')[0].id;
+  await store.sendComposerInput('notice', 'second send');
+  assert.equal(render().props.children[1].length, 1, 'a new send has its own grace period');
+  store.handleFrame({ type: 'ack', action: 'user_message', sessionId: 'notice', clientRequestId: first });
+  assert.equal(render(), null, 'ack hides the notice while the newer send is still within its grace period');
+  advance(5000);
+  assert.ok(render());
+  assert.equal(render('another-session'), null, 'never show a different session backup');
+  assert.ok(render(), 'switching back does not restart the delay');
+  store.dismissPendingMessage(store.pendingMessages('notice')[0].id);
+  assert.equal(render(), null);
+  assert.equal(timers.size, 0);
+  saved.set('workbench-pending-send-legacy', JSON.stringify({ sessionId: 'legacy', text: 'older backup' }));
+  assert.equal(new Store().pendingMessages('legacy')[0].sentAt, 0, 'old backups remain immediately recoverable');
+  console.log('PASS pending notice grace period, independent deadlines, ack cleanup, session isolation and legacy recovery');
+} finally {
+  cleanup?.();
+  Date.now = originalNow;
+  globalThis.window = originalWindow;
+  internals.H = originalDispatcher;
+}

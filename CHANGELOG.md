@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Fixed
+
+- Unconfirmed-message notices wait five seconds before appearing in a centered floating card, avoiding flashes during normal sends while preserving message recovery.
+
 ## 0.3.0 (2026-10-27)
 
 ### Added

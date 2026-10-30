@@ -67,7 +67,7 @@ export const MAX_MENTIONS = 20;
 /** 草稿在 localStorage 的 key 前缀：workbench-draft-<sessionId>。 */
 const DRAFT_STORAGE_PREFIX = "workbench-draft-";
 const PENDING_SEND_PREFIX = "workbench-pending-send-";
-type PendingSend = { sessionId: string; text: string; mentions?: Mention[] };
+type PendingSend = { sessionId: string; text: string; mentions?: Mention[]; sentAt: number };
 /** 新建会话页首条消息的草稿键（会话 id 是 UUID，不会撞上）。 */
 export const NEW_SESSION_DRAFT_ID = "new-session";
 const LAST_SESSION_KEY = "workbench-last-session";
@@ -1972,7 +1972,7 @@ export class Store {
     const clientRequestId = `wb-${globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${++this.nextClientRequestId}-${Math.random()}`}`;
     const sent = this.send({ type: "user_message", sessionId, ...content, clientRequestId });
     if (sent) {
-      const pending = { sessionId, text, ...(mentions?.length ? { mentions: mentions.map(mention => ({ ...mention })) } : {}) };
+      const pending = { sessionId, text, sentAt: Date.now(), ...(mentions?.length ? { mentions: mentions.map(mention => ({ ...mention })) } : {}) };
       this.sendStash.set(clientRequestId, pending);
       try { localStorage.setItem(PENDING_SEND_PREFIX + clientRequestId, JSON.stringify(pending)); } catch { /* 仅内存 */ }
       this.notify();
@@ -2500,7 +2500,8 @@ function readPendingSends(): Map<string, PendingSend> {
         if (!value || typeof value.sessionId !== "string" || typeof value.text !== "string") continue;
         const mentions = Array.isArray(value.mentions) ? value.mentions.filter((item: Mention) => item && typeof item.path === "string" &&
           (item.type === "file" || item.type === "image" && typeof item.mimeType === "string")) : undefined;
-        result.set(key.slice(PENDING_SEND_PREFIX.length), { sessionId: value.sessionId, text: value.text, mentions });
+        const sentAt = typeof value.sentAt === "number" && Number.isFinite(value.sentAt) ? value.sentAt : 0;
+        result.set(key.slice(PENDING_SEND_PREFIX.length), { sessionId: value.sessionId, text: value.text, mentions, sentAt });
       } catch { /* 损坏项不影响其他待确认消息 */ }
     }
   } catch { /* 存储不可用时仅内存 */ }

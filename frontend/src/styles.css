@@ -1007,6 +1007,34 @@ body.resizing {
   color: var(--text-muted);
 }
 
+.pending-message-notice {
+  position: fixed;
+  z-index: 50;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: min(440px, calc(100vw - 32px));
+  max-height: calc(100dvh - 32px);
+  box-sizing: border-box;
+  overflow-y: auto;
+  overflow-wrap: anywhere;
+  padding: 20px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow-pop);
+  color: var(--text);
+  font-size: 14px;
+}
+.pending-message-notice > p { margin: 0; }
+.pending-message-item { margin-top: 12px; }
+.pending-message-item summary { cursor: pointer; color: var(--text-muted); }
+.pending-message-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+
+@media (pointer: coarse) {
+  .pending-message-actions .btn { min-height: 44px; }
+}
+
 /* 会话列表 */
 .session-list {
   list-style: none;
