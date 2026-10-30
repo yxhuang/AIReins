@@ -1,5 +1,5 @@
 import { t } from "../i18n";
-import { useEffect, useRef, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
 import type { AgentKind, ConfigOptionId, DriverConfigOption, SessionRecord } from "../types";
 import type { CreateSessionInput, SessionInfoKind } from "../api";
 import { NEW_SESSION_DRAFT_ID, store } from "../store";
@@ -73,6 +73,21 @@ export function NewSessionForm({ children }: { children?: ReactNode }) {
   const commands = useStore(value => newSessionCommands(agent, cwd, value.sessions, value.commands), shallowEqual);
   const slashQuery = /^[\/、]([^\s]*)$/.exec(message)?.[1] ?? null;
   const slashOpen = !busy && !dismissed && !composing && commands.length > 0 && (slashMenuOpen || slashQuery !== null);
+  const commandPanelRef = useRef<HTMLDivElement>(null);
+  // 命令列表从居中的输入框向上展开；矮视口里上方放不下 480px，高度量到滚动区顶部，超出在列表内滚动。
+  useLayoutEffect(() => {
+    const panel = commandPanelRef.current;
+    if (!slashOpen || !panel) return;
+    const scroller = panel.closest(".welcome-view");
+    const fit = () => panel.style.setProperty("--panel-room",
+      `${Math.max(120, panel.getBoundingClientRect().bottom - (scroller?.getBoundingClientRect().top ?? 0) - 8)}px`);
+    fit();
+    const observer = new ResizeObserver(fit);
+    observer.observe(panel.closest("form") ?? panel);
+    window.addEventListener("resize", fit);
+    scroller?.addEventListener("scroll", fit);
+    return () => { observer.disconnect(); window.removeEventListener("resize", fit); scroller?.removeEventListener("scroll", fit); };
+  }, [slashOpen]);
   const filteredCommands = filterCommands(commands, slashQuery ?? "");
   const activeCommand = filteredCommands[Math.min(selectedCommand, Math.max(0, filteredCommands.length - 1))];
   const attachEnabled = !busy && meta?.drivers[agent]?.mentions === true;
@@ -297,7 +312,7 @@ export function NewSessionForm({ children }: { children?: ReactNode }) {
           aria-label={t("ui.Sidebar.create_and_open")} title={t("ui.Sidebar.create_and_open")} aria-busy={busy}>
           {busy ? <span className="new-send-busy" role="status" aria-label={t("ui.Sidebar.creating")}>…</span> : <SendIcon />}
         </button>
-        {slashOpen && <div className="cmd-panel new-command-panel" role="listbox" aria-label={t("ui.common.slash_commands")}>
+        {slashOpen && <div ref={commandPanelRef} className="cmd-panel new-command-panel" role="listbox" aria-label={t("ui.common.slash_commands")}>
           {!filteredCommands.length && <div className="cmd-empty">{t("ui.SessionView.no_matching_commands")}</div>}
           {filteredCommands.map((command, index) => <button key={command.name} type="button" role="option"
             disabled={!!newSessionInfoKind(agent, `/${command.name}`) && !cwd.trim()}

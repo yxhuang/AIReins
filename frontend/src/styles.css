@@ -2645,6 +2645,7 @@ body.resizing {
 
 /* 「/」菜单与新建页命令列表：在输入框内部，直接贴框的左右边 */
 .slash-menu, .new-form .new-command-panel { left: 0; right: 0; max-height: min(56dvh, 480px); }
+.new-form .new-command-panel { max-height: min(56dvh, 480px, var(--panel-room, 480px)); }
 /* 会话「/」动作菜单不铺满：贴输入框左边，窄屏时仍不超出输入框 */
 .slash-menu { right: auto; width: min(320px, 100%); box-sizing: border-box; }
 
