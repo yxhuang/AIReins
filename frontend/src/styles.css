@@ -1719,8 +1719,9 @@ body.resizing {
 .markdown-code-block .hljs-comment, .markdown-code-block .hljs-quote { color: var(--syntax-comment); }
 .markdown-copy { position: absolute; right: 7px; top: 5px; border: 1px solid var(--border-strong); border-radius: 4px; background: var(--surface); color: var(--text-muted); padding: 2px 8px; cursor: pointer; }
 .markdown-table-scroll { max-width: 100%; overflow-x: auto; margin: 0.7em 0; }
-.markdown-table-scroll table { border-collapse: collapse; width: max-content; min-width: 100%; }
-.markdown-table-scroll th, .markdown-table-scroll td { border: 1px solid var(--border); padding: 4px 8px; text-align: left; }
+/* 表格随消息宽度在单元格内换行；长路径等无空格串也可断开，外层横滚只兜底极窄屏 */
+.markdown-table-scroll table { border-collapse: collapse; width: 100%; }
+.markdown-table-scroll th, .markdown-table-scroll td { border: 1px solid var(--border); padding: 4px 8px; text-align: left; vertical-align: top; overflow-wrap: anywhere; }
 
 /* 流式光标：全站唯一装饰性动画 */
 .cursor {
