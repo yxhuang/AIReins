@@ -241,10 +241,12 @@ export class ClaudeDriver extends BaseDriver {
   private nativeTitlePath(): string | undefined {
     const id = this.reportedNativeSessionId;
     if (!id || !/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(id)) return undefined;
-    let slug = this.cwd.replace(/[^a-zA-Z0-9]/g, "-");
+    // 换目录续接时 Claude 继续写原项目目录下的文件。
+    const cwd = this.nativeCwd ?? this.cwd;
+    let slug = cwd.replace(/[^a-zA-Z0-9]/g, "-");
     if (slug.length > 200) {
       let hash = 0;
-      for (let index = 0; index < this.cwd.length; index++) hash = (hash << 5) - hash + this.cwd.charCodeAt(index) | 0;
+      for (let index = 0; index < cwd.length; index++) hash = (hash << 5) - hash + cwd.charCodeAt(index) | 0;
       slug = `${slug.slice(0, 200)}-${Math.abs(hash).toString(36)}`;
     }
     const root = process.env.WORKBENCH_CLAUDE_HISTORY_DIR

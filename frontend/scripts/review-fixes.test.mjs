@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { transformWithOxc } from "vite";
 import { Store } from "../src/store.ts";
 import { createRenderItemsBuilder } from "../src/render-items.ts";
-import { selectSidebarSections, selectProjectSessions } from "../src/sidebar-sessions.ts";
+import { selectSidebarSections, selectProjectSessions, sessionOrderKey } from "../src/sidebar-sessions.ts";
 import { fetchFiles } from "../src/api.ts";
 
 globalThis.WebSocket = { OPEN: 1 };
@@ -256,6 +256,27 @@ try {
   assert.equal(cleanup, undefined);
   assert.equal(requestsForFiles.length, 3, "防抖未到或面板关闭时不发送请求");
   console.log("✅ file completion: real effect/API signals, query replacement, late abort, close, debounce and unmount");
+  {
+    const at = (id, ms, extra = {}) => ({ ...session(id), lastActivityAt: new Date(now - ms).toISOString(), ...extra });
+    const options = { now, currentId: null, pendingCount: () => 0, expanded: true, searching: false };
+    const order = (list) => selectProjectSessions(list, options).sessions.map(item => item.id);
+    const a = at("a", 1000), b = at("b", 2000), c = at("c", 3000);
+    assert.deepEqual(order([c, a, b]), ["a", "b", "c"], "automatic order stays newest first");
+    const key = sessionOrderKey([a, b], "a");
+    assert.deepEqual(order([a, b, { ...c, orderKey: key, orderActivity: c.lastActivityAt }]), ["c", "a", "b"], "dragged to the top");
+    assert.deepEqual(order([{ ...a, orderKey: sessionOrderKey([b, c], null), orderActivity: a.lastActivityAt }, b, c]), ["b", "c", "a"], "dragged to the bottom");
+    assert.deepEqual(order([a, { ...c, orderKey: sessionOrderKey([a, b], "b"), orderActivity: c.lastActivityAt }, b]), ["a", "c", "b"], "dragged between neighbours");
+    assert.deepEqual(order([a, b, { ...c, orderKey: key, orderActivity: "2020-01-01T00:00:00.000Z" }]), ["a", "b", "c"], "new activity returns to automatic order");
+    const dragged = { ...c, orderKey: key, orderActivity: c.lastActivityAt };
+    assert.equal(sessionOrderKey([dragged, a], "a"), (key + Date.parse(a.lastActivityAt)) / 2, "manual neighbours use their manual position");
+    assert.equal(sessionOrderKey([], null), undefined, "an empty group has no position");
+    const store = new Store();
+    store.sessions = [session("a")];
+    const updated = store.mergeSessionSummary({ ...session("a"), cwd: "/moved", orderKey: 1, seq: 1 }, { ...session("a"), seq: 9 });
+    assert.equal(updated.cwd, "/moved", "a live transcript ahead of the frame must not undo a move");
+    assert.equal(updated.orderKey, 1);
+    assert.equal(updated.seq, 9);
+  }
 } finally {
   globalThis.fetch = originalFetch;
   globalThis.setTimeout = originalSet;

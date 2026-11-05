@@ -18,7 +18,7 @@ import type {
   WorkFileTarget,
 } from "./types";
 import { createSession, deleteSession, fetchCommands, fetchEarlierEvents, fetchFiles, fetchMeta, fetchPages, fetchSessions, fetchSnapshot, releaseSession, type CreateSessionInput, type SessionInfoKind } from "./api";
-import { fetchProjectOrder, moveProjectOrder, patchSession } from "./api";
+import { fetchProjectOrder, moveProjectOrder, moveSession, patchSession } from "./api";
 import { selectSidebarSections } from "./sidebar-sessions";
 import type { CodexResetStatus } from "../../server/codex-resets";
 import { fetchCodexResets, ackCodexReset } from "./api";
@@ -1407,7 +1407,8 @@ export class Store {
         if (this.snapshotGen.get(id) === gen) {
           const live = this.session(id);
           const session = organizationVersion !== this.organizationVersion && live
-            ? { ...snapshot.session, pinned: live.pinned, customTitle: live.customTitle }
+            ? { ...snapshot.session, pinned: live.pinned, customTitle: live.customTitle, cwd: live.cwd, worktree: live.worktree,
+              orderKey: live.orderKey, orderActivity: live.orderActivity }
             : snapshot.session;
           this.applySnapshot(id, session, snapshot.seq, snapshot.events, snapshot.hasMore, snapshot.firstSeq);
           applied = true;
@@ -2295,7 +2296,9 @@ export class Store {
     const summary = live && live.seq > incoming.seq ? live : incoming;
     const organization = preserveOrganization && live ? live : incoming;
     return { ...summary, title: organization.title, nativeTitle: organization.nativeTitle,
-      pinned: organization.pinned, customTitle: organization.customTitle };
+      pinned: organization.pinned, customTitle: organization.customTitle,
+      cwd: organization.cwd, worktree: organization.worktree,
+      orderKey: organization.orderKey, orderActivity: organization.orderActivity };
   }
 
   async refreshProjectOrder(): Promise<void> {
@@ -2310,8 +2313,17 @@ export class Store {
   }
 
   async patchSession(id: string, patch: SessionOrganizationPatch): Promise<void> {
+    await this.applyOrganization(id, () => patchSession(id, patch));
+  }
+
+  /** 跨目录移动；同目录排序走 patchSession。 */
+  async moveSession(id: string, cwd: string, orderKey?: number): Promise<void> {
+    await this.applyOrganization(id, () => moveSession(id, cwd, orderKey));
+  }
+
+  private async applyOrganization(id: string, request: () => Promise<SessionRecord>): Promise<void> {
     const version = this.organizationVersion;
-    const session = await patchSession(id, patch);
+    const session = await request();
     if (this.removed.has(id)) return;
     const live = this.session(id);
     const updated = this.mergeSessionSummary(session, live, version !== this.organizationVersion);

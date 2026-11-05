@@ -1,5 +1,9 @@
+import { randomUUID } from "node:crypto";
+import { readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import type { EventClient } from "./event-stream.js";
 import { sendWs } from "./event-stream.js";
+import type { NativeConversationReader } from "./native-conversation.js";
 import type { SessionRecord } from "./types.js";
 
 export class SessionOrganizationError extends Error {
@@ -9,6 +13,7 @@ export class SessionOrganizationError extends Error {
 export interface SessionOrganizationPatch {
   pinned?: boolean;
   customTitle?: string;
+  orderKey?: number;
 }
 
 function objectFields(value: unknown, allowed: readonly string[]): Record<string, unknown> {
@@ -21,7 +26,7 @@ function objectFields(value: unknown, allowed: readonly string[]): Record<string
 }
 
 export function parseOrganizationPatch(value: unknown): SessionOrganizationPatch {
-  const fields = objectFields(value, ["pinned", "customTitle"]);
+  const fields = objectFields(value, ["pinned", "customTitle", "orderKey"]);
   const patch: SessionOrganizationPatch = {};
   if (Object.hasOwn(fields, "pinned")) {
     if (typeof fields.pinned !== "boolean") throw new SessionOrganizationError("pinned 必须是布尔值");
@@ -32,7 +37,35 @@ export function parseOrganizationPatch(value: unknown): SessionOrganizationPatch
     patch.customTitle = fields.customTitle.trim();
     if ([...patch.customTitle].length > 200) throw new SessionOrganizationError("customTitle 不得超过 200 字符");
   }
+  if (Object.hasOwn(fields, "orderKey")) patch.orderKey = parseOrderKey(fields.orderKey);
   return patch;
+}
+
+function parseOrderKey(value: unknown): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) throw new SessionOrganizationError("orderKey 必须是有限数字");
+  return value;
+}
+
+export function parseSessionMove(value: unknown): { cwd: string; orderKey?: number } {
+  const fields = objectFields(value, ["cwd", "orderKey"]);
+  const cwd = fields.cwd;
+  if (typeof cwd !== "string" || cwd.length > 4096 || !cwd.startsWith("/") || cwd.includes("\0")) {
+    throw new SessionOrganizationError("工作目录必须是 4096 字符以内的绝对路径");
+  }
+  return { cwd, ...(Object.hasOwn(fields, "orderKey") ? { orderKey: parseOrderKey(fields.orderKey) } : {}) };
+}
+
+/** Kimi 不理会 session/resume 的 cwd（实测静默留在旧目录），只有 state.json 决定工作目录；调用前 worker 必须已退出。 */
+export function rebindKimiCwd(reader: NativeConversationReader, record: SessionRecord, cwd: string): void {
+  const wire = reader.transcriptPath(record);
+  if (!wire || !reader.hasArchive(record)) throw new SessionOrganizationError("无法核验 Kimi 原生会话，未移动");
+  const path = join(dirname(dirname(dirname(wire))), "state.json");
+  const state = JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>;
+  if (typeof state.cwd !== "string") throw new SessionOrganizationError("无法核验 Kimi 原生会话，未移动");
+  const temporary = `${path}.aireins-${randomUUID()}`;
+  // wx 不跟随符号链接，也不沿用已有文件的权限。
+  writeFileSync(temporary, JSON.stringify({ ...state, cwd }), { mode: statSync(path).mode & 0o777, flag: "wx" });
+  try { renameSync(temporary, path); } catch (error) { rmSync(temporary, { force: true }); throw error; }
 }
 
 export function parseProjectMove(value: unknown): { path: string; before?: string; after?: string } {

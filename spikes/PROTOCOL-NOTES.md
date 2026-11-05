@@ -791,3 +791,18 @@ side_question 前主回复已完成，回包前另有 `system/control_request_pr
 **验证界限**：没有复现用户真实 SessionStart hook 的首次打开时序；隔离配置的 disabled 初始状态正确。实际 CLI 的授权链接和手动回调已验证，后续重连未成功验证：假 MCP 夹具先误把 JSON-RPC `id:0` 当通知导致超时，修正后又把 HTTP GET 空 body 当 JSON 导致夹具退出；按连续失败限制停止该探针路径，未继续重试。已确认本次启动的 CLI PID 均已退出。当前会话重连后工具列表更新由独立 driver / HTTP / 前端夹具回归覆盖，不宣称 tencent-docs 实服授权或浏览器验收通过。
 
 AIReins 仅开放上述白名单操作；错误与读回状态同时返回，旧 CLI 的 unsupported error 不隐藏，面板始终保留终端 `claude mcp login '<name>'` 兜底（同 cwd 授权后回到当前 worker 重连）。授权/回调响应不写 transcript 或全局配置；CLI 自己保存 OAuth 凭据。未使用 `mcp_clear_auth`，未提供任意控制协议转发。
+
+## 跨目录续接实测（2026-11-05）
+
+版本：Claude Code 2.1.317、Codex 0.166.0、Kimi 2.4.1。全部在隔离的 `CLAUDE_CONFIG_DIR` / `CODEX_HOME` / `KIMI_CODE_HOME` 与临时 cwd 中进行，只复制认证凭据，探针结束即删除。
+
+| CLI | 操作 | 结果 |
+|---|---|---|
+| Claude | 记录在目录 a，从 b 执行 `claude -p --resume <id>` | 成功，读到旧历史，模型报告 cwd 为 b；继续追加到 a 项目目录下的同一 jsonl，新行 `cwd` 为 b，旧行不变 |
+| Claude | 把 jsonl 移到 b 的项目目录后从 b 续接 | 同样成功；AIReins 未采用，因为不需要写原生文件 |
+| Codex | `thread/resume {threadId, cwd:b}` | 响应 `cwd` 与 `thread.cwd` 均为 b，shell `pwd` 为 b，`thread/read.cwd`、sqlite `threads.cwd` 更新为 b，新 `turn_context.cwd` 为 b；rollout 的 `session_meta.cwd` 保持 a |
+| Kimi | `session/resume {sessionId, cwd:b}` | **返回成功但静默留在 a**：shell `pwd` 为 a，文件写进 a；`session/list` 仍为 a |
+| Kimi | `session/fork {sessionId, cwd:b}` | 新会话的 `state.cwd` 与 shell 均为 a，同样不换目录 |
+| Kimi | 改 `state.json` 的 `cwd` 为 b 后 `session/resume` | shell `pwd` 为 b，文件写进 b，`session/list` 显示 b；会话目录仍在 `wd_a_*`，`session_index.jsonl` 的 `workDir` 不变 |
+
+未测：Kimi 自带 TUI 对改写后会话的展示；更旧 CLI 版本的跨目录续接。

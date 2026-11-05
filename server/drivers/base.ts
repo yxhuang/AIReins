@@ -106,6 +106,7 @@ export abstract class BaseDriver implements Driver {
   protected readonly cwd: string;
   protected config: SessionConfig;
   protected readonly resumeSessionId?: string;
+  protected readonly nativeCwd?: string;
   protected readonly callbacks: DriverCallbacks;
   protected stopping = false;
   private processGroup?: { child: ChildProcessWithoutNullStreams; identity: WorkerProcessIdentity };
@@ -115,6 +116,7 @@ export abstract class BaseDriver implements Driver {
     this.cwd = options.cwd;
     this.config = { ...options.config };
     this.resumeSessionId = options.resumeSessionId;
+    this.nativeCwd = options.nativeCwd;
     this.callbacks = options.callbacks;
   }
 

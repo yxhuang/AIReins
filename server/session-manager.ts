@@ -63,7 +63,7 @@ import { parseCodexCommand } from "./codex-commands.js";
 import type { EventPage } from "./event-pages.js";
 import { captureWorkerIdentity, oldWorkerGone, readSystemBootTime } from "./worker-process.js";
 import { hasTerminalWorkerEvidence, rebootProvesWorkerGone } from "./session-recovery.js";
-import { parseProjectMove, parseOrganizationPatch, SessionOrganizationError, type SessionOrganizationFrame } from "./session-organization.js";
+import { parseProjectMove, parseOrganizationPatch, parseSessionMove, rebindKimiCwd, SessionOrganizationError, type SessionOrganizationFrame } from "./session-organization.js";
 
 const RING_SIZE = 1_000;
 const RING_CACHE_MAX_BYTES = 16 * 1024 * 1024;
@@ -99,6 +99,7 @@ export class SessionManager {
   private readonly workers = new Map<string, Driver>();
   private readonly damagedTranscripts = new Set<string>();
   private readonly releases = new Map<string, Promise<unknown>>();
+  private readonly movingSessions = new Set<string>();
   private readonly rings = new Map<string, UnifiedEvent[]>();
   private readonly ringBytes = new Map<string, number>();
   private readonly ringEventBytes = new WeakMap<UnifiedEvent, number>();
@@ -238,9 +239,64 @@ export class SessionManager {
       const worker = this.workers.get(id);
       if (patch.customTitle && worker instanceof CodexDriver) worker.cancelAutomaticTitle();
     }
+    if (patch.orderKey !== undefined) {
+      session.orderKey = patch.orderKey;
+      session.orderActivity = session.lastActivityAt;
+    }
     this.persistRegistry();
     this.organizationUpdated();
     return this.get(id)!;
+  }
+
+  /** 改会话目录：释放 worker，下次发送在新目录续接。不搬原生文件，见 server/README.md。 */
+  async moveSession(id: string, value: unknown): Promise<SessionRecord> {
+    this.assertWritableTranscript(id);
+    const record = this.sessions.get(id);
+    if (!record) throw new SessionOrganizationError(`会话不存在：${id}`, 404, 40401);
+    const { cwd, orderKey } = parseSessionMove(value);
+    const target = normalizeProjectPath(cwd);
+    if (target === normalizeProjectPath(record.worktree?.root ?? record.cwd)) throw new SessionOrganizationError("会话已在该目录");
+    try { this.validateCwd(target); } catch { throw new SessionOrganizationError("目标目录不存在或不是目录"); }
+    const blocker = this.releaseBlocker(id, record, !record.released);
+    if (blocker) throw new SessionBusyError(blocker);
+    if (this.movingSessions.has(id) || this.releases.has(id) || this.startups.has(id) || this.nativeRefreshes.has(id)) {
+      throw new SessionBusyError("会话正在切换配置或续接，请稍候");
+    }
+    if ([...this.sessions.values()].some(other => other.id !== id && other.agent === record.agent
+      && other.nativeSessionId === record.nativeSessionId)) {
+      throw new SessionBusyError("另一条 AIReins 会话引用同一原生历史，请先移除其他引用。");
+    }
+    this.movingSessions.add(id);
+    try {
+      if (!record.released) await this.release(id, "manual");
+      // 释放期间等待的发送可能已开始续接：此时不能再换目录。
+      const resuming = this.releaseBlocker(id, record, false);
+      if (resuming) throw new SessionBusyError(resuming);
+      if (this.workers.has(id) || this.startups.has(id)) throw new SessionBusyError("会话正在切换配置或续接，请稍候");
+      const previous = { ...record };
+      const previousCwd = record.cwd;
+      if (record.agent === "kimi") rebindKimiCwd(this.nativeReader, record, target);
+      else record.nativeCwd ??= record.cwd;
+      record.cwd = target;
+      const worktree = worktreeOf(target);
+      if (worktree) record.worktree = worktree; else delete record.worktree;
+      if (record.agent === "claude") Object.assign(record, claudeEffectiveFields(record.config, this.claudeSettingsResolver(target)));
+      if (orderKey === undefined) { delete record.orderKey; delete record.orderActivity; }
+      else { record.orderKey = orderKey; record.orderActivity = record.lastActivityAt; }
+      try { this.persistRegistry(); } catch (error) {
+        // 注册表没落盘就不能留下已改的 Kimi 原生目录，否则重启后两边分裂。
+        if (record.agent === "kimi") {
+          // 回滚也失败时内存跟 Kimi 留在新目录，靠注册表重试追上。
+          try { rebindKimiCwd(this.nativeReader, record, previousCwd); } catch { this.markRegistryDirty(); throw error; }
+        }
+        for (const key of ["nativeCwd", "worktree", "orderKey", "orderActivity"] as const) delete record[key];
+        Object.assign(record, previous);
+        throw error;
+      }
+      this.registerProject(target);
+      this.organizationUpdated();
+      return this.get(id)!;
+    } finally { this.movingSessions.delete(id); }
   }
 
   moveProject(value: unknown): string[] {
@@ -374,12 +430,16 @@ export class SessionManager {
       ? this.claudeSettingsResolver(cwd)
       : undefined;
     const worktree = worktreeOf(cwd);
+    // 从历史再次续接拖动过的会话：Claude 原生文件仍在最初目录。
+    const nativeCwd = input.resumeSessionId ? [...this.sessions.values()].find(other => other.agent === input.agent
+      && other.nativeSessionId === input.resumeSessionId && other.nativeCwd)?.nativeCwd : undefined;
     const record: SessionRecord = {
       id,
       agent: input.agent,
       agentId: input.agentId || "main",
       cwd,
       ...(worktree ? { worktree } : {}),
+      ...(nativeCwd ? { nativeCwd } : {}),
       status: "starting",
       createdAt: now,
       lastActivityAt: now,
@@ -450,6 +510,7 @@ export class SessionManager {
     worker = this.driverFactory(input.agent, {
       sessionId: id,
       cwd: record.cwd,
+      nativeCwd: record.nativeCwd,
       config,
       resumeSessionId: input.resumeSessionId,
       callbacks,
@@ -798,7 +859,7 @@ export class SessionManager {
 
   async remove(id: string, permanently = false): Promise<SessionRecord | undefined> {
     this.assertWritableTranscript(id);
-    if (this.checkingSessions.has(id) || this.restartingSessions.has(id) || this.nativeRefreshes.has(id)) {
+    if (this.checkingSessions.has(id) || this.restartingSessions.has(id) || this.nativeRefreshes.has(id) || this.movingSessions.has(id)) {
       throw new SessionBusyError("会话正在续接，请稍候再移除");
     }
     const record = this.sessions.get(id);
@@ -967,7 +1028,7 @@ export class SessionManager {
   }
 
   /** 自动释放跳过的原因；null 表示可以释放。手动释放把这些原因转成可读错误。 */
-  private releaseBlocker(id: string, record: SessionRecord): string | null {
+  private releaseBlocker(id: string, record: SessionRecord, requireWorker = true): string | null {
     if (this.stopping) return "AIReins 正在退出";
     if (this.damagedTranscripts.has(id)) return "transcript 损坏，禁止释放";
     if (this.thinkingUpdates.has(id) || this.sideQuestions.has(id)) return "会话正在切换 Thinking 或进行侧问，请稍候";
@@ -978,7 +1039,7 @@ export class SessionManager {
     // 释放会停掉 worker，连带杀掉它的后台任务（委派的 codex 等）
     if (record.backgroundTasks?.length) return `会话还有 ${record.backgroundTasks.length} 个后台任务在运行，结束后才能释放`;
     if (!record.nativeSessionId) return "会话还没有原生会话 id（首轮完成前），无法释放";
-    if (!this.workers.has(id)) return "会话没有活动 worker";
+    if (requireWorker && !this.workers.has(id)) return "会话没有活动 worker";
     return null;
   }
 
@@ -1338,6 +1399,7 @@ export class SessionManager {
     replacement = this.driverFactory(record.agent, {
       sessionId: id,
       cwd: record.cwd,
+      nativeCwd: record.nativeCwd,
       config,
       resumeSessionId: nativeSessionId,
       callbacks,

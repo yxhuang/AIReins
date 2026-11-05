@@ -779,6 +779,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       const compactMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/compact$/);
       const filesMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/files$/);
       const releaseMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/release$/);
+      const moveMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/move$/);
       const infoMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/info\/([a-z]+)$/);
       const pluginMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/plugins$/);
       const mcpMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/mcp$/);
@@ -788,7 +789,12 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       const historyMessagesMatch = url.pathname.match(/^\/api\/history\/([^/]+)\/([^/]+)\/messages$/);
       const pageHealthMatch = url.pathname.match(/^\/api\/pages\/([^/]+)\/health$/);
       const pageProxyMatch = url.pathname.match(/^\/pages\/([^/]+)(\/.*)?$/);
-      if (method === "GET" && pageHealthMatch) {
+      if (method === "POST" && moveMatch) {
+        const session = await manager.moveSession(decodeURIComponent(moveMatch[1]), await readJson(request)).catch((error: unknown) => {
+          throw error instanceof SessionBusyError ? new ApiError(400, 40063, error.message) : error;
+        });
+        await respond(response, 200, 0, "success", { session }, requestId);
+      } else if (method === "GET" && pageHealthMatch) {
         const id = decodeURIComponent(pageHealthMatch[1]);
         const page = pagesById.get(id);
         if (!page) throw new ApiError(404, 40410, `页面不存在：${id}`);

@@ -175,6 +175,11 @@ export interface SessionRecord {
   cwd: string;
   /** cwd 位于 git 链接工作树时，建会话时记下的主仓库与分支；侧栏据此归组 */
   worktree?: { root: string; branch?: string };
+  /** 拖到别的目录后，Claude/Codex 原生记录仍写着的最初目录；AIReins 用它定位原生文件、改写历史显示。 */
+  nativeCwd?: string;
+  /** 手动排序位置，仅在 lastActivityAt 仍等于 orderActivity 时生效；新活动后回到自动排序。 */
+  orderKey?: number;
+  orderActivity?: string;
   status: SessionStatus;
   createdAt: string;
   lastActivityAt: string;
@@ -239,6 +244,7 @@ export interface DriverOptions {
   cwd: string;
   config: SessionConfig;
   resumeSessionId?: string;
+  nativeCwd?: string;
   callbacks: DriverCallbacks;
 }
 

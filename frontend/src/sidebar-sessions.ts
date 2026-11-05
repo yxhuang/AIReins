@@ -109,11 +109,24 @@ export function selectSidebarSections(value: SidebarValue, query = "") {
   return { waiting, pinned: pinned.filter(matches), projects: matchingProjects(projects), olderProjects: matchingProjects(olderProjects) };
 }
 
+/** 手动位置只保留到会话下一次活动，之后回到自动排序。 */
+const sortTime = (session: SessionRecord) => session.orderKey !== undefined && session.orderActivity === session.lastActivityAt
+  ? session.orderKey : activityTime(session);
+
+/** 在 sessions（不含被拖会话）中插到 beforeId 之前的排序键；beforeId 为空表示末尾。 */
+export function sessionOrderKey(sessions: SessionRecord[], beforeId: string | null): number | undefined {
+  const index = beforeId === null ? sessions.length : Math.max(0, sessions.findIndex(session => session.id === beforeId));
+  const above = sessions[index - 1], below = sessions[index];
+  // shortcut: 两邻居时间完全相同（同毫秒活动）时插不进中间；要保证时需改写邻居的位置。
+  if (above && below) return (sortTime(above) + sortTime(below)) / 2;
+  return above ? sortTime(above) - 1 : below ? sortTime(below) + 1 : undefined;
+}
+
 /** 普通会话限前 8 个；工作中/待处理/当前会话豁免，搜索或手动展开时全取。 */
 export function selectProjectSessions(sessions: SessionRecord[], options: Pick<Store, "now" | "currentId" | "pendingCount"> & {
   expanded: boolean; searching: boolean;
 }): { sessions: SessionRecord[]; hiddenCount: number } {
-  const sorted = [...sessions].sort(byActivity);
+  const sorted = [...sessions].sort((a, b) => sortTime(b) - sortTime(a));
   if (options.expanded || options.searching) return { sessions: sorted, hiddenCount: 0 };
   let ordinaryCount = 0;
   const visible = sorted.filter(session => session.id === options.currentId || (session.backgroundTasks?.length ?? 0) > 0

@@ -117,11 +117,14 @@ export interface AskQuestion {
 export interface SessionOrganizationPatch {
   pinned?: boolean;
   customTitle?: string;
+  orderKey?: number;
 }
 
 export interface SessionRecord {
   pinned?: boolean;
   customTitle?: string;
+  orderKey?: number;
+  orderActivity?: string;
   nativeTitle?: string;
   title?: string;
   pendingGateCount?: number;

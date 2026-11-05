@@ -496,6 +496,10 @@ const messages: Record<string, string> = {
   "server.message513": "仓库状态已变化，请重新检查",
   "server.self_update.timeout": "{p0} 执行超时（{p1} 秒），请检查网络或代理后重新检查",
   "server.self_update.push_failed": "本地提交已保留；推送未完成。重新检查后可再次推送，无需重复提交。{p0}",
-  "server.self_update.install_failed": "安装未完成；代码已保留。重新检查后可重试安装。{p0}"
+  "server.self_update.install_failed": "安装未完成；代码已保留。重新检查后可重试安装。{p0}",
+  "server.session_move.order_key": "orderKey 必须是有限数字",
+  "server.session_move.same_directory": "会话已在该目录",
+  "server.session_move.target_missing": "目标目录不存在或不是目录",
+  "server.session_move.kimi_unverified": "无法核验 Kimi 原生会话，未移动",
 };
 export default messages;

@@ -166,6 +166,12 @@ export function patchSession(id: string, patch: SessionOrganizationPatch): Promi
   }).then((data) => data.session);
 }
 
+export function moveSession(id: string, cwd: string, orderKey?: number): Promise<SessionRecord> {
+  return call<{ session: SessionRecord }>(`/api/sessions/${encodeURIComponent(id)}/move`, {
+    method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ cwd, orderKey }),
+  }).then((data) => data.session);
+}
+
 export function fetchProjectOrder(): Promise<string[]> {
   return call<{ paths: string[] }>("/api/project-order").then((data) => data.paths);
 }

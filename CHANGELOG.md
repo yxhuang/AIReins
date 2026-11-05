@@ -2,9 +2,25 @@
 
 ## Unreleased
 
+## 0.4.0 (2026-11-05)
+
+### Added
+
+- Drag a conversation within its directory in the sidebar to change its position; new activity returns it to the automatic order. The row menu offers Move up and Move down.
+- Drag a conversation onto another directory to continue it there. Claude and Codex keep their native records in place and start using the new directory on the next message; Kimi's session state is updated to the new directory. Conversation history shows the new directory.
+
+### Changed
+
+- Markdown tables fill the message width and wrap long cell contents, including paths. Code blocks keep horizontal scrolling.
+- Mobile dark-mode toolbars use clearer button surfaces and adjusted spacing.
+- Long streaming responses use plain text while generating and render the full Markdown when complete, reducing work during large replies.
+
 ### Fixed
 
+- Pending messages, approvals and questions recover after send errors or disconnections without silently resending or overwriting newer drafts. Unconfirmed inputs remain available for review, including image-only messages.
+- History, file, terminal and dispatch views offer local retry controls after loading failures. Dialogs keep keyboard focus inside and return it to the opener when closed.
 - New Claude conversations offer plugin, MCP and settings panels from the slash menu before the first message. Opening a panel prepares the conversation and preserves unsent text and attachments.
+- New-conversation command panels fit the available height and scroll within short windows.
 - The slash menu in a conversation and the command list on the new-session page now open in the same panel style above the input box, with matching rows, section headers and selection highlight.
 - Unconfirmed-message notices wait five seconds before appearing in a centered floating card, avoiding flashes during normal sends while preserving message recovery.
 

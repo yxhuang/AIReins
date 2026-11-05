@@ -104,17 +104,27 @@ AI 越来越能干，能自己读代码、改文件、跑命令，一口气做�
 
 本机浏览器直连 `127.0.0.1`；其他设备先加入你的 tailnet，再经 Tailscale Serve 转发到 AIReins 的远程入口，由它做 Host/Origin 检查并只放行白名单里的 Tailscale 登录。AIReins 是一个只监听回环地址的 Node 进程，用各家官方协议驱动三家 CLI：Claude Code 的 stream-json、Codex 的 `codex app-server`、Kimi Code 的 ACP。会话写进各家 CLI 自己的历史，AIReins 只是另一个入口。协议细节见 [spikes/PROTOCOL-NOTES.md](spikes/PROTOCOL-NOTES.md)。
 
+## 最新版本：0.4.0
+
+[发布说明](https://github.com/yxhuang/AIReins/releases/tag/v0.4.0) · [更新日志](CHANGELOG.md)
+
+- 在侧栏目录内调整会话顺序，或把空闲会话拖到另一目录继续工作；手动位置保留到该会话下次活动。手机也可从菜单上移、下移，跨目录移动目前需在桌面拖动。
+- 首条消息发送前即可打开 Claude 插件、MCP 和设置面板，未发送的文字与附件保留在输入框。
+- 补齐未确认输入与视图加载失败的恢复入口，Markdown 表格自动换行，并调整手机工具栏；完整变更见更新日志。
+
+更新后端后需择时运行 `aireins restart`，这会停止所有正在运行的会话；随后刷新已打开的页面。
+
 ## 功能一览
 
 | | |
 |---|---|
-| **三家会话** | Claude Code、Codex、Kimi Code 并排开、随时切换；每个会话单独设模型、推理档位和权限模式；斜杠命令、skills、`@` 文件提及带补全；标题自动生成，可置顶、分组、重命名 |
+| **三家会话** | Claude Code、Codex、Kimi Code 并排开、随时切换；每个会话单独设模型、推理档位和权限模式；斜杠命令、skills、`@` 文件提及带补全；标题自动生成，可置顶、按目录分组、重命名及调整会话顺序 |
 | **审批与提问** | 在任何设备上批准或拒绝工具调用、回答 AI 的提问；所有会话里待处理的事集中呈现 |
-| **中途掌控** | 上下文用量圆环；打断；Claude Code 与 Codex 支持运行中插话改方向和旁路追问，Kimi 运行中的消息排到当前回合结束后发送 |
+| **中途掌控** | 上下文用量圆环，可请求原生压缩；打断；Claude Code 与 Codex 支持运行中插话改方向和旁路追问，Kimi 运行中的消息排到当前回合结束后发送 |
 | **原生历史** | 搜索、按目录筛选三家 CLI 的原生历史并续接；在 AIReins 开的会话，在 CLI 和 VS Code 扩展里也能续接（Claude 会话要出现在历史列表里需设 `claudeCodeEntrypoint`），反过来也一样（Codex 同一线程同一时间只能有一个客户端写入，转到别处续接前先在 AIReins 里释放） |
 | **派单树** | 子代理与委派任务按父子树展开，派单流程图实时显示状态，桌面和手机都能看 |
 | **直达与扩展页** | 「直达」菜单合并仓库 `pages/links.json`（随 git 在各机器间同步）与本机 `~/.workbench/pages/links.json` 的链接；扩展页可嵌入 [AI-Usage](https://github.com/yxhuang/ai-usage) 等本地小工具 |
-| **整台电脑** | 文件面板浏览任意可读目录，带 Git 状态与标签页；在家目录、Windows 盘符和会话目录里预览 Markdown、代码、图片、PDF，就地编辑 UTF-8 文本文件（超过 4 MiB 先确认再加载，上限 32 MiB）；多标签终端（远程入口默认关闭，需显式开启） |
+| **整台电脑** | 文件面板浏览任意可读目录，带 Git 状态与标签页；在家目录、Windows 盘符和会话目录里预览 Markdown、代码、图片、PDF，就地编辑 UTF-8 文本文件（超过 4 MiB 先确认再加载，上限 32 MiB）；文件与终端标签可排序、在主区和侧栏之间移动；多标签终端（远程入口默认关闭，需显式开启） |
 | **手机与发送** | 手机布局可加到主屏当 App；Taildrop 把文件或文件夹（打包 zip）发到你在线的设备 |
 | **多台电脑** | 列出 tailnet 里的其他电脑，一键添加，在一个菜单里切换到它们的 AIReins |
 | **Windows 体验** | 托盘图标和开始菜单快捷方式，以独立应用窗口打开 |
@@ -124,14 +134,16 @@ AI 越来越能干，能自己读代码、改文件、跑命令，一口气做�
 
 | | AIReins | Orca | Claude Code Remote Control | Codex Remote |
 |---|---|---|---|---|
-| 远程控制的对象 | 整台电脑：会话、任意目录、文件、终端 | 工作区/worktree、代理会话、终端、git | Claude Code 会话（每个进程一个，server 模式可多个） | 一台主机上的 Codex 任务 |
-| 代理 | Claude Code、Codex、Kimi | 一个 PTY 中的多种 CLI | Claude Code | Codex |
+| 远程控制的对象 | 整台电脑：会话、任意目录、文件、终端 | 工作区/worktree、代理会话、终端、git | Claude Code 会话（每个交互进程一个，server 模式可多个） | 已连接 Mac/Windows 主机上的项目与聊天；桌面应用也可接入 SSH 项目 |
+| 代理 | Claude Code、Codex、Kimi | 多种 CLI；支持的代理另有聊天界面 | Claude Code | Codex 和 ChatGPT |
 | 网络路径 | 仅你的 tailnet，无 AIReins 或 AI 厂商中转（Tailscale 直连不通时可能经其加密的 DERP 中继） | 默认走 Orca 中继（账号）；可选局域网或 Tailscale | Anthropic 中继 | OpenAI 中继 |
 | 手机客户端 | Web 应用 | iOS / Android 应用（beta） | Claude 应用或 claude.ai | ChatGPT 应用 |
-| 运行形态 | 一个 Node 进程 + 浏览器 | 桌面应用（必须保持打开） | 本机 `claude` 进程（必须保持运行） | 桌面应用 |
+| 运行形态 | 一个 Node 进程 + 浏览器 | 桌面应用（必须保持打开） | 本机 `claude` 进程（必须保持运行） | 主机上的 ChatGPT 桌面应用（必须保持打开） |
 | 适合 | 一个人从任何地方用自己的一台电脑 | 在并行 worktree 中跑多个代理 | 在 Claude 应用里接着用 Claude Code 会话 | 在 ChatGPT 应用中的 Codex 用户 |
 
-<!-- Comparison facts collected 2026-10-12, re-checked 2026-10-17; re-check before each release. -->
+对比于 2026-11-05 按官方 [Orca 手机指南](https://www.onorca.dev/docs/mobile)、[Claude Remote Control 指南](https://code.claude.com/docs/en/remote-control)及 [ChatGPT 远程连接指南](https://learn.chatgpt.com/docs/remote-connections)核对；具体可用性可能受服务商灰度开放和订阅方案影响。
+
+<!-- 每次发布前重新核对以上对比来源。 -->
 
 ## 跑起来
 

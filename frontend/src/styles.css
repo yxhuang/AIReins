@@ -1146,6 +1146,9 @@ body.resizing {
 .sidebar-project { list-style: none; }
 .project-header { display: flex; align-items: center; gap: 2px; padding-top: 4px; }
 .project-header[draggable="true"] { cursor: grab; }
+.session-drop-before { box-shadow: inset 0 2px 0 var(--busy); }
+.session-drop-after { box-shadow: inset 0 -2px 0 var(--busy); }
+.project-drop-target > .project-header { box-shadow: inset 0 0 0 2px var(--busy); border-radius: 6px; }
 .project-toggle {
   flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: 6px;
   border: 0; border-radius: 6px; background: transparent; color: color-mix(in srgb, var(--text) 50%, var(--text-muted));

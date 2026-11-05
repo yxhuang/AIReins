@@ -102,17 +102,27 @@ My daily setup is one agent leading and several executing:
 
 A browser on the same computer connects to `127.0.0.1` directly. Other devices join your tailnet first, then Tailscale Serve forwards them to AIReins' remote entry, which checks Host/Origin and admits only allowlisted Tailscale logins. AIReins is a single Node process listening on loopback only. It drives the three CLIs through their official protocols: Claude Code's stream-json, Codex's `codex app-server` and Kimi Code's ACP. Sessions are written to each CLI's own history; AIReins is just another way in. Protocol details are in [spikes/PROTOCOL-NOTES.md](spikes/PROTOCOL-NOTES.md).
 
+## Latest release: 0.4.0
+
+[Release notes](https://github.com/yxhuang/AIReins/releases/tag/v0.4.0) · [Changelog](CHANGELOG.md)
+
+- Reorder conversations within a sidebar directory, or drag an idle conversation to another directory and continue there. New activity returns a manually positioned conversation to automatic ordering. Move up/down actions also work on phones; moving between directories currently requires desktop dragging.
+- Open Claude plugin, MCP and settings panels before the first message; unsent text and attachments stay in the composer.
+- Recover unconfirmed inputs and failed view loads, read wrapping Markdown tables, and use the revised mobile toolbars. See the changelog for the full list.
+
+Updating backend code requires `aireins restart`, which stops all running sessions; choose the time, then refresh open pages.
+
 ## Features
 
 | | |
 |---|---|
-| **Three agents** | Claude Code, Codex and Kimi Code side by side; per-session model, reasoning effort and permission mode; slash commands, skills and `@` file mentions with completion; automatic titles, pinning, groups and renaming |
+| **Three agents** | Claude Code, Codex and Kimi Code side by side; per-session model, reasoning effort and permission mode; slash commands, skills and `@` file mentions with completion; automatic titles, pinning, directory grouping, renaming and conversation ordering |
 | **Approvals and questions** | Approve or deny tool calls and answer agent questions from any device; everything pending across sessions in one place |
-| **Control mid-run** | Context-usage ring; interrupt; Claude Code and Codex also let you steer a running turn and ask side questions, while Kimi queues messages until the current turn ends |
+| **Control mid-run** | Context-usage ring with native compaction; interrupt; Claude Code and Codex also let you steer a running turn and ask side questions, while Kimi queues messages until the current turn ends |
 | **Native history** | Search and filter the three CLIs' native history by folder and resume sessions; sessions started in AIReins resume in the CLIs and the VS Code extension (Claude sessions appear in the history lists only with `claudeCodeEntrypoint` set), and the other way round (a Codex thread allows one writer at a time, so release it in AIReins before resuming elsewhere) |
 | **Dispatch tree** | Sub-agents and delegated runs as a parent/child tree, with a live dispatch flow chart, on desktop and phone |
 | **Quick links and pages** | The Quick links menu merges the repository `pages/links.json` (synced across machines by git) with this machine's `~/.workbench/pages/links.json`; extension pages can embed local tools such as [AI-Usage](https://github.com/yxhuang/ai-usage) |
-| **The whole computer** | File panel for any readable folder, with Git status and tabs; inside your home folder, Windows drives and the session folder, preview Markdown, code, images and PDF and edit UTF-8 text in place (files over 4 MiB load after a confirmation, up to 32 MiB); multi-tab terminal (off on the remote entry until you enable it) |
+| **The whole computer** | File panel for any readable folder, with Git status and tabs; inside your home folder, Windows drives and the session folder, preview Markdown, code, images and PDF and edit UTF-8 text in place (files over 4 MiB load after a confirmation, up to 32 MiB); file and terminal tabs that can be reordered and moved between the main and side panes; multi-tab terminal (off on the remote entry until you enable it) |
 | **Phone and Taildrop** | Phone layout installable as a home-screen app; send files or folders (zipped) to your online Taildrop devices |
 | **Several computers** | Lists the other computers on your tailnet; add one with a click and switch between their AIReins instances from one menu |
 | **On Windows** | Tray icon and Start-menu shortcut that open AIReins in its own app window |
@@ -122,14 +132,16 @@ A browser on the same computer connects to `127.0.0.1` directly. Other devices j
 
 | | AIReins | Orca | Claude Code Remote Control | Codex Remote |
 |---|---|---|---|---|
-| What you control remotely | The whole computer: sessions, any folder, files, terminal | Workspaces/worktrees, agent sessions, terminal, git | Claude Code sessions (one per process, or several in server mode) | Codex tasks on a host |
-| Agents | Claude Code, Codex, Kimi | Many CLIs in a PTY | Claude Code | Codex |
+| What you control remotely | The whole computer: sessions, any folder, files, terminal | Workspaces/worktrees, agent sessions, terminal, git | Claude Code sessions (one per interactive process, or several in server mode) | Projects and chats on connected Mac/Windows hosts; SSH projects via the desktop app |
+| Agents | Claude Code, Codex, Kimi | Multiple CLIs; chat UI for supported agents | Claude Code | Codex and ChatGPT |
 | Network path | Your tailnet only; no AIReins or AI-vendor relay (Tailscale may fall back to its encrypted DERP relays) | Orca relay (account) by default; LAN or Tailscale optional | Anthropic relay | OpenAI relay |
 | Phone client | Web app | iOS / Android apps (beta) | Claude app or claude.ai | ChatGPT app |
-| Runs as | One Node process + browser | Desktop app (must stay open) | A local `claude` process (must keep running) | Desktop app |
+| Runs as | One Node process + browser | Desktop app (must stay open) | A local `claude` process (must keep running) | ChatGPT desktop app on the host (must stay open) |
 | Best for | One person using one computer from anywhere | Running many agents in parallel worktrees | Continuing Claude Code sessions from the Claude app | Codex users in the ChatGPT app |
 
-<!-- Comparison facts collected 2026-10-12, re-checked 2026-10-17; re-check before each release. -->
+Comparison checked 2026-11-05 against the official [Orca mobile guide](https://www.onorca.dev/docs/mobile), [Claude Remote Control guide](https://code.claude.com/docs/en/remote-control) and [ChatGPT remote connections guide](https://learn.chatgpt.com/docs/remote-connections). Availability may depend on the provider's rollout and plan.
+
+<!-- Re-check the linked comparison sources before each release. -->
 
 ## Get started
 

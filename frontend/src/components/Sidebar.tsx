@@ -5,7 +5,7 @@ import { relativeTime, relativeTimeShort, sessionTitle } from "../format";
 import { AgentIcon } from "./AgentIcon";
 import { isInlineSvg } from "../pages";
 import { store, type Store } from "../store";
-import { projectDisplayPath, selectSidebarSections, selectProjectSessions, sidebarStatusDot } from "../sidebar-sessions";
+import { projectDisplayPath, selectSidebarSections, selectProjectSessions, sessionOrderKey, sidebarStatusDot } from "../sidebar-sessions";
 import { lockSidebarSwipe, normalizeSidebarTitle, sidebarSwipeOffset } from "../sidebar-menu";
 import { SidebarActionMenu, type SidebarMenuItem } from "./SidebarActionMenu";
 import { useStore } from "../useStore";
@@ -82,6 +82,9 @@ export function Sidebar({ collapsed, onToggle, returnToSession = false, mobileAc
   const draggedPath = useRef<string | null>(null);
   const dropBeforePath = useRef<string | null>(null);
   const [orderError, setOrderError] = useState<string | null>(null);
+  const draggedSession = useRef<{ id: string; path: string } | null>(null);
+  const dragPointer = useRef<string | null>(null);
+  const [sessionDrop, setSessionDrop] = useState<{ path: string; before: string | null } | null>(null);
   const [canDrag, setCanDrag] = useState(false);
   useEffect(() => {
     const media = window.matchMedia("(min-width: 721px)");
@@ -164,8 +167,58 @@ export function Sidebar({ collapsed, onToggle, returnToSession = false, mobileAc
     0,
   );
 
-  const renderRow = (session: SessionRecord) => (
-    <li key={session.id}>
+  const markSessionDrop = (event: DragEvent, path: string, before: string | null) => {
+    event.preventDefault(); event.dataTransfer.dropEffect = "move";
+    setSessionDrop(previous => previous?.path === path && previous.before === before ? previous : { path, before });
+  };
+  const endSessionDrag = () => { draggedSession.current = null; setSessionDrop(null); };
+  /** 同目录只改排序键；跨目录走移动接口。 */
+  const placeSession = async (id: string, from: string, path: string, sessions: SessionRecord[], before: string | null) => {
+    if (before === id) return;
+    const orderKey = sessionOrderKey(sessions.filter(session => session.id !== id), before);
+    setOrderError(null);
+    try {
+      if (from !== path) { await store.moveSession(id, path, orderKey); setProjectFold(path, "open"); }
+      else if (orderKey !== undefined) await store.patchSession(id, { orderKey });
+    } catch (error) { setOrderError(error instanceof Error ? error.message : String(error)); }
+  };
+  const latestPlaceSession = useRef(placeSession);
+  latestPlaceSession.current = placeSession;
+  // 菜单上移/下移：回调保持稳定，别让 SessionRow 的 memo 失效。
+  const sessionGroups = useRef(new Map<string, { path: string; sessions: SessionRecord[] }>());
+  const moveSessionBy = useCallback(async (id: string, step: -1 | 1) => {
+    const group = sessionGroups.current.get(id);
+    if (!group) return;
+    const index = group.sessions.findIndex(session => session.id === id);
+    await latestPlaceSession.current(id, group.path, group.path, group.sessions, group.sessions[index + (step < 0 ? -1 : 2)]?.id ?? null);
+  }, []);
+  const dropSession = (path: string, sessions: SessionRecord[]) => {
+    const dragged = draggedSession.current, target = sessionDrop;
+    endSessionDrag();
+    if (dragged && target?.path === path) void placeSession(dragged.id, dragged.path, path, sessions, target.before);
+  };
+
+  const renderRow = (session: SessionRecord, group?: { path: string; sessions: SessionRecord[] }) => {
+    const index = group?.sessions.indexOf(session) ?? -1;
+    const next = group?.sessions[index + 1]?.id ?? null;
+    const dropHere = group && sessionDrop?.path === group.path;
+    if (group) sessionGroups.current.set(session.id, group);
+    return <li key={session.id}
+      className={dropHere && sessionDrop.before === session.id ? "session-drop-before" : dropHere && sessionDrop.before === null && !next ? "session-drop-after" : undefined}
+      draggable={group && canDrag && !searching ? true : undefined}
+      onPointerDown={group ? (event) => { dragPointer.current = event.pointerType; } : undefined}
+      onDragStart={group ? (event) => {
+        if (dragPointer.current === "touch") { event.preventDefault(); return; }
+        draggedSession.current = { id: session.id, path: group.path };
+        event.dataTransfer.effectAllowed = "move"; event.dataTransfer.setData("text/plain", session.id);
+      } : undefined}
+      onDragOver={group ? (event) => {
+        if (!draggedSession.current) return;
+        event.stopPropagation();
+        const rect = event.currentTarget.getBoundingClientRect();
+        markSessionDrop(event, group.path, event.clientY < rect.top + rect.height / 2 ? session.id : next);
+      } : undefined}
+      onDragEnd={group ? endSessionDrag : undefined}>
       <SessionRow
         session={session}
         pending={store.pendingCountFor(session)}
@@ -174,9 +227,12 @@ export function Sidebar({ collapsed, onToggle, returnToSession = false, mobileAc
         windowsPaths={meta?.capabilities.windowsPaths === true}
         swipeOpen={swipedId === session.id}
         onSwipeChange={setSwipedId}
+        canMoveUp={index > 0}
+        canMoveDown={next !== null}
+        onMove={moveSessionBy}
       />
-    </li>
-  );
+    </li>;
+  };
 
   const renderProject = (project: typeof projects[number], index: number, sortable = true) => {
     const working = project.sessions.some(session => session.id === currentId
@@ -184,10 +240,11 @@ export function Sidebar({ collapsed, onToggle, returnToSession = false, mobileAc
     const folded = !searching && (projectFolds[project.path] ? projectFolds[project.path] === "closed" : !working);
     const expanded = expandedProjects.has(project.path);
     const visible = selectProjectSessions(project.sessions, { now, currentId, pendingCount: store.pendingCount.bind(store), expanded, searching });
-    return <li key={project.path} className="sidebar-project" data-project-path={project.path}
-      onDragOver={sortable ? (event) => {
+    return <li key={project.path} className={`sidebar-project${sessionDrop?.path === project.path && sessionDrop.before === (visible.sessions[0]?.id ?? null) ? " project-drop-target" : ""}`} data-project-path={project.path}
+      onDragOver={(event) => {
+        if (draggedSession.current) { markSessionDrop(event, project.path, visible.sessions[0]?.id ?? null); return; }
         const path = draggedPath.current;
-        if (!path) return;
+        if (!sortable || !path) return;
         event.preventDefault(); event.dataTransfer.dropEffect = "move";
         if (path === project.path) return;
         dropBeforePath.current = project.path;
@@ -196,8 +253,12 @@ export function Sidebar({ collapsed, onToggle, returnToSession = false, mobileAc
           next.splice(next.indexOf(project.path), 0, path);
           return next;
         });
-      } : undefined}
-      onDrop={sortable ? (event) => { event.preventDefault(); if (dropBeforePath.current) void dropProject(dropBeforePath.current); } : undefined}>
+      }}
+      onDrop={(event) => {
+        event.preventDefault();
+        if (draggedSession.current) dropSession(project.path, visible.sessions);
+        else if (sortable && dropBeforePath.current) void dropProject(dropBeforePath.current);
+      }}>
       <ProjectHeader project={project} collapsed={folded} now={now}
         windowsPaths={meta?.capabilities.windowsPaths === true}
         previous={sortable ? projects[index - 1]?.path : undefined} next={sortable ? projects[index + 1]?.path : undefined}
@@ -208,7 +269,7 @@ export function Sidebar({ collapsed, onToggle, returnToSession = false, mobileAc
           event.dataTransfer.effectAllowed = "move"; event.dataTransfer.setData("text/plain", project.path);
         }}
         onDragEnd={() => { if (draggedPath.current) { draggedPath.current = null; dropBeforePath.current = null; setPreviewPaths(null); } }} />
-      {!folded && <ul className="session-list project-session-list" id={`project-${encodeURIComponent(project.path)}`}>{visible.sessions.map(renderRow)}
+      {!folded && <ul className="session-list project-session-list" id={`project-${encodeURIComponent(project.path)}`}>{visible.sessions.map(session => renderRow(session, { path: project.path, sessions: visible.sessions }))}
         {!searching && (visible.hiddenCount > 0 || expanded) && <li>
           <button type="button" className="project-show-more" aria-expanded={expanded} onClick={() => setExpandedProjects(previous => {
             const next = new Set(previous);
@@ -299,9 +360,9 @@ export function Sidebar({ collapsed, onToggle, returnToSession = false, mobileAc
                 // 分区标题复用 .page-nav-title 的中性小字语言；暖色仍只出现在行内闸门徽标上
                 <li className="page-nav-title" role="presentation">{t("ui.Sidebar.pending_sentence", { p0: (waiting.length) })}</li>
               )}
-              {waiting.map(renderRow)}
+              {waiting.map(session => renderRow(session))}
               {pinned.length > 0 && <li className="sidebar-section-label" role="presentation"><span>{t("ui.Sidebar.pinned")}</span></li>}
-              {pinned.map(renderRow)}
+              {pinned.map(session => renderRow(session))}
               {projects.map((project, index) => renderProject(project, index))}
               {olderProjects.length > 0 && <li className="sidebar-older-projects">
                 <button type="button" className="project-toggle older-projects-toggle"
@@ -495,6 +556,9 @@ const SessionRow = memo(function SessionRow({
   windowsPaths,
   swipeOpen,
   onSwipeChange,
+  canMoveUp,
+  canMoveDown,
+  onMove,
 }: {
   session: SessionRecord;
   pending: number;
@@ -503,6 +567,9 @@ const SessionRow = memo(function SessionRow({
   windowsPaths: boolean;
   swipeOpen: boolean;
   onSwipeChange: (id: string | null) => void;
+  canMoveUp: boolean;
+  canMoveDown: boolean;
+  onMove: (id: string, step: -1 | 1) => Promise<void>;
 }) {
   const [confirming, setConfirming] = useState(false);
   const [permanently, setPermanently] = useState(false);
@@ -691,6 +758,10 @@ const SessionRow = memo(function SessionRow({
     { id: "pin", label: session.pinned ? t("ui.Sidebar.unpin") : t("ui.Sidebar.pin"), icon: "pin", shortcut: "P",
       onSelect: () => void runMenuAction(() => store.patchSession(session.id, { pinned: !session.pinned })) },
     { id: "rename", label: t("ui.Sidebar.rename"), icon: "rename", shortcut: "R", onSelect: startRename },
+    ...(canMoveUp || canMoveDown ? [
+      { id: "move-up", label: t("ui.Sidebar.move_up"), icon: "up" as const, disabled: !canMoveUp, onSelect: () => { if (canMoveUp) void runMenuAction(() => onMove(session.id, -1)); } },
+      { id: "move-down", label: t("ui.Sidebar.move_down"), icon: "down" as const, disabled: !canMoveDown, onSelect: () => { if (canMoveDown) void runMenuAction(() => onMove(session.id, 1)); } },
+    ] : []),
     { id: "delete", label: t("ui.common.remove"), icon: "delete", shortcut: "D", divider: true, onSelect: () => beginConfirm() },
     ...(session.agent === "claude" ? [] : [{ id: "permanent-delete", label: t("ui.common.permanently_delete"), icon: "delete" as const, danger: true, onSelect: () => beginConfirm(true) }]),
   ];

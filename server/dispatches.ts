@@ -280,7 +280,7 @@ export async function readClaudeSubagent(path: string): Promise<ClaudeSubagentSn
   } catch { return null; }
 }
 
-export interface ClaudeParentSession { cwd: string | null; nativeSessionId?: string }
+export interface ClaudeParentSession { cwd: string | null; nativeCwd?: string; nativeSessionId?: string }
 export type ClaudeSessionProvider = () => readonly ClaudeParentSession[] | Promise<readonly ClaudeParentSession[]>;
 export interface DispatchParentSession extends ClaudeParentSession {
   id?: string;
@@ -300,9 +300,11 @@ export function createClaudeSubagentReader(read = readClaudeSubagent,
     let canonicalRoot: string;
     try { canonicalRoot = await realpath(projectsRoot); } catch { return []; }
     const candidates = new Map<string, string | null>();
+    const movedParents = new Set<string>();
     for (const session of sessions) {
       if (session.nativeSessionId && NATIVE_ID.test(session.nativeSessionId)) {
-        const cwd = stringValue(session.cwd);
+        const cwd = stringValue(session.nativeCwd ?? session.cwd);
+        if (session.nativeCwd) movedParents.add(session.nativeSessionId);
         if (cwd || !candidates.has(session.nativeSessionId)) candidates.set(session.nativeSessionId, cwd);
       }
     }
@@ -388,7 +390,8 @@ export function createClaudeSubagentReader(read = readClaudeSubagent,
                 cache.set(path, snapshot);
               }
               const value = await snapshot.value;
-              if (!value || value.agent.parentSessionId !== parentSessionId || value.agent.cwd !== cwd) continue;
+              // 拖到别的目录后新派的子代理记录新 cwd，父记录头部仍是最初目录。
+              if (!value || value.agent.parentSessionId !== parentSessionId || (value.agent.cwd !== cwd && !movedParents.has(parentSessionId))) continue;
               const agent = value.agent;
               const last = Date.parse(agent.lastActivityAt);
               if (!Number.isFinite(last) || last > now || last < now - CLAUDE_WINDOW_MS) continue;
@@ -400,7 +403,7 @@ export function createClaudeSubagentReader(read = readClaudeSubagent,
                   || (b.startedAt ?? "").localeCompare(a.startedAt ?? "") || b.runId.localeCompare(a.runId))[0];
               const started = Date.parse(agent.startedAt ?? "");
               output.set(runId, {
-                runId, tool: "claude", name: agent.name, cwd, model: agent.model, effort: null, agentType: agent.agentType, native: true,
+                runId, tool: "claude", name: agent.name, cwd: agent.cwd, model: agent.model, effort: null, agentType: agent.agentType, native: true,
                 status, startedAt: agent.startedAt, endedAt: status === "OK" || status === "TOOL_FAIL" ? agent.lastActivityAt : null,
                 elapsedS: Number.isFinite(started) ? Math.max(0, ((status === "running" ? now : last) - started) / 1000) : null,
                 exit: null, files: null, session: agent.agentId, promptHead: agent.promptHead,
@@ -823,7 +826,7 @@ async function allClaudeSubagents(root: string, sessions: readonly ClaudeParentS
   const unique = new Map<string, ClaudeParentSession>();
   for (const session of sessions) {
     if (!session.nativeSessionId || !NATIVE_ID.test(session.nativeSessionId)) continue;
-    const value = { cwd: stringValue(session.cwd), nativeSessionId: session.nativeSessionId };
+    const value = { cwd: stringValue(session.cwd), nativeCwd: session.nativeCwd, nativeSessionId: session.nativeSessionId };
     unique.set(JSON.stringify(value), value);
   }
   const candidates = [...unique.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([, value]) => value);

@@ -175,6 +175,7 @@ export class HistoryIndex {
   private readonly candidatesById = new Map<string, Candidate>();
   private registryFingerprint = "";
   private workbenchSessionIds = new Set<string>();
+  private movedCwds = new Map<string, string>();
 
   constructor(options: HistoryIndexOptions = {}) {
     const workbenchHome = process.env.WORKBENCH_HOME || join(homedir(), ".workbench");
@@ -241,7 +242,7 @@ export class HistoryIndex {
         empty += 1;
         continue;
       }
-      const decorated = decorateSource(session, workbenchIds);
+      const decorated = decorateSource(session, workbenchIds, this.movedCwds);
       const dispatch = dispatches.get(session.nativeSessionId);
       if (dispatch) decorated.dispatch = dispatch;
       if (q && !`${decorated.title}\n${decorated.cwd}`.toLocaleLowerCase().includes(q)) continue;
@@ -305,7 +306,7 @@ export class HistoryIndex {
     const session = await this.parseCandidate(candidate);
     if (!session) return undefined;
     const workbenchIds = await this.loadWorkbenchSessionIds();
-    const decorated = decorateSource(session, workbenchIds);
+    const decorated = decorateSource(session, workbenchIds, this.movedCwds);
     const path = agent === "kimi"
       ? join(dirname(candidate.path), "agents", "main", "wire.jsonl")
       : candidate.path;
@@ -579,17 +580,20 @@ export class HistoryIndex {
     } catch {
       this.registryFingerprint = "missing";
       this.workbenchSessionIds = new Set();
+      this.movedCwds = new Map();
       return this.workbenchSessionIds;
     }
     const fingerprint = `${metadata.mtimeMs}:${metadata.size}`;
     if (fingerprint === this.registryFingerprint) return this.workbenchSessionIds;
     const ids = new Set<string>();
+    const moved = new Map<string, string>();
     try {
       const records = JSON.parse(await readFile(this.roots.workbenchRegistry, "utf8")) as unknown;
       if (Array.isArray(records)) {
         for (const record of records) {
           if (!record || typeof record !== "object") continue;
           const item = record as Record<string, unknown>;
+          if (typeof item.nativeCwd === "string" && typeof item.cwd === "string" && typeof item.nativeSessionId === "string") moved.set(`${item.agent}:${item.nativeSessionId}`, item.cwd);
           // 导入的会话仍属于原来的客户端；注册表只证明工作台新建的会话来源。
           if (AGENTS.includes(item.agent as AgentKind) && typeof item.nativeSessionId === "string" && !item.resumedFrom) {
             ids.add(`${item.agent}:${item.nativeSessionId}`);
@@ -599,6 +603,7 @@ export class HistoryIndex {
     } catch { /* 来源回退失败不影响三家原生历史读取。 */ }
     this.registryFingerprint = fingerprint;
     this.workbenchSessionIds = ids;
+    this.movedCwds = moved;
     return ids;
   }
 }
@@ -632,12 +637,14 @@ function sessionFromCandidate(
   };
 }
 
-function decorateSource(session: HistorySession, workbenchIds: Set<string>): HistorySession {
+function decorateSource(session: HistorySession, workbenchIds: Set<string>, movedCwds: Map<string, string>): HistorySession {
+  const key = `${session.agent}:${session.nativeSessionId}`;
+  const cwd = movedCwds.get(key) ?? session.cwd;
   if ((session.source !== "unknown" && !(session.agent === "claude" && session.source === "interactive"))
-    || !workbenchIds.has(`${session.agent}:${session.nativeSessionId}`)) {
-    return { ...session };
+    || !workbenchIds.has(key)) {
+    return { ...session, cwd };
   }
-  return { ...session, source: "workbench" };
+  return { ...session, cwd, source: "workbench" };
 }
 
 function claudeSource(entrypoint: string): HistorySource {

@@ -496,6 +496,10 @@ const messages: Record<string, string> = {
   "server.message513": "The repository has changed; check again",
   "server.self_update.timeout": "{p0} timed out after {p1, plural, one {# second} other {# seconds}}. Check your network or proxy, then check again",
   "server.self_update.push_failed": "Local commits have been kept; the push did not complete. Check again to push without creating another commit. {p0}",
-  "server.self_update.install_failed": "Installation did not finish; your code is preserved. Check again to retry installation. {p0}"
+  "server.self_update.install_failed": "Installation did not finish; your code is preserved. Check again to retry installation. {p0}",
+  "server.session_move.order_key": "orderKey must be a finite number",
+  "server.session_move.same_directory": "The session is already in this directory",
+  "server.session_move.target_missing": "The target directory does not exist or is not a directory",
+  "server.session_move.kimi_unverified": "Could not verify the native Kimi session; nothing was moved",
 };
 export default messages;
