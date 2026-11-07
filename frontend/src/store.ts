@@ -22,7 +22,7 @@ import { fetchProjectOrder, moveProjectOrder, moveSession, patchSession } from "
 import { selectSidebarSections } from "./sidebar-sessions";
 import type { CodexResetStatus } from "../../server/codex-resets";
 import { fetchCodexResets, ackCodexReset } from "./api";
-import { fetchWorkFile, saveWorkFile } from "./api";
+import { fetchWorkFile, openWorkPathInSystem, saveWorkFile } from "./api";
 import { sessionTitle } from "../../shared/session-title";
 import { extractMentionTokens, stripMentionCandidates } from "./mentions";
 import { partitionPages, type SkippedPage } from "./pages";
@@ -1074,6 +1074,23 @@ export class Store {
       this.setFilesOpen(true);
     }
     this.notify();
+  }
+
+  /** 会话里的文件入口：网页看不了且本机能交给系统时用默认程序打开，其余进预览面板。 */
+  async openFileLink(target: WorkFileTarget): Promise<void> {
+    if (this.meta?.capabilities.systemOpen) {
+      // 能否预览取决于扩展名、大小和二进制内容，只有服务端能判定；读失败留给预览面板显示。
+      const file = await fetchWorkFile(target, AbortSignal.timeout(10_000)).catch(() => null);
+      if (file?.kind === "unsupported") {
+        try { await openWorkPathInSystem(target); }
+        catch (error) {
+          this.lastError = { message: error instanceof Error ? error.message : String(error) };
+          this.notify();
+        }
+        return;
+      }
+    }
+    await this.openFilePreview(target);
   }
 
   async openFilePreview(target: WorkFileTarget, id?: number): Promise<void> {

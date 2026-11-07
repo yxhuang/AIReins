@@ -36,7 +36,7 @@ export function MessageLink({ href, children }: { href?: string; children?: Reac
   if (!href || href.startsWith("#") || (context && !path && !/^(?:[a-z][a-z\d+.-]*:|\/\/)/i.test(href))) return <span title={href}>{children}</span>;
   if (context && path) return <a href={href} title={t("ui.MarkdownMessage.open_file", { p0: (path) })} onClick={event => {
     event.preventDefault();
-    void store.openFilePreview({ path, root: fileRoot(path, context.root ?? context.cwd), sessionId: context.sessionId });
+    void store.openFileLink({ path, root: fileRoot(path, context.root ?? context.cwd), sessionId: context.sessionId });
   }}>{children}</a>;
   return <a href={href} target="_blank" rel="noopener noreferrer">{children}</a>;
 }

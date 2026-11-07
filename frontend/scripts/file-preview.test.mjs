@@ -56,5 +56,32 @@ assert.equal(s.filePreview.file.version,'v2');assert.equal(s.clearFilePreview(),
 const imageLoad=s.openFilePreview(target('image.png'));
 pending[4].resolve(response({path:'/project/image.png',name:'image.png',kind:'image',size:1,mimeType:'image/png',editable:false}));await imageLoad;
 assert.equal(s.clearFilePreview(),true,'只读媒体无需放弃草稿确认');
+{
+  const link=new Store(),calls=[];let reply;
+  globalThis.fetch=async(url,init)=>{calls.push(String(url));return reply(String(url),init);};
+  const ok=data=>({json:async()=>({code:0,data})});
+  const office={path:'/project/a.pptx',name:'a.pptx',size:1,kind:'unsupported',mimeType:'application/octet-stream',editable:false,reason:'x'};
+  reply=()=>ok(office);
+  await link.openFileLink(target('a.pptx'));
+  assert.equal(calls.length,1,'远程/无系统能力直接预览，不探测也不调用系统');
+  assert.ok(calls.every(url=>url.includes('/api/fs/file')));assert.ok(link.filePreview);
+  assert.equal(link.clearFilePreview(),true);link.setFilesOpen(false);
+  link.meta={capabilities:{systemOpen:true}};calls.length=0;
+  reply=url=>url.includes('open-system')?ok({opened:true}):ok(office);
+  await link.openFileLink(target('a.pptx'));
+  assert.ok(calls.some(url=>url.includes('/api/fs/open-system')));
+  assert.equal(link.filePreview,null,'交给系统后不留空白面板');assert.equal(link.filesOpen,false);assert.equal(link.lastError,null);
+  reply=url=>url.includes('open-system')?{json:async()=>({code:50390,msg:'无法用系统程序打开'})}:ok(office);
+  await link.openFileLink(target('a.pptx'));
+  assert.match(link.lastError.message,/无法用系统程序打开/);assert.equal(link.filePreview,null);
+  calls.length=0;reply=()=>ok(file('/project/b.txt','text'));
+  await link.openFileLink(target('b.txt'));
+  assert.ok(!calls.some(url=>url.includes('open-system')));assert.equal(link.filePreview.file.text,'text','可预览的仍进面板');
+  link.clearFilePreview();calls.length=0;
+  reply=()=>({json:async()=>({code:40400,msg:'文件不存在'})});
+  await link.openFileLink(target('gone.txt'));
+  assert.ok(!calls.some(url=>url.includes('open-system')));assert.match(link.filePreview.error,/不存在/);
+}
+console.log('✅ 会话文件入口：网页不支持的交系统打开，可预览/无能力/读失败走面板');
 confirmed=true;
 console.log('✅ 文件请求竞态、草稿保留/取消、卸载提醒与冲突后的版本保护');

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Changed
+
+- Clicking a file in a conversation opens it with the system default app when the page cannot preview it (Office, binary, over 32 MiB) and you are on the local machine, instead of leaving an empty side panel.
+
 ## 0.4.0 (2026-11-05)
 
 ### Added

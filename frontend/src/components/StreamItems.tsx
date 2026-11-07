@@ -109,14 +109,14 @@ export const ThoughtBlockView = memo(function ThoughtBlockView({ item }: { item:
   );
 }, (previous, next) => previous.item.text === next.item.text);
 
-/** Claude SendUserFile 发给用户的文件：常显，点开在右侧文件面板预览。 */
+/** Claude SendUserFile 发给用户的文件：常显，点开走 openFileLink（面板预览或系统默认程序）。 */
 function SentFilesCard({ files, caption, cwd, sessionId }: { files: string[]; caption: string; cwd: string; sessionId?: string }) {
   return (
     <div className="tool-card sent-files">
       <div className="sent-files-head"><span className="tool-name">{t("ui.StreamItems.sent_files")}</span>{caption && <span className="sent-files-caption">{caption}</span>}</div>
       {files.map((path) => (
         <button key={path} type="button" className="sent-file" title={t("ui.MarkdownMessage.open_file", { p0: path })}
-          onClick={() => void store.openFilePreview({ path, root: fileRoot(path, cwd), sessionId })}>
+          onClick={() => void store.openFileLink({ path, root: fileRoot(path, cwd), sessionId })}>
           <span className="sent-file-name">{path.slice(path.lastIndexOf("/") + 1)}</span>
           <span className="sent-file-dir mono">{path.slice(0, path.lastIndexOf("/") + 1)}</span>
         </button>

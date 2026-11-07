@@ -40,11 +40,11 @@ console.log("✅ 文件 Markdown 链接按所在目录解析、外链安全新�
 
 // 沿用现有 hook fixture 模式，直接执行共享组件的真实点击处理。
 const internals = React.__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE;
-const previousDispatcher = internals.H, previousOpen = store.openFilePreview;
+const previousDispatcher = internals.H, previousOpen = store.openFileLink;
 try {
   internals.H = { useContext: () => ({ cwd: '/repo/docs', root: preview.target.root, sessionId: preview.target.sessionId }) };
   let opened, prevented;
-  store.openFilePreview = async target => { opened = target; };
+  store.openFileLink = async target => { opened = target; };
   for (const [href, path, root] of [
     ['证明材料/01_中文 空格.pdf', '/repo/docs/证明材料/01_中文 空格.pdf', '/repo'],
     ['../shared.pdf', '/repo/shared.pdf', '/repo'],
@@ -56,5 +56,5 @@ try {
     assert.equal(prevented, true);
     assert.deepEqual(opened, { path, root, sessionId: 'one' });
   }
-} finally { internals.H = previousDispatcher; store.openFilePreview = previousOpen; }
+} finally { internals.H = previousDispatcher; store.openFileLink = previousOpen; }
 console.log("✅ 本地链接点击沿用预览 root/sessionId，越出 root 时复用目录回退");
