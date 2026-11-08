@@ -9,8 +9,18 @@
   <meta property="og:type" content="website">
   <meta property="og:title" content="AIReins">
   <meta property="og:description" content="Let the agents run. Keep the reins. A local workbench for Claude Code, Codex and Kimi Code, from your desktop or phone.">
-  <meta property="og:image" content="./assets/banner-en-light.png">
+  <link rel="canonical" href="https://yxhuang.github.io/AIReins/">
+  <meta property="og:url" content="https://yxhuang.github.io/AIReins/">
+  <meta property="og:site_name" content="AIReins">
+  <meta property="og:image" content="https://yxhuang.github.io/AIReins/assets/banner-en-light.png">
+  <meta property="og:image:width" content="2560">
+  <meta property="og:image:height" content="1120">
   <meta property="og:image:alt" content="AIReins: Let the agents run. Keep the reins.">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="AIReins">
+  <meta name="twitter:description" content="Let the agents run. Keep the reins. A local workbench for Claude Code, Codex and Kimi Code, from your desktop or phone.">
+  <meta name="twitter:image" content="https://yxhuang.github.io/AIReins/assets/banner-en-light.png">
+  <script type="application/ld+json">{"@context":"https://schema.org","@type":"SoftwareApplication","name":"AIReins","applicationCategory":"DeveloperApplication","operatingSystem":"Linux, Windows (WSL2), macOS (experimental)","description":"A local web workbench that drives the official Claude Code, Codex and Kimi Code CLIs from your desktop or phone over your own tailnet.","url":"https://yxhuang.github.io/AIReins/","codeRepository":"https://github.com/yxhuang/AIReins","license":"https://opensource.org/licenses/MIT","offers":{"@type":"Offer","price":"0","priceCurrency":"USD"}}</script>
   <link rel="icon" href="./assets/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="./assets/apple-touch-icon.png">
   <link rel="stylesheet" href="./style.css">
@@ -77,6 +87,18 @@
         <article>
           <h3 data-i18n="historyTitle">Pick up where you left off.</h3>
           <p data-i18n="historyText">Search and resume native CLI history. Reorder conversations within a directory, or drag an idle conversation to another directory to continue there. New activity restores automatic ordering.</p>
+        </article>
+        <article>
+          <h3 data-i18n="wholeTitle">The whole computer, not one session.</h3>
+          <p data-i18n="wholeText">Browse any folder, including Windows drives under WSL. Preview and edit files, flip through a folder’s images, open Office files in their own apps on the local machine, and use a multi-tab terminal.</p>
+        </article>
+        <article>
+          <h3 data-i18n="leadTitle">One leads, the others follow.</h3>
+          <p data-i18n="leadText">With a delegation tool, let one agent hand work to another and follow the whole dispatch tree live, on desktop or phone. Native sub-agents show up as a tree either way.</p>
+        </article>
+        <article>
+          <h3 data-i18n="privateTitle">No vendor relay. No account. No telemetry.</h3>
+          <p data-i18n="privateText">Traffic stays on your tailnet. Sessions are the CLIs’ own history, so you can resume them in the terminal or VS Code as usual.</p>
         </article>
       </div>
     </section>
@@ -150,7 +172,8 @@
     <section class="start-section wrap section" id="get-started" aria-labelledby="start-title">
       <div>
         <h2 id="start-title" data-i18n="startTitle">Keep the reins in your hand.</h2>
-        <p data-i18n="startText">Installation, prerequisites and remote setup are in the README.</p>
+        <p data-i18n="startText">One command installs and builds it; prerequisites and remote setup are in the README.</p>
+        <pre class="install"><code>git clone https://github.com/yxhuang/AIReins.git &amp;&amp; cd AIReins &amp;&amp; bash install.sh</code></pre>
         <p class="small" data-i18n="platforms">Windows + WSL2 and native Linux supported. macOS is experimental, with CI coverage only.</p>
       </div>
       <a class="button button-primary" href="https://github.com/yxhuang/AIReins#get-started" data-doc="start" data-i18n="startButton">Get started in the README</a>
@@ -161,7 +184,7 @@
   <footer class="site-footer wrap">
     <a class="brand" href="#" aria-label="AIReins"><img src="./assets/icon.svg" alt="" width="28" height="28" loading="lazy"><span>AIReins</span></a>
     <div class="footer-links">
-      <a href="https://github.com/yxhuang/AIReins/releases/tag/v0.4.0" data-i18n="release">v0.4.0 · Release notes</a>
+      <a href="https://github.com/yxhuang/AIReins/releases/tag/v0.5.0" data-i18n="release">v0.5.0 · Release notes</a>
       <a href="https://github.com/yxhuang/AIReins/blob/main/LICENSE" data-i18n="license">Code: MIT License</a>
       <a href="https://github.com/yxhuang/AIReins/blob/main/NOTICE" data-i18n="notice">Name &amp; marks: NOTICE</a>
       <a href="https://github.com/yxhuang/AIReins">GitHub</a>

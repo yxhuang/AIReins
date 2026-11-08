@@ -181,3 +181,5 @@ figcaption { max-width: 78ch; margin: 16px auto 0; text-align: center; font-size
 @media (prefers-reduced-motion: no-preference) {
   .button { transition: background-color 140ms ease, color 140ms ease; }
 }
+.install { max-width: 100%; margin: 20px 0 0; padding: 14px 18px; overflow-x: auto; background: var(--surface); border: 1px solid var(--border-strong); border-radius: 8px; font: 14px/1.6 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: var(--text); }
+.start-section > div { min-width: 0; max-width: 100%; }
