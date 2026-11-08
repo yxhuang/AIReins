@@ -82,3 +82,15 @@ export function isolatedHtml(text: string, runScripts = false): string {
   doc.querySelectorAll("a,area").forEach(node => node.removeAttribute("href"));
   return prefix + doc.documentElement.outerHTML;
 }
+
+// 与 server/work-files.ts 的 imageTypes 保持一致。
+const IMAGE_FILE = /\.(?:png|jpe?g|gif|webp|avif|bmp|ico|svg)$/i;
+/** 同目录图片按名称自然排序（slide2 在 slide10 前）；当前文件不在列表或只有一张时返回 null。 */
+export function imageNeighbors(files: readonly { name: string; path: string }[], path: string):
+  { index: number; total: number; prev: string | null; next: string | null } | null {
+  const images = files.filter(file => IMAGE_FILE.test(file.name))
+    .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" }));
+  const index = images.findIndex(file => file.path === path);
+  if (index < 0 || images.length < 2) return null;
+  return { index, total: images.length, prev: images[index - 1]?.path ?? null, next: images[index + 1]?.path ?? null };
+}

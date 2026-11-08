@@ -2,9 +2,14 @@
 
 ## Unreleased
 
+### Added
+
+- Image previews in the file panel get previous/next buttons and a position counter for the other images in the same folder (natural name order, so slide2 comes before slide10). The buttons fade in when the pointer is over the image. The mouse wheel also switches images; a tall image scrolls to its end first.
+
 ### Changed
 
-- Clicking a file in a conversation opens it with the system default app when the page cannot preview it (Office, binary, over 32 MiB) and you are on the local machine, instead of leaving an empty side panel.
+- Clicking a folder link in a conversation opens that folder in the side file panel instead of failing with "only regular files are supported".
+- Clicking a file in a conversation or in the file panel opens it with the system default app when the page cannot preview it (Office, binary, over 32 MiB) and you are on the local machine, instead of leaving an empty side panel.
 
 ## 0.4.0 (2026-11-05)
 

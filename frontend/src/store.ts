@@ -22,7 +22,7 @@ import { fetchProjectOrder, moveProjectOrder, moveSession, patchSession } from "
 import { selectSidebarSections } from "./sidebar-sessions";
 import type { CodexResetStatus } from "../../server/codex-resets";
 import { fetchCodexResets, ackCodexReset } from "./api";
-import { fetchWorkFile, openWorkPathInSystem, saveWorkFile } from "./api";
+import { fetchDirectories, fetchWorkFile, openWorkPathInSystem, saveWorkFile } from "./api";
 import { sessionTitle } from "../../shared/session-title";
 import { extractMentionTokens, stripMentionCandidates } from "./mentions";
 import { partitionPages, type SkippedPage } from "./pages";
@@ -1076,21 +1076,31 @@ export class Store {
     this.notify();
   }
 
-  /** 会话里的文件入口：网页看不了且本机能交给系统时用默认程序打开，其余进预览面板。 */
-  async openFileLink(target: WorkFileTarget): Promise<void> {
-    if (this.meta?.capabilities.systemOpen) {
-      // 能否预览取决于扩展名、大小和二进制内容，只有服务端能判定；读失败留给预览面板显示。
-      const file = await fetchWorkFile(target, AbortSignal.timeout(10_000)).catch(() => null);
-      if (file?.kind === "unsupported") {
-        try { await openWorkPathInSystem(target); }
-        catch (error) {
-          this.lastError = { message: error instanceof Error ? error.message : String(error) };
-          this.notify();
-        }
-        return;
-      }
+  /** 网页无法预览且本机能交给系统时用默认程序打开；返回 true 表示已接手（失败写入 lastError），false 由调用方走预览。 */
+  async openUnpreviewableInSystem(target: WorkFileTarget): Promise<boolean> {
+    if (!this.meta?.capabilities.systemOpen) return false;
+    // 能否预览取决于扩展名、大小和二进制内容，只有服务端能判定；读失败留给预览面板显示。
+    const file = await fetchWorkFile(target, AbortSignal.timeout(10_000)).catch(() => null);
+    if (file?.kind !== "unsupported") return false;
+    try { await openWorkPathInSystem(target); }
+    catch (error) {
+      this.lastError = { message: error instanceof Error ? error.message : String(error) };
+      this.notify();
     }
-    await this.openFilePreview(target);
+    return true;
+  }
+
+  /** 会话里的文件入口：文件夹在右侧开目录标签；网页看不了的交系统打开，其余进预览面板。 */
+  async openFileLink(target: WorkFileTarget): Promise<void> {
+    // 链接本身看不出是不是文件夹；文件路径列目录会立即失败，再按文件处理。
+    if (await fetchDirectories(target.path).then(() => true, () => false)) {
+      const existing = this.fileTabs.find(tab => !tab.preview && tab.area !== "main" && tab.directory?.path === target.path);
+      if (existing) this.switchFileTab(existing.id);
+      else this.openFileTab({ path: target.path, root: target.root, folder: true });
+      this.setFilesOpen(true);
+      return;
+    }
+    if (!(await this.openUnpreviewableInSystem(target))) await this.openFilePreview(target);
   }
 
   async openFilePreview(target: WorkFileTarget, id?: number): Promise<void> {

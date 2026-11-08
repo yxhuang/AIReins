@@ -361,7 +361,14 @@ export function FilePanel({ onClose: closeRight, tabId: ownTabId }: { onClose: (
         navigationHistory={directoryHistory} registerBrowserBack={registerBrowserBack} navTarget={navSlot} afterLocation={area === "right" ? tabRow : undefined} showHidden={showHidden}
         onPathChange={path => store.setFileDirectory(path, tabId)}
         onBrowseHistory={path => store.navigateHistory(path)}
-        onSelectFile={path => { setNotice(null); store.openFileTab({ path, root: sessionDirectory() ?? session?.cwd ?? "/", folder: false }); }}
+        onSelectFile={path => {
+          setNotice(null);
+          const root = sessionDirectory() ?? session?.cwd ?? "/";
+          const open = () => store.openFileTab({ path, root, folder: false });
+          // 没有系统打开能力（远程）时不探测，保持同步开标签。
+          if (!systemOpen) open();
+          else void store.openUnpreviewableInSystem({ path, root, sessionId: session?.id }).then(done => { if (!done) open(); });
+        }}
         onEntryMenu={(entry, x, y) => openSendMenu({ path: entry.path, root: entry.root, sessionId: session?.id }, entry.name, entry.folder, x, y, true)} />}
       {hasTab && sendMenu && <TaildropMenu enabled={sendMenu.folder ? folderTaildrop : taildrop} position={sendMenu} folder={sendMenu.folder} onClose={() => setSendMenu(null)}
         leadingItems={menuItems}

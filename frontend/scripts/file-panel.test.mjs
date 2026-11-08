@@ -486,6 +486,7 @@ console.log("✅ 文件刷新：草稿确认、错误重试、读取/保存保�
       useState(initial) { const i = cursor++; if (!(i in slots)) slots[i] = initial;
         return [slots[i], value => { slots[i] = value; }]; },
       useMemo(fn) { return fn(); },
+      useEffect() {},
     };
     globalThis.DOMParser = class {
       parseFromString() { parses++; return {
