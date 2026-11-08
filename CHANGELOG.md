@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.5.0 (2026-11-09)
 
 ### Added
 
@@ -9,7 +9,12 @@
 ### Changed
 
 - Clicking a folder link in a conversation opens that folder in the side file panel instead of failing with "only regular files are supported".
-- Clicking a file in a conversation or in the file panel opens it with the system default app when the page cannot preview it (Office, binary, over 32 MiB) and you are on the local machine, instead of leaving an empty side panel.
+- Clicking a file in a conversation or in the file panel opens it with the system default app when the page cannot preview it (Office, binary, over 32 MiB) and you are on the local machine, instead of leaving an empty side panel. Only documents, media and archives are opened this way, checked against the file's real path so a renamed link cannot slip through. Executables, installers, shortcuts, scripts and macro-enabled Office files are never opened by a click, since that would run them; they stay in the file panel, where Open with default app remains in the menu.
+
+### Fixed
+
+- Manually ordered conversations keep their position when they are released after being idle, when AIReins restarts, or when their process exits. New messages, turns and setting changes still return them to automatic order.
+- The CI smoke test waits for the background CLI version probe instead of failing on slow runners.
 
 ## 0.4.0 (2026-11-05)
 

@@ -3,6 +3,7 @@ import { worktreeOf } from "./worktree.js";
 import { fallbackTitleMetadata } from "./i18n/messages.js";
 import { platform, vscodeFileUri, type Platform } from "./platform.js";
 import { sessionTitle } from "../shared/session-title.js";
+import { LIFECYCLE_EVENTS } from "../shared/session-order.js";
 import { configOptionsForModel } from "../shared/model-config.js";
 import { statSync } from "node:fs";
 import { isAbsolute, resolve } from "node:path";
@@ -1141,6 +1142,8 @@ export class SessionManager {
       this.persistRegistry(true);
     });
     session.seq = event.seq;
+    // 释放/退出这类生命周期事件不算用户活动，手动排序位置跟着保留。
+    if (LIFECYCLE_EVENTS.has(type) && session.orderActivity === session.lastActivityAt) session.orderActivity = timestamp;
     session.lastActivityAt = timestamp;
     if (type === "user_message" && !this.titles.has(id)) this.titles.set(id, sessionTitle({}, [event]));
     this.appendEventRing(id, event);
@@ -1174,7 +1177,10 @@ export class SessionManager {
     if (status === "starting" || status === "dead") this.setBackgroundTasks(id, []);
     session.status = status;
     setTranscriptCacheIdle(session.transcriptPath, status === "idle" || session.released === true);
-    session.lastActivityAt = new Date().toISOString();
+    const now = new Date().toISOString();
+    // 状态切换本身不算新活动；真正的用户消息/回合事件会经 emit 结束手动位置。
+    if (session.orderActivity === session.lastActivityAt) session.orderActivity = now;
+    session.lastActivityAt = now;
     this.trackWorkerProcess(session, status === "dead" ? undefined : this.workers.get(id));
     this.persistRegistry();
   }

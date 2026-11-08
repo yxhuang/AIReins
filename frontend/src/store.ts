@@ -15,6 +15,7 @@ import type {
   UnifiedEvent,
   FilePreviewState,
   TerminalInfo,
+  WorkFile,
   WorkFileTarget,
 } from "./types";
 import { createSession, deleteSession, fetchCommands, fetchEarlierEvents, fetchFiles, fetchMeta, fetchPages, fetchSessions, fetchSnapshot, releaseSession, type CreateSessionInput, type SessionInfoKind } from "./api";
@@ -24,6 +25,7 @@ import type { CodexResetStatus } from "../../server/codex-resets";
 import { fetchCodexResets, ackCodexReset } from "./api";
 import { fetchDirectories, fetchWorkFile, openWorkPathInSystem, saveWorkFile } from "./api";
 import { sessionTitle } from "../../shared/session-title";
+import { LIFECYCLE_EVENTS } from "../../shared/session-order";
 import { extractMentionTokens, stripMentionCandidates } from "./mentions";
 import { partitionPages, type SkippedPage } from "./pages";
 import { normalizeHistoryDirectory } from "./history";
@@ -201,6 +203,8 @@ export class Store {
   private fileWorkspaceSessionId: string | null = null;
   private fileTabSequence = 1;
   private fileLoads = new Map<number, AbortController>();
+  /** openUnpreviewableInSystem 刚读到的可预览文件，供紧接着的 openFilePreview 一次性复用。 */
+  private fileProbe: { target: WorkFileTarget; file: WorkFile; at: number } | null = null;
   private fileUnloadBound = false;
   private fileLoadSequence = 0;
   /** 文件面板发给 Composer 的一次性请求；模块加载不依赖 DOM。 */
@@ -1081,9 +1085,14 @@ export class Store {
     if (!this.meta?.capabilities.systemOpen) return false;
     // 能否预览取决于扩展名、大小和二进制内容，只有服务端能判定；读失败留给预览面板显示。
     const file = await fetchWorkFile(target, AbortSignal.timeout(10_000)).catch(() => null);
+    // 紧接着的预览直接用这次结果，不再读一遍（文本最多 4 MiB）。
+    if (file) this.fileProbe = { target, file, at: Date.now() };
     if (file?.kind !== "unsupported") return false;
-    try { await openWorkPathInSystem(target); }
+    // auto：服务端按 realpath 只放行文档/媒体，可执行、安装包、快捷方式和脚本留在面板由用户自己决定。
+    try { await openWorkPathInSystem(target, true); this.fileProbe = null; }
     catch (error) {
+      if ((error as { code?: number }).code === 41590) return false;
+      this.fileProbe = null;
       this.lastError = { message: error instanceof Error ? error.message : String(error) };
       this.notify();
     }
@@ -1104,6 +1113,8 @@ export class Store {
   }
 
   async openFilePreview(target: WorkFileTarget, id?: number): Promise<void> {
+    // 探测结果只给紧接着的这一次读取用；提前返回（切到已有标签等）也要作废，免得之后刷新拿到旧内容。
+    const probe = this.fileProbe; this.fileProbe = null;
     const existing = this.fileTabs.find(tab => tab.preview?.target.path === target.path);
     if (existing && (id === undefined || existing.id !== id)) {
       this.switchFileTab(existing.id);
@@ -1131,7 +1142,9 @@ export class Store {
     if (this.fileTabs.find(tab => tab.id === id)?.area !== "main") this.setFilesOpen(true);
     this.notify();
     try {
-      const file = await fetchWorkFile(target, AbortSignal.any([abort.signal, AbortSignal.timeout(target.large ? 120_000 : 10_000)]));
+      const fresh = probe && Date.now() - probe.at < 3000 && probe.target.path === target.path && probe.target.root === target.root
+        && probe.target.sessionId === target.sessionId && !target.large;
+      const file = fresh ? probe.file : await fetchWorkFile(target, AbortSignal.any([abort.signal, AbortSignal.timeout(target.large ? 120_000 : 10_000)]));
       if (this.fileTabs.find(tab => tab.id === id)?.preview !== preview) return;
       this.patchFileTab(id, { preview: { ...preview, file, draft: file.text ?? "", loading: false } });
     } catch (error) {
@@ -1179,6 +1192,7 @@ export class Store {
     if (entry && !entry.folder) {
       const existing = this.fileTabs.find(tab => tab.preview?.target.path === entry.path);
       if (existing) {
+        this.fileProbe = null;
         this.switchFileTab(existing.id);
         if (existing.area !== "main") this.setFilesOpen(true);
         return;
@@ -1898,6 +1912,8 @@ export class Store {
       // seq 始终即时推进；流式摘要只在可见字段变化或活动时间跨秒时发布。
       const session: SessionRecord = { ...previous };
       if (!streamDelta || Date.parse(event.timestamp) - Date.parse(previous.lastActivityAt) >= 1000) {
+        // 与服务端一致：释放/退出不结束手动排序位置，免得侧栏行在列表刷新前先跳走。
+        if (LIFECYCLE_EVENTS.has(event.type) && previous.orderActivity === previous.lastActivityAt) session.orderActivity = event.timestamp;
         session.lastActivityAt = event.timestamp;
       }
       const freshSummary = event.seq > session.seq;

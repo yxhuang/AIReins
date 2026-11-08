@@ -38,6 +38,14 @@ await assert.rejects(openSystemWorkPath({ path: join(fixture, "missing"), root: 
 await assert.rejects(openSystemWorkPath({ path: join(fixture, "docs"), root: fixture }, { platform: "darwin" },
   async () => { throw new Error("launcher failed"); }), { status: 503 });
 assert.equal(calls.length, 2);
+// 自动交接按 realpath 走白名单：改名成 .docx 的软链指向 exe 也拒绝，手动入口（无 auto）照常。
+await writeFile(join(fixture, "docs", "setup.exe"), "MZ");
+await symlink(join(fixture, "docs", "setup.exe"), join(fixture, "docs", "report.docx"));
+await assert.rejects(openSystemWorkPath({ path: join(fixture, "docs", "report.docx"), root: fixture }, { platform: "darwin", auto: true }, run), { status: 415 });
+await assert.rejects(openSystemWorkPath({ path: join(fixture, "docs", "setup.exe"), root: fixture }, { platform: "darwin", auto: true }, run), { status: 415 });
+await openSystemWorkPath({ path: join(fixture, "docs", "表.xlsx"), root: fixture }, { platform: "darwin", auto: true }, run);
+await openSystemWorkPath({ path: join(fixture, "docs", "setup.exe"), root: fixture }, { platform: "darwin" }, run);
+assert.equal(calls.length, 4, "白名单自动打开、手动入口不受限");
 
 await rm(fixture, { recursive: true, force: true });
 console.log("system open tests passed");

@@ -136,6 +136,14 @@ try {
   assert.equal(moved.nativeCwd, a, "Claude/Codex native records keep their origin");
   assert.equal(moved.orderKey, 42);
   assert.equal(moved.orderActivity, moved.lastActivityAt);
+  {
+    const live = (manager as any).sessions.get("claude") as SessionRecord, tick = () => new Promise(resolve => setTimeout(resolve, 5));
+    await tick(); (manager as any).emit("claude", "worker_released", { reason: "idle" });
+    await tick(); (manager as any).setStatus("claude", "idle");
+    assert.equal(live.orderActivity, live.lastActivityAt, "release and status changes keep the manual position");
+    await tick(); (manager as any).emit("claude", "turn_completed", {});
+    assert.notEqual(live.orderActivity, live.lastActivityAt, "real activity returns to automatic order");
+  }
   assert.equal((await move("claude", { cwd: c })).nativeCwd, a, "origin survives a second move");
   const back = await move("claude", { cwd: a });
   assert.equal(back.nativeCwd, a, "stays marked as moved so subagents spawned elsewhere remain visible");

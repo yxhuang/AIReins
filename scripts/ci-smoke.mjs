@@ -68,7 +68,11 @@ try {
   }
   assert(response, 'Backend did not serve /api/meta');
   assert.equal(response.status, 200);
-  const meta = JSON.parse(response.body);
+  let meta = JSON.parse(response.body);
+  // CLI 版本在后台探测，慢机器（macOS runner）上首个 /api/meta 可能还没拿到。
+  for (let attempt = 0; attempt < 100 && meta.data?.metadataPending; attempt++) {
+    await delay(100); meta = JSON.parse((await get(port, '/api/meta')).body);
+  }
   assert.equal(meta.code, 0); assert(meta.data.capabilities);
   for (const cli of ['claude', 'codex', 'kimi']) assert.equal(meta.data.cliVersions[cli], 'workbench-ci-stub-1.0');
   response = await get(port, '/');

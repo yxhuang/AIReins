@@ -556,11 +556,11 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       try {
         const body = await readJson(request, 32 * 1024);
         if (!body || typeof body !== "object" || Array.isArray(body)) throw new WorkFileError(400, "请求必须包含 path 和 root");
-        const input = body as { path: string; root: string; sessionId?: string };
+        const input = body as { path: string; root: string; sessionId?: string; auto?: unknown };
         if (input.sessionId !== undefined && (typeof input.sessionId !== "string" || !input.sessionId)) throw new WorkFileError(400, "sessionId 必须是非空字符串");
         const session = input.sessionId === undefined ? undefined : manager.get(input.sessionId);
         if (input.sessionId !== undefined && !session) throw new WorkFileError(404, "会话不存在");
-        await openSystemWorkPath(input, { sessionCwd: session?.cwd });
+        await openSystemWorkPath(input, { sessionCwd: session?.cwd, auto: input.auto === true });
         await respond(response, 200, 0, "success", { opened: true }, requestId);
       } catch (error) {
         if (error instanceof WorkFileError) throw new ApiError(error.status, error.status * 100 + 90, error.message);

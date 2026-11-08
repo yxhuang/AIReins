@@ -102,13 +102,13 @@ My daily setup is one agent leading and several executing:
 
 A browser on the same computer connects to `127.0.0.1` directly. Other devices join your tailnet first, then Tailscale Serve forwards them to AIReins' remote entry, which checks Host/Origin and admits only allowlisted Tailscale logins. AIReins is a single Node process listening on loopback only. It drives the three CLIs through their official protocols: Claude Code's stream-json, Codex's `codex app-server` and Kimi Code's ACP. Sessions are written to each CLI's own history; AIReins is just another way in. Protocol details are in [spikes/PROTOCOL-NOTES.md](spikes/PROTOCOL-NOTES.md).
 
-## Latest release: 0.4.0
+## Latest release: 0.5.0
 
-[Release notes](https://github.com/yxhuang/AIReins/releases/tag/v0.4.0) · [Changelog](CHANGELOG.md)
+[Release notes](https://github.com/yxhuang/AIReins/releases/tag/v0.5.0) · [Changelog](CHANGELOG.md)
 
-- Reorder conversations within a sidebar directory, or drag an idle conversation to another directory and continue there. New activity returns a manually positioned conversation to automatic ordering. Move up/down actions also work on phones; moving between directories currently requires desktop dragging.
-- Open Claude plugin, MCP and settings panels before the first message; unsent text and attachments stay in the composer.
-- Recover unconfirmed inputs and failed view loads, read wrapping Markdown tables, and use the revised mobile toolbars. See the changelog for the full list.
+- Page through the images in a folder from the file preview: previous/next buttons, a position counter and the mouse wheel, in natural name order.
+- Folder links in a conversation open that folder in the side file panel. Files the page cannot preview (Office, binary, over 32 MiB) open in their default app on the local machine (WSL and macOS); only documents, media and archives open this way, so executables, installers, shortcuts, scripts and macro-enabled Office files are never run by a click.
+- Manually ordered conversations keep their position when they are released after being idle or when AIReins restarts.
 
 Updating backend code requires `aireins restart`, which stops all running sessions; choose the time, then refresh open pages.
 

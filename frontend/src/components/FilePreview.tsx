@@ -9,7 +9,7 @@ import { store } from "../store";
 import type { DirectoryEntry, FilePreviewState } from "../types";
 
 // 预览按路径重挂载，切图时沿用上一张的同目录列表，避免左右按钮闪烁。
-let imageDirectory: { path: string; files: DirectoryEntry[] } | null = null;
+let imageDirectory: { path: string; files: DirectoryEntry[]; at: number } | null = null;
 // 触控板一次手势、鼠标快速连滚都是一串 wheel；间隔超过此值才算新一次切换。
 const WHEEL_GAP_MS = 200;
 let lastWheelAt = 0;
@@ -20,15 +20,16 @@ export function FilePreview({ preview, source = false, tabId }: { preview: FileP
   const isImage = file?.kind === "image";
   const [siblings, setSiblings] = useState(() => imageDirectory?.path === cwd ? imageDirectory.files : []);
   useEffect(() => {
-    if (!isImage) return;
+    // 同目录逐张切换时沿用 30 秒内的列表；列目录要 stat 每项并跑 git status，不必每张都重取。
+    if (!isImage || (imageDirectory?.path === cwd && Date.now() - imageDirectory.at < 30_000 && imageDirectory.files.some(file => file.path === target.path))) return;
     let live = true;
     // 列表失败只是没有左右切换，不影响当前图片。
     fetchDirectories(cwd, true).then(listing => {
-      imageDirectory = { path: cwd, files: listing.files ?? [] };
+      imageDirectory = { path: cwd, files: listing.files ?? [], at: Date.now() };
       if (live) setSiblings(imageDirectory.files);
     }, () => {});
     return () => { live = false; };
-  }, [isImage, cwd]);
+  }, [isImage, cwd, target.path]);
   const neighbors = isImage ? imageNeighbors(siblings, target.path) : null;
   const showImage = (path: string | null) => { if (path) void store.openFilePreview({ path, root: target.root, sessionId: target.sessionId }, tabId); };
   const [failedLoad, setFailedLoad] = useState<number | null>(null);

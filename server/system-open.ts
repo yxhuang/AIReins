@@ -49,9 +49,13 @@ async function runSystemOpen(path: string, host: Platform): Promise<void> {
   else throw new Error("Unsupported platform");
 }
 
-export async function openSystemWorkPath(input: WorkFileInput, options: WorkFileOptions = {}, run = runSystemOpen): Promise<void> {
+/** 点击文件时自动交系统打开的白名单（按 realpath 判断，软链改名绕不过）：文档、媒体与大图/PDF，可执行或脚本类一律不在内。 */
+export const AUTO_OPEN_TYPES = /\.(?:docx?|dotx?|xlsx?|xlsb|xltx?|csv|pptx?|potx?|odt|ods|odp|odg|rtf|pages|numbers|key|vsdx?|mpp|pub|epub|mobi|djvu|xps|oxps|pdf|txt|log|json|md|png|jpe?g|gif|webp|avif|bmp|tiff?|heic|psd|ai|mp4|m4v|mkv|mov|avi|wmv|webm|flv|mpe?g|3gp|mp3|wav|flac|m4a|aac|ogg|opus|wma|zip|7z|rar|tar|gz|tgz|bz2|xz)$/i;
+
+export async function openSystemWorkPath(input: WorkFileInput, options: WorkFileOptions & { auto?: boolean } = {}, run = runSystemOpen): Promise<void> {
   const host = options.platform ?? platform;
   const real = await resolveWorkOpenTarget(input, options);
+  if (options.auto && !AUTO_OPEN_TYPES.test(real)) throw new WorkFileError(415, "此类型不会自动交给系统程序打开");
   const path = host === "wsl" ? windowsOpenPath(real) : real;
   try { await run(path, host); }
   catch { throw new WorkFileError(503, "无法用系统程序打开，请检查默认程序和桌面登录状态"); }

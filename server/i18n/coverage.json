@@ -1,7 +1,7 @@
 {
-  "templates": 502,
-  "coveredSourceSites": 606,
-  "errorSourceSites": 456,
+  "templates": 503,
+  "coveredSourceSites": 607,
+  "errorSourceSites": 457,
   "sources": [
     {
       "file": "server/access.ts",
@@ -2147,643 +2147,643 @@
     },
     {
       "file": "server/session-manager.ts",
-      "line": 211,
+      "line": 212,
       "key": "server.message316",
       "category": "title"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 220,
+      "line": 221,
       "key": "server.message316",
       "category": "title"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 233,
+      "line": 234,
       "key": "server.message167",
       "category": "SessionOrganizationError"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 649,
+      "line": 650,
       "key": "server.message335",
       "category": "Error"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 1000,
+      "line": 1001,
       "key": "server.message318",
       "category": "SessionBusyError"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 415,
+      "line": 416,
       "key": "server.message319",
       "category": "Error"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 497,
+      "line": 498,
       "key": "server.message320",
       "category": "message"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 557,
+      "line": 558,
       "key": "server.message321",
       "category": "Error"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 562,
+      "line": 563,
       "key": "server.message322",
       "category": "Error"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 255,
+      "line": 256,
       "key": "server.message167",
-      "category": "Error"
-    },
-    {
-      "file": "server/session-manager.ts",
-      "line": 568,
-      "key": "server.message323",
       "category": "Error"
     },
     {
       "file": "server/session-manager.ts",
       "line": 569,
+      "key": "server.message323",
+      "category": "Error"
+    },
+    {
+      "file": "server/session-manager.ts",
+      "line": 570,
       "key": "server.message324",
       "category": "Error"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 577,
+      "line": 578,
       "key": "server.message325",
       "category": "Error"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 595,
+      "line": 596,
       "key": "server.message326",
       "category": "Error"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 596,
+      "line": 597,
       "key": "server.message327",
       "category": "Error"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 598,
+      "line": 599,
       "key": "server.message328",
       "category": "Error"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 606,
+      "line": 607,
       "key": "server.message101",
       "category": "Error"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 608,
+      "line": 609,
       "key": "server.message329",
       "category": "Error"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 611,
+      "line": 612,
       "key": "server.message330",
       "category": "Error"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 616,
+      "line": 617,
       "key": "server.message331",
       "category": "Error"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 617,
+      "line": 618,
       "key": "server.message327",
       "category": "Error"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 619,
+      "line": 620,
       "key": "server.message332",
       "category": "Error"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 658,
+      "line": 659,
       "key": "server.message333",
       "category": "Error"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 662,
+      "line": 663,
       "key": "server.message102",
       "category": "Error"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 664,
+      "line": 665,
       "key": "server.message334",
       "category": "Error"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 669,
+      "line": 670,
       "key": "server.message335",
       "category": "Error"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 677,
+      "line": 678,
       "key": "server.message334",
       "category": "Error"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 689,
+      "line": 690,
       "key": "server.message336",
       "category": "Error"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 690,
+      "line": 691,
       "key": "server.message327",
       "category": "Error"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 692,
+      "line": 693,
       "key": "server.message337",
       "category": "Error"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 695,
+      "line": 696,
       "key": "server.message338",
       "category": "Error"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 702,
+      "line": 703,
       "key": "server.message339",
       "category": "Error"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 703,
+      "line": 704,
       "key": "server.message340",
       "category": "Error"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 704,
+      "line": 705,
       "key": "server.message341",
       "category": "Error"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 714,
+      "line": 715,
       "key": "server.message342",
       "category": "Error"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 725,
+      "line": 726,
       "key": "server.message343",
       "category": "Error"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 726,
+      "line": 727,
       "key": "server.message344",
       "category": "Error"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 727,
+      "line": 728,
       "key": "server.message345",
       "category": "Error"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 730,
+      "line": 731,
       "key": "server.message346",
       "category": "Error"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 738,
+      "line": 739,
       "key": "server.message347",
       "category": "Error"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 739,
+      "line": 740,
       "key": "server.message348",
       "category": "Error"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 740,
+      "line": 741,
       "key": "server.message344",
       "category": "Error"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 745,
+      "line": 746,
       "key": "server.message087",
       "category": "Error"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 746,
+      "line": 747,
       "key": "server.message349",
       "category": "Error"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 758,
+      "line": 759,
       "key": "server.message350",
       "category": "Error"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 797,
+      "line": 798,
       "key": "server.message351",
       "category": "Error"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 801,
+      "line": 802,
       "key": "server.message352",
       "category": "Error"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 802,
+      "line": 803,
       "key": "server.message353",
       "category": "Error"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 803,
+      "line": 804,
       "key": "server.message354",
       "category": "Error"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 506,
+      "line": 507,
       "key": "server.message167",
       "category": "Error"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 808,
+      "line": 809,
       "key": "server.message353",
       "category": "Error"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 814,
+      "line": 815,
       "key": "server.message355",
       "category": "Error"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 815,
+      "line": 816,
       "key": "server.message356",
       "category": "Error"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 817,
+      "line": 818,
       "key": "server.message357",
       "category": "Error"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 820,
+      "line": 821,
       "key": "server.message358",
       "category": "Error"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 826,
+      "line": 827,
       "key": "server.message359",
       "category": "Error"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 828,
+      "line": 829,
       "key": "server.message360",
       "category": "Error"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 863,
+      "line": 864,
       "key": "server.message361",
       "category": "SessionBusyError"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 875,
+      "line": 876,
       "key": "server.message362",
       "category": "SessionBusyError"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 879,
+      "line": 880,
       "key": "server.message363",
       "category": "SessionBusyError"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 267,
+      "line": 268,
       "key": "server.message364",
       "category": "SessionBusyError"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 893,
+      "line": 894,
       "key": "server.message365",
       "category": "SessionBusyError"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 423,
+      "line": 424,
       "key": "server.message319",
       "category": "Error"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 564,
+      "line": 565,
       "key": "server.message167",
       "category": "Error"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 946,
+      "line": 947,
       "key": "server.message366",
       "category": "Error"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 505,
+      "line": 506,
       "key": "server.message319",
-      "category": "other"
-    },
-    {
-      "file": "server/session-manager.ts",
-      "line": 1033,
-      "key": "server.message367",
       "category": "other"
     },
     {
       "file": "server/session-manager.ts",
       "line": 1034,
+      "key": "server.message367",
+      "category": "other"
+    },
+    {
+      "file": "server/session-manager.ts",
+      "line": 1035,
       "key": "server.message368",
       "category": "other"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 263,
+      "line": 264,
       "key": "server.message369",
       "category": "other"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 1036,
+      "line": 1037,
       "key": "server.message370",
       "category": "other"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 1037,
+      "line": 1038,
       "key": "server.message371",
       "category": "other"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 1038,
+      "line": 1039,
       "key": "server.message372",
       "category": "other"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 1040,
+      "line": 1041,
       "key": "server.message373",
       "category": "other"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 1041,
+      "line": 1042,
       "key": "server.message374",
       "category": "other"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 1042,
+      "line": 1043,
       "key": "server.message375",
       "category": "other"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 1256,
+      "line": 1262,
       "key": "server.message376",
       "category": "this.warnMissingNativeMark"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 1296,
+      "line": 1302,
       "key": "server.message377",
       "category": "this.warnMissingNativeMark"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 1317,
+      "line": 1323,
       "key": "server.message378",
       "category": "this.warnMissingNativeMark"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 1318,
+      "line": 1324,
       "key": "server.message379",
       "category": "Error"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 1346,
+      "line": 1352,
       "key": "server.message380",
       "category": "other"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 1347,
+      "line": 1353,
       "key": "server.message381",
       "category": "other"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 645,
+      "line": 646,
       "key": "server.message167",
       "category": "Error"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 1371,
+      "line": 1377,
       "key": "server.message382",
       "category": "Error"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 805,
+      "line": 806,
       "key": "server.message167",
       "category": "Error"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 1380,
+      "line": 1386,
       "key": "server.message383",
       "category": "Error"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 1385,
+      "line": 1391,
       "key": "server.message384",
       "category": "Error"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 942,
+      "line": 943,
       "key": "server.message319",
       "category": "Error"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 1430,
+      "line": 1436,
       "key": "server.message359",
       "category": "Error"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 1436,
+      "line": 1442,
       "key": "server.message385",
       "category": "Error"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 1439,
+      "line": 1445,
       "key": "server.message386",
       "category": "Error"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 1450,
+      "line": 1456,
       "key": "server.message387",
       "category": "message"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 945,
+      "line": 946,
       "key": "server.message167",
       "category": "Error"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 1576,
+      "line": 1582,
       "key": "server.message388",
       "category": "Error"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 1581,
+      "line": 1587,
       "key": "server.message389",
       "category": "SessionBusyError"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 1582,
+      "line": 1588,
       "key": "server.message390",
       "category": "Error"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 1588,
+      "line": 1594,
       "key": "server.message391",
       "category": "Error"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 1590,
+      "line": 1596,
       "key": "server.message392",
       "category": "Error"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 1368,
+      "line": 1374,
       "key": "server.message167",
       "category": "Error"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 1379,
+      "line": 1385,
       "key": "server.message167",
       "category": "Error"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 1598,
+      "line": 1604,
       "key": "server.message393",
       "category": "Error"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 1601,
+      "line": 1607,
       "key": "server.message394",
       "category": "Error"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 1607,
+      "line": 1613,
       "key": "server.message395",
       "category": "Error"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 1616,
+      "line": 1622,
       "key": "server.message396",
       "category": "Error"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 1619,
+      "line": 1625,
       "key": "server.message397",
       "category": "Error"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 1622,
+      "line": 1628,
       "key": "server.message398",
       "category": "Error"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 1638,
+      "line": 1644,
       "key": "server.message399",
       "category": "Error"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 1640,
+      "line": 1646,
       "key": "server.message400",
       "category": "Error"
     },
@@ -3431,7 +3431,7 @@
     },
     {
       "file": "server/session-manager.ts",
-      "line": 307,
+      "line": 308,
       "key": "server.projectOrder.unknown",
       "category": "SessionOrganizationError"
     },
@@ -3467,7 +3467,7 @@
     },
     {
       "file": "server/session-manager.ts",
-      "line": 92,
+      "line": 93,
       "key": "server.message502",
       "category": "SessionBusyError"
     },
@@ -3485,7 +3485,13 @@
     },
     {
       "file": "server/system-open.ts",
-      "line": 57,
+      "line": 58,
+      "key": "server.message514",
+      "category": "WorkFileError"
+    },
+    {
+      "file": "server/system-open.ts",
+      "line": 61,
       "key": "server.message505",
       "category": "WorkFileError"
     },
@@ -3497,25 +3503,25 @@
     },
     {
       "file": "server/session-manager.ts",
-      "line": 1032,
+      "line": 1033,
       "key": "server.message319",
       "category": "Error"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 871,
+      "line": 872,
       "key": "server.message364",
       "category": "SessionBusyError"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 1394,
+      "line": 1400,
       "key": "server.message319",
       "category": "Error"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 1574,
+      "line": 1580,
       "key": "server.message167",
       "category": "Error"
     },
@@ -3581,37 +3587,37 @@
     },
     {
       "file": "server/session-manager.ts",
-      "line": 258,
+      "line": 259,
       "key": "server.session_move.same_directory",
       "category": "other"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 259,
+      "line": 260,
       "key": "server.session_move.target_missing",
       "category": "other"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 275,
+      "line": 276,
       "key": "server.message369",
       "category": "other"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 883,
+      "line": 884,
       "key": "server.message364",
       "category": "other"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 1035,
+      "line": 1036,
       "key": "server.message369",
       "category": "other"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 1595,
+      "line": 1601,
       "key": "server.message167",
       "category": "other"
     },

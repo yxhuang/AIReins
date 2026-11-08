@@ -104,13 +104,13 @@ AI 越来越能干，能自己读代码、改文件、跑命令，一口气做�
 
 本机浏览器直连 `127.0.0.1`；其他设备先加入你的 tailnet，再经 Tailscale Serve 转发到 AIReins 的远程入口，由它做 Host/Origin 检查并只放行白名单里的 Tailscale 登录。AIReins 是一个只监听回环地址的 Node 进程，用各家官方协议驱动三家 CLI：Claude Code 的 stream-json、Codex 的 `codex app-server`、Kimi Code 的 ACP。会话写进各家 CLI 自己的历史，AIReins 只是另一个入口。协议细节见 [spikes/PROTOCOL-NOTES.md](spikes/PROTOCOL-NOTES.md)。
 
-## 最新版本：0.4.0
+## 最新版本：0.5.0
 
-[发布说明](https://github.com/yxhuang/AIReins/releases/tag/v0.4.0) · [更新日志](CHANGELOG.md)
+[发布说明](https://github.com/yxhuang/AIReins/releases/tag/v0.5.0) · [更新日志](CHANGELOG.md)
 
-- 在侧栏目录内调整会话顺序，或把空闲会话拖到另一目录继续工作；手动位置保留到该会话下次活动。手机也可从菜单上移、下移，跨目录移动目前需在桌面拖动。
-- 首条消息发送前即可打开 Claude 插件、MCP 和设置面板，未发送的文字与附件保留在输入框。
-- 补齐未确认输入与视图加载失败的恢复入口，Markdown 表格自动换行，并调整手机工具栏；完整变更见更新日志。
+- 文件预览可逐张翻看同一目录的图片：左右按钮、「第几张 / 共几张」和滚轮切换，按文件名自然排序。
+- 会话里的文件夹链接在右侧文件面板打开该文件夹；网页无法预览的文件（Office、二进制、超过 32 MiB）在本机直接用默认程序打开（WSL 和 macOS），只放行文档、媒体和压缩包，可执行文件、安装包、快捷方式、脚本和带宏的 Office 文件不会因点击而运行。
+- 手动调整过顺序的会话，在空闲释放或 AIReins 重启后保持原位。
 
 更新后端后需择时运行 `aireins restart`，这会停止所有正在运行的会话；随后刷新已打开的页面。
 
