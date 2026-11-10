@@ -376,7 +376,10 @@ function NewConfigPills({
         return { ...prev, model: value, ...(patch.effort === null ? { effort: "" } : {}) };
       }),
     };
-    const effective = option.id === "model" || option.id === "effort" ? defaults?.[option.id] : undefined;
+    const effective = option.id === "model" ? defaults?.model
+      : option.id === "effort" ? (selected.model && defaults?.effortByModel?.[selected.model] !== undefined
+        ? defaults.effortByModel[selected.model] : defaults?.effort)
+      : undefined;
     return { group, text: pillText(option, selected[option.id], effective) };
   };
   const byId = (id: ConfigOptionId) => modelOptions.find((o) => o.id === id);

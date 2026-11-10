@@ -62,11 +62,11 @@ try {
   const localBase = `http://127.0.0.1:${port}`, remoteBase = `http://127.0.0.1:${remotePort}`;
   const localMeta = () => fetch(`${localBase}/api/meta`, { signal: AbortSignal.timeout(10_000) }).then(res => res.json()) as Promise<any>;
   assert.equal((await localMeta()).data.capabilities.powerOff, true);
-  assert.deepEqual((await localMeta()).data.claudeDefaults, { model: "opus", effort: "high" });
+  assert.deepEqual((await localMeta()).data.claudeDefaults, { model: "opus", effort: "high", effortByModel: {} });
   await writeFile(claudeSettingsPath, JSON.stringify({ model: "sonnet", effortLevel: "low" }));
-  assert.deepEqual((await localMeta()).data.claudeDefaults, { model: "sonnet", effort: "low" }, "默认值不沿用 CLI 探测缓存");
+  assert.deepEqual((await localMeta()).data.claudeDefaults, { model: "sonnet", effort: "low", effortByModel: {} }, "默认值不沿用 CLI 探测缓存");
   await writeFile(claudeSettingsPath, "{ invalid");
-  assert.deepEqual((await localMeta()).data.claudeDefaults, { model: null, effort: null }, "坏配置不阻塞 API");
+  assert.deepEqual((await localMeta()).data.claudeDefaults, { model: null, effort: null, effortByModel: {} }, "坏配置不阻塞 API");
   const updated = await fetch(`${localBase}/api/prefs`, { method: "PUT", headers: { origin: localBase, "content-type": "application/json" },
     body: JSON.stringify({ idleReleaseMinutes: 15, shutdownCommand: "/untrusted" }) });
   assert.equal(updated.status, 200);

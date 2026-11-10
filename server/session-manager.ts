@@ -69,7 +69,7 @@ import { parseProjectMove, parseOrganizationPatch, parseSessionMove, rebindKimiC
 const RING_SIZE = 1_000;
 const RING_CACHE_MAX_BYTES = 16 * 1024 * 1024;
 type DriverFactory = typeof createDriver;
-type ClaudeSettingsResolver = (cwd: string) => ClaudeEffectiveSettings;
+type ClaudeSettingsResolver = (cwd: string, model?: string | null) => ClaudeEffectiveSettings;
 type SnapshotCreator = (cwd: string) => Promise<string | null>;
 
 /** GET /api/sessions/:id/info/:kind 的 kind → Claude control_request subtype */
@@ -139,7 +139,7 @@ export class SessionManager {
 
   constructor(
     private readonly driverFactory: DriverFactory = createDriver,
-    private readonly claudeSettingsResolver: ClaudeSettingsResolver = readClaudeEffectiveSettings,
+    private readonly claudeSettingsResolver: ClaudeSettingsResolver = (cwd, model) => readClaudeEffectiveSettings(cwd, undefined, model),
     private readonly snapshotCreator: SnapshotCreator = createSnapshotIfNeeded,
     private readonly nativeReader: NativeConversationReader = new NativeConversationReader(),
     private readonly claudePlugins: ClaudePlugins = new ClaudePlugins(),
@@ -281,7 +281,7 @@ export class SessionManager {
       record.cwd = target;
       const worktree = worktreeOf(target);
       if (worktree) record.worktree = worktree; else delete record.worktree;
-      if (record.agent === "claude") Object.assign(record, claudeEffectiveFields(record.config, this.claudeSettingsResolver(target)));
+      if (record.agent === "claude") Object.assign(record, claudeEffectiveFields(record.config, this.claudeSettingsResolver(target, record.config.model)));
       if (orderKey === undefined) { delete record.orderKey; delete record.orderActivity; }
       else { record.orderKey = orderKey; record.orderActivity = record.lastActivityAt; }
       try { this.persistRegistry(); } catch (error) {
@@ -428,7 +428,7 @@ export class SessionManager {
     const config = configFromCreateInput(input);
     const cwd = resolve(input.cwd);
     const claudeSettings = input.agent === "claude"
-      ? this.claudeSettingsResolver(cwd)
+      ? this.claudeSettingsResolver(cwd, config.model)
       : undefined;
     const worktree = worktreeOf(cwd);
     // 从历史再次续接拖动过的会话：Claude 原生文件仍在最初目录。
@@ -1221,13 +1221,13 @@ export class SessionManager {
       const updatesModel = Object.hasOwn(update, "model");
       const updatesEffort = Object.hasOwn(update, "effort");
       const settings = updatesModel || updatesEffort
-        ? this.claudeSettingsResolver(session.cwd)
+        ? this.claudeSettingsResolver(session.cwd, session.config.model)
         : undefined;
       if (updatesModel) {
         session.model = session.config.model;
         applyClaudeConfigValue(session, "model", session.config.model, settings!.model);
       }
-      if (updatesEffort) {
+      if (updatesEffort || updatesModel) { // 换模型时跟随配置的 effort 也随 modelSettings 变
         session.effort = session.config.effort;
         applyClaudeConfigValue(session, "effort", session.config.effort, settings!.effort);
       }

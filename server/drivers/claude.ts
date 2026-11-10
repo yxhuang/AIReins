@@ -14,7 +14,7 @@ import type {
   UserMessageInput,
 } from "../types.js";
 import { BaseDriver, mentionFallbackNote, parseJsonLine, tryReadMentionText, userMessageText, withTimeout } from "./base.js";
-import { readClaudeEffectiveSettings } from "../claude-settings.js";
+import { readClaudeEffectiveSettings, setClaudeModelIds } from "../claude-settings.js";
 import { loadPrefs } from "../prefs.js";
 import type { RemoteControlState } from "../types.js";
 import { supportsClaudeFastMode, type McpAction, type SideQuestionInput } from "../session-menu.js";
@@ -103,6 +103,7 @@ export function deriveClaudeModelLabels(models: unknown): Record<string, string>
 }
 
 export function updateClaudeModelLabels(models: unknown): void {
+  setClaudeModelIds(models);
   const labels = deriveClaudeModelLabels(models);
   const option = CLAUDE_CONFIG_SCHEMA.options.find((item) => item.id === "model");
   for (const entry of option?.values ?? []) {

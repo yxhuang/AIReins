@@ -155,13 +155,13 @@
     },
     {
       "file": "server/claude-settings.ts",
-      "line": 24,
+      "line": 31,
       "key": "server.message024",
       "category": "Error"
     },
     {
       "file": "server/claude-settings.ts",
-      "line": 45,
+      "line": 83,
       "key": "server.message025",
       "category": "Error"
     },
@@ -401,205 +401,205 @@
     },
     {
       "file": "server/drivers/claude.ts",
-      "line": 157,
+      "line": 158,
       "key": "server.message063",
       "category": "name"
     },
     {
       "file": "server/drivers/claude.ts",
-      "line": 159,
-      "key": "server.message064",
-      "category": "label"
-    },
-    {
-      "file": "server/drivers/claude.ts",
       "line": 160,
-      "key": "server.message059",
+      "key": "server.message064",
       "category": "label"
     },
     {
       "file": "server/drivers/claude.ts",
       "line": 161,
-      "key": "server.message060",
+      "key": "server.message059",
       "category": "label"
     },
     {
       "file": "server/drivers/claude.ts",
       "line": 162,
-      "key": "server.message061",
+      "key": "server.message060",
       "category": "label"
     },
     {
       "file": "server/drivers/claude.ts",
       "line": 163,
+      "key": "server.message061",
+      "category": "label"
+    },
+    {
+      "file": "server/drivers/claude.ts",
+      "line": 164,
       "key": "server.message062",
       "category": "label"
     },
     {
       "file": "server/drivers/claude.ts",
-      "line": 171,
+      "line": 172,
       "key": "server.message065",
       "category": "name"
     },
     {
       "file": "server/drivers/claude.ts",
-      "line": 173,
+      "line": 174,
       "key": "server.message064",
       "category": "label"
     },
     {
       "file": "server/drivers/claude.ts",
-      "line": 182,
+      "line": 183,
       "key": "server.message066",
       "category": "name"
     },
     {
       "file": "server/drivers/claude.ts",
-      "line": 347,
+      "line": 348,
       "key": "server.message067",
       "category": "warning"
     },
     {
       "file": "server/drivers/claude.ts",
-      "line": 349,
+      "line": 350,
       "key": "server.message068",
       "category": "Error"
     },
     {
       "file": "server/drivers/claude.ts",
-      "line": 361,
+      "line": 362,
       "key": "server.message069",
       "category": "Error"
     },
     {
       "file": "server/drivers/claude.ts",
-      "line": 413,
+      "line": 414,
       "key": "server.message070",
       "category": "Error"
     },
     {
       "file": "server/drivers/claude.ts",
-      "line": 416,
+      "line": 417,
       "key": "server.message071",
       "category": "Error"
     },
     {
       "file": "server/drivers/claude.ts",
-      "line": 497,
+      "line": 498,
       "key": "server.message072",
       "category": "Error"
     },
     {
       "file": "server/drivers/claude.ts",
-      "line": 501,
+      "line": 502,
       "key": "server.message073",
       "category": "Error"
     },
     {
       "file": "server/drivers/claude.ts",
-      "line": 503,
+      "line": 504,
       "key": "server.message074",
       "category": "Error"
     },
     {
       "file": "server/drivers/claude.ts",
-      "line": 506,
+      "line": 507,
       "key": "server.message075",
       "category": "Error"
     },
     {
       "file": "server/drivers/claude.ts",
-      "line": 509,
+      "line": 510,
       "key": "server.message076",
       "category": "Error"
     },
     {
       "file": "server/drivers/claude.ts",
-      "line": 517,
+      "line": 518,
       "key": "server.message077",
       "category": "Error"
     },
     {
       "file": "server/drivers/claude.ts",
-      "line": 524,
+      "line": 525,
       "key": "server.message078",
       "category": "message"
     },
     {
       "file": "server/drivers/claude.ts",
-      "line": 606,
+      "line": 607,
       "key": "server.message079",
       "category": "warning"
     },
     {
       "file": "server/drivers/claude.ts",
-      "line": 626,
+      "line": 627,
       "key": "server.message080",
       "category": "String"
     },
     {
       "file": "server/drivers/claude.ts",
-      "line": 646,
+      "line": 647,
       "key": "server.message081",
       "category": "String"
     },
     {
       "file": "server/drivers/claude.ts",
-      "line": 653,
+      "line": 654,
       "key": "server.message082",
       "category": "Error"
     },
     {
       "file": "server/drivers/claude.ts",
-      "line": 671,
+      "line": 672,
       "key": "server.message083",
       "category": "Error"
     },
     {
       "file": "server/drivers/claude.ts",
-      "line": 681,
+      "line": 682,
       "key": "server.message084",
       "category": "Error"
     },
     {
       "file": "server/drivers/claude.ts",
-      "line": 719,
+      "line": 720,
       "key": "server.message085",
       "category": "error"
     },
     {
       "file": "server/drivers/claude.ts",
-      "line": 850,
+      "line": 851,
       "key": "server.message086",
       "category": "Error"
     },
     {
       "file": "server/drivers/claude.ts",
-      "line": 863,
+      "line": 864,
       "key": "server.message087",
       "category": "Error"
     },
     {
       "file": "server/drivers/claude.ts",
-      "line": 875,
+      "line": 876,
       "key": "server.message087",
       "category": "Error"
     },
     {
       "file": "server/drivers/claude.ts",
-      "line": 906,
+      "line": 907,
       "key": "server.message088",
       "category": "Error"
     },
     {
       "file": "server/drivers/claude.ts",
-      "line": 932,
+      "line": 933,
       "key": "server.message089",
       "category": "Error"
     },
     {
       "file": "server/drivers/claude.ts",
-      "line": 933,
+      "line": 934,
       "key": "server.message090",
       "category": "Error"
     },

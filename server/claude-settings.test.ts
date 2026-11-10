@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { chmod, lstat, mkdir, mkdtemp, readFile, readlink, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { readClaudeDefaultSettings, readClaudeEffectiveSettings, readClaudeStartupSettings, writeClaudeStartupSettings } from "./claude-settings.js";
+import { readClaudeDefaultSettings, readClaudeEffectiveSettings, readClaudeStartupSettings, setClaudeModelIds, writeClaudeStartupSettings } from "./claude-settings.js";
 
 const root = await mkdtemp(join(tmpdir(), "workbench-claude-settings-test-"));
 const userHome = join(root, "home");
@@ -32,7 +32,7 @@ try {
     join(layeredCwd, ".claude", "settings.local.json"),
     JSON.stringify({ effortLevel: "xhigh" }),
   );
-  assert.deepEqual(readClaudeDefaultSettings(userHome), { model: "opus", effort: "high" }, "新建默认值仅取用户层，不受项目层覆盖");
+  assert.deepEqual(readClaudeDefaultSettings(userHome), { model: "opus", effort: "high", effortByModel: {} }, "新建默认值仅取用户层，不受项目层覆盖");
   assert.deepEqual(readClaudeEffectiveSettings(layeredCwd, userHome), {
     model: "sonnet",
     effort: "xhigh",
@@ -66,7 +66,7 @@ try {
     effort: null,
     remoteControlAtStartup: false,
   });
-  assert.deepEqual(readClaudeDefaultSettings(join(root, "empty-home")), { model: null, effort: null });
+  assert.deepEqual(readClaudeDefaultSettings(join(root, "empty-home")), { model: null, effort: null, effortByModel: {} });
 
   const linkedHome = join(root, "linked-home");
   await mkdir(join(linkedHome, ".claude"), { recursive: true });
@@ -76,7 +76,7 @@ try {
   await writeFile(target, `${JSON.stringify(before, null, 2)}\n`);
   await symlink(target, link);
   const inode = (await lstat(link)).ino;
-  assert.deepEqual(readClaudeDefaultSettings(linkedHome), { model: "opus", effort: "high" });
+  assert.deepEqual(readClaudeDefaultSettings(linkedHome), { model: "opus", effort: "high", effortByModel: {} });
   assert.equal((await lstat(link)).ino, inode, "读取默认值保留设置软链接");
   assert.deepEqual(JSON.parse(await readFile(target, "utf8")), before, "读取默认值不写配置");
   assert.deepEqual(writeClaudeStartupSettings(false, linkedHome), { remoteControlAtStartup: false });
@@ -89,17 +89,36 @@ try {
   assert.deepEqual(writeClaudeStartupSettings(true, linkedHome), { remoteControlAtStartup: true });
   assert.deepEqual(readClaudeStartupSettings(linkedHome), { remoteControlAtStartup: true });
   await writeFile(target, "{ invalid");
-  assert.deepEqual(readClaudeDefaultSettings(linkedHome), { model: null, effort: null }, "无效 JSON 不阻塞 meta");
+  assert.deepEqual(readClaudeDefaultSettings(linkedHome), { model: null, effort: null, effortByModel: {} }, "无效 JSON 不阻塞 meta");
   assert.throws(() => writeClaudeStartupSettings(false, linkedHome));
   assert.equal(await readFile(target, "utf8"), "{ invalid");
   for (const invalid of [[], null, "settings"]) {
     await writeFile(target, JSON.stringify(invalid));
-    assert.deepEqual(readClaudeDefaultSettings(linkedHome), { model: null, effort: null });
+    assert.deepEqual(readClaudeDefaultSettings(linkedHome), { model: null, effort: null, effortByModel: {} });
   }
   await writeFile(target, JSON.stringify({ model: "  sonnet  ", effortLevel: " high ", env: { SECRET: "never exposed" } }));
-  assert.deepEqual(readClaudeDefaultSettings(linkedHome), { model: "sonnet", effort: "high" });
+  assert.deepEqual(readClaudeDefaultSettings(linkedHome), { model: "sonnet", effort: "high", effortByModel: {} });
   await writeFile(target, JSON.stringify({ model: 123, effortLevel: "   " }));
-  assert.deepEqual(readClaudeDefaultSettings(linkedHome), { model: null, effort: null });
+  assert.deepEqual(readClaudeDefaultSettings(linkedHome), { model: null, effort: null, effortByModel: {} });
+
+  // modelSettings 按完整 ID：同层优先于 effortLevel，后层 effortLevel 仍覆盖前层（CLI 实测）。
+  setClaudeModelIds([
+    { value: "default", resolvedModel: "claude-opus-5-5" },
+    { value: "opus", resolvedModel: "claude-opus-5-5" },
+    { value: "sonnet", resolvedModel: "claude-sonnet-5-5" },
+  ]);
+  await writeFile(target, JSON.stringify({ model: "opus", effortLevel: "high", modelSettings: { "claude-opus-5-5": { effortLevel: "medium" } } }));
+  assert.deepEqual(readClaudeDefaultSettings(linkedHome), {
+    model: "opus", effort: "medium", effortByModel: { default: "medium", opus: "medium", sonnet: "high" },
+  });
+  const perModelCwd = join(root, "per-model");
+  await mkdir(join(perModelCwd, ".claude"), { recursive: true });
+  assert.equal(readClaudeEffectiveSettings(perModelCwd, linkedHome).effort, "medium");
+  assert.equal(readClaudeEffectiveSettings(perModelCwd, linkedHome, "sonnet").effort, "high");
+  assert.equal(readClaudeEffectiveSettings(perModelCwd, linkedHome, "claude-opus-5-5").effort, "medium");
+  await writeFile(join(perModelCwd, ".claude", "settings.local.json"), JSON.stringify({ effortLevel: "low" }));
+  assert.equal(readClaudeEffectiveSettings(perModelCwd, linkedHome).effort, "low");
+  setClaudeModelIds([]);
 } finally {
   await chmod(unreadablePath, 0o600).catch(() => undefined);
   await rm(root, { recursive: true, force: true });

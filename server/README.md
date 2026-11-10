@@ -222,7 +222,7 @@ AIReins 新建的 Codex 会话在首个 `item/completed.userMessage` 后、没�
 - `GET /api/history`：只读列出三家 CLI 自己保存的所有来源会话；没有用户消息的会话隐藏，`empty` 单独计数（分页为本页扫描计数），`skipped` 记录损坏/不可读候选。命中 delegate 元数据的条目附带 `dispatch:{runId,name}`，UUID 和 `session_...` 原样匹配；派单映射只读全部目录的 `run.json`/旧 `meta.json`，缓存 30 秒。
 - `GET /api/history/:agent/:nativeSessionId/messages`：从最新消息向前分页读取完整原生历史
 - `GET /api/meta`：server/CLI 实测版本、按请求入口计算的终端能力位、三 driver 能力位与配置 schema；`hostName` 为执行主机名称，优先用既有 `remote.json` 的 Tailscale 域名机器名，否则用 Node `hostname()`，供主机菜单显示「机器名（本机）」。新增字段需要后端重启，旧前端可忽略。
-  - `claudeDefaults:{model:string|null,effort:string|null}`：每次请求只读 `~/.claude/settings.json` 的 `model` / `effortLevel`（去除首尾空白），供新建页的「跟随 Claude 配置」胶囊显示真实用户默认值；不经过 CLI 探测缓存、不含项目层设置、不写用户配置，也不返回其他设置。缺失、不可读、无效 JSON 或非字符串/空值为 `null`；旧后端可能省略该字段。会话创建后仍以该会话的 `effectiveModel` / `effectiveEffort` 为准，包含项目层覆盖及运行时回报。
+  - `claudeDefaults:{model:string|null,effort:string|null,effortByModel:Record<string,string|null>}`：每次请求只读 `~/.claude/settings.json` 的 `model` / `effortLevel`（去除首尾空白）；`modelSettings[<完整模型 ID>].effortLevel` 优先于顶层 `effortLevel`，别名→完整 ID 取启动探测 `initialize` 的 `resolvedModel`（未指定模型按 `default`），`effortByModel` 是各别名的跟随值，探测失败时为空并回落顶层值。供新建页的「跟随 Claude 配置」胶囊显示真实用户默认值；不经过 CLI 探测缓存、不含项目层设置、不写用户配置，也不返回其他设置。缺失、不可读、无效 JSON 或非字符串/空值为 `null`；旧后端可能省略该字段。会话创建后仍以该会话的 `effectiveModel` / `effectiveEffort` 为准，包含项目层覆盖及运行时回报。
   - Codex 档位 `defaultsByModel` 是各模型的有效默认：优先该模型支持的用户全局档位，否则用模型内建默认；`config/read` 不可用时为 null，前端不推测。
 - `GET /api/tailscale/peers`：只读发现其他 Windows/Linux/macOS 电脑，沿用现有 Host/Origin 与远程 Tailscale 身份白名单，不增加豁免。`execFile` 不经 shell 调用 `tailscale status --json`（5 秒超时，输出最多 1 MiB），优先 PATH，WSL 未找到时回退 `/mnt/c/Program Files/Tailscale/tailscale.exe`。成功信封 `data:{peers:[{name,origin,online,os,ips}]}`，仅含前端可接受的 HTTPS MagicDNS 地址，排除自身、手机及非法域名，在线优先后按名字排序。未安装、未运行、超时或坏 JSON 都返回 HTTP 200、`code:0`、`data:{peers:[],reason:"可读原因"}`。发现不探测目标 AIReins 是否可用；后端重启后生效。
 - `GET /api/tailscale/file-targets`：文件面板「发送到设备」的 Taildrop 目标。调用 `tailscale file cp --targets`（查找顺序与超时同上），成功信封 `data:{targets:[{name,ip,online,self}],reason?}`；`self` 仅远程入口按 Tailscale Serve 覆盖写入的 `X-Forwarded-For` 标出来访设备，本机入口恒为 false。排序为本机、在线、名称。CLI 不存在、未运行、超时都返回 `code:0`、空列表加 `reason`。
@@ -351,7 +351,7 @@ Claude 额外固定返回四个字段；未显式覆盖时的初始形状如下�
 }
 ```
 
-`config.model / config.effort` 只表示会话级覆盖，`null` 不改写；前端据此区分“覆盖”与“继承”。`effectiveModel / effectiveEffort` 是当前能确认的实际值，拿不到就是 `null`。对应 source 为：`session`（会话显式覆盖）、`settings`（分层 settings 合并）或 `init`（Claude `system/init` 的运行时回报）；值为 `null` 时 source 也为 `null`。兼容字段 `model / effort` 保留既有语义：首轮前是覆盖值或 `null`，init 报出某项后更新为该项的运行时精确值。显式覆盖始终保留在 `config` 中，不会被 settings 或 init 改写。
+`config.model / config.effort` 只表示会话级覆盖，`null` 不改写；前端据此区分“覆盖”与“继承”。`effectiveModel / effectiveEffort` 是当前能确认的实际值，拿不到就是 `null`。对应 source 为：`session`（会话显式覆盖）、`settings`（分层 settings 合并；每层 `modelSettings[所用模型].effortLevel` 先于同层 `effortLevel`，后层覆盖前层，与 CLI `get_settings.applied.effort` 一致）或 `init`（Claude `system/init` 的运行时回报）；值为 `null` 时 source 也为 `null`。兼容字段 `model / effort` 保留既有语义：首轮前是覆盖值或 `null`，init 报出某项后更新为该项的运行时精确值。显式覆盖始终保留在 `config` 中，不会被 settings 或 init 改写。
 
 `riskyMode` 在 Claude 的 `bypassPermissions / dontAsk`、Codex 的 `full-access / 旧 never`、Kimi 的 `yolo` 下为 `true`。这是每会话标记，不存在全局 yolo 开关。
 

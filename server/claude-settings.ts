@@ -8,6 +8,13 @@ export interface ClaudeEffectiveSettings {
   remoteControlAtStartup?: boolean;
 }
 
+export interface ClaudeDefaultSettings {
+  model: string | null;
+  effort: string | null;
+  /** 新建表单选了别的模型时，按 modelSettings 解析出的跟随值。 */
+  effortByModel: Record<string, string | null>;
+}
+
 export interface ClaudeStartupSettings {
   remoteControlAtStartup: boolean;
 }
@@ -26,13 +33,44 @@ function readUserSettings(userHome: string): Record<string, unknown> {
   return parsed as Record<string, unknown>;
 }
 
+// CLI initialize 报告的别名 → 完整模型 ID（"default" 即未指定模型时的解析结果）；modelSettings 按完整 ID 记。
+let claudeModelIds: Record<string, string> = {};
+
+export function setClaudeModelIds(models: unknown): void {
+  if (!Array.isArray(models)) return;
+  const ids: Record<string, string> = {};
+  for (const item of models) {
+    if (item && typeof item === "object" && typeof item.value === "string" && typeof item.resolvedModel === "string") {
+      ids[item.value] = item.resolvedModel;
+    }
+  }
+  claudeModelIds = ids;
+}
+
+/** 单层设置对某模型的 effort：modelSettings[模型].effortLevel 优先于同层 effortLevel（与 CLI get_settings.applied 一致）。 */
+function layerEffort(settings: Record<string, unknown>, model: string | null): string | null {
+  const perModel = settings.modelSettings;
+  if (perModel && typeof perModel === "object" && !Array.isArray(perModel)) {
+    for (const key of [model, claudeModelIds[model ?? "default"]]) {
+      if (!key) continue;
+      const entry = (perModel as Record<string, unknown>)[key];
+      const effort = entry && typeof entry === "object" ? nonEmptyString((entry as Record<string, unknown>).effortLevel) : null;
+      if (effort !== null) return effort;
+    }
+  }
+  return nonEmptyString(settings.effortLevel);
+}
+
 /** 新建页只读用户级默认值；坏配置不阻塞 meta，也不返回其他设置。 */
-export function readClaudeDefaultSettings(userHome = homedir()): Pick<ClaudeEffectiveSettings, "model" | "effort"> {
+export function readClaudeDefaultSettings(userHome = homedir()): ClaudeDefaultSettings {
   try {
     const settings = readUserSettings(userHome);
-    return { model: nonEmptyString(settings.model), effort: nonEmptyString(settings.effortLevel) };
+    const model = nonEmptyString(settings.model);
+    const effortByModel: Record<string, string | null> = {};
+    for (const alias of Object.keys(claudeModelIds)) effortByModel[alias] = layerEffort(settings, alias);
+    return { model, effort: layerEffort(settings, model), effortByModel };
   } catch {
-    return { model: null, effort: null };
+    return { model: null, effort: null, effortByModel: {} };
   }
 }
 
@@ -55,6 +93,7 @@ export function writeClaudeStartupSettings(enabled: boolean, userHome = homedir(
 export function readClaudeEffectiveSettings(
   cwd: string,
   userHome: string = homedir(),
+  modelOverride?: string | null,
 ): ClaudeEffectiveSettings {
   const effective: ClaudeEffectiveSettings = { model: null, effort: null, remoteControlAtStartup: false };
   const paths = [
@@ -64,6 +103,7 @@ export function readClaudeEffectiveSettings(
   ];
 
   let projectDisabled = false;
+  const layers: Record<string, unknown>[] = [];
   for (const [index, path] of paths.entries()) {
     let settings: Record<string, unknown>;
     try {
@@ -75,15 +115,17 @@ export function readClaudeEffectiveSettings(
       continue;
     }
 
+    layers.push(settings);
     const model = nonEmptyString(settings.model);
-    const effort = nonEmptyString(settings.effortLevel);
     if (model !== null) effective.model = model;
-    if (effort !== null) effective.effort = effort;
     if (index === 0 && settings.remoteControlAtStartup === true) effective.remoteControlAtStartup = true;
     if (index > 0 && settings.remoteControlAtStartup === false) projectDisabled = true;
   }
 
   if (projectDisabled) effective.remoteControlAtStartup = false;
+  // 后层覆盖前层；每层先看所用模型的 modelSettings。
+  const model = modelOverride || effective.model;
+  for (const settings of layers) effective.effort = layerEffort(settings, model) ?? effective.effort;
 
   return effective;
 }

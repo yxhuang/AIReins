@@ -230,7 +230,7 @@ export interface MetaInfo {
   /** 旧后端可省略；历史目录输入用来展开 ~。 */
   homeDir?: string;
   /** 只读 Claude 用户 settings 的默认模型/档位；旧后端省略，未知值为 null。 */
-  claudeDefaults?: { model: string | null; effort: string | null };
+  claudeDefaults?: { model: string | null; effort: string | null; effortByModel?: Record<string, string | null> };
   cliVersions: Record<AgentKind, string>;
   platform?: "wsl" | "linux" | "darwin" | "unsupported";
   /** 服务端缺省 Unix shell 的名称；旧后端省略时回退 bash。 */
