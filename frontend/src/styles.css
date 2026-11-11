@@ -3031,6 +3031,9 @@ body.resizing {
     display: grid; grid-template-columns: 1fr 1fr; column-gap: 14px; align-items: start;
   }
   .settings > .settings-panel > .settings-col + .settings-col { border-top: none; border-left: 1px solid var(--border); padding-left: 14px; }
+  /* 左栏拉满面板高度，版本号沉到左下角 */
+  .settings > .settings-panel > .settings-col:first-child { align-self: stretch; display: flex; flex-direction: column; }
+  .settings > .settings-panel .settings-version { margin-top: auto; }
   /* 收起态侧栏窄且 overflow:hidden，设置与直达浮层贴在侧栏右侧弹出，底边对齐侧栏底部内边距 */
   .app.sidebar-collapsed .sidebar-foot .settings > .settings-panel,
   .app.sidebar-collapsed .sidebar-foot .launcher-panel { position: fixed; left: 56px; right: auto; bottom: 10px; max-height: calc(100vh - 20px); }
@@ -3075,6 +3078,7 @@ body.resizing {
 }
 
 .settings-hint { font-size: 13px; color: var(--text-faint); line-height: 1.5; }
+.settings-version { margin: 0; padding-top: 4px; font-variant-numeric: tabular-nums; user-select: text; }
 .settings-range { width: 100%; margin: 2px 0 0; accent-color: var(--busy); }
 .settings-range-value { font-size: 15px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
 

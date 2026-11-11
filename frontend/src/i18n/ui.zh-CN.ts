@@ -548,6 +548,7 @@ const dictionary: Record<string, string> = {
   "ui.common.settings": "设置",
   "ui.SettingsMenu.checking_sessions": "检查会话中…",
   "ui.SettingsMenu.restart": "重启 {product}",
+  "ui.SettingsMenu.version": "{product} v{p0}",
   "ui.SelfUpdate.update": "更新 {product}",
   "ui.SelfUpdate.checking": "正在与远端对比……",
   "ui.SelfUpdate.pull_title": "拉取远端更新",

@@ -133,6 +133,7 @@ function applyTheme(choice: ThemeChoice) {
 
 export function SettingsMenu() {
   const powerSupported = useStore(value => value.meta?.capabilities?.powerOff === true);
+  const serverVersion = useStore(value => value.meta?.serverVersion);
   const [open, setOpen] = useState(false);
   const [storageDialogOpen, setStorageDialogOpen] = useState(false);
   const [updateDialogOpen, setUpdateDialogOpen] = useState(false);
@@ -519,6 +520,7 @@ export function SettingsMenu() {
               </button>
               <SelfUpdate dialogOpen={updateDialogOpen} onDialogOpenChange={setUpdateDialogOpen} onRestart={() => void restart()} />
             </section>
+            {serverVersion && <p className="settings-hint settings-version">{t("ui.SettingsMenu.version", { p0: serverVersion })}</p>}
           </div>
           <div className="settings-col">
             {renderGroup(SESSIONS_GROUP, <WorkbenchStorage dialogOpen={storageDialogOpen} onDialogOpenChange={setStorageDialogOpen} />)}

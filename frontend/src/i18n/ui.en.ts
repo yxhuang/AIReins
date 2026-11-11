@@ -548,6 +548,7 @@ const dictionary: Record<string, string> = {
   "ui.common.settings": "Settings",
   "ui.SettingsMenu.checking_sessions": "Checking sessions…",
   "ui.SettingsMenu.restart": "Restart {product}",
+  "ui.SettingsMenu.version": "{product} v{p0}",
   "ui.SelfUpdate.update": "Update {product}",
   "ui.SelfUpdate.checking": "Comparing with the remote…",
   "ui.SelfUpdate.pull_title": "Pull remote updates",
