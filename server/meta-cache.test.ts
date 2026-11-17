@@ -12,7 +12,8 @@ const { getMeta } = await import("./meta.js");
 const started = Date.now();
 const meta = await getMeta();
 assert.ok(Date.now() - started < 200, "有缓存时不等探测");
-assert.deepEqual(meta.drivers, { marker: 1 });
+assert.equal((meta.drivers as any).marker, 1);
+assert.deepEqual((meta.drivers as any).antigravity.options, [], "旧缓存也立即提供 Antigravity 基础能力");
 assert.equal(meta.defaultCwd, process.cwd());
 for (let i = 0; i < 100 && readFileSync(join(home, "meta-cache.json"), "utf8").includes("marker"); i++) {
   await new Promise((resolve) => setTimeout(resolve, 100));
@@ -28,7 +29,7 @@ const cold = await import(new URL("./meta.ts?cold-start", import.meta.url).href)
 const initial = await cold.getMeta();
 assert.equal(initial.metadataPending, true, "无缓存时先给基础信息，不等 CLI 探测");
 assert.equal(initial.defaultCwd, process.cwd());
-for (const agent of ["claude", "codex", "kimi"]) {
+for (const agent of ["claude", "antigravity", "codex", "kimi"]) {
   assert.equal((initial.drivers as Record<string, { interrupt: boolean }>)[agent].interrupt, true);
   assert.deepEqual((initial.drivers as Record<string, { options: unknown[] }>)[agent].options, []);
 }

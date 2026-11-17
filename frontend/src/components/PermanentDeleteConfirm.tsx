@@ -12,6 +12,7 @@ export function PermanentDeleteConfirm({ session, busy, error, onCancel, onConfi
   const titleId = useId();
   const descriptionId = useId();
   const unsupported = session.agent === "claude" ? t("ui.PermanentDeleteConfirm.claude_has_no_verified_api_to_permanently")
+    : session.agent === "antigravity" ? t("ui.PermanentDeleteConfirm.agent_has_no_verified_delete_api", { agent: "Antigravity" })
     : !session.nativeSessionId ? t("ui.PermanentDeleteConfirm.this_session_has_no_native_session_id") : null;
   const blocked = !["idle", "dead", "error"].includes(session.status) || Boolean(session.backgroundTasks?.length);
   useEffect(() => { dialog.current?.querySelector<HTMLButtonElement>("[data-autofocus]")?.focus(); }, []);
@@ -33,7 +34,7 @@ export function PermanentDeleteConfirm({ session, busy, error, onCancel, onConfi
       <div className="dir-heading"><h2 id={titleId}>{t("ui.PermanentDeleteConfirm.permanently_delete_session")}</h2></div>
       <div className="permanent-delete-body">
         <p><strong>{sessionTitle(session)}</strong></p>
-        <p className="mono">{session.agent} · {session.nativeSessionId ?? t("ui.PermanentDeleteConfirm.no_native_session_id")}</p>
+        <p className="mono">{session.agent === "antigravity" ? "Antigravity" : session.agent} · {session.nativeSessionId ?? t("ui.PermanentDeleteConfirm.no_native_session_id")}</p>
         <p id={descriptionId}>{t("ui.PermanentDeleteConfirm.permanently_delete_this_session_the_record_its")}</p>
         {unsupported && <p role="alert">{unsupported}</p>}
         {blocked && <p role="alert">{t("ui.PermanentDeleteConfirm.stop_execution_and_background_tasks_first_wait")}</p>}

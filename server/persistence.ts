@@ -17,7 +17,7 @@ import {
   statSync,
 } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, sep } from "node:path";
 import { createHash } from "node:crypto";
 import { EventPageIndex } from "./event-pages.js";
 import { normalizeProjectPath } from "../shared/project-path.js";
@@ -131,7 +131,16 @@ export function uploadDirReferences(kept: SessionRecord[]): Map<string, Set<stri
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
       text = "";
     }
-    const references = new Set(ids.filter((id) => text.includes(join(uploadsDir, id))));
+    // 先找附件根路径，每次命中再比较目录名；避免按目录数重复扫描整份 transcript。
+    const references = new Set<string>();
+    const prefix = `${uploadsDir}${sep}`;
+    let offset = text.indexOf(prefix);
+    while (offset !== -1) {
+      const start = offset + prefix.length;
+      // 保留 includes 的保守前缀语义，避免已有跨会话附件失去保护。
+      for (const id of ids) if (text.startsWith(id, start)) references.add(id);
+      offset = text.indexOf(prefix, start);
+    }
     if (signature === transcriptSignature(path)) uploadReferenceCache.set(path, { signature, idsKey, references });
     return [session.id, references];
   }));

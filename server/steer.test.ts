@@ -10,17 +10,18 @@ process.env.WORKBENCH_HOME = join(fixture, "wb");
 process.env.WORKBENCH_CLAUDE_HISTORY_DIR = join(fixture, "claude");
 process.env.WORKBENCH_CODEX_HISTORY_DIR = join(fixture, "codex");
 process.env.WORKBENCH_KIMI_HISTORY_DIR = join(fixture, "kimi");
-const [{ SessionManager }, { ClaudeDriver }, { CodexDriver }, { KimiDriver }] = await Promise.all([
-  import("./session-manager.js"), import("./drivers/claude.js"), import("./drivers/codex.js"), import("./drivers/kimi.js"),
+const [{ SessionManager }, { ClaudeDriver }, { CodexDriver }, { KimiDriver }, { AntigravityDriver }] = await Promise.all([
+  import("./session-manager.js"), import("./drivers/claude.js"), import("./drivers/codex.js"), import("./drivers/kimi.js"), import("./drivers/antigravity.js"),
 ]);
 const settle = () => new Promise<void>(resolve => setImmediate(resolve));
 
 // Fake CLI NDJSON transport. Keep the production serializers/RPC handler and driver lifecycle.
 function fakeCli(kind: AgentKind, options: DriverOptions) {
-  const Driver = { claude: ClaudeDriver, codex: CodexDriver, kimi: KimiDriver }[kind];
+  const Driver = { claude: ClaudeDriver, codex: CodexDriver, kimi: KimiDriver, antigravity: AntigravityDriver }[kind];
   const driver = new Driver(options);
   const internal = driver as any;
   const frames: any[] = [];
+  const finishedPrompts = new Set<number>();
   let turn = 0, rejectSteer = false, holdStart = false;
   let heldReply: any;
   const receive = (frame: any) => internal.handleStdoutLine(JSON.stringify(frame));
@@ -48,7 +49,8 @@ function fakeCli(kind: AgentKind, options: DriverOptions) {
     if (kind === "codex") receive({ method: "turn/completed", params: { threadId: "thread-test", turn: { id: `turn-${turn}`, status: "completed" } } });
     else if (kind === "claude") receive({ type: "result", subtype: "success", result: "OK" });
     else {
-      const prompt = frames.filter(frame => frame.method === "session/prompt").at(-1);
+      const prompt = frames.find(frame => frame.method === "session/prompt" && !finishedPrompts.has(frame.id));
+      finishedPrompts.add(prompt.id);
       receive({ id: prompt.id, ...(error ? { error: { message: "prompt failed" } } : { result: { stopReason: "end_turn" } }) });
     }
   };
@@ -67,7 +69,7 @@ const manager = new SessionManager((kind, options) => {
 manager.onEvent(event => events.push(event));
 const messages = (id: string) => events.filter(event => event.sessionId === id && event.type === "user_message");
 try {
-  for (const kind of ["claude", "codex", "kimi"] as const) {
+  for (const kind of ["claude", "antigravity", "codex", "kimi"] as const) {
     const session = await manager.create({ agent: kind, cwd: fixture, snapshot: "skip" });
     const h = fakes.at(-1)!;
     await manager.sendUserMessage(session.id, { text: "第一轮" }, `request-${kind}`);
@@ -91,6 +93,12 @@ try {
       assert.equal(h.frames.filter(frame => frame.method === "turn/start").length, 1);
       const interruption = manager.interrupt(session.id); await interruption;
       assert.equal(h.frames.at(-1).params.turnId, "turn-1", "插话不能丢失中断目标");
+    } else if (kind === "antigravity") {
+      assert.equal(h.frames.length, count + 1, "Antigravity 插话立即交给原生 ACP");
+      assert.equal(h.frames.at(-1).method, "session/prompt");
+      assert.equal(messages(session.id).at(-1)!.payload.queued, undefined);
+      h.finish(); await settle();
+      assert.equal(manager.get(session.id)!.status, "running", "原生追加请求完成前保持运行中");
     } else {
       assert.equal(h.frames.length, count, "Kimi busy 时不能再次发 session/prompt");
       assert.equal(messages(session.id).at(-1)!.payload.queued, true);
@@ -187,5 +195,5 @@ try {
     assert.equal(h.frames.filter(frame => frame.method === "session/prompt").length, 1);
     assert.ok(events.some(event => event.sessionId === s.id && event.payload.source === "steer_queue" && /已取消/.test(String(event.payload.message))));
   }
-  console.log("✅ steering：三家发送、Codex 回合/附件/拒绝竞态、Kimi FIFO/取消、审批闸门契约通过");
+  console.log("✅ steering：四家发送、Antigravity 原生追加、Codex 回合/附件/拒绝竞态、Kimi FIFO/取消、审批闸门契约通过");
 } finally { await manager.shutdown(); }

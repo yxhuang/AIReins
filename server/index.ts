@@ -647,7 +647,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       try {
         const parent = url.searchParams.get("parent");
         const agent = url.searchParams.get("agent");
-        if (agent !== null && !["claude", "codex", "kimi"].includes(agent)) throw new DispatchQueryError("agent 必须是 claude、codex 或 kimi");
+        if (agent !== null && !AGENTS.includes(agent as AgentKind)) throw new DispatchQueryError("agent 必须是 claude、antigravity、codex 或 kimi");
         const sessions = () => manager.list().map(({ id, agent, cwd, nativeSessionId, config, createdAt }) =>
           ({ id, agent, cwd, nativeSessionId, model: config.model, createdAt }));
         await respond(response, 200, 0, "success", { dispatches: parent !== null
@@ -1170,7 +1170,7 @@ function validateHistoryQuery(searchParams: URLSearchParams): {
 
 function validateHistoryAgent(value: string): CreateSessionInput["agent"] {
   if (!AGENTS.includes(value as CreateSessionInput["agent"])) {
-    throw new ApiError(400, 40030, "history agent 必须是 claude、codex 或 kimi");
+    throw new ApiError(400, 40030, "history agent 必须是 claude、antigravity、codex 或 kimi");
   }
   return value as CreateSessionInput["agent"];
 }
@@ -1252,7 +1252,7 @@ function validateCreateSession(value: unknown): CreateSessionInput {
   if (!value || typeof value !== "object") throw new ApiError(400, 40000, "请求体必须是 JSON 对象");
   const input = value as Record<string, unknown>;
   if (!AGENTS.includes(input.agent as CreateSessionInput["agent"])) {
-    throw new ApiError(400, 40001, "agent 必须是 claude、codex 或 kimi");
+    throw new ApiError(400, 40001, "agent 必须是 claude、antigravity、codex 或 kimi");
   }
   if (typeof input.cwd !== "string") throw new ApiError(400, 40002, "cwd 必须是绝对路径字符串");
   if (input.snapshot !== undefined && !["auto", "skip"].includes(String(input.snapshot))) {

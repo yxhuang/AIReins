@@ -12,6 +12,8 @@ assert.equal(contextPercent("claude", { totalTokens: 42000, maxTokens: 200000, p
 assert.equal(contextPercent("claude", { totalTokens: 42000, maxTokens: 200000 }), 21);
 assert.equal(contextPercent("claude", { percentage: 0 }), 0);
 assert.equal(contextPercent("kimi", { used: 120, size: 100 }), 100);
+assert.equal(contextPercent("antigravity", { used: 100, size: 400 }), 25);
+assert.equal(contextPercent("antigravity", { totalTokens: 100, maxTokens: 400 }), null);
 for (const payload of [undefined, null, {}, { used: 3, size: 0 }, { used: -1, size: 100 }, { used: "30", size: 100 }, { used: Infinity, size: 100 }, { used: 30, size: NaN }]) {
   assert.equal(contextPercent("kimi", payload), null);
 }
@@ -21,7 +23,7 @@ globalThis.React = React;
 const { ContextUsage } = await import("../src/components/ContextUsage.tsx");
 const { compactSessionContext } = await import("../src/api.ts");
 const previousFetch = globalThis.fetch;
-const previousState = { sessions: store.sessions, data: store.data, drafts: store.drafts };
+const previousState = { sessions: store.sessions, data: store.data, drafts: store.drafts, commands: store.commands };
 const nodes = node => !node || typeof node !== "object" ? [] : Array.isArray(node) ? node.flatMap(nodes)
   : [node, ...nodes(node.props?.children)];
 function mount(session) {
@@ -60,13 +62,19 @@ try {
   assert.equal(requests[0].url, "/api/sessions/session%2Fid/compact");
   assert.equal(requests[0].options.method, "POST");
 
-  for (const agent of ["claude", "codex", "kimi"]) {
+  for (const agent of ["claude", "antigravity", "codex", "kimi"]) {
+    store.commands = new Map();
     const session = { id: `context-${agent}`, agent, status: "idle", config: {} };
     store.sessions = [session]; store.data = new Map(); store.drafts = new Map([[session.id, "keep this draft"]]);
     const render = mount(session);
     let tree = render();
     assert.ok(ring(tree), `${agent}: the context indicator must be a button even without a reading`);
     ring(tree).props.onClick(); tree = render();
+    if (agent === "antigravity") {
+      assert.equal(action(tree), undefined, "Antigravity must not offer unreported compact commands");
+      store.commands.set(session.id, [{ name: "compact", description: "Compact", source: agent }]);
+      tree = render();
+    }
     assert.ok(action(tree)); assert.equal(action(tree).props.disabled, false);
     let finish;
     const before = requests.length;

@@ -13,6 +13,7 @@ export class NativeDeleteError extends Error {}
 
 /** Validate before stopping a worker; never substitute a project purge or worktree removal. */
 export function validateNativeDelete(record: SessionRecord): void {
+  if (record.agent === "antigravity") throw new NativeDeleteError("Antigravity 当前没有已核实的单会话彻底删除接口；请使用「移除」。");
   if (record.agent === "claude") throw new NativeDeleteError("Claude 当前没有已核实的单会话彻底删除接口；请使用「移除」。AIReins 不会清理整个项目或工作树。");
   const pattern = new RegExp(record.agent === "kimi" ? `^session_${UUID}$` : `^${UUID}$`);
   if (!record.nativeSessionId || !pattern.test(record.nativeSessionId)) {

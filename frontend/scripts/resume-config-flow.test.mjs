@@ -18,6 +18,7 @@ globalThis.WebSocket = { CONNECTING: 0, OPEN: 1, CLOSING: 2, CLOSED: 3 };
 
 const { Store } = await import("../src/store.ts");
 const { needsRestartNote, RESTART_NOTE, pillText, modelShortName } = await import("../src/config-view.ts");
+const configView = await import("../src/config-view.ts");
 const {
   HISTORY_PAGE_SIZE,
   fetchInitialHistoryPage,
@@ -70,6 +71,34 @@ function stubFetch(session, snapshotEvents = []) {
 }
 
 // ============ 需求 1：claude model/effort 重启切换 ============
+
+await t("会话配置候选优先于 meta，旧会话回落，空会话 schema 不回落", async () => {
+  const fallback = [{ id: "effort", values: [{ value: "old", label: "Old" }], default: "old", mutable: true }];
+  const options = [{ id: "effort", values: [{ value: "deep", label: "Deep" }], default: "deep", mutable: true }];
+  const session = makeSession("acp-schema", { agent: "antigravity", configSchema: { source: "ACP runtime", options } });
+  assert.deepEqual(configView.sessionConfigOptions(session, fallback), options);
+  assert.deepEqual(configView.sessionConfigOptions(makeSession("legacy"), fallback), fallback);
+  assert.deepEqual(configView.sessionConfigOptions({ ...session, configSchema: { source: "ACP runtime", options: [] } }, fallback), []);
+  const source = readFileSync(new URL("../src/components/SessionView.tsx", import.meta.url), "utf8");
+  assert.match(source, /sessionConfigOptions\(session,\s*meta\?\.drivers\[session.agent\]\?\.options/);
+});
+
+await t("快照和 WS config_updated 同步会话 schema，旧事件保留候选，列表旧响应不覆盖更新", async () => {
+  const initialSchema = { source: "ACP runtime", options: [{ id: "effort", values: [{ value: "balanced", label: "Balanced" }], default: "balanced", mutable: true }] };
+  const session = makeSession("acp-schema-flow", { agent: "antigravity", configSchema: initialSchema });
+  stubFetch(session);
+  const s = new Store();
+  s.sessions = [session];
+  await s.ensureLoaded(session.id);
+  assert.deepEqual(s.session(session.id).configSchema, initialSchema, "snapshot restores session schema");
+  const updatedSchema = { source: "ACP runtime", options: [{ ...initialSchema.options[0], values: [{ value: "deep", label: "Deep" }], default: "deep" }] };
+  s.handleFrame(makeEvent(session.id, 1, "config_updated", { config: { model: "next-model", effort: "deep" }, configSchema: updatedSchema }));
+  assert.deepEqual(s.session(session.id).configSchema, updatedSchema);
+  s.handleFrame(makeEvent(session.id, 2, "config_updated", { config: { effort: "deep" } }));
+  assert.deepEqual(s.session(session.id).configSchema, updatedSchema, "old-server payload leaves schema intact");
+  await s.refreshSessions();
+  assert.deepEqual(s.session(session.id).configSchema, updatedSchema, "stale list cannot replace newer schema");
+});
 
 // --- 验收 1：mutableVia 项的「重启」旁注 ---
 await t("needsRestartNote：仅 mutableVia:\"restart\" 需要旁注；文案逐字为「切换会重启底层进程并续接当前会话」", async () => {

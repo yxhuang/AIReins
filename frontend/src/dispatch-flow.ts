@@ -256,7 +256,7 @@ export function dispatchStatus(status: string): { label: string; className: stri
 export interface DispatchSessionTitle { id: string; agent?: string; nativeSessionId?: string; title: string; model?: string | null }
 
 export function dispatcherLabel(agent: string): string {
-  return ({ claude: "Claude Code", codex: "Codex", kimi: "Kimi", copilot: "Copilot" } as Record<string, string>)[agent] ?? t("core.025");
+  return ({ claude: "Claude Code", antigravity: "Antigravity", codex: "Codex", kimi: "Kimi", copilot: "Copilot" } as Record<string, string>)[agent] ?? t("core.025");
 }
 
 /** Resolve by explicit run ID or matching runtime + native ID, never by task name/cwd/model. */
@@ -279,12 +279,12 @@ export function dispatchForests(runs: readonly DispatchRun[], _sessions: readonl
     }
     const source = root.parent;
     const agent = source?.agent;
-    if (!agent || !["claude", "codex", "kimi"].includes(agent)) continue;
+    if (!agent || !["claude", "antigravity", "codex", "kimi"].includes(agent)) continue;
     const id = agent;
     const forest = forests.get(id) ?? { id, agent, title: dispatcherLabel(agent), runs: [] };
     forest.runs.push(run); forests.set(id, forest);
   }
-  return ["claude", "codex", "kimi"].flatMap(agent => {
+  return ["claude", "antigravity", "codex", "kimi"].flatMap(agent => {
     const forest = forests.get(agent);
     return forest ? [forest] : [];
   });
@@ -302,7 +302,7 @@ export function dispatcherModel(runs: readonly DispatchRun[], sessions: readonly
   return models.size ? [...models].join(" · ") : null;
 }
 export function dispatcherSessions(runs: readonly DispatchRun[], sessions: readonly DispatchSessionTitle[]) {
-  // run.session 是执行端自己的会话；三家派单人身份均在 parent。
+  // run.session 是执行端自己的会话；各家派单人身份均在 parent。
   // 同一会话可能同时以工作台 id 和原生 id 出现，按匹配后的 id 去重。
   const sources = new Map<string, { id: string; agent: string; title: string; running: number }>();
   for (const run of runs) {

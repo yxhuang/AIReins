@@ -474,7 +474,7 @@ export function fetchPageHealth(id: string): Promise<PageHealth> {
   return call<PageHealth>(`/api/pages/${encodeURIComponent(id)}/health`);
 }
 
-/** 三家 CLI 自己保存的历史会话列表（只读）；翻页原样带回 nextCursor 与相同 agent/q/cwd。 */
+/** 各家 CLI 自己保存的历史会话列表（只读）；翻页原样带回 nextCursor 与相同 agent/q/cwd。 */
 export function fetchHistory(input: HistoryQueryInput): Promise<HistoryListData> {
   const query = buildHistoryQuery(input);
   return call<HistoryListData>(`/api/history${query ? `?${query}` : ""}`);

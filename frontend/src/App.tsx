@@ -27,7 +27,7 @@ const selectErrorContext = (value: Store) => {
   if (!error?.sessionId) return undefined;
   const session = value.session(error.sessionId);
   if (!session) return undefined;
-  return `${session.agent} · ${sessionTitle(session, value.data.get(error.sessionId)?.events)}`;
+  return `${session.agent === "antigravity" ? "Antigravity" : session.agent} · ${sessionTitle(session, value.data.get(error.sessionId)?.events)}`;
 };
 const selectAppUi = (value: Store) =>
   [

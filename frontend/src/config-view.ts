@@ -2,6 +2,14 @@ import { t } from "./i18n";
 import type { AgentKind, ConfigOptionId, DriverConfigOption, EffectiveSource, SessionRecord } from "./types";
 export { configOptionsForModel, modelConfigPatch } from "../../shared/model-config";
 
+/** 会话级候选随 CLI 更新；旧会话没有 schema 时才使用全局元数据。 */
+export function sessionConfigOptions(
+  session: Pick<SessionRecord, "configSchema">,
+  fallbackOptions: DriverConfigOption[] = [],
+): DriverConfigOption[] {
+  return session.configSchema?.options ?? fallbackOptions;
+}
+
 /** 新建表单显式提交用户指定的默认模式，兼容尚未重启的服务端。 */
 export function newSessionConfig(agent: AgentKind): Partial<Record<ConfigOptionId, string>> {
   if (agent === "codex") return { permissionMode: "auto-review" };

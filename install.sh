@@ -147,7 +147,7 @@ ai_usage_recognized() {
     const window = w => object(w) && typeof w.id === "string" && typeof w.label === "string"
       && typeof w.used_pct === "number" && Number.isFinite(w.used_pct)
       && (w.resets_at === null || date(w.resets_at)) && optionalText(w.note);
-    const provider = p => object(p) && ["claude", "codex", "kimi"].includes(p.id)
+    const provider = p => object(p) && ["claude", "antigravity", "codex", "kimi"].includes(p.id)
       && typeof p.name === "string" && optionalText(p.plan) && optionalText(p.error)
       && ["ok", "stale", "auth_expired", "error"].includes(p.status) && date(p.fetched_at)
       && Array.isArray(p.windows) && p.windows.every(window);
@@ -349,7 +349,7 @@ for dep in python3 curl; do
   fi
 done
 cli_found=false
-for cli in claude codex kimi; do
+for cli in claude agy codex kimi; do
   if command -v "$cli" >/dev/null 2>&1; then
     say '  ✅ %s：已安装' '  ✅ %s: installed' "$cli"
     cli_found=true
@@ -360,7 +360,7 @@ done
 if "$cli_found"; then
   ok '至少一家 Agent CLI 已安装；请确认已登录。' 'At least one Agent CLI is installed; make sure you are logged in.'
 else
-  warn 'claude / codex / kimi 均未安装；请至少安装并登录一家 CLI。' 'None of claude / codex / kimi is installed; install and log in to at least one CLI.'
+  warn 'claude / agy / codex / kimi 均未安装；请至少安装并登录一家 CLI。' 'None of claude / agy / codex / kimi is installed; install and log in to at least one CLI.'
 fi
 if [[ ":$PATH:" == *":$HOME/.local/bin:"* ]]; then
   ok '~/.local/bin 已在 PATH 中' '~/.local/bin is already in PATH'

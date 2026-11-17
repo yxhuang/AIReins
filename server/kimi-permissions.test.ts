@@ -48,6 +48,7 @@ for (const mode of modes) {
     assert.deepEqual(h.sent.find((frame) => frame.method === "session/set_config_option").params,
       { sessionId: "native-test", configId: "mode", value: mode });
     assert.equal(h.metadata.at(-1).config.permissionMode, mode);
+    assert.deepEqual(h.metadata.at(-1).configSchema, h.driver.getConfigSchema(), "start/resume must publish session schema");
   }
 }
 {
@@ -61,8 +62,16 @@ for (const mode of modes) {
   for (const mode of ["yolo", "default", "auto", "plan"] as const) {
     assert.equal((await h.driver.setConfig({ permissionMode: mode })).permissionMode, mode);
     assert.equal(h.sent.at(-1).params.value, mode);
+    assert.deepEqual(h.metadata.at(-1).configSchema, h.driver.getConfigSchema(), "set_config must publish updated schema");
   }
   await assert.rejects(h.driver.setConfig({ permissionMode: "invalid" }), /不合法/);
+  h.receive({ jsonrpc: "2.0", method: "session/update", params: {
+    sessionId: "native-test", update: { sessionUpdate: "config_option_update", configOptions: [
+      { id: "mode", currentValue: "plan", options: [{ value: "plan", name: "Plan" }] },
+    ] },
+  } });
+  assert.equal(h.metadata.at(-1).config.permissionMode, "plan");
+  assert.deepEqual(h.metadata.at(-1).configSchema, h.driver.getConfigSchema(), "runtime updates must publish candidate changes");
 }
 
 // 原生标准审批仍原样转发，即使 CLI 在 yolo 下因自身策略请求审批也不能替它放行。

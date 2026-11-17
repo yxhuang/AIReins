@@ -7,7 +7,7 @@ import { compactCwd, awayFromLatest, syncStreamViewport, showComposerInterrupt, 
 import { createRenderItemsBuilder } from "../render-items";
 import { filterCommands, noteCommandUsed, parseSideCommand, readRecentCommands, recentInTable, withSideCommands } from "../commands";
 import { extractMentionTokens, mentionQueryAt, mentionTokenEnd } from "../mentions";
-import { configOptionsForModel, modelConfigPatch, needsRestartNote, effectiveFor, modelShortName, pillText, EFFECTIVE_SOURCE_LABELS, ALIAS_NOTE, RESTART_NOTE } from "../config-view";
+import { configOptionsForModel, sessionConfigOptions, modelConfigPatch, needsRestartNote, effectiveFor, modelShortName, pillText, EFFECTIVE_SOURCE_LABELS, ALIAS_NOTE, RESTART_NOTE } from "../config-view";
 import { fetchFiles, uploadAttachment, fetchCodexSkills, runCodexCommand, type CodexSkillInfo, type SessionInfoKind } from "../api";
 import { filterSkills, insertSkill, skillQueryAt } from "../codex-skills";
 import { CodexCommandPanel, type CodexCommandResult } from "./CodexCommandPanel";
@@ -386,7 +386,9 @@ function SessionMoreMenu({ session, usage }: { session: SessionRecord; usage?: U
           ? t("ui.SessionView.the_session_must_be_idle_to_release")
           : null;
   const canRelease = disabledReason === null;
-  const title = disabledReason ?? t("ui.SessionView.continue_in_vs_code_release_the_worker");
+  const releaseLabel = t(session.agent === "antigravity" ? "ui.SessionView.continue_in_antigravity" : "ui.SessionView.continue_in_vs_code");
+  const title = disabledReason ?? t(session.agent === "antigravity"
+    ? "ui.SessionView.release_and_copy_resume_command" : "ui.SessionView.continue_in_vs_code_release_the_worker");
 
   const onClick = async () => {
     if (!canRelease) return;
@@ -402,7 +404,7 @@ function SessionMoreMenu({ session, usage }: { session: SessionRecord; usage?: U
         // 剪贴板不可用（权限/非安全上下文）：弹窗让用户手动复制
         window.prompt(t("ui.SessionView.released_copy_the_resume_command_manually"), command);
       }
-      const openVSCode = Boolean(vscodeUri) && !window.matchMedia("(max-width: 720px), (pointer: coarse)").matches;
+      const openVSCode = session.agent !== "antigravity" && Boolean(vscodeUri) && !window.matchMedia("(max-width: 720px), (pointer: coarse)").matches;
       showNotice(copied
         ? openVSCode ? t("ui.SessionView.released_command_copied_opening_vs_code") : t("ui.SessionView.released_command_copied")
         : openVSCode ? t("ui.SessionView.released_opening_vs_code_copy_the_command") : t("ui.SessionView.released_copy_the_command_manually"), false);
@@ -456,9 +458,9 @@ function SessionMoreMenu({ session, usage }: { session: SessionRecord; usage?: U
           <button type="button" className="btn session-more-item" role="menuitem" disabled={!session.nativeSessionId} aria-disabled={!session.nativeSessionId}
             title={session.nativeSessionId ? t("ui.SessionView.copy_native_session_id", { p0: (session.nativeSessionId) }) : t("ui.SessionView.no_native_session_id_until_the_first")} onClick={() => void copyId()}>
             <CopyIcon />{t("ui.SessionView.copy_session_id")}</button>
-          <button type="button" className="btn session-more-item" role="menuitem" aria-label={t("ui.SessionView.continue_in_vs_code")} disabled={!canRelease} aria-disabled={!canRelease}
+          <button type="button" className="btn session-more-item" role="menuitem" aria-label={releaseLabel} disabled={!canRelease} aria-disabled={!canRelease}
             aria-describedby={disabledReason ? `${menuId}-reason` : undefined} title={title} onClick={() => void onClick()}>
-            <VSCodeIcon />{t("ui.SessionView.continue_in_vs_code")}</button>
+            <>{session.agent === "antigravity" ? <AgentIcon agent="antigravity" label="Antigravity" /> : <VSCodeIcon />}{releaseLabel}</></button>
           {disabledReason && <p id={`${menuId}-reason`} className="session-more-reason">{disabledReason}</p>}
         </div>
       </span>
@@ -504,7 +506,7 @@ function useConfigState(sessionId: string) {
 function ConfigControls({ session }: { session: SessionRecord }) {
   const meta = useStore(selectMeta);
   const { switching } = useConfigState(session.id);
-  const schemaOptions = meta?.drivers[session.agent]?.options ?? [];
+  const schemaOptions = sessionConfigOptions(session, meta?.drivers[session.agent]?.options);
   const options = configOptionsForModel(schemaOptions, session.config?.model);
   const pending = store.configPending.get(session.id);
   // 重启切换进行中（claude model/effort）：全部控件禁用，就地显示后端给的过渡文案
@@ -1488,8 +1490,8 @@ export function Composer({ session, dead, errored }: { session: SessionRecord; d
       {infoKind && <InfoDialog key={`${session.id}:${infoKind}`} session={session} kind={infoKind} onClose={() => { setInfoKind(null); textareaRef.current?.focus(); }} />}
       {sideQuestion && <SideQuestionDialog sessionId={session.id} agent={session.agent} initialQuestion={sideQuestion.question}
         onClose={() => { setSideQuestion(null); textareaRef.current?.focus(); }} />}
-      {session.agent === "kimi" && session.status === "running" && (
-        <div className="composer-hint" role="status">{t("ui.SessionView.kimi_does_not_support_steering_during_execution")}</div>
+      {(session.agent === "kimi" || session.agent === "antigravity") && session.status === "running" && (
+        <div className="composer-hint" role="status">{t("ui.SessionView.messages_queue_until_turn_end", { agent: session.agent === "antigravity" ? "Antigravity" : "Kimi" })}</div>
       )}
       {attachments.length > 0 && (
         <div className="attach-bar" aria-label={t("ui.SessionView.pending_attachments")}>

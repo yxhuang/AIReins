@@ -15,7 +15,7 @@ const paths = {
   codex: join(roots.codex, "2026", "10", "03", `rollout-fixture-${ids.codex}.jsonl`),
   kimi: join(roots.kimi, "workspace", ids.kimi, "agents", "main", "wire.jsonl"),
 };
-const session = (agent: AgentKind, overrides: Partial<SessionRecord> = {}) => ({
+const session = (agent: Exclude<AgentKind, "antigravity">, overrides: Partial<SessionRecord> = {}) => ({
   agent, cwd, nativeSessionId: ids[agent], ...overrides,
 }) as SessionRecord;
 async function lines(path: string, records: unknown[]): Promise<void> {

@@ -12,7 +12,7 @@ const workbenchHome = join(home, 'workbench');
 const bin = join(home, 'bin');
 const directories = ['workbench', 'bin', '.claude', '.codex', '.kimi', '.config', 'claude-history', 'codex-history', 'kimi-history', 'delegate'];
 await Promise.all(directories.map(directory => mkdir(join(home, directory))));
-for (const cli of ['claude', 'codex', 'kimi']) {
+for (const cli of ['claude', 'agy', 'codex', 'kimi']) {
   await writeFile(join(bin, cli), '#!/bin/sh\nif [ "$1" = --version ]; then echo workbench-ci-stub-1.0; exit 0; fi\nexit 1\n', { mode: 0o755 });
 }
 await writeFile(join(workbenchHome, 'prefs.json'), '{}\n');
@@ -74,7 +74,7 @@ try {
     await delay(100); meta = JSON.parse((await get(port, '/api/meta')).body);
   }
   assert.equal(meta.code, 0); assert(meta.data.capabilities);
-  for (const cli of ['claude', 'codex', 'kimi']) assert.equal(meta.data.cliVersions[cli], 'workbench-ci-stub-1.0');
+  for (const cli of ['claude', 'antigravity', 'codex', 'kimi']) assert.equal(meta.data.cliVersions[cli], 'workbench-ci-stub-1.0');
   response = await get(port, '/');
   assert.equal(response.status, 200); assert.match(response.body, /<html[\s>]/i);
   const headers = { host: new URL(origin).host, 'tailscale-user-login': login };

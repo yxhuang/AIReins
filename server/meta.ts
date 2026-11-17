@@ -39,7 +39,7 @@ function probeVersion(command: string): Promise<string> {
   });
 }
 
-// 三家 CLI 探测仅后台执行；首次无缓存也先返回基础能力，完整配置就绪后通知页面补取。
+// 四家 CLI 探测仅后台执行；首次无缓存也先返回基础能力，完整配置就绪后通知页面补取。
 function cachePath(): string {
   return join(process.env.WORKBENCH_HOME || join(homedir(), ".workbench"), "meta-cache.json");
 }
@@ -74,9 +74,11 @@ export function getMeta(): Promise<Record<string, unknown>> {
     // 历史会话目录筛选展开 `~` 用。
     homeDir: homedir(),
     ...probed,
+    cliVersions: { antigravity: "unknown", ...(probed.cliVersions as object) },
+    drivers: { antigravity: { ...DRIVER_CAPABILITIES.antigravity, options: [] }, ...(probed.drivers as object) },
   });
   const initial = readCache() ?? {
-    cliVersions: { claude: "unknown", codex: "unknown", kimi: "unknown" },
+    cliVersions: { claude: "unknown", antigravity: "unknown", codex: "unknown", kimi: "unknown" },
     drivers: Object.fromEntries(Object.entries(DRIVER_CAPABILITIES).map(([agent, capabilities]) =>
       [agent, { ...capabilities, options: [] }],
     )),
@@ -84,11 +86,12 @@ export function getMeta(): Promise<Record<string, unknown>> {
   cached = Promise.resolve(withLive({ ...initial, metadataPending: true }));
   probing = Promise.all([
     probeVersion("claude"),
+    probeVersion("agy"),
     probeVersion("codex"),
     probeVersion("kimi"),
     getDriverMetadata(process.cwd()),
-  ]).then(([claude, codex, kimi, drivers]) => {
-    const probed = { cliVersions: { claude, codex, kimi }, drivers };
+  ]).then(([claude, antigravity, codex, kimi, drivers]) => {
+    const probed = { cliVersions: { claude, antigravity, codex, kimi }, drivers };
     writeCache(probed);
     cached = Promise.resolve(withLive({ ...probed, metadataPending: false }));
   }).catch(() => {

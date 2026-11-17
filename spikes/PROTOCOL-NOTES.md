@@ -806,3 +806,15 @@ AIReins 仅开放上述白名单操作；错误与读回状态同时返回，旧
 | Kimi | 改 `state.json` 的 `cwd` 为 b 后 `session/resume` | shell `pwd` 为 b，文件写进 b，`session/list` 显示 b；会话目录仍在 `wd_a_*`，`session_index.jsonl` 的 `workDir` 不变 |
 
 未测：Kimi 自带 TUI 对改写后会话的展示；更旧 CLI 版本的跨目录续接。
+
+## Antigravity CLI 1.5.9 ACP（2026-11-16）
+
+官方入口 `agy acp`，逐行 JSON-RPC，`initialize.protocolVersion=1`。实测能力含 load/resume/list/close；`session/new` 返回 UUID、`configOptions` 和账号 tier。当前账号目录只返回其实际可用模型，不能从官方通用订阅表替代推断。
+
+统一配置映射为 model/model、effort/thought_level、permissionMode/mode；审批选项为 default、accept-edits、auto、plan。`session/set_config_option` 的结果和 `config_option_update` 决定当前选项；不是把 `--model` 参数附在 ACP 启动命令上。所有修改仅会话级。
+
+真实 Flash low 冒烟通过：首轮仅返回校验串，关闭 worker 后用同一 ID `session/resume`，第二轮仍能复述该串；`agent_message_chunk` 流式到达，`usage_update` 为 `{used,size}`，本机窗口 size=1048576。命令清单包含 compact 和来自共享 Skills 清单的技能。`user_message_chunk` 是 CLI 的输入回显，AIReins 不重复生成 user_message。
+
+共享 ACP runtime 复用 Kimi 的 JSON-RPC、工具/权限/文件/终端闭环；两家单独映射配置 ID、来源标识和默认审批档位。Antigravity 运行中消息直接发送原生 `session/prompt`；2026-11-17 Flash low 实测两个请求都独立返回 `end_turn`，追加要求进入后续回复，因此不能假定第二次发送只有一个总应答。driver 计数所有在途请求，最后一个结束才 idle；Kimi 继续 FIFO。会话 `configSchema` 随启动、配置应答及配置通知传到前端，不再固定使用启动时全局候选。取消会回复未决标准审批为 cancelled，并清除对应 AIReins 闸门。
+
+11-17 真实 Flash low 补验：文件工具写入成功；图片附件识别出 3 个红圆；原生 `/compact` 完成，随后仍能复述写入校验串；CLI 命令清单有 44 项、含共享 `refine-prompt`，未出现 OneSkill 旧备份命令。两次定向写入（工作区内及隔离目录外的指定测试文件）均未触发权限请求，因此真实审批卡仍待验；协议审批回归继续通过。真实浏览器/手机操作未执行，不把自动化映射检查当作真实页面验收。原生历史导入和原生单会话删除暂未接入，现有 native JSONL reader 明确跳过 Antigravity。

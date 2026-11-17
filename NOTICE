@@ -5,15 +5,15 @@ Not covered by the MIT License:
 
 - The project name and logo (frontend/public/icon.svg and the icons generated
   from it). Please use your own name and logo for a fork or derived product.
-- Third-party marks. The Claude, OpenAI/Codex, Kimi and Visual Studio Code
+- Third-party marks. The Claude, Google Gemini/Antigravity, OpenAI/Codex, Kimi and Visual Studio Code
   icons in frontend/src/components/AgentIcon.tsx are trademarks of their
-  owners and appear only to identify the tools this project drives. Their SVG
+  owners and appear only to identify the tools this project drives. The Claude, OpenAI/Codex, Kimi and Visual Studio Code SVG
   paths come from @lobehub/icons-static-svg (MIT License,
-  Copyright (c) 2023 LobeHub).
+  Copyright (c) 2023 LobeHub). The Gemini-style star identifies Antigravity.
 
 Not part of this repository:
 
-- Claude Code, Codex and Kimi Code. This project drives their official CLIs;
+- Claude Code, Antigravity, Codex and Kimi Code. This project drives their official CLIs;
   install them separately and use them under their own terms and accounts.
 - The author's personal configuration, pages and helper tools. Machine-specific
   settings live in ~/.workbench on each computer. The dispatch panel can read

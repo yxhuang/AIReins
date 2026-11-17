@@ -591,12 +591,34 @@ async function withNewForm({ saved = "", cwd, sessions = [], meta = { defaultCwd
 }
 const finishNewCreate = () => new Promise(resolve => setImmediate(resolve));
 
+await t("新建页：默认 Antigravity、四家顺序、动态配置与显式选择保留", async () => {
+  const metadata = { drivers: { antigravity: { options: [{ id: "model", values: [{ value: "runtime-model", label: "Runtime model" }], default: "runtime-model", mutable: true }], mentions: true } }, capabilities: {} };
+  await withNewForm({ cwd: "/project", meta: metadata }, async f => {
+    const tree = f.update();
+    assert.deepEqual(treeButtons(tree).filter(node => node.props.className?.startsWith("new-agent ")).map(node => node.props.className.match(/agent-(\w+)/)[1]), ["claude", "antigravity", "codex", "kimi"]);
+    assert.equal(f.agent("antigravity").props["aria-pressed"], true);
+    const pills = treeFind(tree, node => node.type?.name === "NewConfigPills");
+    assert.equal(pills.props.agent, "antigravity");
+    assert.deepEqual(pills.props.selected, {}, "default follows runtime config without an invented model or permission");
+    f.update().props.onSubmit({ preventDefault() {} });
+    await finishNewCreate();
+    assert.equal(f.calls[0].agent, "antigravity");
+    assert.equal(f.calls[0].config, undefined);
+  });
+  await withNewForm({ cwd: "/project", meta: metadata }, async f => {
+    f.agent("claude").props.onClick();
+    store.newSessionCwd = "/other"; store.newSessionRequest++;
+    assert.equal(f.agent("claude").props["aria-pressed"], true);
+  });
+});
+
 await t("新建页：冷启动可打开插件/MCP，先建空会话并保留首条消息与附件，不发给模型", async () => {
   const oldDocument = globalThis.document;
   globalThis.document = { addEventListener() {}, removeEventListener() {} };
   try {
     for (const [name, kind] of [["plugin", "plugins"], ["mcp", "mcp"]]) {
       await withNewForm({ cwd: "/project", meta: { drivers: { claude: { mentions: true } }, capabilities: {} } }, async f => {
+        f.agent("claude").props.onClick();
         const attachment = { id: "fixture-file", source: "upload", status: "ready", name: "file.txt", path: "/fixture/file.txt" };
         const input = treeFind(f.update(), node => node.type === "input" && node.props.type === "file");
         const oldFetch = globalThis.fetch;
@@ -639,6 +661,7 @@ await t("新建页：/mcp 补全、Tab 后发送、整行发送打开管理面�
     for (const mode of ["completion", "tab", "text", "failure"]) await withNewForm({ cwd: "/project",
       ...(mode === "failure" ? { create: async () => { throw new Error("fixture create failed"); } } : {}),
     }, async f => {
+      f.agent("claude").props.onClick();
       f.textarea().props.onChange({ target: { value: mode === "completion" || mode === "tab" ? "/mc" : "/mcp " } });
       if (mode === "text" || mode === "failure") f.update().props.onSubmit({ preventDefault() {} });
       else {
@@ -664,6 +687,7 @@ await t("新建页：/mcp 补全、Tab 后发送、整行发送打开管理面�
 
 await t("新建页：文件顶栏与文件/文件夹右键引用写入首条消息，保留光标与草稿", async () => {
   await withNewForm({ cwd: "/project", meta: { drivers: { claude: { mentions: true } }, capabilities: {} } }, async f => {
+    f.agent("claude").props.onClick();
     f.textarea().props.onChange({ target: { value: "查看尾文" } });
     const field = { selectionStart: 2, style: {}, scrollHeight: 80, focus() { this.focused = true; }, setSelectionRange(start, end) { this.selectionStart = start; this.selectionEnd = end; } };
     f.textarea().props.ref.current = field;

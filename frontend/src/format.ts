@@ -25,7 +25,7 @@ export function relativeTimeShort(iso: string, now: number): string {
 }
 
 // 历史 / 外部续聊消息的角色名：用户显示「我」，助手显示所属 CLI。
-const AGENT_NAMES: Record<AgentKind, string> = { claude: "Claude Code", codex: "Codex", kimi: "Kimi" };
+const AGENT_NAMES: Record<AgentKind, string> = { claude: "Claude Code", antigravity: "Antigravity", codex: "Codex", kimi: "Kimi" };
 export function messageRoleLabel(role: string, agent: AgentKind | undefined): string {
   if (role === "user") return t("core.037");
   return agent ? AGENT_NAMES[agent] : t("core.038");

@@ -11,6 +11,8 @@ export function ContextUsage({ session }: { session: SessionRecord }) {
   const selectUsage = useCallback((value: Store) => value.data.get(session.id)?.latestUsage, [session.id]);
   const latestUsage = useStore(selectUsage) ?? session.snapshotState?.latestUsage;
   const pendingGates = useStore(value => value.pendingCountFor(session));
+  const canCompact = useStore(value => session.agent !== "antigravity"
+    || value.commands.get(session.id)?.some(command => command.name === "compact") === true);
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [accepted, setAccepted] = useState(false);
@@ -46,7 +48,7 @@ export function ContextUsage({ session }: { session: SessionRecord }) {
   const label = percent === null ? t("ui.ContextUsage.context_usage_is_unavailable") : t("ui.ContextUsage.about_of_context_used", { p0: (Math.round(percent)) });
   const unavailable = session.status !== "idle" || pendingGates > 0 || Boolean(session.backgroundTasks?.length);
   const compact = async () => {
-    if (submitting.current || accepted || unavailable) return;
+    if (!canCompact || submitting.current || accepted || unavailable) return;
     submitting.current = true;
     setBusy(true); setError(null);
     try {
@@ -72,14 +74,14 @@ export function ContextUsage({ session }: { session: SessionRecord }) {
       {open && <div id={menuId} ref={panelRef} className="cfg-menu context-usage-menu" role="dialog"
         aria-label={t("ui.ContextUsage.context")} tabIndex={-1}>
         <strong>{label}</strong>
-        <p>{t("ui.ContextUsage.compact_description")}</p>
-        {unavailable && <p>{t("ui.ContextUsage.wait_until_idle")}</p>}
+        {canCompact && <p>{t("ui.ContextUsage.compact_description")}</p>}
+        {canCompact && unavailable && <p>{t("ui.ContextUsage.wait_until_idle")}</p>}
         {error && <p className="config-error" role="alert">{error}</p>}
         {accepted && <p role="status">{t("ui.ContextUsage.request_accepted")}</p>}
-        <button type="button" className="btn context-compact" disabled={unavailable || busy || accepted}
+        {canCompact && <button type="button" className="btn context-compact" disabled={unavailable || busy || accepted}
           aria-busy={busy} onClick={compact}>
           {t(busy ? "ui.ContextUsage.compacting" : "ui.CodexCommandPanel.compact_context")}
-        </button>
+        </button>}
       </div>}
     </div>
   );

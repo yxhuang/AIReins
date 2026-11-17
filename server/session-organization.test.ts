@@ -3,7 +3,7 @@ import { mkdtempSync, readFileSync, readdirSync, writeFileSync, existsSync, stat
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { WebSocket } from "ws";
-import type { Driver, SessionRecord } from "./types.js";
+import type { Driver, DriverOptions, SessionRecord } from "./types.js";
 import { normalizeProjectPath } from "../shared/project-path.js";
 
 const home = mkdtempSync(join(tmpdir(), "aireins-project-order-"));
@@ -24,9 +24,13 @@ const originals = [record("one", `${a}//./`, "2020-01-04"), record("two", b, "20
 writeFileSync(join(home, "sessions.json"), JSON.stringify(originals));
 const legacyFile = join(home, "session-groups.json");
 writeFileSync(legacyFile, "untouched legacy contents");
-const factory = (kind: Driver["kind"], _options?: unknown): Driver => ({ kind, async start() {}, async stop() {},
+const callbacks = new Map<string, DriverOptions["callbacks"]>();
+const factory = (kind: Driver["kind"], options?: DriverOptions): Driver => {
+  if (options) callbacks.set(options.sessionId, options.callbacks);
+  return { kind, async start() {}, async stop() {},
   getConfigSchema: () => ({ source: "test", options: [] }), async setConfig(config) { return config; },
-  async sendUserMessage() {}, async resolvePermission() {}, async interrupt() {} });
+  async sendUserMessage() {}, async resolvePermission() {}, async interrupt() {} };
+};
 let manager = new SessionManager(factory);
 const route = (method: string, path: string, body?: unknown) => organizationRoute(manager, method, path, body)!;
 const invalid = (method: string, path: string, body: unknown, status = 400) => assert.throws(
@@ -79,8 +83,37 @@ try {
   assert.deepEqual(manager.listProjectOrder(), [c, a, b, hidden]);
   assert(frames.at(-1).value.sessions.some((session: SessionRecord) => session.id === added.id));
   assert.deepEqual(frames.at(-1).value.projectOrder, [c, a, b, hidden]);
-  await manager.create({ agent: "codex", cwd: a, config: {} });
-  assert.deepEqual(manager.listProjectOrder(), [c, a, b, hidden], "creating in existing directory never moves it");
+  const existing = await manager.create({ agent: "codex", cwd: a, config: {} });
+  assert.deepEqual(manager.listProjectOrder(), [a, c, b, hidden], "a new session also promotes an existing directory");
+  const cCallbacks = callbacks.get(added.id)!, aCallbacks = callbacks.get(existing.id)!;
+  cCallbacks.status("running");
+  assert.deepEqual(manager.listProjectOrder(), [c, a, b, hidden], "starting a turn promotes its directory");
+  aCallbacks.status("running");
+  assert.deepEqual(manager.listProjectOrder(), [a, c, b, hidden], "a newer running session takes the top spot");
+  const runningFrames = frames.length;
+  cCallbacks.status("running");
+  cCallbacks.emit("agent_text_delta", { text: "still working" });
+  assert.equal(frames.length, runningFrames, "repeated running status and streaming do not reorder directories");
+  cCallbacks.status("idle");
+  cCallbacks.metadata({ backgroundTasks: [{ id: "task", type: "bash", description: "background" }] });
+  assert.deepEqual(manager.listProjectOrder(), [c, a, b, hidden], "an idle session's first background task promotes its directory");
+  aCallbacks.status("idle"); aCallbacks.status("running");
+  cCallbacks.metadata({ backgroundTasks: [{ id: "task", type: "bash", description: "updated" }] });
+  cCallbacks.metadata({ backgroundTasks: [] });
+  aCallbacks.status("idle");
+  assert.deepEqual(manager.listProjectOrder(), [a, c, b, hidden], "task updates and completion keep the last promotion order");
+  cCallbacks.status("running");
+  assert.deepEqual(manager.listProjectOrder(), [c, a, b, hidden], "a later turn in the same session promotes again");
+  cCallbacks.status("idle");
+  const worktreeSession = (manager as any).sessions.get(added.id) as SessionRecord;
+  worktreeSession.worktree = { root: a, branch: "test" };
+  cCallbacks.status("running");
+  assert.deepEqual(manager.listProjectOrder(), [a, c, b, hidden], "worktree activity promotes the main repository");
+  delete worktreeSession.worktree;
+  cCallbacks.status("idle"); cCallbacks.status("running");
+  cCallbacks.status("idle");
+  assert.deepEqual(frames.at(-1).value.projectOrder, [c, a, b, hidden], "automatic promotions broadcast the saved order");
+  assert.deepEqual(JSON.parse(readFileSync(projectOrderPath, "utf8")), [c, a, b, hidden]);
   assert.equal(readFileSync(legacyFile, "utf8"), "untouched legacy contents");
   unsubscribe();
   await manager.shutdown();

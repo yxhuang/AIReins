@@ -1,6 +1,6 @@
 # AGENTS.md
 
-AIReins: one Node process (`server/`) plus a Vite/React page (`frontend/`) that drives Claude Code, Codex and Kimi Code through their official CLIs, for one person on their own computer and tailnet.
+AIReins: one Node process (`server/`) plus a Vite/React page (`frontend/`) that drives Claude Code, Antigravity, Codex and Kimi Code through their official CLIs, for one person on their own computer and tailnet.
 
 If `.private/` exists (the maintainer's untracked notes, its own Git repository), read `.private/HANDOFF.md` first: it holds the current state and open tasks; `.private/plan.md` is the plan document.
 
@@ -10,7 +10,7 @@ Read the relevant one before changing behaviour, and update it in the same chang
 
 - `server/README.md`: API contracts, access control, remote entry, config files, diagnostics.
 - `frontend/README.md`: frontend architecture, navigation and UI rules.
-- `spikes/PROTOCOL-NOTES.md`: the three CLI protocols (Claude stream-json, Codex app-server, Kimi ACP) as observed.
+- `spikes/PROTOCOL-NOTES.md`: the four CLI protocols (Claude stream-json, Antigravity ACP, Codex app-server, Kimi ACP) as observed.
 - `docs/terminal-panel-design.md` §9: terminal contract. `docs/host-connections.md`: install and host switching.
 
 These documents are in Chinese; write additions in the language of the surrounding text.
@@ -36,7 +36,7 @@ The second and third are outside `npm test`; run them too. Tests must not depend
 - **Build**: `npm run build` keeps old hashed assets in `frontend/dist` (`emptyOutDir: false`) because open pages still reference them. Keep it that way; after precompression, remove only unreferenced assets older than 7 days and their companions.
 - **Running instance**: backend changes take effect after `aireins restart`; that stops every running session, so check `aireins status` and let the user choose the moment. Frontend changes need `npm run build` and a page refresh (the backend serves `frontend/dist`); under `npm run dev` a refresh is enough.
 - **Security boundary**: both listeners bind `127.0.0.1`. Keep the Host/Origin checks and the Tailscale login allowlist exactly as strict; remote access goes through Tailscale Serve only. See `SECURITY.md`.
-- **CLI state is the user's**: read the three CLIs' global config, never write it; per-session settings stay per-session. The one exception is the Claude Remote Control default (`remoteControlAtStartup`), written through the existing symlink without replacing it.
+- **CLI state is the user's**: read the four CLIs' global config, never write it; per-session settings stay per-session. The one exception is the Claude Remote Control default (`remoteControlAtStartup`), written through the existing symlink without replacing it.
 - **Deleting native sessions** goes only through `codex delete --force` and Kimi ACP `session/delete`, keeping the realpath, reference and identity guards.
 - **Codex single writer**: release an AIReins session before another client resumes the same Codex thread.
 - **Logs** carry no secrets. Pass proxy variables through in both cases (`HTTPS_PROXY` and `https_proxy`).

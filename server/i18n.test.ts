@@ -25,7 +25,7 @@ assert.deepEqual(describeServerMessage("Tailscale 账号 owner@example.com 未�
 assert.ok(en["server.message006"].includes("aireins restart"));
 
 assert.deepEqual(describeServerMessage("Kimi 的 2 条排队消息已取消：worker 已停止"), {
-  key: "server.message146", params: { p0: "2", p1: "worker 已停止" }, localizedParams: { p1: { key: "server.message155" } },
+  key: "server.message146", params: { p0: "Kimi", p1: "2", p2: "worker 已停止" }, localizedParams: { p2: { key: "server.message155" } },
 });
 assert.equal(describeServerMessage("Codex 提问缺少答案：会话不存在")?.localizedParams, undefined);
 const source = { code: 40401, msg: "会话不存在：abc", data: { events: [

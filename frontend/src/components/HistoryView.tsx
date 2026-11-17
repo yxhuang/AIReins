@@ -18,7 +18,7 @@ import { shallowEqual, useStore } from "../useStore";
 import { PanelActions } from "./PanelActions";
 import { DirectoryBrowser } from "./DirectoryBrowser";
 
-const AGENTS: AgentKind[] = ["claude", "codex", "kimi"];
+const AGENTS: AgentKind[] = ["claude", "antigravity", "codex", "kimi"];
 
 /** 每页条数：466 条全量下约 3~4 页「加载更多」，不引虚拟滚动库。 */
 const PAGE_SIZE = 150;
@@ -52,7 +52,7 @@ interface ListState {
 type ListPhase = "loading" | "ready" | "error";
 
 /**
- * 侧栏历史列表（#/history）：只读列出三家 CLI 自己保存的历史会话，
+ * 侧栏历史列表（#/history）：只读列出各家 CLI 自己保存的历史会话，
  * 预览确认后「导入并续接」（就地续接，不是分叉——代价写在按钮上方）。
  * 分页用 nextCursor +「加载更多」；扫描未完成时提示并沿游标重试，不当错误。
  */
@@ -216,7 +216,7 @@ export function HistoryView() {
                 aria-pressed={agentFilter === agent}
                 onClick={() => setAgentFilter(agent)}
               >
-                {agent}
+                {agent === "antigravity" ? "Antigravity" : agent}
               </button>
             ))}
           </div>
@@ -425,7 +425,7 @@ export function HistoryPreviewPane({ item, onBack, sharedHeader = false }: { ite
       <div className="history-preview-head">
         <h2 className="history-preview-title" title={`${item.title} · ${item.nativeSessionId}`}>{item.title}</h2>
         <p className="history-preview-meta">
-          {item.agent} · {SOURCE_LABELS[item.source]} ·{" "}
+          {item.agent === "antigravity" ? "Antigravity" : item.agent} · {SOURCE_LABELS[item.source]} ·{" "}
           {relativeTime(item.lastActivityAt, now)}
         </p>
         <p className="history-preview-id mono" title={item.nativeSessionId}>

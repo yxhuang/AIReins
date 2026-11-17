@@ -119,7 +119,7 @@ export const PagedHistory = memo(function PagedHistory({ agent, nativeSessionId,
 
   return (
     <section className="session-history" aria-label={t("ui.ResumedHistory.conversation_before_import")}>
-      <p className="session-history-note">{t("ui.ResumedHistory.native_session_user_assistant_and_tool_calls_sentence", { p0: (agent) })}</p>
+      <p className="session-history-note">{t("ui.ResumedHistory.native_session_user_assistant_and_tool_calls_sentence", { p0: agent === "antigravity" ? "Antigravity" : agent })}</p>
       {phase === "loading" && <p className="session-history-note">{t("ui.ResumedHistory.loading_history_messages")}</p>}
       {phase === "error" && (
         <p className="session-history-error" role="alert">{t("ui.ResumedHistory.failed_to_load_history_messages")}{error}

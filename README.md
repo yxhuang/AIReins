@@ -10,11 +10,11 @@
   <img src="https://img.shields.io/badge/Node.js-%E2%89%A5%2022.12-1F1E1D?style=flat-square&logo=nodedotjs&logoColor=white" alt="Node.js ≥ 22.12">
   <img src="https://img.shields.io/badge/WSL2%20%C2%B7%20Linux-supported-1F1E1D?style=flat-square" alt="WSL2 · Linux supported">
   <img src="https://img.shields.io/badge/macOS-experimental-8a8580?style=flat-square" alt="macOS experimental">
-  <img src="https://img.shields.io/badge/Claude%20Code%20%C2%B7%20Codex%20%C2%B7%20Kimi-official%20CLIs-1F1E1D?style=flat-square" alt="Claude Code · Codex · Kimi: official CLIs">
+  <img src="https://img.shields.io/badge/Claude%20Code%20%C2%B7%20Antigravity%20%C2%B7%20Codex%20%C2%B7%20Kimi-official%20CLIs-1F1E1D?style=flat-square" alt="Claude Code · Antigravity · Codex · Kimi: official CLIs">
 </p>
 
 <p align="center">
-  <b>Use your whole computer from your phone. Let three AI agents do the work; you set the direction.</b><br>
+  <b>Use your whole computer from your phone. Let four AI agents do the work; you set the direction.</b><br>
   One Node process and a web page, on your own private network.
 </p>
 
@@ -35,14 +35,15 @@
 
 ## What it is
 
-AIReins is an AI workbench that runs on your own computer. It drives Claude Code, Codex and Kimi Code through their official CLIs and your existing logins. You open sessions, approve tool calls, browse files and use a terminal from a browser on your desktop or phone, and reach the computer from anywhere over [Tailscale](https://tailscale.com).
+AIReins is an AI workbench that runs on your own computer. It drives Claude Code, Antigravity, Codex and Kimi Code through their official CLIs and your existing logins. You open sessions, approve tool calls, browse files and use a terminal from a browser on your desktop or phone, and reach the computer from anywhere over [Tailscale](https://tailscale.com).
 
 Official remote options usually give you a window into one session. AIReins gives you the whole computer: any folder (including Windows drives under `/mnt/c`, not just git repos), file preview and editing, a terminal, sending with Taildrop, and the native history of all three CLIs.
 
 ## Highlights
 
-- **Keeps your harness.** AIReins is not another agent framework. It drives the official Claude Code, Codex and Kimi Code CLIs you already have, so your `CLAUDE.md`, `AGENTS.md`, skills, hooks, MCP servers, plugins and CLI settings load as usual. Nothing to migrate, and AIReins never rewrites them on its own; only when you toggle the Claude Remote Control default or a Claude plugin in the UI is that saved to the matching native config. You can pick a model, reasoning effort and permission mode per session; the choice applies to that session only.
-- **One workbench for all three.** No more switching between CLI windows: sessions from all three agents sit side by side, and approvals, answers and interrupts all happen in one place.
+- **Keeps your harness.** AIReins is not another agent framework. It drives the official Claude Code, Antigravity, Codex and Kimi Code CLIs you already have, so your `CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, skills, hooks, MCP servers, plugins and CLI settings load as usual. Nothing to migrate, and AIReins never rewrites them on its own; only when you toggle the Claude Remote Control default or a Claude plugin in the UI is that saved to the matching native config. You can pick a model, reasoning effort and permission mode per session; the choice applies to that session only.
+- **One workbench for all four.** No more switching between CLI windows: sessions from all four agents sit side by side, and approvals, answers and interrupts all happen in one place.
+- **Google Antigravity.** New conversations default to Antigravity, between Claude and Codex, with Gemini colors and account-provided model and effort pickers. Install and sign in to `agy` first. AIReins saves its own conversations and resumes them through the official ACP interface; external Antigravity history import and permanent native-session deletion are not yet available.
 - **One history, free to come and go.** Search, filter by folder and resume the native history of all three CLIs in one place. Sessions live in each CLI's own history, so you can pick them up again in the CLI, the VS Code extension or the Codex app, and reach a Claude session from the Claude app once Remote Control is on. (For Claude sessions to appear in the CLI and VS Code history lists, set `claudeCodeEntrypoint` in `prefs.json`, see [Configuration](#configuration); without it, `claude --resume <session ID>` still works.)
 - **Files and terminal at hand.** The right-hand panel holds a file window (browse any folder, preview, edit in place, see Git status) and a multi-tab terminal: your default shell (`$SHELL`) on Linux and macOS, bash plus Windows PowerShell under WSL.
 - **A live dispatch map.** When one agent leads and hands work to the others, the dispatch flow chart shows who sent what to whom, how far each run has got and whether it passed; sub-agents unfold as a parent/child tree too.
@@ -72,7 +73,7 @@ So everything in AIReins serves one idea: **let the agents run, and keep the rei
 - **Decide from anywhere.** Approve or deny tool calls and answer the agents' questions from your phone. Everything waiting on you, across all sessions, is collected in one place.
 - **Pull them back mid-run.** Interrupt with one tap; with Claude Code and Codex you can also steer a running turn or ask a side question (Kimi queues messages until the current turn ends), instead of waiting for the run to finish and redoing it.
 - **See what they are doing.** Context usage and every tool call in plain view, with sub-agents and delegated runs laid out as a parent/child tree.
-- **Use all three together.** Let one agent lead and hand work to another (with an external delegation tool, see [Optional integrations](#optional-integrations)) and follow the whole dispatch tree on your phone. You decide which agent suits which job; no single vendor locks you in.
+- **Use all four together.** Let one agent lead and hand work to another (with an external delegation tool, see [Optional integrations](#optional-integrations)) and follow the whole dispatch tree on your phone. You decide which agent suits which job; no single vendor locks you in.
 - **Keep everything yours.** No vendor relay, no account, no telemetry. Sessions are the CLIs' own native history, so you can resume them from the command line or VS Code as usual.
 
 ## Before you start
@@ -116,7 +117,7 @@ Updating backend code requires `aireins restart`, which stops all running sessio
 
 | | |
 |---|---|
-| **Three agents** | Claude Code, Codex and Kimi Code side by side; per-session model, reasoning effort and permission mode; slash commands, skills and `@` file mentions with completion; automatic titles, pinning, directory grouping, renaming and conversation ordering |
+| **Four agents** | Claude Code, Antigravity, Codex and Kimi Code side by side; per-session model, reasoning effort and permission mode; slash commands, skills and `@` file mentions with completion; automatic titles, pinning, directory grouping, renaming and conversation ordering |
 | **Approvals and questions** | Approve or deny tool calls and answer agent questions from any device; everything pending across sessions in one place |
 | **Control mid-run** | Context-usage ring with native compaction; interrupt; Claude Code and Codex also let you steer a running turn and ask side questions, while Kimi queues messages until the current turn ends |
 | **Native history** | Search and filter the three CLIs' native history by folder and resume sessions; sessions started in AIReins resume in the CLIs and the VS Code extension (Claude sessions appear in the history lists only with `claudeCodeEntrypoint` set), and the other way round (a Codex thread allows one writer at a time, so release it in AIReins before resuming elsewhere) |
@@ -133,7 +134,7 @@ Updating backend code requires `aireins restart`, which stops all running sessio
 | | AIReins | Orca | Claude Code Remote Control | Codex Remote |
 |---|---|---|---|---|
 | What you control remotely | The whole computer: sessions, any folder, files, terminal | Workspaces/worktrees, agent sessions, terminal, git | Claude Code sessions (one per interactive process, or several in server mode) | Projects and chats on connected Mac/Windows hosts; SSH projects via the desktop app |
-| Agents | Claude Code, Codex, Kimi | Multiple CLIs; chat UI for supported agents | Claude Code | Codex and ChatGPT |
+| Agents | Claude Code, Antigravity, Codex, Kimi | Multiple CLIs; chat UI for supported agents | Claude Code | Codex and ChatGPT |
 | Network path | Your tailnet only; no AIReins or AI-vendor relay (Tailscale may fall back to its encrypted DERP relays) | Orca relay (account) by default; LAN or Tailscale optional | Anthropic relay | OpenAI relay |
 | Phone client | Web app | iOS / Android apps (beta) | Claude app or claude.ai | ChatGPT app |
 | Runs as | One Node process + browser | Desktop app (must stay open) | A local `claude` process (must keep running) | ChatGPT desktop app on the host (must stay open) |
@@ -161,7 +162,7 @@ Comparison checked 2026-11-05 against the official [Orca mobile guide](https://w
 | Node.js ≥ 22.12 (with npm) | Install inside WSL | Install yourself | The installer can install it with Homebrew |
 | `rg` (ripgrep) | `sudo apt-get install -y ripgrep` | Same | The installer can install it with Homebrew |
 | Port detection | `ss` (iproute2) | `ss` (iproute2) | Built-in `lsof` |
-| At least one AI CLI | Claude Code, Codex or Kimi Code, installed and logged in | Same | Same |
+| At least one AI CLI | Claude Code, Antigravity (`agy`), Codex or Kimi Code, installed and logged in | Same | Same |
 | Remote access (optional) | Tailscale on Windows, logged in | Tailscale on this machine, logged in | Tailscale on this machine, logged in |
 | Other | Google Chrome on Windows (for the app window); PowerShell 7 recommended (`winget install --id Microsoft.PowerShell --source winget`) for the modern, sharp Windows folder picker, which falls back to the classic tree dialog with only the built-in 5.1 | | |
 
@@ -177,7 +178,7 @@ git clone https://github.com/yxhuang/AIReins.git && cd AIReins && bash install.s
 
 What the installer does **automatically**:
 
-1. **Checks** Node, npm, the port tool, `rg` and the three CLIs. If a core dependency is missing it stops and prints the fix for your platform. On macOS, with Homebrew and an interactive terminal, it asks once `[Y/n]`; press Enter and it runs `brew install` for the missing Node or ripgrep, then checks again. On Linux, commands that need `sudo` are only printed, never run for you.
+1. **Checks** Node, npm, the port tool, `rg` and the four CLIs. If a core dependency is missing it stops and prints the fix for your platform. On macOS, with Homebrew and an interactive terminal, it asks once `[Y/n]`; press Enter and it runs `brew install` for the missing Node or ripgrep, then checks again. On Linux, commands that need `sudo` are only printed, never run for you.
 2. **Installs and builds**: npm dependencies and the frontend.
 3. **Installs the `aireins` command** as a link in `~/.local/bin/aireins`.
 4. **WSL: installs the Windows tray icon and Start-menu shortcut** (independent of Tailscale; the tray is not started).

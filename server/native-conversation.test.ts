@@ -42,7 +42,7 @@ const [{ NativeConversationReader }, { SessionManager }] = await Promise.all([
   import("./session-manager.js"),
 ]);
 const reader = new NativeConversationReader(roots);
-const agents: AgentKind[] = ["claude", "codex", "kimi"];
+const agents: Exclude<AgentKind, "antigravity">[] = ["claude", "codex", "kimi"];
 const schema: DriverConfigSchema = { source: "fixture", options: [] };
 
 class FakeDriver implements Driver {
@@ -51,6 +51,8 @@ class FakeDriver implements Driver {
   started = false;
   constructor(readonly kind: AgentKind, readonly options: DriverOptions, readonly shouldFail = false) {}
   async start(): Promise<void> {
+    assert.notEqual(this.kind, "antigravity", "该夹具仅模拟 JSONL 原生存档");
+    if (this.kind === "antigravity") throw new Error("unsupported fixture agent");
     if (this.shouldFail) throw new Error("fixture resume failed");
     this.started = true;
     this.options.callbacks.metadata({ nativeSessionId: this.options.resumeSessionId, nativeTranscriptPath: paths[this.kind] });
@@ -196,19 +198,19 @@ async function writeLines(path: string, rows: unknown[]): Promise<void> {
   await writeFile(path, `${rows.map((row) => JSON.stringify(row)).join("\n")}\n`);
 }
 
-function externalUser(agent: AgentKind): unknown {
+function externalUser(agent: Exclude<AgentKind, "antigravity">): unknown {
   if (agent === "claude") return { type: "user", uuid: "claude-user-2", message: { role: "user", content: "外部问题" } };
   if (agent === "codex") return { type: "event_msg", payload: { type: "user_message", message: "外部问题" } };
   return { type: "turn.prompt", input: [{ type: "text", text: "外部问题" }] };
 }
 
-function externalAssistant(agent: AgentKind): unknown {
+function externalAssistant(agent: Exclude<AgentKind, "antigravity">): unknown {
   if (agent === "claude") return { type: "assistant", uuid: "claude-assistant-2", message: { role: "assistant", content: [{ type: "text", text: "外部回答" }] } };
   if (agent === "codex") return { type: "event_msg", payload: { type: "agent_message", message: "外部回答" } };
   return { type: "context.append_loop_event", event: { type: "content.part", part: { type: "text", text: "外部回答" } } };
 }
 
-function localAssistant(agent: AgentKind, turn: number): unknown {
+function localAssistant(agent: Exclude<AgentKind, "antigravity">, turn: number): unknown {
   if (agent === "claude") return {
     type: "assistant", uuid: `claude-local-assistant-${turn}`,
     message: { role: "assistant", content: [{ type: "text", text: `本端回复 ${turn}` }] },
@@ -217,7 +219,7 @@ function localAssistant(agent: AgentKind, turn: number): unknown {
   return { type: "context.append_loop_event", event: { type: "content.part", part: { type: "text", text: `本端回复 ${turn}` } } };
 }
 
-function toolCall(agent: AgentKind, id: string): unknown {
+function toolCall(agent: Exclude<AgentKind, "antigravity">, id: string): unknown {
   if (agent === "claude") return { type: "assistant", uuid: `tool-${id}`, message: { role: "assistant", content: [{ type: "tool_use", id, name: "Bash", input: { command: "pwd" } }] } };
   if (agent === "codex") return { type: "response_item", payload: { type: "function_call", call_id: id, name: "exec_command", arguments: '{"cmd":"pwd"}' } };
   return { type: "context.append_loop_event", event: { type: "tool.call", toolCallId: id, name: "Bash", args: { command: "pwd" } } };

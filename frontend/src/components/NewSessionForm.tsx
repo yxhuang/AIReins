@@ -50,7 +50,7 @@ export function NewSessionForm({ children }: { children?: ReactNode }) {
   const cwdRequest = useStore(value => value.newSessionRequest);
   const fileMentionRequest = useStore(value => value.fileMentionRequest);
   const [cwd, setCwd] = useState(() => initialCwd ?? pickInitialCwd());
-  const [agent, setAgent] = useState<AgentKind>("claude");
+  const [agent, setAgent] = useState<AgentKind>("antigravity");
   // 首条消息和附件离开新建页时保留，回来接着写（用户 10-25）。
   const [message, setMessage] = useState(() => store.getDraft(NEW_SESSION_DRAFT_ID));
   const [busy, setBusy] = useState(false);
@@ -61,7 +61,7 @@ export function NewSessionForm({ children }: { children?: ReactNode }) {
   const pendingMentionCursor = useRef<number | null>(null);
   const cwdTouched = useRef(false);
   const lastCwdRequest = useRef(cwdRequest);
-  const [configSel, setConfigSel] = useState<Partial<Record<ConfigOptionId, string>>>(() => newSessionConfig("claude"));
+  const [configSel, setConfigSel] = useState<Partial<Record<ConfigOptionId, string>>>(() => newSessionConfig("antigravity"));
   const [attachments, setAttachments] = useState<NewAttachment[]>(() => store.newSessionAttachments);
   const [slashMenuOpen, setSlashMenuOpen] = useState(false);
   const [dismissed, setDismissed] = useState(false);
@@ -250,10 +250,10 @@ export function NewSessionForm({ children }: { children?: ReactNode }) {
     <div className="new-form-head">
       {children}
       <div className="new-agents" role="group" aria-label={t("ui.Sidebar.select_agent")}>
-        {(["claude", "codex", "kimi"] as const).map(kind => <button key={kind} type="button"
+        {(["claude", "antigravity", "codex", "kimi"] as const).map(kind => <button key={kind} type="button"
           className={`new-agent agent-${kind}${agent === kind ? " selected" : ""}`} aria-pressed={agent === kind}
           disabled={busy || !!createdSession.current} onClick={() => { setAgent(kind); setConfigSel(newSessionConfig(kind)); setDismissed(false); setSlashMenuOpen(false); }}>
-          <AgentIcon agent={kind} label={kind} /><span>{{ claude: "Claude", codex: "Codex", kimi: "Kimi" }[kind]}</span>
+          <AgentIcon agent={kind} label={kind} /><span>{{ claude: "Claude", antigravity: "Antigravity", codex: "Codex", kimi: "Kimi" }[kind]}</span>
         </button>)}
       </div>
     </div>

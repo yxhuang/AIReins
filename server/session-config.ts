@@ -30,5 +30,6 @@ export function isRiskyConfig(agent: CreateSessionInput["agent"], config: Sessio
   const mode = config.permissionMode;
   if (agent === "claude") return mode === "bypassPermissions" || mode === "dontAsk";
   if (agent === "kimi") return mode === "yolo";
+  if (agent === "antigravity") return false;
   return mode === "full-access" || mode === "never";
 }

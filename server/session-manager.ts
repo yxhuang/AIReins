@@ -294,7 +294,7 @@ export class SessionManager {
         Object.assign(record, previous);
         throw error;
       }
-      this.registerProject(target);
+      this.registerProject(record.worktree?.root ?? record.cwd);
       this.organizationUpdated();
       return this.get(id)!;
     } finally { this.movingSessions.delete(id); }
@@ -317,10 +317,10 @@ export class SessionManager {
     return this.listProjectOrder();
   }
 
-  private registerProject(cwd: string): void {
+  private registerProject(cwd: string, promote = false): void {
     const path = normalizeProjectPath(cwd);
-    if (this.projectOrder.includes(path)) return;
-    const paths = [path, ...this.projectOrder].slice(0, PROJECT_ORDER_LIMIT);
+    if (this.projectOrder[0] === path || (!promote && this.projectOrder.includes(path))) return;
+    const paths = [path, ...this.projectOrder.filter(item => item !== path)].slice(0, PROJECT_ORDER_LIMIT);
     saveProjectOrder(paths);
     this.projectOrder = paths;
     this.organizationUpdated();
@@ -477,7 +477,7 @@ export class SessionManager {
       riskyMode: record.riskyMode,
     });
 
-    this.registerProject(record.worktree?.root ?? record.cwd);
+    this.registerProject(record.worktree?.root ?? record.cwd, true);
 
     // 默认不快照（P1-8）：只有显式传 "auto" 才做；续接等未传该字段的入口一并跳过
     if (input.snapshot === "auto") {
@@ -648,6 +648,9 @@ export class SessionManager {
       || this.checkingSessions.has(id) || this.restartingSessions.has(id)
       || this.sideQuestions.has(id) || this.thinkingUpdates.has(id) || session.backgroundTasks?.length) {
       throw new Error("请等当前执行与审批结束后再操作");
+    }
+    if (session.agent === "antigravity" && !this.commands.get(id)?.some(command => command.name === "compact")) {
+      throw new Error("Antigravity 当前未提供 compact 命令");
     }
     if (session.agent === "codex") await this.executeCodexCommand(id, { name: "compact" });
     else await this.sendUserMessage(id, { command: { name: "compact" } });
@@ -1166,14 +1169,17 @@ export class SessionManager {
     this.assertWritableTranscript(id);
     const session = this.sessions.get(id);
     if (!session || (!session.backgroundTasks?.length && !tasks.length)) return;
+    const beganWorking = session.status === "idle" && !session.backgroundTasks?.length && tasks.length > 0;
     session.backgroundTasks = tasks;
     this.emit(id, "background_tasks_updated", { tasks });
+    if (beganWorking) this.registerProject(session.worktree?.root ?? session.cwd, true);
   }
 
   private setStatus(id: string, status: SessionStatus): void {
     this.assertWritableTranscript(id);
     const session = this.sessions.get(id);
     if (!session) return;
+    const beganRunning = status === "running" && session.status !== "running";
     if (status === "starting" || status === "dead") this.setBackgroundTasks(id, []);
     session.status = status;
     setTranscriptCacheIdle(session.transcriptPath, status === "idle" || session.released === true);
@@ -1183,6 +1189,7 @@ export class SessionManager {
     session.lastActivityAt = now;
     this.trackWorkerProcess(session, status === "dead" ? undefined : this.workers.get(id));
     this.persistRegistry();
+    if (beganRunning) this.registerProject(session.worktree?.root ?? session.cwd, true);
   }
 
   private trackWorkerProcess(record: SessionRecord, worker?: Driver): void {
@@ -1252,7 +1259,7 @@ export class SessionManager {
 
   private async captureNativeMark(id: string): Promise<void> {
     const record = this.sessions.get(id);
-    if (!record) return;
+    if (!record || record.agent === "antigravity") return;
     try {
       const mark = await this.nativeReader.capture(record);
       if (mark) {
@@ -1299,7 +1306,7 @@ export class SessionManager {
     const previous = this.nativeMarks.get(id);
     let change: NativeConversationChange | undefined;
     if (!previous) {
-      this.warnMissingNativeMark(record, "尚未记录上次同步的对话指纹");
+      if (record.agent !== "antigravity") this.warnMissingNativeMark(record, "尚未记录上次同步的对话指纹");
       if (!released) return;
     } else {
       try {
@@ -1530,6 +1537,8 @@ export class SessionManager {
         const session = this.sessions.get(id);
         if (!session || !current()) return;
         const before = JSON.stringify(session);
+        const previousConfig = JSON.stringify(session.config);
+        const previousSchema = JSON.stringify(session.configSchema);
         const nativeTitle = typeof metadata.nativeTitle === "string"
           ? metadata.nativeTitle.replace(/\s+/g, " ").trim().slice(0, 200) : "";
         const titleChanged = Boolean(nativeTitle && nativeTitle !== session.nativeTitle);
@@ -1537,6 +1546,7 @@ export class SessionManager {
         if (metadata.nativeSessionId) session.nativeSessionId = metadata.nativeSessionId;
         if (metadata.nativeTranscriptPath) session.nativeTranscriptPath = metadata.nativeTranscriptPath;
         if (metadata.config) this.applyConfig(session, metadata.config);
+        if (metadata.configSchema) session.configSchema = structuredClone(metadata.configSchema);
         if (metadata.effectiveConfig) this.applyEffectiveConfig(session, metadata.effectiveConfig);
         if (metadata.remoteControl && JSON.stringify(session.remoteControl) !== JSON.stringify(metadata.remoteControl)) {
           session.remoteControl = metadata.remoteControl;
@@ -1544,6 +1554,10 @@ export class SessionManager {
         }
         if (metadata.backgroundTasks && JSON.stringify(session.backgroundTasks ?? []) !== JSON.stringify(metadata.backgroundTasks)) this.setBackgroundTasks(id, metadata.backgroundTasks);
         this.trackWorkerProcess(session, worker());
+        if (metadata.configSchema && (previousSchema !== JSON.stringify(session.configSchema)
+          || previousConfig !== JSON.stringify(session.config))) {
+          this.emit(id, "config_updated", this.configUpdatedPayload(session, { effectiveFrom: "immediate" }));
+        }
         if (JSON.stringify(session) !== before) this.persistRegistry();
         if (titleChanged) this.organizationUpdated();
       }),
@@ -1734,6 +1748,7 @@ export class SessionManager {
       effort: session.effort,
       permissionMode: session.permissionMode,
       riskyMode: session.riskyMode,
+      ...(session.configSchema ? { configSchema: structuredClone(session.configSchema) } : {}),
       ...this.claudeEffectivePayload(session),
       ...payload,
     };
@@ -1780,6 +1795,7 @@ function cloneSession(session: SessionRecord): SessionRecord {
   return {
     ...visible,
     config: { ...session.config },
+    ...(session.configSchema ? { configSchema: structuredClone(session.configSchema) } : {}),
     ...(session.resumedFrom ? { resumedFrom: { ...session.resumedFrom } } : {}),
   };
 }
@@ -1814,6 +1830,7 @@ function buildResumeCommand(record: SessionRecord): string {
   const cwd = `'${record.cwd.replace(/'/g, `'\\''`)}'`;
   const nativeId = record.nativeSessionId ?? "";
   if (record.agent === "claude") return `cd ${cwd} && claude --resume ${nativeId}`;
+  if (record.agent === "antigravity") return `cd ${cwd} && agy --conversation ${nativeId}`;
   if (record.agent === "codex") return `cd ${cwd} && codex resume ${nativeId}`;
   return `cd ${cwd} && kimi -S ${nativeId}`;
 }

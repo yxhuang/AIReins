@@ -55,9 +55,9 @@ export function LauncherMenu({ collapsed }: { collapsed: boolean }) {
           <h3 className="settings-group-title">{group}</h3>
           {items.map((link, index) => <a className="launcher-link" key={index} href={link.url} target="_blank" rel="noopener noreferrer" onClick={() => close(true)}>
             {/* 与扩展页 manifest 同一信任边界：links.json 由用户自己维护，内联 SVG 按 HTML 渲染 */}
-            {link.icon && (/^agent:(claude|codex|kimi)$/.test(link.icon)
-              // 三家品牌图标复用 AgentIcon，配置里写 agent:claude / agent:codex / agent:kimi，不在 links.json 里复制路径
-              ? <span className="launcher-link-icon" aria-hidden="true"><AgentIcon agent={link.icon.slice(6) as "claude" | "codex" | "kimi"} label={link.name} /></span>
+            {link.icon && (/^agent:(claude|antigravity|codex|kimi)$/.test(link.icon)
+              // 各家品牌图标复用 AgentIcon，配置里写 agent:<agent>，不在 links.json 里复制路径
+              ? <span className="launcher-link-icon" aria-hidden="true"><AgentIcon agent={link.icon.slice(6) as "claude" | "antigravity" | "codex" | "kimi"} label={link.name} /></span>
               : isInlineSvg(link.icon)
               ? <span className="launcher-link-icon" aria-hidden="true" dangerouslySetInnerHTML={{ __html: link.icon }} />
               : <span className="launcher-link-icon" aria-hidden="true">{link.icon}</span>)}

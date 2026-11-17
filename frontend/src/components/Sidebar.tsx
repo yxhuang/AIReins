@@ -23,6 +23,7 @@ const loadHistoryView = () => import("./HistoryView").then(module => ({ default:
 
 const AGENT_LABELS: Record<AgentKind, string> = {
   claude: "claude",
+  antigravity: "Antigravity",
   codex: "codex",
   kimi: "kimi",
 };
@@ -763,7 +764,7 @@ const SessionRow = memo(function SessionRow({
       { id: "move-down", label: t("ui.Sidebar.move_down"), icon: "down" as const, disabled: !canMoveDown, onSelect: () => { if (canMoveDown) void runMenuAction(() => onMove(session.id, 1)); } },
     ] : []),
     { id: "delete", label: t("ui.common.remove"), icon: "delete", shortcut: "D", divider: true, onSelect: () => beginConfirm() },
-    ...(session.agent === "claude" ? [] : [{ id: "permanent-delete", label: t("ui.common.permanently_delete"), icon: "delete" as const, danger: true, onSelect: () => beginConfirm(true) }]),
+    ...(!["codex", "kimi"].includes(session.agent) ? [] : [{ id: "permanent-delete", label: t("ui.common.permanently_delete"), icon: "delete" as const, danger: true, onSelect: () => beginConfirm(true) }]),
   ];
   if (confirming) {
     if (permanently) return <PermanentDeleteConfirm session={session} busy={busy} error={error}

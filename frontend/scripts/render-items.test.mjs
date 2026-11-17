@@ -71,7 +71,7 @@ t("新建命令：无同目录表时取同 agent 最近非空表，无可用表�
 t("新建命令：Claude/Kimi 排除依赖现有会话的操作，保留文本命令", () => {
   const sessionActions = ["status", "tasks", "compact", "context", "clear", "cost", "usage", "resume", "rewind", "export", "exit", "quit", "btw", "side", "mcp", "model", "permissions", "config", "settings", "thinking", "fast"];
   const commands = [...sessionActions.map(name => cmd(name)), cmd("help"), cmd("review"), cmd("project-skill")];
-  for (const agent of ["claude", "kimi"]) {
+  for (const agent of ["claude", "antigravity", "kimi"]) {
     assert.deepEqual(names(newSessionCommands(agent, "/repo", [commandSession("source", agent, "/repo", "17")], new Map([["source", commands]]))), [...(agent === "claude" ? panelNames : []), "help", "review", "project-skill"]);
   }
 });
@@ -91,6 +91,9 @@ t("新建命令：无缓存也提供 Claude 管理入口，覆盖同名 CLI 项�
   assert.equal(newSessionInfoKind("claude", "/mcp reconnect"), null);
   assert.equal(newSessionInfoKind("codex", "/mcp"), null);
   assert.equal(newSessionInfoKind("kimi", "/plugin"), null);
+  assert.equal(newSessionInfoKind("antigravity", "/plugin"), null);
+  assert.equal(newSessionInfoKind("antigravity", "/mcp"), null);
+  assert.deepEqual(withSideCommands("antigravity", []), []);
 });
 
 t("新建命令：Codex 只保留 review 文本入口，不暴露 AIReins 会话动作", () => {
@@ -288,6 +291,7 @@ t("三家按停止结束的回合显示中性打断行而非出错", () => {
     ["claude", { subtype: "error_during_execution", isError: true, interrupted: true }],
     ["codex", { status: "interrupted" }],
     ["kimi", { stopReason: "cancelled" }],
+    ["antigravity", { stopReason: "cancelled" }],
   ]) {
     const [item] = buildRenderItems([ev(1, "turn_completed", payload)], agent);
     assert.equal(item.text, "已打断，可直接发消息继续", agent);
@@ -733,6 +737,8 @@ t("正常与旧版无字段的 turn_completed 不显示，三家异常均带原�
     ["codex", { status: "failed", error: { message: "执行失败" } }, "执行失败", "failed"],
     ["kimi", { stopReason: "end_turn" }, null],
     ["kimi", { stopReason: "max_tokens" }, "已达到输出长度上限", "max_tokens"],
+    ["antigravity", { stopReason: "max_tokens" }, "已达到输出长度上限", "max_tokens"],
+    ["antigravity", { stopReason: "end_turn" }, null],
     ["claude", { subtype: "constructor", isError: true }, "执行未正常完成", "constructor"],
     ["kimi", { stopReason: "unknown_reason" }, "执行未正常完成", "unknown_reason"],
     ["claude", {}, null], ["codex", {}, null], ["kimi", {}, null],

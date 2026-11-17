@@ -47,7 +47,7 @@ const nestedParameterNames: Record<string, string[]> = {
     "p1"
   ],
   "server.message146": [
-    "p1"
+    "p2"
   ],
   "server.message175": [
     "p0"
@@ -152,7 +152,7 @@ export function withMessageMetadata(value: unknown): unknown {
     const schemaField = (field === "label" && ["userSettings", "projectSettings", "localSettings"].includes(String(source.source)))
       || (field === "name" && ["model", "effort", "permissionMode"].includes(String(source.id)))
       || (["label", "description"].includes(field) && Object.hasOwn(source, "value"))
-      || (["description", "argHint"].includes(field) && ["claude", "codex", "kimi"].includes(String(source.source)) && typeof source.name === "string");
+      || (["description", "argHint"].includes(field) && ["claude", "antigravity", "codex", "kimi"].includes(String(source.source)) && typeof source.name === "string");
     if (typeof child === "string" && (messageFields.has(field) || schemaField)) {
       const descriptor = describeServerMessage(child);
       if (descriptor) metadata[field] = descriptor;

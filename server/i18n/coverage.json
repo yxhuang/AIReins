@@ -1,7 +1,7 @@
 {
-  "templates": 503,
-  "coveredSourceSites": 607,
-  "errorSourceSites": 457,
+  "templates": 505,
+  "coveredSourceSites": 609,
+  "errorSourceSites": 459,
   "sources": [
     {
       "file": "server/access.ts",
@@ -923,145 +923,145 @@
     },
     {
       "file": "server/drivers/kimi.ts",
-      "line": 146,
+      "line": 147,
       "key": "server.message063",
       "category": "model"
     },
     {
       "file": "server/drivers/kimi.ts",
-      "line": 147,
+      "line": 148,
       "key": "server.message065",
       "category": "effort"
     },
     {
       "file": "server/drivers/kimi.ts",
-      "line": 148,
+      "line": 149,
       "key": "server.message066",
       "category": "permissionMode"
     },
     {
       "file": "server/drivers/kimi.ts",
-      "line": 302,
+      "line": 312,
       "key": "server.message141",
       "category": "Error"
     },
     {
       "file": "server/drivers/kimi.ts",
-      "line": 323,
+      "line": 334,
       "key": "server.message142",
       "category": "Error"
     },
     {
       "file": "server/drivers/kimi.ts",
-      "line": 331,
+      "line": 342,
       "key": "server.message143",
       "category": "Error"
     },
     {
       "file": "server/drivers/kimi.ts",
-      "line": 366,
+      "line": 377,
       "key": "server.message144",
       "category": "Error"
     },
     {
       "file": "server/drivers/kimi.ts",
-      "line": 390,
+      "line": 404,
       "key": "server.message145",
       "category": "this.cancelQueuedPrompts"
     },
     {
       "file": "server/drivers/kimi.ts",
-      "line": 400,
+      "line": 414,
       "key": "server.message146",
       "category": "message"
     },
     {
       "file": "server/drivers/kimi.ts",
-      "line": 411,
+      "line": 425,
       "key": "server.message147",
       "category": "Error"
     },
     {
       "file": "server/drivers/kimi.ts",
-      "line": 413,
+      "line": 427,
       "key": "server.message148",
       "category": "Error"
     },
     {
       "file": "server/drivers/kimi.ts",
-      "line": 419,
+      "line": 433,
       "key": "server.message149",
       "category": "Error"
     },
     {
       "file": "server/drivers/kimi.ts",
-      "line": 424,
+      "line": 438,
       "key": "server.message150",
       "category": "Error"
     },
     {
       "file": "server/drivers/kimi.ts",
-      "line": 429,
+      "line": 443,
       "key": "server.message151",
       "category": "Error"
     },
     {
       "file": "server/drivers/kimi.ts",
-      "line": 431,
+      "line": 445,
       "key": "server.message152",
       "category": "Error"
     },
     {
       "file": "server/drivers/kimi.ts",
-      "line": 439,
+      "line": 453,
       "key": "server.message153",
       "category": "Error"
     },
     {
       "file": "server/drivers/kimi.ts",
-      "line": 446,
+      "line": 460,
       "key": "server.message154",
       "category": "this.cancelQueuedPrompts"
     },
     {
       "file": "server/drivers/kimi.ts",
-      "line": 457,
+      "line": 478,
       "key": "server.message155",
       "category": "this.cancelQueuedPrompts"
     },
     {
       "file": "server/drivers/kimi.ts",
-      "line": 543,
+      "line": 564,
       "key": "server.message156",
       "category": "this.replyError"
     },
     {
       "file": "server/drivers/kimi.ts",
-      "line": 589,
+      "line": 610,
       "key": "server.message157",
       "category": "warning"
     },
     {
       "file": "server/drivers/kimi.ts",
-      "line": 600,
+      "line": 621,
       "key": "server.message158",
       "category": "protocolLimitations"
     },
     {
       "file": "server/drivers/kimi.ts",
-      "line": 608,
+      "line": 629,
       "key": "server.message159",
       "category": "this.cancelQueuedPrompts"
     },
     {
       "file": "server/drivers/kimi.ts",
-      "line": 875,
+      "line": 897,
       "key": "server.message160",
       "category": "Error"
     },
     {
       "file": "server/drivers/kimi.ts",
-      "line": 877,
+      "line": 899,
       "key": "server.message161",
       "category": "Error"
     },
@@ -1199,19 +1199,19 @@
     },
     {
       "file": "server/history.ts",
-      "line": 632,
+      "line": 634,
       "key": "server.message043",
       "category": "truncateText"
     },
     {
       "file": "server/history.ts",
-      "line": 1057,
+      "line": 1059,
       "key": "server.message180",
       "category": "HistoryQueryError"
     },
     {
       "file": "server/history.ts",
-      "line": 1081,
+      "line": 1083,
       "key": "server.message181",
       "category": "HistoryQueryError"
     },
@@ -1889,55 +1889,55 @@
     },
     {
       "file": "server/native-conversation.ts",
-      "line": 269,
+      "line": 271,
       "key": "server.message264",
       "category": "Error"
     },
     {
       "file": "server/native-session-delete.ts",
-      "line": 16,
+      "line": 17,
       "key": "server.message265",
       "category": "NativeDeleteError"
     },
     {
       "file": "server/native-session-delete.ts",
-      "line": 19,
+      "line": 20,
       "key": "server.message266",
       "category": "NativeDeleteError"
     },
     {
       "file": "server/native-session-delete.ts",
-      "line": 26,
+      "line": 27,
       "key": "server.message267",
       "category": "NativeDeleteError"
     },
     {
       "file": "server/native-session-delete.ts",
-      "line": 37,
+      "line": 38,
       "key": "server.message268",
       "category": "NativeDeleteError"
     },
     {
       "file": "server/native-session-delete.ts",
-      "line": 46,
+      "line": 47,
       "key": "server.message269",
       "category": "NativeDeleteError"
     },
     {
       "file": "server/native-session-delete.ts",
-      "line": 51,
+      "line": 52,
       "key": "server.message270",
       "category": "NativeDeleteError"
     },
     {
       "file": "server/native-session-delete.ts",
-      "line": 60,
+      "line": 61,
       "key": "server.message271",
       "category": "NativeDeleteError"
     },
     {
       "file": "server/native-session-delete.ts",
-      "line": 69,
+      "line": 70,
       "key": "server.message272",
       "category": "NativeDeleteError"
     },
@@ -2093,49 +2093,49 @@
     },
     {
       "file": "server/persistence.ts",
-      "line": 301,
+      "line": 310,
       "key": "server.message307",
       "category": "Error"
     },
     {
       "file": "server/persistence.ts",
-      "line": 304,
+      "line": 313,
       "key": "server.message308",
       "category": "Error"
     },
     {
       "file": "server/persistence.ts",
-      "line": 361,
+      "line": 370,
       "key": "server.message309",
       "category": "Error"
     },
     {
       "file": "server/persistence.ts",
-      "line": 376,
+      "line": 385,
       "key": "server.message310",
       "category": "Error"
     },
     {
       "file": "server/persistence.ts",
-      "line": 387,
+      "line": 396,
       "key": "server.message311",
       "category": "Error"
     },
     {
       "file": "server/persistence.ts",
-      "line": 407,
+      "line": 416,
       "key": "server.message312",
       "category": "Error"
     },
     {
       "file": "server/persistence.ts",
-      "line": 453,
+      "line": 462,
       "key": "server.message313",
       "category": "Error"
     },
     {
       "file": "server/persistence.ts",
-      "line": 526,
+      "line": 535,
       "key": "server.message314",
       "category": "Error"
     },
@@ -2171,7 +2171,7 @@
     },
     {
       "file": "server/session-manager.ts",
-      "line": 1001,
+      "line": 1004,
       "key": "server.message318",
       "category": "SessionBusyError"
     },
@@ -2279,163 +2279,163 @@
     },
     {
       "file": "server/session-manager.ts",
-      "line": 659,
+      "line": 662,
       "key": "server.message333",
       "category": "Error"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 663,
+      "line": 666,
       "key": "server.message102",
       "category": "Error"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 665,
+      "line": 668,
       "key": "server.message334",
       "category": "Error"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 670,
+      "line": 673,
       "key": "server.message335",
       "category": "Error"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 678,
+      "line": 681,
       "key": "server.message334",
       "category": "Error"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 690,
+      "line": 693,
       "key": "server.message336",
       "category": "Error"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 691,
+      "line": 694,
       "key": "server.message327",
       "category": "Error"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 693,
+      "line": 696,
       "key": "server.message337",
       "category": "Error"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 696,
+      "line": 699,
       "key": "server.message338",
       "category": "Error"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 703,
+      "line": 706,
       "key": "server.message339",
       "category": "Error"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 704,
+      "line": 707,
       "key": "server.message340",
       "category": "Error"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 705,
+      "line": 708,
       "key": "server.message341",
       "category": "Error"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 715,
+      "line": 718,
       "key": "server.message342",
       "category": "Error"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 726,
+      "line": 729,
       "key": "server.message343",
       "category": "Error"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 727,
+      "line": 730,
       "key": "server.message344",
-      "category": "Error"
-    },
-    {
-      "file": "server/session-manager.ts",
-      "line": 728,
-      "key": "server.message345",
       "category": "Error"
     },
     {
       "file": "server/session-manager.ts",
       "line": 731,
+      "key": "server.message345",
+      "category": "Error"
+    },
+    {
+      "file": "server/session-manager.ts",
+      "line": 734,
       "key": "server.message346",
       "category": "Error"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 739,
+      "line": 742,
       "key": "server.message347",
       "category": "Error"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 740,
+      "line": 743,
       "key": "server.message348",
       "category": "Error"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 741,
+      "line": 744,
       "key": "server.message344",
       "category": "Error"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 746,
+      "line": 749,
       "key": "server.message087",
       "category": "Error"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 747,
+      "line": 750,
       "key": "server.message349",
       "category": "Error"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 759,
+      "line": 762,
       "key": "server.message350",
       "category": "Error"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 798,
+      "line": 801,
       "key": "server.message351",
       "category": "Error"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 802,
+      "line": 805,
       "key": "server.message352",
       "category": "Error"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 803,
+      "line": 806,
       "key": "server.message353",
       "category": "Error"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 804,
+      "line": 807,
       "key": "server.message354",
       "category": "Error"
     },
@@ -2447,61 +2447,61 @@
     },
     {
       "file": "server/session-manager.ts",
-      "line": 809,
+      "line": 812,
       "key": "server.message353",
       "category": "Error"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 815,
+      "line": 818,
       "key": "server.message355",
       "category": "Error"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 816,
+      "line": 819,
       "key": "server.message356",
       "category": "Error"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 818,
+      "line": 821,
       "key": "server.message357",
       "category": "Error"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 821,
+      "line": 824,
       "key": "server.message358",
       "category": "Error"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 827,
+      "line": 830,
       "key": "server.message359",
       "category": "Error"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 829,
+      "line": 832,
       "key": "server.message360",
       "category": "Error"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 864,
+      "line": 867,
       "key": "server.message361",
       "category": "SessionBusyError"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 876,
+      "line": 879,
       "key": "server.message362",
       "category": "SessionBusyError"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 880,
+      "line": 883,
       "key": "server.message363",
       "category": "SessionBusyError"
     },
@@ -2513,7 +2513,7 @@
     },
     {
       "file": "server/session-manager.ts",
-      "line": 894,
+      "line": 897,
       "key": "server.message365",
       "category": "SessionBusyError"
     },
@@ -2531,7 +2531,7 @@
     },
     {
       "file": "server/session-manager.ts",
-      "line": 947,
+      "line": 950,
       "key": "server.message366",
       "category": "Error"
     },
@@ -2543,13 +2543,13 @@
     },
     {
       "file": "server/session-manager.ts",
-      "line": 1034,
+      "line": 1037,
       "key": "server.message367",
       "category": "other"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 1035,
+      "line": 1038,
       "key": "server.message368",
       "category": "other"
     },
@@ -2561,73 +2561,73 @@
     },
     {
       "file": "server/session-manager.ts",
-      "line": 1037,
+      "line": 1040,
       "key": "server.message370",
       "category": "other"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 1038,
+      "line": 1041,
       "key": "server.message371",
       "category": "other"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 1039,
+      "line": 1042,
       "key": "server.message372",
       "category": "other"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 1041,
+      "line": 1044,
       "key": "server.message373",
       "category": "other"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 1042,
+      "line": 1045,
       "key": "server.message374",
       "category": "other"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 1043,
+      "line": 1046,
       "key": "server.message375",
       "category": "other"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 1262,
+      "line": 1269,
       "key": "server.message376",
       "category": "this.warnMissingNativeMark"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 1302,
+      "line": 1309,
       "key": "server.message377",
       "category": "this.warnMissingNativeMark"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 1323,
+      "line": 1330,
       "key": "server.message378",
       "category": "this.warnMissingNativeMark"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 1324,
+      "line": 1331,
       "key": "server.message379",
       "category": "Error"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 1352,
+      "line": 1359,
       "key": "server.message380",
       "category": "other"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 1353,
+      "line": 1360,
       "key": "server.message381",
       "category": "other"
     },
@@ -2639,151 +2639,151 @@
     },
     {
       "file": "server/session-manager.ts",
-      "line": 1377,
+      "line": 1384,
       "key": "server.message382",
       "category": "Error"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 806,
+      "line": 809,
       "key": "server.message167",
       "category": "Error"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 1386,
+      "line": 1393,
       "key": "server.message383",
       "category": "Error"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 1391,
+      "line": 1398,
       "key": "server.message384",
       "category": "Error"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 943,
+      "line": 946,
       "key": "server.message319",
       "category": "Error"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 1436,
+      "line": 1443,
       "key": "server.message359",
       "category": "Error"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 1442,
+      "line": 1449,
       "key": "server.message385",
       "category": "Error"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 1445,
+      "line": 1452,
       "key": "server.message386",
       "category": "Error"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 1456,
+      "line": 1463,
       "key": "server.message387",
       "category": "message"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 946,
+      "line": 949,
       "key": "server.message167",
-      "category": "Error"
-    },
-    {
-      "file": "server/session-manager.ts",
-      "line": 1582,
-      "key": "server.message388",
-      "category": "Error"
-    },
-    {
-      "file": "server/session-manager.ts",
-      "line": 1587,
-      "key": "server.message389",
-      "category": "SessionBusyError"
-    },
-    {
-      "file": "server/session-manager.ts",
-      "line": 1588,
-      "key": "server.message390",
-      "category": "Error"
-    },
-    {
-      "file": "server/session-manager.ts",
-      "line": 1594,
-      "key": "server.message391",
       "category": "Error"
     },
     {
       "file": "server/session-manager.ts",
       "line": 1596,
+      "key": "server.message388",
+      "category": "Error"
+    },
+    {
+      "file": "server/session-manager.ts",
+      "line": 1601,
+      "key": "server.message389",
+      "category": "SessionBusyError"
+    },
+    {
+      "file": "server/session-manager.ts",
+      "line": 1602,
+      "key": "server.message390",
+      "category": "Error"
+    },
+    {
+      "file": "server/session-manager.ts",
+      "line": 1608,
+      "key": "server.message391",
+      "category": "Error"
+    },
+    {
+      "file": "server/session-manager.ts",
+      "line": 1610,
       "key": "server.message392",
       "category": "Error"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 1374,
+      "line": 1381,
       "key": "server.message167",
       "category": "Error"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 1385,
+      "line": 1392,
       "key": "server.message167",
       "category": "Error"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 1604,
+      "line": 1618,
       "key": "server.message393",
       "category": "Error"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 1607,
+      "line": 1621,
       "key": "server.message394",
       "category": "Error"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 1613,
+      "line": 1627,
       "key": "server.message395",
       "category": "Error"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 1622,
+      "line": 1636,
       "key": "server.message396",
       "category": "Error"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 1625,
+      "line": 1639,
       "key": "server.message397",
       "category": "Error"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 1628,
+      "line": 1642,
       "key": "server.message398",
       "category": "Error"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 1644,
+      "line": 1658,
       "key": "server.message399",
       "category": "Error"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 1646,
+      "line": 1660,
       "key": "server.message400",
       "category": "Error"
     },
@@ -3503,25 +3503,25 @@
     },
     {
       "file": "server/session-manager.ts",
-      "line": 1033,
+      "line": 1036,
       "key": "server.message319",
       "category": "Error"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 872,
+      "line": 875,
       "key": "server.message364",
       "category": "SessionBusyError"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 1400,
+      "line": 1407,
       "key": "server.message319",
       "category": "Error"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 1580,
+      "line": 1594,
       "key": "server.message167",
       "category": "Error"
     },
@@ -3605,19 +3605,19 @@
     },
     {
       "file": "server/session-manager.ts",
-      "line": 884,
+      "line": 887,
       "key": "server.message364",
       "category": "other"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 1036,
+      "line": 1039,
       "key": "server.message369",
       "category": "other"
     },
     {
       "file": "server/session-manager.ts",
-      "line": 1601,
+      "line": 1615,
       "key": "server.message167",
       "category": "other"
     },
@@ -3644,48 +3644,60 @@
       "line": 79,
       "key": "server.projectOrder.path",
       "category": "SessionOrganizationError"
+    },
+    {
+      "file": "server/native-session-delete.ts",
+      "key": "server.antigravity.delete_unavailable",
+      "category": "NativeDeleteError",
+      "line": 16
+    },
+    {
+      "file": "server/session-manager.ts",
+      "key": "server.antigravity.compact_unavailable",
+      "category": "Error",
+      "line": 653
     }
   ],
   "excluded": [
     {
       "file": "server/drivers/kimi.ts",
-      "line": 186,
+      "line": 189,
       "text": "[kimi probe] 保留 {p0}：{p1}",
       "reason": "日志或启动诊断，不发送到前端"
     },
     {
       "file": "server/drivers/kimi.ts",
-      "line": 187,
+      "line": 190,
       "text": "无效 sessionId",
       "reason": "日志或启动诊断，不发送到前端"
     },
     {
       "file": "server/drivers/kimi.ts",
-      "line": 200,
+      "line": 203,
       "text": "匹配目录数量 {p0}",
       "reason": "日志或启动诊断，不发送到前端"
     },
     {
       "file": "server/drivers/kimi.ts",
-      "line": 205,
+      "line": 208,
       "text": "状态或 wire 路径含软链",
       "reason": "日志或启动诊断，不发送到前端"
     },
     {
       "file": "server/drivers/kimi.ts",
-      "line": 208,
+      "line": 211,
       "text": "state.id 不匹配",
       "reason": "日志或启动诊断，不发送到前端"
     },
     {
       "file": "server/drivers/kimi.ts",
-      "line": 213,
+      "line": 216,
       "text": "wire 含对话或非探测记录",
       "reason": "日志或启动诊断，不发送到前端"
     },
     {
       "file": "server/drivers/kimi.ts",
-      "line": 218,
+      "line": 221,
       "text": "index-dirty 含软链",
       "reason": "日志或启动诊断，不发送到前端"
     },

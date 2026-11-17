@@ -1,6 +1,6 @@
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 
-export const AGENTS = ["claude", "codex", "kimi"] as const;
+export const AGENTS = ["claude", "antigravity", "codex", "kimi"] as const;
 export type AgentKind = (typeof AGENTS)[number];
 
 const EVENT_TYPES = [
@@ -210,6 +210,8 @@ export interface SessionRecord {
   effectiveEffortSource?: EffectiveConfigSource | null;
   permissionMode?: string | null;
   config: SessionConfig;
+  /** CLI 当前会话公布的配置候选；旧会话可缺省。 */
+  configSchema?: DriverConfigSchema;
   riskyMode: boolean;
   remoteControl?: RemoteControlState;
   /** 仅 Claude：worker 当前的后台任务；非空时会话虽 idle 仍在干活。不跨 worker 保留。 */
@@ -230,6 +232,7 @@ export interface DriverCallbacks {
     nativeSessionId?: string;
     nativeTranscriptPath?: string;
     config?: SessionConfig;
+    configSchema?: DriverConfigSchema;
     effectiveConfig?: EffectiveConfigUpdate;
     remoteControl?: RemoteControlState;
     backgroundTasks?: BackgroundTask[];

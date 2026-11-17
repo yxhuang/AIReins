@@ -117,7 +117,7 @@ class FakeClaudeDriver implements Driver {
 class FakeDefaultDriver implements Driver {
   private config: SessionConfig;
 
-  constructor(readonly kind: "codex" | "kimi", readonly options: DriverOptions) {
+  constructor(readonly kind: Exclude<AgentKind, "claude">, readonly options: DriverOptions) {
     this.config = kind === "codex"
       ? { model: "gpt-5.6-sol", effort: "xhigh", permissionMode: "untrusted" }
       : { model: "kimi-code/k3", effort: "high", permissionMode: "default" };
@@ -156,8 +156,13 @@ class FakeDefaultDriver implements Driver {
 }
 
 const instances: FakeClaudeDriver[] = [];
+const defaultInstances: FakeDefaultDriver[] = [];
 const factory = (agent: AgentKind, options: DriverOptions): Driver => {
-  if (agent !== "claude") return new FakeDefaultDriver(agent, options);
+  if (agent !== "claude") {
+    const driver = new FakeDefaultDriver(agent, options);
+    defaultInstances.push(driver);
+    return driver;
+  }
   const driver = new FakeClaudeDriver(options, CLAUDE_CONFIG_SCHEMA);
   instances.push(driver);
   return driver;
@@ -345,6 +350,38 @@ assert.deepEqual({ model: kimi.model, effort: kimi.effort, permissionMode: kimi.
 });
 assert.equal(Object.hasOwn(kimi, "effectiveModel"), false);
 
+// ACP runtime 候选更新须覆盖记录、快照、事件和持久化，即使当前配置值没变。
+const antigravity = await manager.create({ agent: "antigravity", cwd: process.cwd() });
+const acpCallbacks = defaultInstances.at(-1)!.options.callbacks;
+const acpConfig = { model: "runtime-model", effort: "balanced", permissionMode: "ask" };
+const runtimeSchema: DriverConfigSchema = {
+  source: "ACP runtime",
+  options: [
+    { id: "model", name: "Model", values: [{ value: "runtime-model", label: "Runtime" }], default: "runtime-model", mutable: true },
+    { id: "effort", name: "Effort", values: [{ value: "balanced", label: "Balanced" }], default: "balanced", mutable: true },
+    { id: "permissionMode", name: "Mode", values: [{ value: "ask", label: "Ask" }], default: "ask", mutable: true },
+  ],
+};
+acpCallbacks.metadata({ config: acpConfig, configSchema: runtimeSchema } as any);
+assert.deepEqual((manager.get(antigravity.id) as any).configSchema, runtimeSchema);
+assert.deepEqual((manager.list().find(session => session.id === antigravity.id) as any).configSchema, runtimeSchema);
+assert.deepEqual((manager.getSnapshot(antigravity.id, true)!.session as any).configSchema, runtimeSchema);
+assert.equal(events.at(-1)!.type, "config_updated");
+assert.deepEqual(events.at(-1)!.payload.configSchema, runtimeSchema);
+assert.deepEqual(events.at(-1)!.payload.config, acpConfig);
+const updatedRuntimeSchema = structuredClone(runtimeSchema);
+updatedRuntimeSchema.options[1].values.push({ value: "deep", label: "Deep" });
+const beforeSchemaUpdate = events.length;
+acpCallbacks.metadata({ config: acpConfig, configSchema: updatedRuntimeSchema } as any);
+assert.equal(events.length, beforeSchemaUpdate + 1, "candidate-only updates must broadcast");
+assert.deepEqual(events.at(-1)!.payload.configSchema, updatedRuntimeSchema);
+const afterSchemaUpdate = events.length;
+acpCallbacks.metadata({ config: acpConfig, configSchema: updatedRuntimeSchema } as any);
+assert.equal(events.length, afterSchemaUpdate, "unchanged ACP metadata must not rebroadcast");
+const clonedAcp = manager.get(antigravity.id) as any;
+clonedAcp.configSchema.options[1].values.length = 0;
+assert.equal((manager.get(antigravity.id) as any).configSchema.options[1].values.length, 2, "public snapshots must not alias stored schema");
+
 let snapshotFinished = false;
 let driverStartedAfterSnapshot = false;
 let snapshotCalls = 0;
@@ -408,6 +445,7 @@ await snapshotFailureManager.shutdown();
 await manager.shutdown();
 
 const emptySettingsManager = new SessionManager(factory, () => ({ model: null, effort: null }));
+assert.deepEqual((emptySettingsManager.get(antigravity.id) as any).configSchema, updatedRuntimeSchema, "ACP schema must survive registry reload");
 const reloadedOverride = emptySettingsManager.get(overridden.id)!;
 assert.equal(reloadedOverride.config.model, "haiku");
 assert.equal(reloadedOverride.model, "claude-haiku-4-5-20251001");

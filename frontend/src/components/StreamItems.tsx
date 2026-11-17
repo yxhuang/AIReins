@@ -304,6 +304,7 @@ function ToolBodyView({ body, status, showAll, onShowAll }: {
 export const GateBlock = forwardRef<HTMLDivElement, { item: GateView; sessionId: string; dead: boolean }>(
   function GateBlock({ item, sessionId, dead }, ref) {
     const [detailOpen, setDetailOpen] = useState(false);
+    const agentName = item.agent === "antigravity" ? "Antigravity" : item.agent;
     const [contentOpen, setContentOpen] = useState(false);
     // 发送成功才进提交中态：禁用所有决策按钮，直到 permission_resolved 到达；
     // 断线发送失败时不进提交中态（按钮保持可点，错误由全局 lastError 条提示），避免永久卡死。
@@ -319,7 +320,7 @@ export const GateBlock = forwardRef<HTMLDivElement, { item: GateView; sessionId:
       return (
         <div className="gate-block gate-resolved" ref={ref}>
           <span className="gate-resolved-label">
-            {item.agent} {t("ui.StreamItems.wants_to_run")} <span className="mono">{item.toolName}</span> —— {label}
+            {agentName} {t("ui.StreamItems.wants_to_run")} <span className="mono">{item.toolName}</span> —— {label}
           </span>
         </div>
       );
@@ -329,7 +330,7 @@ export const GateBlock = forwardRef<HTMLDivElement, { item: GateView; sessionId:
       return (
         <div className="gate-block gate-expired" ref={ref}>
           <span className="gate-resolved-label">
-            {item.agent} {t("ui.StreamItems.wants_to_run")} <span className="mono">{item.toolName}</span>{t("ui.StreamItems.this_session_has_ended_this_approval_is")}</span>
+            {agentName} {t("ui.StreamItems.wants_to_run")} <span className="mono">{item.toolName}</span>{t("ui.StreamItems.this_session_has_ended_this_approval_is")}</span>
         </div>
       );
     }
@@ -345,7 +346,7 @@ export const GateBlock = forwardRef<HTMLDivElement, { item: GateView; sessionId:
     return (
       <div className="gate-block" ref={ref}>
         <div className="gate-title">
-          {item.agent} {t("ui.StreamItems.wants_to_run")} <span className="mono">{item.toolName}</span>
+          {agentName} {t("ui.StreamItems.wants_to_run")} <span className="mono">{item.toolName}</span>
           {item.finalGate && <span className="gate-final-tag">{t("ui.StreamItems.final_approval")}</span>}
         </div>
         {item.label !== item.toolName && <div className="gate-label">{item.label}</div>}

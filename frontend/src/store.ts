@@ -2,6 +2,7 @@ import { localizeServerData, t } from "./i18n";
 import type {
   CommandInfo,
   ConfigOptionId,
+  DriverConfigSchema,
   EffectiveSource,
   HistorySession,
   Mention,
@@ -1966,6 +1967,10 @@ export class Store {
     const payload = event.payload;
     if (payload.config && typeof payload.config === "object") {
       session.config = payload.config as SessionConfig;
+    }
+    if (payload.configSchema && typeof payload.configSchema === "object"
+      && Array.isArray((payload.configSchema as DriverConfigSchema).options)) {
+      session.configSchema = payload.configSchema as DriverConfigSchema;
     }
     if ("model" in payload) session.model = payload.model as string | null;
     if ("effort" in payload) session.effort = payload.effort as string | null;

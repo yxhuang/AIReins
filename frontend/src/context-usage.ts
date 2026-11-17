@@ -20,7 +20,7 @@ export function contextPercent(agent: AgentKind, payload: unknown): number | nul
     const usage = record(data.usage);
     used = record(usage.last).totalTokens;
     size = usage.modelContextWindow;
-  } else {
+  } else if (agent === "kimi" || agent === "antigravity") {
     used = data.used;
     size = data.size;
   }

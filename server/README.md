@@ -1,6 +1,18 @@
 # AIReins server（M1）
 
-后端使用 Node 22、TypeScript 和 `tsx` 直跑，没有后端构建步骤。服务固定绑定回环地址 `127.0.0.1`，默认端口为 `8790`，带访问控制（见「## 访问控制」）；三家 CLI 版本在启动时实测并缓存。
+后端使用 Node 22、TypeScript 和 `tsx` 直跑，没有后端构建步骤。服务固定绑定回环地址 `127.0.0.1`，默认端口为 `8790`，带访问控制（见「## 访问控制」）；四家 CLI 版本在启动时实测并缓存。
+
+## Antigravity 官方 CLI
+
+`agent: "antigravity"` 使用本机官方 `agy acp`（ACP v1，stdio JSON-RPC），复用 Kimi 的 ACP 事件、工具审批、附件和终端生命周期实现。沿用 CLI 已有登录，不读取或复制 OAuth token，不写全局设置；模型清单来自当前账号的 `session/new.configOptions`，不按订阅名推测可用模型。
+
+- 模型、推理和审批选项分别映射 `model` → `model`、`thought_level` → `effort`、`mode` → `permissionMode`。新建默认保留 CLI 实际审批档位，配置修改仅发送 `session/set_config_option`。模型变化后按 CLI 返回的新 options 更新推理档位；会话的 `configSchema` 随 `config_updated`、列表和快照同步到界面，候选变化即使当前值相同也广播。旧会话缺少该字段时才回落启动探测缓存。
+- 支持文本/思考流、工具调用与更新、标准 ACP 审批和可表达的提问表单、文件和图片附件、命令清单、原生标题与 `usage_update` 上下文用量（`{used,size}`）。不把上下文用量当作订阅额度。
+- 会话释放与正常关闭使用 `session/close`；再次发送或新建续接使用原生 `session/resume`，保留 AIReins 自有 transcript。复制到终端的续接命令为 `agy --conversation <nativeId>`。运行中再次发送的消息立即交给原生 `session/prompt`，由 CLI 决定处理时机；每个请求独立返回，所有在途请求结束后才回到 idle，不把首个应答当作全部结束。中断发送 `session/cancel` 并取消未决审批；Kimi 仍使用 worker FIFO 队列。
+- 外部 Antigravity 原生历史格式尚未接入文件索引，因此 `/api/history?agent=antigravity` 返回空列表；在 AIReins 创建的会话仍由自己的注册表和 transcript 正常保存、展示与续接。不对该 CLI 做原生 JSONL 路径猜测、外部续聊指纹检查或自动崩溃恢复；不提供彻底删除原生会话。
+- 元数据后台探测会创建并关闭一个无提示的空 ACP 会话；未核实删除接口，保留该原生记录。缺少 CLI 或认证时 options 为空并返回探测错误，不影响其他 CLI。旧版 metadata 缓存也立即补上 Antigravity 基础能力。
+
+官方说明：[ACP](https://antigravity.google/docs/cli/acp/)、[模型](https://antigravity.google/docs/models)、[全局规则](https://antigravity.google/docs/rules/)。AIReins 不管理用户的全局规则或便携偏好，它们可由独立的环境仓库管理。
 
 ## 启动
 
@@ -17,13 +29,13 @@ npm run server
 - 注册表：`~/.workbench/sessions.json`
 - 统一事件 transcript：`~/.workbench/transcripts/<sessionId>.ndjson`
 - 非 Git 工作目录的委派前快照：`~/.workbench/snapshots/<basename>-<pathHash>/`
-- 各家 CLI 自有 transcript：由原生 CLI 管理；普通「移除」保留。用户明确确认「彻底删除」时，Codex 经正式 `codex delete --force <UUID>` 删除单个原生会话；Claude/Kimi 当前未开放此操作。
+- 各家 CLI 自有 transcript：由原生 CLI 管理；普通「移除」保留。用户明确确认「彻底删除」时，Codex 经正式 `codex delete --force <UUID>` 删除单个原生会话；Antigravity/Claude 当前未开放此操作，Kimi 通过官方 ACP session/delete 删除。
 
 活动事件触发的定时注册表保存失败时记录日志并保留 dirty，按 2、4、8 秒递增重试，最长间隔 30 秒，成功后恢复 1 秒合并窗口。driver 的 IO/退出回调中发生的注册表写入错误采用同样的后台重试，避免未捕获异常；直接同步调用 `emit`、`setStatus` 等路径仍向调用方抛出写入错误。
 
 统一 transcript 的同步追加和延迟批量追加任一失败后，该文件在当前后端进程内保持只读，对应会话标为 `error` 并忽略后续 driver 回调。同步追加被拒绝的事件不推进 seq，也不进入事件缓存或 WS 广播；直接调用仍收到原始写入错误，driver 的异步 IO/退出回调只记录错误，不使其他会话或整个后端退出。延迟批量写失败前可能已广播的事件不可视为已持久化，刷新或重启后以实际磁盘记录为准。
 
-服务启动会把已释放或符合安全恢复条件的异常退出记录载入为 `idle + released`，下一次发送原地续接；包括原状态已被旧代码写成 `dead`、PID 已清空，但能通过系统启动时间证明旧 worker 全部消失的记录。不会接管旧进程。其余记录保持 `dead`，transcript 损坏优先为 `error`。新建续接也可传原生 `resumeSessionId`；Claude 使用 `--resume`，Codex 使用 `thread/resume`，Kimi 使用 `session/resume`。续接前若另一条 AIReins 会话仍有 worker 占着同一原生会话：它空闲或出错（如上一轮因模型满载失败、进程仍在）时先停掉它的 worker，旧会话随进程退出标 `dead`；它正在执行、有待处理闸门或后台任务、正在续接/重启/检查时返回 400 / 40063。三家都只留一个进程写同一原生会话（Codex 有单写者锁，Claude `--resume` 追加同一 jsonl）。
+服务启动会把已释放或符合安全恢复条件的异常退出记录载入为 `idle + released`，下一次发送原地续接；包括原状态已被旧代码写成 `dead`、PID 已清空，但能通过系统启动时间证明旧 worker 全部消失的记录。不会接管旧进程。其余记录保持 `dead`，transcript 损坏优先为 `error`。新建续接也可传原生 `resumeSessionId`；Claude 使用 `--resume`，Codex 使用 `thread/resume`，Kimi、Antigravity 使用 `session/resume`。续接前若另一条 AIReins 会话仍有 worker 占着同一原生会话：它空闲或出错（如上一轮因模型满载失败、进程仍在）时先停掉它的 worker，旧会话随进程退出标 `dead`；它正在执行、有待处理闸门或后台任务、正在续接/重启/检查时返回 400 / 40063。四家都只留一个进程写同一原生会话（Codex 有单写者锁，Claude `--resume` 追加同一 jsonl）。
 
 ### Claude Remote Control 契约（M23）
 
@@ -129,7 +141,7 @@ webhook 地址就是密钥：文件权限设为 600，也不要写进日志或�
 
 `/api/meta` 和 WebSocket `ready` 的 `serverVersion` 在进程启动时读取仓库 `package.json.version`。CLI 协议握手中的客户端版本独立保留。
 
-CLI 版本与配置选项在后台探测，不阻塞 `/api/meta`：优先返回 `~/.workbench/meta-cache.json` 的最近结果，无缓存时返回三家基础能力及空 `options`，`metadataPending:true`。探测完成（包括不可用/超时）后更新内存与磁盘缓存，返回 `metadataPending:false`，并向已连接的 WebSocket 广播 `{type:"meta_updated"}` 提示重新取元数据；连接建立时仍为 pending 的前端也补取一次，覆盖建连前或断线期间漏掉的通知。能力授权始终按当前请求入口计算，不从磁盘缓存恢复。
+CLI 版本与配置选项在后台探测，不阻塞 `/api/meta`：优先返回 `~/.workbench/meta-cache.json` 的最近结果，无缓存时返回四家基础能力及空 `options`，`metadataPending:true`。探测完成（包括不可用/超时）后更新内存与磁盘缓存，返回 `metadataPending:false`，并向已连接的 WebSocket 广播 `{type:"meta_updated"}` 提示重新取元数据；连接建立时仍为 pending 的前端也补取一次，覆盖建连前或断线期间漏掉的通知。能力授权始终按当前请求入口计算，不从磁盘缓存恢复。
 
 | 能力字段 | WSL2 | 原生 Linux | macOS 实验性 |
 |---|---|---|---|
@@ -195,13 +207,13 @@ macOS 安装时若已安装 Homebrew、stdin/stdout 都是 TTY，缺失或版本
 - `GET /api/sessions/:id/events?beforeSeq=<firstSeq>`
 - `GET /api/sessions/:id/commands`：当前活动会话的实时归一命令表
 - `POST /api/sessions/:id/release`：释放会话 worker（见「三家 CLI 原生历史」末尾「释放」小节）
-- `POST /api/sessions/:id/compact`：手动压缩当前上下文，无请求体；成功返回 `{accepted:true}`，只表示原生请求已接受，进度与结果仍走现有会话事件。三家均须 `idle` 且无待审批闸门、后台任务、发送/续接检查、配置切换、Thinking 切换或侧问；同一请求尚在提交时拒绝重复操作，非法状态返回 400 / 40067，不存在为 404 / 40401。Codex 复用原生 `thread/compact/start` 命令，Claude/Kimi 经既有命令消息链路发送 `/compact`，不发送普通文字总结。已释放会话先按原生 ID 续接，并保留原生单写者检查；不改 CLI 全局配置。
+- `POST /api/sessions/:id/compact`：手动压缩当前上下文，无请求体；成功返回 `{accepted:true}`，只表示原生请求已接受，进度与结果仍走现有会话事件。四家均须 `idle` 且无待审批闸门、后台任务、发送/续接检查、配置切换、Thinking 切换或侧问；同一请求尚在提交时拒绝重复操作，非法状态返回 400 / 40067，不存在为 404 / 40401。Codex 复用原生 `thread/compact/start` 命令，Claude/Kimi 经既有命令消息链路发送 `/compact`；Antigravity 仅在当前 CLI 公布 `compact` 命令时使用同一路径，不发送普通文字总结。已释放会话先按原生 ID 续接，并保留原生单写者检查；不改 CLI 全局配置。
 - `PATCH /api/sessions/:id`：侧栏会话组织字段。请求体只接受 `{pinned?: boolean, customTitle?: string, orderKey?: number}`，逐字段校验类型，未知字段 400 / 40070；`customTitle` trim 后 ≤200 字符，空串删除该键（恢复自动标题，显示标题始终是 `customTitle` 优先，集中取标题在 `shared/session-title.ts`）。会话不存在 404 / 40401。响应 `{session}`。组织变更不推进会话 seq、不更新 `lastActivityAt`、不广播 transcript 事件，也不写三家原生记录；`pinned/customTitle` 直接存 `sessions.json` 注册表条目，沿用现有原子写/延迟刷盘。
 
 原生标题通过 driver metadata 的 `nativeTitle` 同步，折叠空白、最多200字符，非字符串、空串与重复通知忽略；注册表持久化，并复用 `session_organization_updated` 控制帧同步所有页面，不推进 seq 或活动时间。显示优先级为手动 `customTitle` → `nativeTitle` → 首条输入。原生标题晚于列表/快照请求到达时，客户端保留更新后的标题和较新的运行状态。Codex 读取新建/续接响应的 `thread.name` 并接收 `thread/name/updated.threadName`；Kimi 接收 `session_info_update.title`。Claude 接收人工标题通知，并按当前 cwd 和原生 UUID 精确定位 `.jsonl`，只读尾部最多256KiB的 `ai-title.aiTitle`；首轮结果后短期监听该文件的变化，75ms防抖，找到标题立即关闭，最多30秒，进程停止/退出也关闭，不轮询。超过监听窗口的标题留待下轮读取。Kimi ACP 未开放概括接口，其原生标题可能仍为首条输入。
 
 AIReins 新建的 Codex 会话在首个 `item/completed.userMessage` 后、没有手动或原生标题时，复用 0.160.0 TUI 的自动标题流程，最多尝试一次。它在主会话现有 app-server 内另建 `ephemeral:true, threadSource:"thread_title"` 的只读线程，使用 TUI 原 prompt（整体≤960 UTF-8 bytes）、JSON schema 与标题归一化（≤36 Unicode 字符）。OpenAI provider + ChatGPT 登录 + 模型目录支持时用 `gpt-5.6-luna / low`，否则沿用当前模型和原生配置档位；这是额外的一次原生模型请求。禁用工具、MCP、plugins、hooks、skills 注入、环境访问和委派；辅助通知与审批请求不进入主 transcript、用量、状态、会话列表或派单树。生成全过程上限30秒，失败静默、不重试；取消/超时只中断辅助回合，再 unsubscribe（各最多1秒），晚到的辅助线程也立即 unsubscribe。手动改名取消生成，写回前再读主线程名称；已有名称不覆盖。写回仅通过拥有主线程的同一 app-server 的 `thread/name/set`，不另起 writer，不直接修改原生文件或全局配置。ephemeral 线程不物化到 `~/.codex/sessions`。源码出处见 `spikes/PROTOCOL-NOTES.md`。
-- `GET /api/project-order` → `{paths}`；`POST /api/project-order/move` 只接受 `{path,before}` 或 `{path,after}`，所有路径须为列表内已有的绝对路径、≤4096 字符，未知字段或无效目标 400 / 40070，响应 `{paths}`。在完整顺序上移动，其他目录相对位置不变，包括侧栏暂时不可见的目录。服务端独占写入 `project-order.json`（用户数据目录，由 `WORKBENCH_HOME` 覆盖），tmp+rename 原子写、权限 0600，最多 500 项、超出丢末尾。文件不存在时用全部会话 cwd 按每目录最新 `createdAt` 倒序生成；新建会话首次出现的目录登记在最前，已有目录不自动移动。路径与前端共用 lexical 规范化（重复 `/`、`.`、`..`、非根尾 `/`，保留大小写）。每次组织变化广播 WS 控制帧 `session_organization_updated {sessions, projectOrder}`（无 seq、不受会话订阅过滤）。手建分组接口已删除；不读取或改写旧 `session-groups.json`。启动清理 `pruneStorage` 仍保护 pinned 与旧记录的 `groupId`，其余逻辑忽略旧字段。部署后需刷新电脑与手机所有已打开页面，旧页面不兼容新帧。
+- `GET /api/project-order` → `{paths}`；`POST /api/project-order/move` 只接受 `{path,before}` 或 `{path,after}`，所有路径须为列表内已有的绝对路径、≤4096 字符，未知字段或无效目标 400 / 40070，响应 `{paths}`。在完整顺序上移动，其他目录相对位置不变，包括侧栏暂时不可见的目录。服务端独占写入 `project-order.json`（用户数据目录，由 `WORKBENCH_HOME` 覆盖），tmp+rename 原子写、权限 0600，最多 500 项、超出丢末尾。文件不存在时用全部会话 cwd 按每目录最新 `createdAt` 倒序生成；每次新建会话（含已有目录）、会话从非 running 进入 running，或 idle 会话的后台任务从空变为非空时，将 `worktree.root ?? cwd` 对应目录移到最前；同目录另一会话开始运行也触发置前。流式输出、重复 running、已有后台任务的清单更新和运行结束不重排；手动移动保留到下一次自动置前。已在最前的目录不重复写盘或广播，其他目录相对位置保留。路径与前端共用 lexical 规范化（重复 `/`、`.`、`..`、非根尾 `/`，保留大小写）。每次组织变化广播 WS 控制帧 `session_organization_updated {sessions, projectOrder}`（无 seq、不受会话订阅过滤）。手建分组接口已删除；不读取或改写旧 `session-groups.json`。启动清理 `pruneStorage` 仍保护 pinned 与旧记录的 `groupId`，其余逻辑忽略旧字段。部署后需刷新电脑与手机所有已打开页面，旧页面不兼容新帧。
 - `POST /api/sessions/:id/move` → `{session}`：把会话拖到另一目录。只接受 `{cwd, orderKey?}`，`cwd` 为已存在目录的绝对路径；未知字段/同目录/目录不存在 400 / 40070，会话不存在 404 / 40401，运行中、有审批或后台任务、配置切换或续接中、另一条会话引用同一原生历史 400 / 40063。空闲 worker 先按手动释放处理，下次发送在新目录续接，不打断运行中的回合。三家写法不同（实测见 `spikes/PROTOCOL-NOTES.md`）：Claude、Codex 按传入 cwd 续接，不动原生文件，记录 `nativeCwd`（最初目录），AIReins 用它定位 Claude 原生文件并在历史列表里显示新目录，拖回最初目录时也保留；Kimi 忽略续接的 cwd，改写该会话 `state.json` 的 `cwd`（临时文件 + rename，保留权限和其他字段，不改所在 `wd_*` 目录），是目前唯一写入原生会话文件的路径。
 - 手动排序字段 `orderKey` / `orderActivity`：`orderKey` 是排序时间轴上的位置，写入时 `orderActivity` 记下当时的 `lastActivityAt`；两者不等即失效，会话有新活动后回到自动排序。`worker_released` / `process_exited` / `remote_control_updated` / `background_tasks_updated` 事件与状态切换会推进 `lastActivityAt`，但若手动位置仍有效则同步推进 `orderActivity`，空闲或关机释放不会打乱手动顺序。事件集合在 `shared/session-order.ts`，前端收到同样事件时按同一规则推进本地副本。不写 transcript、不推进 seq 或活动时间。
 - `GET /api/sessions/:id/info/:kind`：输入框「/」菜单的只读查看，仅 Claude 会话。kind 为 `mcp` / `hooks` / `permissions` / `context`，分别转发 control_request `mcp_status` / `get_hooks_listing` / `list_permission_rules` / `get_context_usage`；`plugins` 没有对应 control_request，与 VSCode 扩展同样在会话 cwd 下跑 `claude plugin list --json`，`data` 为 `{plugins:[{id,version,scope,enabled,projectEnabled,installPath,…}]}`，不需要 worker（dead 会话也可查）；其余`data` 是 CLI 的 response 原样（`context` 只保留 categories、totalTokens、maxTokens、percentage、model、autoCompactThreshold、isAutoCompactEnabled，原样约 50KB）。已释放会话按 `ensureWorker` 先拉起；dead、非 Claude、未知 kind 或 CLI 报错返回 400 / 40063，15 秒超时。返回结构见 `spikes/PROTOCOL-NOTES.md` §10。
@@ -292,7 +304,7 @@ Kimi 配置探测仍通过 `session/new` 读取 configOptions。探测进程关�
 
 `GET /api/uploads/file` 不是信封接口，直接返回文件字节；`path` 经 `realpath` 后必须落在 `~/.workbench/uploads/` 之内且是普通文件（`..` 与指向目录外的符号链接一律拒绝），否则 404/`40450`。响应带 `content-type`（按扩展名）与 `cache-control: private, max-age=3600`。
 
-建会话时，三家统一使用 `config.model / config.effort / config.permissionMode`：
+建会话时，四家统一使用 `config.model / config.effort / config.permissionMode`：
 
 ```json
 {
@@ -541,7 +553,7 @@ Codex 权限菜单已按当前官方三个常用预设更新（2026-10-01；本�
 ```ts
 interface HistoryListData {
   sessions: Array<{
-    agent: "claude" | "codex" | "kimi";
+    agent: "claude" | "antigravity" | "codex" | "kimi";
     nativeSessionId: string;
     cwd: string;
     title: string;             // 第一条真实用户输入，折叠空白后最多 160 字符
@@ -639,7 +651,7 @@ worker 的 `processId` 原本就持久化；新启动的 POSIX worker 使用独�
 - `shutdownCommand`：可执行文件的绝对路径，公开默认不设。无参数应排定约 60 秒后关机，`abort` 应取消；AIReins 不经 shell 执行。未配置、文件缺失或不可执行时，`GET /api/meta` 的 `capabilities.powerOff` 为 `false`，设置隐藏关机入口，关机 API 返回 503。
 - `claudeCodeEntrypoint`：可选值 `"claude-vscode"`；公开默认不设，交给 Claude CLI 自身默认。Worker 统一带 `WORKBENCH_WORKER=1`，不传旧 `CC_FORK_GUARD`；会按发送前刷新原生记录的机制续接。
 - `directoryBrowserHome`：目录浏览器「主目录」的绝对路径，公开默认 `$HOME`。
-- `proxyUrl`：本机可选 HTTP(S) 代理 origin，例如 `"http://localhost:18080"`；沿用 `validProxyUrl` 校验，可带末尾 `/`，不接受凭证、路径、查询或 fragment。公开默认不设；未配置有效的新旧偏好时，完全保留继承环境（包括原有代理和 NO_PROXY）。`server/proxy-env.ts` 的 `proxyEnvironment` 每次启动子进程时重读偏好，将 `http_proxy/https_proxy/HTTP_PROXY/HTTPS_PROXY/all_proxy/ALL_PROXY` 统一为该地址。接入三种 CLI 的会话进程、Codex/Kimi 配置探测、Claude 模型标签探测、三种 CLI 的 `--version`、`claude plugin`、Kimi ACP 委托 AR 创建的终端命令，以及更新流程的 Git fetch/push；本地 Git 操作仍继承原环境。不修改 AR 主进程的 `process.env`，不写 CLI 或 Git 全局配置。Node 自身的 `fetch`（通知 webhook、pages 健康检查）不在此配置范围。
+- `proxyUrl`：本机可选 HTTP(S) 代理 origin，例如 `"http://localhost:18080"`；沿用 `validProxyUrl` 校验，可带末尾 `/`，不接受凭证、路径、查询或 fragment。公开默认不设；未配置有效的新旧偏好时，完全保留继承环境（包括原有代理和 NO_PROXY）。`server/proxy-env.ts` 的 `proxyEnvironment` 每次启动子进程时重读偏好，将 `http_proxy/https_proxy/HTTP_PROXY/HTTPS_PROXY/all_proxy/ALL_PROXY` 统一为该地址。接入四种 CLI 的会话进程、Antigravity/Codex/Kimi 配置探测、Claude 模型标签探测、四种 CLI 的 `--version`、`claude plugin`、Kimi/Antigravity ACP 委托 AR 创建的终端命令，以及更新流程的 Git fetch/push；本地 Git 操作仍继承原环境。不修改 AR 主进程的 `process.env`，不写 CLI 或 Git 全局配置。Node 自身的 `fetch`（通知 webhook、pages 健康检查）不在此配置范围。
   - `no_proxy/NO_PROXY` 合并原有大小写两份规则（逗号或空白分隔、去重），补齐 `localhost,127.0.0.1,::1,100.64.0.0/10,.ts.net`，两份变量取相同值。`.ts.net` 使用域名后缀规则，无需 `*.ts.net`；裸 IPv6 loopback 用 `::1`。绕过是否生效由子进程使用的 HTTP 库决定：[Claude 官方文档](https://code.claude.com/docs/en/network-config) 明确支持域名后缀；[libcurl](https://curl.se/libcurl/c/CURLOPT_NOPROXY.html) 从 7.86.0 支持 CIDR；Codex 使用的 [reqwest/hyper-util 匹配器](https://github.com/hyperium/hyper-util/blob/master/src/client/proxy/matcher.rs) 支持 IP 网段和域名后缀。[Kimi 的 HTTPX 客户端](https://github.com/MoonshotAI/kimi-cli/blob/main/packages/kosong/src/kosong/chat_provider/kimi.py) 所用 [HTTPX 匹配器](https://github.com/encode/httpx/blob/master/httpx/_utils.py) 支持 `.ts.net`，但不按 CIDR 匹配任意网段 IP；不能保证所有 CLI 版本或终端工具都识别 `100.64.0.0/10`，需要直连特定 Tailscale IP 时可在继承的 NO_PROXY 中列出具体 IP。
   - 代理离线时也保留地址，不做启动时可用性探测或自动重试；同一地址稍后开启、重开或切换节点后，客户端的后续连接仍可使用。已结束的失败回合须手动重发，不自动重放请求。改地址后新子进程立即用新值；已有 worker 需在空闲时释放并按原生 ID 续接或重新连接。浏览器/Windows 系统代理不会自动传入 WSL 服务。首次安装此后端改动需择时重启 AR。
 - `codexProxyUrl`：已发布的旧名，作为 `proxyUrl` 的向后兼容别名保留；有效的 `proxyUrl` 优先，否则使用有效的旧名。旧名现在也作用于上述全部接入点，建议迁移到 `proxyUrl`。
@@ -1057,6 +1069,8 @@ Codex 输入框 `$` 在光标 token 处打开名称+描述面板，支持过滤�
 ## AIReins 存储统计与清理接口
 
 两个接口使用现有 `{code,msg,data,request_id}` 信封和统一 access 策略；统计不读取磁盘会话登记表，而以 `SessionManager` 当前内存记录判断归属。
+
+附件引用检查对每份 transcript 先搜索附件根路径，再在命中处比较目录名，避免按附件目录数重复扫描大记录、阻塞重启前检查等请求。签名缓存、保守前缀匹配及读取失败时放弃删除的规则不变。
 
 `GET /api/storage` 返回以下 `data`：
 

@@ -26,7 +26,7 @@ interface NativeLine { text: string; startOffset: number }
 
 /** Only reads native CLI files. All searches and tail reads have fixed limits. */
 export class NativeConversationReader {
-  private readonly roots: Record<AgentKind, string>;
+  private readonly roots: Record<Exclude<AgentKind, "antigravity">, string>;
   private readonly located = new Map<string, string>();
 
   constructor(roots: Partial<Record<AgentKind, string>> = {}) {
@@ -169,6 +169,8 @@ export class NativeConversationReader {
   }
 
   private pathFor(session: SessionRecord): string | undefined {
+    // Antigravity 的原生存储由官方 ACP 管理，不套用其他 CLI 的 JSONL 路径。
+    if (session.agent === "antigravity") return undefined;
     const root = this.roots[session.agent];
     const id = session.nativeSessionId;
     if (!id || !/^[A-Za-z0-9_-]{1,128}$/.test(id)) return undefined;

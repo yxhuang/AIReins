@@ -196,7 +196,7 @@ export class HistoryIndex {
     const started = Date.now();
     const agents = input.agent ? [input.agent] : AGENTS;
     const cursor = input.cursor ? decodeCursor(input.cursor) : undefined;
-    const discovery = await this.discover(agents, started + this.timeoutMs);
+    const discovery = await this.discover(agents.filter(agent => agent !== "antigravity"), started + this.timeoutMs);
     const candidates = discovery.candidates
       .sort(compareCandidates)
       .filter((candidate) => !cursor || candidateAfterCursor(candidate, cursor));
@@ -366,6 +366,7 @@ export class HistoryIndex {
   }
 
   private async findCandidate(agent: AgentKind, nativeSessionId: string, deadline: number): Promise<Candidate | undefined> {
+    if (agent === "antigravity") return undefined;
     const key = `${agent}:${nativeSessionId}`;
     const cached = this.candidatesById.get(key);
     if (cached) {
@@ -387,6 +388,7 @@ export class HistoryIndex {
   private async discover(agents: AgentKind[], deadline: number): Promise<DiscoveryResult> {
     const result: DiscoveryResult = { candidates: [], skipped: 0, truncated: false };
     for (const agent of agents) {
+      if (agent === "antigravity") continue;
       const stack = [this.roots[agent]];
       while (stack.length > 0) {
         if (Date.now() >= deadline || result.candidates.length >= this.maxDiscovered) {

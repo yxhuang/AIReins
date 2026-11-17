@@ -14,7 +14,7 @@ const records = ["live", "ended"].map((id): SessionRecord => ({ id, agent: "code
   config: {}, riskyMode: false, seq: 0, createdAt: "2026-10-03T00:00:00.000Z", lastActivityAt: "2026-10-03T00:00:00.000Z",
   transcriptPath: join(home, "transcripts", `${id}.ndjson`) }));
 for (const record of records) fs.writeFileSync(record.transcriptPath, "{}\n");
-const { removeUploadDirs } = await import("./persistence.js");
+const { removeUploadDirs, uploadDirReferences } = await import("./persistence.js");
 const { getStorageStats } = await import("./storage.js");
 const read = fs.readFileSync, remove = fs.rmSync;
 for (const mode of process.argv[2] ? [process.argv[2]] : ["deletion", "scan"]) {
@@ -51,3 +51,25 @@ for (const mode of process.argv[2] ? [process.argv[2]] : ["deletion", "scan"]) {
   assert.equal(fs.existsSync(join(home, "uploads", "orphan")), false);
   console.log(`✅ reference safety: ${mode}`);
 }
+
+// 附件目录越多，不应按目录数反复扫描每份大 transcript。
+const prefix = join(home, "uploads");
+for (const id of ["ref", "reference", "special [1]", ...Array.from({ length: 75 }, (_, i) => `missing-${i}`)]) {
+  fs.mkdirSync(join(prefix, id), { recursive: true });
+}
+const large = "x".repeat(2 * 1024 * 1024);
+fs.writeFileSync(records[0]!.transcriptPath, `${large} ${join(prefix, "reference", "image.png")} ${join(prefix, "special [1]", "a.png")}`);
+const includes = String.prototype.includes;
+let scannedBytes = 0;
+String.prototype.includes = function (search: string, position?: number): boolean {
+  if (this.length >= large.length) scannedBytes += this.length;
+  return includes.call(this, search, position);
+};
+try {
+  const references = uploadDirReferences(records);
+  assert.deepEqual([...references.get("live")!].sort(), ["ref", "reference", "special [1]"], "保留旧的保守前缀保护及特殊字符语义");
+  assert.ok(scannedBytes <= large.length * 3, `大记录重复扫描了 ${scannedBytes} 字节，不能随附件目录数增长`);
+} finally {
+  String.prototype.includes = includes;
+}
+console.log("✅ reference scan: large transcripts are not rescanned for every upload directory");

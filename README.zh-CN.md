@@ -1,7 +1,7 @@
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/assets/banner-zh-dark.png">
-    <img src="docs/assets/banner-zh-light.png" alt="AIReins：AI 跑得再快，缰绳在你手里。Claude Code、Codex、Kimi Code 三条线经 AR 汇到手机上的审批按钮" width="100%">
+    <img src="docs/assets/banner-zh-light.png" alt="AIReins：AI 跑得再快，缰绳在你手里。Claude Code、Antigravity、Codex、Kimi Code 三条线经 AR 汇到手机上的审批按钮" width="100%">
   </picture>
 </p>
 
@@ -10,11 +10,11 @@
   <img src="https://img.shields.io/badge/Node.js-%E2%89%A5%2022.12-1F1E1D?style=flat-square&logo=nodedotjs&logoColor=white" alt="Node.js ≥ 22.12">
   <img src="https://img.shields.io/badge/WSL2%20%C2%B7%20Linux-supported-1F1E1D?style=flat-square" alt="WSL2 · Linux supported">
   <img src="https://img.shields.io/badge/macOS-experimental-8a8580?style=flat-square" alt="macOS experimental">
-  <img src="https://img.shields.io/badge/Claude%20Code%20%C2%B7%20Codex%20%C2%B7%20Kimi-official%20CLIs-1F1E1D?style=flat-square" alt="Claude Code · Codex · Kimi: official CLIs">
+  <img src="https://img.shields.io/badge/Claude%20Code%20%C2%B7%20Antigravity%20%C2%B7%20Codex%20%C2%B7%20Kimi-official%20CLIs-1F1E1D?style=flat-square" alt="Claude Code · Antigravity · Codex · Kimi: official CLIs">
 </p>
 
 <p align="center">
-  <b>在手机上用整台电脑，让三家 AI 一起干活，方向由你来定。</b><br>
+  <b>在手机上用整台电脑，让四家 AI 一起干活，方向由你来定。</b><br>
   一个 Node 进程加一个网页，走你自己的私有网络。
 </p>
 
@@ -35,14 +35,15 @@
 
 ## 这是什么
 
-AIReins 是一个跑在你自己电脑上的 AI 工作台。它通过官方 CLI 驱动 Claude Code、Codex 和 Kimi Code，沿用你已有的登录；你在电脑或手机的浏览器里开会话、审批、看文件、开终端，经 [Tailscale](https://tailscale.com) 在任何地方连回这台电脑。
+AIReins 是一个跑在你自己电脑上的 AI 工作台。它通过官方 CLI 驱动 Claude Code、Antigravity、Codex 和 Kimi Code，沿用你已有的登录；你在电脑或手机的浏览器里开会话、审批、看文件、开终端，经 [Tailscale](https://tailscale.com) 在任何地方连回这台电脑。
 
 官方的远程方案一般只给你一个会话的窗口。AIReins 给你的是整台电脑：任意目录（包括 `/mnt/c` 下的 Windows 盘符，不限于 git 仓库）、文件预览与编辑、终端、Taildrop 发送，以及三家 CLI 的原生历史。
 
 ## 特点
 
-- **不换掉你的 harness。** AIReins 本身不是 agent 框架，它驱动的就是你装好的 Claude Code、Codex、Kimi Code 官方 CLI。你的 `CLAUDE.md`、`AGENTS.md`、skills、hooks、MCP、插件和各家配置照常加载，不用迁移；AIReins 不会自己改写它们，只有你在界面里主动切换 Claude Remote Control 默认值或 Claude 插件开关时，才经官方 CLI 保存到对应配置。模型、推理档位和权限模式可以按会话另选，只对这个会话生效。
-- **一个工作台管三家会话。** 不用在几个 CLI 窗口之间来回切：三家会话并排在侧栏，审批、回答提问、打断都在同一处。
+- **不换掉你的 harness。** AIReins 本身不是 agent 框架，它驱动的就是你装好的 Claude Code、Antigravity、Codex、Kimi Code 官方 CLI。你的 `CLAUDE.md`、`AGENTS.md`、`GEMINI.md`、skills、hooks、MCP、插件和各家配置照常加载，不用迁移；AIReins 不会自己改写它们，只有你在界面里主动切换 Claude Remote Control 默认值或 Claude 插件开关时，才经官方 CLI 保存到对应配置。模型、推理档位和权限模式可以按会话另选，只对这个会话生效。
+- **一个工作台管四家会话。** 不用在几个 CLI 窗口之间来回切：四家会话并排在侧栏，审批、回答提问、打断都在同一处。
+- **Google Antigravity。** 默认新建 Antigravity，会话入口位于 Claude 后、Codex 前，使用 Gemini 星形和蓝紫配色；模型与推理档位从当前账号动态读取。先在终端安装并登录 `agy`。AIReins 保存自己创建的对话并通过官方 ACP 续接；外部 Antigravity 历史导入和原生会话彻底删除暂未开放。
 - **历史统一看，进出都自由。** 三家的原生历史在一处搜索、按目录筛选、续接。会话本来就写在各家自己的历史里，随时可以回到 CLI、VS Code 扩展、Codex App 接着用，Claude 会话开了 Remote Control 还能在 Claude App 里连上。（Claude 会话要出现在 CLI 和 VS Code 的历史列表里，需在 `prefs.json` 设 `claudeCodeEntrypoint`，见[配置](#配置)；不设也能用 `claude --resume <会话 ID>` 续接。）
 - **文件和终端就在旁边。** 右侧栏是文件窗口（浏览任意目录、预览、就地编辑、看 Git 状态）和多标签终端：Linux 与 macOS 打开你的默认 shell（`$SHELL`），WSL 下是 bash，还能开 Windows PowerShell。
 - **派单拓扑实时看。** 让一家 AI 当指挥、把活派给其他家时，派单流程图实时显示谁派给了谁、跑到哪一步、成没成；子代理同样按父子树展开。
@@ -74,7 +75,7 @@ AI 越来越能干，能自己读代码、改文件、跑命令，一口气做�
 - **随时随地拍板。** 工具调用在手机上批准或拒绝，AI 的提问在手机上回答；所有会话里待你处理的事集中在一处，不用一个个翻。
 - **中途可以拉回来。** 一键打断；Claude Code 和 Codex 还能在运行中插话改方向、旁路追问（Kimi 运行中发的消息排到当前回合结束后），不必等它跑完再返工。
 - **看得见它在做什么。** 上下文用量、每一步工具调用都摆在眼前，派出去的子代理和委派任务按父子树展开。
-- **三家 AI 一起用。** 让一家当指挥、把活派给另一家（需要外部委派工具，见[可选集成](#可选集成)），你在手机上看整棵派单树；哪家适合哪件事，由你决定，不被一家绑住。
+- **四家 AI 一起用。** 让一家当指挥、把活派给另一家（需要外部委派工具，见[可选集成](#可选集成)），你在手机上看整棵派单树；哪家适合哪件事，由你决定，不被一家绑住。
 - **东西都在你自己手里。** 不经 AI 厂商中转，没有账号，没有遥测；会话就是三家 CLI 原生的历史，在命令行和 VS Code 里照样能续接。
 
 ## 说在前面
@@ -118,7 +119,7 @@ AI 越来越能干，能自己读代码、改文件、跑命令，一口气做�
 
 | | |
 |---|---|
-| **三家会话** | Claude Code、Codex、Kimi Code 并排开、随时切换；每个会话单独设模型、推理档位和权限模式；斜杠命令、skills、`@` 文件提及带补全；标题自动生成，可置顶、按目录分组、重命名及调整会话顺序 |
+| **四家会话** | Claude Code、Antigravity、Codex、Kimi Code 并排开、随时切换；每个会话单独设模型、推理档位和权限模式；斜杠命令、skills、`@` 文件提及带补全；标题自动生成，可置顶、按目录分组、重命名及调整会话顺序 |
 | **审批与提问** | 在任何设备上批准或拒绝工具调用、回答 AI 的提问；所有会话里待处理的事集中呈现 |
 | **中途掌控** | 上下文用量圆环，可请求原生压缩；打断；Claude Code 与 Codex 支持运行中插话改方向和旁路追问，Kimi 运行中的消息排到当前回合结束后发送 |
 | **原生历史** | 搜索、按目录筛选三家 CLI 的原生历史并续接；在 AIReins 开的会话，在 CLI 和 VS Code 扩展里也能续接（Claude 会话要出现在历史列表里需设 `claudeCodeEntrypoint`），反过来也一样（Codex 同一线程同一时间只能有一个客户端写入，转到别处续接前先在 AIReins 里释放） |
@@ -179,7 +180,7 @@ git clone https://github.com/yxhuang/AIReins.git && cd AIReins && bash install.s
 
 安装器会**自动**做这些事：
 
-1. **体检**：检查 Node、npm、端口工具、`rg` 和三家 CLI。缺核心依赖就停下，并打印对应平台的修复命令。在 macOS 上，如果装了 Homebrew 且是在交互终端里运行，它会问一次 `[Y/n]`，回车后替你 `brew install` 缺的 Node 或 ripgrep，装完再检查一遍。Linux 上需要 `sudo` 的命令只打印，不替你执行。
+1. **体检**：检查 Node、npm、端口工具、`rg` 和四家 CLI。缺核心依赖就停下，并打印对应平台的修复命令。在 macOS 上，如果装了 Homebrew 且是在交互终端里运行，它会问一次 `[Y/n]`，回车后替你 `brew install` 缺的 Node 或 ripgrep，装完再检查一遍。Linux 上需要 `sudo` 的命令只打印，不替你执行。
 2. **安装与构建**：安装 npm 依赖，构建前端。
 3. **装 `aireins` 命令**：链接到 `~/.local/bin/aireins`。
 4. **WSL：装 Windows 托盘和开始菜单快捷方式**（不依赖 Tailscale；装完不自动启动托盘）。
@@ -190,7 +191,7 @@ git clone https://github.com/yxhuang/AIReins.git && cd AIReins && bash install.s
 
 你还需要**手动**做的：
 
-- 安装并登录至少一家 AI CLI；要远程访问，再安装并登录 Tailscale。安装器不碰你的账号和三家 CLI 的配置。
+- 安装并登录至少一家 AI CLI；要远程访问，再安装并登录 Tailscale。安装器不碰你的账号和四家 CLI 的配置。
 - 安装器提示 `~/.local/bin` 不在 PATH 时，把它打印的那一行加进 shell 配置（macOS 一般是 `~/.zshrc`，Linux/WSL 是 `~/.bashrc`），再重开终端。
 - **WSL**：从开始菜单打开「AIReins」启动托盘，并把它固定到任务栏（Windows 不允许程序替你固定）。
 - 安装器报告远程配置失败（比如拒绝了 UAC、Serve 已有别的配置）时，按它的提示处理后重跑 `bash install.sh`。

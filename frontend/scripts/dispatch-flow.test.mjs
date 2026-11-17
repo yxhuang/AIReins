@@ -189,6 +189,20 @@ await t('三家独立会话分图，运行端与原生 ID 一起隔离；嵌套�
   }
 });
 
+await t('Antigravity 派单来源使用独立身份、图标与四家顺序', () => {
+  const agents = ['kimi', 'antigravity', 'claude', 'codex'];
+  const runs = agents.map(agent => run({ runId: `${agent}-dispatch`, parent: { agent, sessionId: `${agent}-source` } }));
+  const forests = flow.dispatchForests(runs, []);
+  assert.deepEqual(forests.map(forest => forest.agent), ['claude', 'antigravity', 'codex', 'kimi']);
+  const forest = forests[1];
+  assert.equal(forest.title, 'Antigravity');
+  const html = renderToStaticMarkup(React.createElement(DispatchTree, { groups: groupDispatches(forest.runs, now),
+    title: forest.title, agent: forest.agent, dispatchers: dispatcherSessions(forest.runs, []), model: null, now }));
+  assert.ok(html.includes('data-source-agent="antigravity"'));
+  assert.ok(html.includes('agent-icon agent-antigravity'));
+  assert.ok(html.includes('linearGradient'));
+});
+
 await t('同主体不同会话合为一树；Copilot 不作根，仍可作为第二层执行端', () => {
   const sessions = [{ id: 'one', agent: 'claude', title: '会话一' }, { id: 'two', agent: 'claude', title: '会话二' }];
   const runs = [run({ runId: 'one', parent: { agent: 'claude', sessionId: 'one' } }),

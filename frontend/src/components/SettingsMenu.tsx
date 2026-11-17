@@ -157,6 +157,7 @@ export function SettingsMenu() {
   const panelRef = useRef<HTMLDivElement>(null);
   const [restartState, setRestartState] = useState<"idle" | "checking" | "restarting" | "failed">("idle");
   const [restartError, setRestartError] = useState("");
+  const [restartCheckFailed, setRestartCheckFailed] = useState(false);
   const restartPending = useRef(false);
   const restartAbort = useRef<AbortController | null>(null);
   const restartDialog = useRef<HTMLDivElement>(null);
@@ -192,6 +193,8 @@ export function SettingsMenu() {
     restartPending.current = true;
     setRestartState("checking");
     setRestartError("");
+    setRestartCheckFailed(false);
+    let checking = !confirmed;
     const controller = new AbortController();
     restartAbort.current = controller;
     try {
@@ -204,6 +207,7 @@ export function SettingsMenu() {
           return;
         }
       }
+      checking = false;
       close(false);
       setRestartState("restarting");
       await restartAndReconnect(store, () => restartWorkbench(controller.signal), controller.signal);
@@ -211,6 +215,8 @@ export function SettingsMenu() {
       gearRef.current?.focus();
     } catch (error) {
       if (controller.signal.aborted) return;
+      setRestartCheckFailed(checking);
+      close(false);
       setRestartError(error instanceof Error ? error.message : String(error));
       setRestartState("failed");
     } finally {
@@ -599,10 +605,10 @@ export function SettingsMenu() {
           <div className="dir-dialog storage-dialog" ref={restartDialog} tabIndex={-1} role="dialog" aria-modal="true"
             aria-labelledby="restart-title" aria-describedby="restart-description">
             <div className="dir-heading">
-              <h2 id="restart-title">{restartState === "restarting" ? t("ui.SettingsMenu.restarting") : t("ui.SettingsMenu.restart_not_confirmed")}</h2>
+              <h2 id="restart-title">{restartState === "restarting" ? t("ui.SettingsMenu.restarting") : restartCheckFailed ? t("ui.SettingsMenu.restart_check_failed") : t("ui.SettingsMenu.restart_not_confirmed")}</h2>
             </div>
             <p id="restart-description" role={restartState === "failed" ? "alert" : "status"}>
-              {restartState === "restarting" ? t("ui.SettingsMenu.waiting_for_to_reconnect_please_wait") : t("ui.SettingsMenu.run_wb_restart_in_a_terminal_on", { p0: (restartError) })}
+              {restartState === "restarting" ? t("ui.SettingsMenu.waiting_for_to_reconnect_please_wait") : restartCheckFailed ? t("ui.SettingsMenu.restart_not_sent", { p0: restartError }) : t("ui.SettingsMenu.run_wb_restart_in_a_terminal_on", { p0: (restartError) })}
             </p>
             {restartState === "failed" && <div className="dir-actions"><button type="button" className="btn" onClick={() => {
               setRestartState("idle");

@@ -74,7 +74,7 @@ const beforeInstaller = join(fixture, 'install-before.sh');
 writeFileSync(beforeInstaller, original.stdout.replaceAll('bin/workbench', 'bin/aireins'));
 const afterInstaller = join(fixture, 'install-after.sh');
 copyFileSync(join(repo, 'install.sh'), afterInstaller);
-for (const name of ['ss', 'lsof', 'rg', 'npm', 'python3', 'curl', 'claude', 'codex', 'kimi', 'powershell.exe']) {
+for (const name of ['ss', 'lsof', 'rg', 'npm', 'python3', 'curl', 'claude', 'agy', 'codex', 'kimi', 'powershell.exe']) {
   writeFileSync(join(commands, name), '#!/usr/bin/env bash\nexit 0\n', { mode: 0o755 });
 }
 writeFileSync(join(commands, 'node'), '#!/usr/bin/env bash\nif [[ "$1" == --version ]]; then echo v22.23.1; else echo "remote probe stubbed: $1"; fi\n', { mode: 0o755 });
@@ -88,16 +88,18 @@ const checkInstaller = (path, os, release, distro = '', locale = { LC_ALL: 'zh_C
   assert.equal(checked.status, 0, checked.stderr + checked.stdout);
   return checked.stdout.replace(/remote probe stubbed: .*\n/, 'remote probe stubbed\n');
 };
-// 除命令改名、命令链接体检和可选 ai-usage 体检外，中文版保留 HEAD 的既有输出。
+// 除命令改名、命令链接、Antigravity 和可选 ai-usage 体检外，中文版保留 HEAD 的既有输出。
 const withoutCliCheck = output => output
   .replace(/^.*~\/\.local\/bin\/aireins.*\n/gm, '')
   .replace(/^.*ai-usage.*\n/gm, '')
+  .replace(/^.*agy：.*\n/gm, '')
   .replace(/成功 \d+ 项，⚠ \d+ 项，❌ \d+ 项。/, '成功 / 警告 / 错误统计');
 assert.equal(withoutCliCheck(checkInstaller(afterInstaller, 'Linux', '6.6-microsoft-standard', 'ubuntu')),
   withoutCliCheck(checkInstaller(beforeInstaller, 'Linux', '6.6-microsoft-standard', 'ubuntu')
     .replaceAll('Workbench', 'AIReins').replaceAll('wb status', 'aireins status')));
 const macCheck = checkInstaller(afterInstaller, 'Darwin', '24.0');
 assert(macCheck.includes('✅ macOS（实验性）'));
+assert(macCheck.includes('agy：已安装'), 'Antigravity 安装检查使用隔离 CLI stub');
 assert(macCheck.includes('✅ lsof 已安装'));
 assert(!macCheck.includes('✅ ss 已安装'));
 const linuxCheck = checkInstaller(afterInstaller, 'Linux', '6.6-generic');

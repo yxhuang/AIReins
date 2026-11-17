@@ -7,6 +7,7 @@ import { kimiHistoryRoot } from "../history.js";
 import { pathToFileURL } from "node:url";
 import type {
   ConfigOptionId,
+  DriverOptions,
   DriverConfigSchema,
   PermissionDecision,
   QuestionAnswers,
@@ -123,7 +124,7 @@ function terminalOutputForEvent(
   };
 }
 
-interface AcpConfigOption {
+export interface AcpConfigOption {
   id?: string;
   name?: string;
   currentValue?: unknown;
@@ -148,11 +149,12 @@ const CONFIG_NAMES: Record<ConfigOptionId, string> = {
   permissionMode: "审批模式",
 };
 
-function kimiConfigSchemaFromOptions(configOptions: AcpConfigOption[]): DriverConfigSchema {
+export function acpConfigSchemaFromOptions(configOptions: AcpConfigOption[], agent: "kimi" | "antigravity" = "kimi"): DriverConfigSchema {
+  const ids = agent === "antigravity" ? { model: "model", thought_level: "effort", mode: "permissionMode" } as Record<string, ConfigOptionId> : KIMI_UNIFIED_IDS;
   return {
-    source: "Kimi ACP session/new.configOptions",
+    source: `${agent === "antigravity" ? "Antigravity" : "Kimi"} ACP session/new.configOptions`,
     options: configOptions.flatMap((option) => {
-      const id = KIMI_UNIFIED_IDS[String(option.id ?? "")];
+      const id = ids[String(option.id ?? "")];
       if (!id) return [];
       return [{
         id,
@@ -165,17 +167,18 @@ function kimiConfigSchemaFromOptions(configOptions: AcpConfigOption[]): DriverCo
             ...(value.description ? { description: value.description } : {}),
           }];
         }),
-        default: id === "permissionMode" ? "auto" : option.currentValue === undefined ? "" : String(option.currentValue),
+        default: id === "permissionMode" && agent === "kimi" ? "auto" : option.currentValue === undefined ? "" : String(option.currentValue),
         mutable: true,
       }];
     }),
   };
 }
 
-function kimiConfigFromOptions(configOptions: AcpConfigOption[]): SessionConfig {
+function kimiConfigFromOptions(configOptions: AcpConfigOption[], agent: "kimi" | "antigravity"): SessionConfig {
+  const ids = agent === "antigravity" ? { model: "model", thought_level: "effort", mode: "permissionMode" } as Record<string, ConfigOptionId> : KIMI_UNIFIED_IDS;
   const config: SessionConfig = {};
   for (const option of configOptions) {
-    const id = KIMI_UNIFIED_IDS[String(option.id ?? "")];
+    const id = ids[String(option.id ?? "")];
     if (id && option.currentValue !== undefined) config[id] = String(option.currentValue);
   }
   return config;
@@ -237,7 +240,7 @@ export async function probeKimiConfigSchema(cwd: string): Promise<DriverConfigSc
     });
     const result = await probe.request("session/new", { cwd, mcpServers: [] });
     sessionId = String(result?.sessionId ?? "");
-    return kimiConfigSchemaFromOptions(Array.isArray(result?.configOptions) ? result.configOptions : []);
+    return acpConfigSchemaFromOptions(Array.isArray(result?.configOptions) ? result.configOptions : []);
   } finally {
     if (sessionId) {
       try { await probe.request("session/close", { sessionId }, 1_000); } catch { /* probe shutdown remains authoritative */ }
@@ -266,11 +269,18 @@ async function* textFileLines(path: string): AsyncGenerator<string> {
   } finally { stream.destroy(); }
 }
 
-export class KimiDriver extends BaseDriver {
+/** 两家官方 ACP 共用消息、审批、附件与终端生命周期；配置 ID 和默认档位按 CLI 区分。 */
+export class AcpDriver extends BaseDriver {
+  readonly kind: "kimi" | "antigravity";
+  private get label(): string { return this.kind === "antigravity" ? "Antigravity" : "Kimi"; }
+
+  constructor(options: DriverOptions, kind: "kimi" | "antigravity") {
+    super(options);
+    this.kind = kind;
+  }
   private fileRequests: Promise<void> = Promise.resolve();
   private filesClosed = false;
   private terminalCleanup: Promise<void> = Promise.resolve();
-  readonly kind = "kimi" as const;
   private rpcId = 1_000;
   private readonly rpc = new Map<number, PendingRpc>();
   private readonly permissions = new Map<string, KimiPermission>();
@@ -279,16 +289,16 @@ export class KimiDriver extends BaseDriver {
   private nativeSessionId = "";
   private terminalCounter = 0;
   private configOptions: AcpConfigOption[] = [];
-  private promptActive = false;
+  private activePrompts = 0;
   private readonly queuedPrompts: Record<string, unknown>[][] = [];
 
   async start(): Promise<void> {
-    this.spawnProcess("kimi", ["acp"]);
+    this.spawnProcess(this.kind === "antigravity" ? "agy" : "kimi", ["acp"]);
     await withTimeout(this.request("initialize", {
       protocolVersion: 1,
       clientCapabilities: KIMI_CLIENT_CAPABILITIES,
       clientInfo: { name: "workbench", title: "Workbench", version: "0.1.0" },
-    }), 15_000, "Kimi initialize");
+    }), 15_000, `${this.label} initialize`);
 
     const requestedConfig = { ...this.config };
     const result = this.resumeSessionId
@@ -296,39 +306,40 @@ export class KimiDriver extends BaseDriver {
         sessionId: this.resumeSessionId,
         cwd: this.cwd,
         mcpServers: [],
-      }), 15_000, "Kimi session/resume")
-      : await withTimeout(this.request("session/new", { cwd: this.cwd, mcpServers: [] }), 15_000, "Kimi session/new");
+      }), 15_000, `${this.label} session/resume`)
+      : await withTimeout(this.request("session/new", { cwd: this.cwd, mcpServers: [] }), 15_000, `${this.label} session/new`);
     this.nativeSessionId = result?.sessionId ?? this.resumeSessionId ?? "";
-    if (!this.nativeSessionId) throw new Error("Kimi 未返回 sessionId");
+    if (!this.nativeSessionId) throw new Error(`${this.label} 未返回 sessionId`);
     this.updateConfigOptions(result?.configOptions ?? []);
 
     if (requestedConfig.model) await this.applyConfigOption("model", requestedConfig.model);
     if (requestedConfig.effort) await this.applyConfigOption("effort", requestedConfig.effort);
-    // 新会话默认 Auto；续接无保存档位的旧会话沿用原来的 default，仍实际设置 mode。
-    await this.applyConfigOption("permissionMode", requestedConfig.permissionMode ?? (this.resumeSessionId ? "default" : "auto"));
+    // Kimi 新会话默认 Auto；Antigravity 沿用 CLI 实际档位。所有修改仅作用于会话。
+    await this.applyConfigOption("permissionMode", requestedConfig.permissionMode ?? (this.kind === "antigravity" ? this.config.permissionMode ?? "default" : this.resumeSessionId ? "default" : "auto"));
     this.callbacks.metadata({
       nativeSessionId: this.nativeSessionId,
       config: { ...this.config },
+      configSchema: this.getConfigSchema(),
     });
     this.callbacks.status("idle");
   }
 
   getConfigSchema(): DriverConfigSchema {
-    return kimiConfigSchemaFromOptions(this.configOptions);
+    return acpConfigSchemaFromOptions(this.configOptions, this.kind);
   }
 
   async setConfig(config: SessionConfig): Promise<SessionConfig> {
     const entries = (["model", "effort", "permissionMode"] as ConfigOptionId[])
       .filter((id) => config[id] !== undefined);
-    if (entries.length === 0) throw new Error("Kimi set_config 没有可修改的配置项");
+    if (entries.length === 0) throw new Error(`${this.label} set_config 没有可修改的配置项`);
     for (const id of entries) await this.applyConfigOption(id, config[id]!);
     const current = { ...this.config };
-    this.callbacks.metadata({ config: current });
+    this.callbacks.metadata({ config: current, configSchema: this.getConfigSchema() });
     return current;
   }
 
   async sendUserMessage(message: UserMessageInput, options?: SendUserMessageOptions): Promise<void | SendUserMessageReceipt> {
-    if (!this.nativeSessionId) throw new Error("Kimi session 尚未就绪");
+    if (!this.nativeSessionId) throw new Error(`${this.label} session 尚未就绪`);
     const prompt: Record<string, unknown>[] = [];
     let text = userMessageText(message);
     const fallbackNotes: string[] = [];
@@ -363,33 +374,36 @@ export class KimiDriver extends BaseDriver {
     if (text) prompt.push({ type: "text", text });
     prompt.push(...attachments);
     if (options?.steer) {
-      if (!this.promptActive) throw new Error("Kimi 当前回合已结束，请重发消息");
-      this.queuedPrompts.push(prompt);
-      return { queued: true };
+      if (!this.activePrompts) throw new Error(`${this.label} 当前回合已结束，请重发消息`);
+      if (this.kind === "kimi") {
+        this.queuedPrompts.push(prompt);
+        return { queued: true };
+      }
+      // Antigravity 接收运行中追加的 session/prompt，由原生 CLI 决定何时处理。
     }
     this.startPrompt(prompt);
   }
 
   private startPrompt(prompt: Record<string, unknown>[]): void {
-    this.promptActive = true;
+    this.activePrompts++;
     this.callbacks.status("running");
     void this.request("session/prompt", {
       sessionId: this.nativeSessionId,
       prompt,
     }).then((result) => {
-      this.promptActive = false;
+      this.activePrompts--;
       this.callbacks.emit("turn_completed", {
         stopReason: result?.stopReason,
         result,
       });
       const next = this.queuedPrompts.shift();
       if (next) this.startPrompt(next);
-      else this.callbacks.status("idle");
+      else if (this.activePrompts === 0) this.callbacks.status("idle");
     }).catch((error) => {
-      this.promptActive = false;
+      this.activePrompts--;
       this.cancelQueuedPrompts("当前回合失败");
       this.callbacks.emit("session_error", { message: errorMessage(error), source: "session/prompt" });
-      this.callbacks.status("error");
+      this.callbacks.status(this.activePrompts > 0 ? "running" : "error");
     });
   }
 
@@ -397,7 +411,7 @@ export class KimiDriver extends BaseDriver {
     const count = this.queuedPrompts.length;
     this.queuedPrompts.length = 0;
     if (count) this.callbacks.emit("session_error", {
-      source: "steer_queue", message: `Kimi 的 ${count} 条排队消息已取消：${reason}`,
+      source: "steer_queue", message: `${this.label} 的 ${count} 条排队消息已取消：${reason}`,
     });
   }
 
@@ -408,27 +422,27 @@ export class KimiDriver extends BaseDriver {
     questionAnswers?: QuestionAnswers,
   ): Promise<void> {
     const pending = this.permissions.get(requestId);
-    if (!pending) throw new Error(`Kimi permission_request 不存在：${requestId}`);
+    if (!pending) throw new Error(`${this.label} permission_request 不存在：${requestId}`);
     if (pending.method === "elicitation/create") {
-      if (updatedInput !== undefined) throw new Error("Kimi 提问不接受 updatedInput");
+      if (updatedInput !== undefined) throw new Error(`${this.label} 提问不接受 updatedInput`);
       if (decision === "deny") {
         this.replyResult(pending.rpcId, { action: "decline" });
       } else {
         const questions = pending.questions ?? [];
         if (!questionAnswers || Object.keys(questionAnswers).length !== questions.length) {
-          throw new Error("Kimi 提问必须回答全部问题");
+          throw new Error(`${this.label} 提问必须回答全部问题`);
         }
         const content: Record<string, string | string[]> = Object.create(null);
         for (const question of questions) {
           if (!Object.hasOwn(questionAnswers, question.question)) {
-            throw new Error(`Kimi 提问缺少答案：${question.question}`);
+            throw new Error(`${this.label} 提问缺少答案：${question.question}`);
           }
           const answer = questionAnswers[question.question]!.trim();
           const exact = question.options.find((option) => option.label === answer);
           const labels = exact ? [answer] : answer.split(",").map((label) => label.trim());
-          if (!question.multiSelect && labels.length !== 1) throw new Error(`Kimi 提问只允许单选：${question.question}`);
+          if (!question.multiSelect && labels.length !== 1) throw new Error(`${this.label} 提问只允许单选：${question.question}`);
           if (new Set(labels).size !== labels.length || labels.some((label) => !question.options.some((o) => o.label === label))) {
-            throw new Error(`Kimi 提问只接受列出的选项，不支持「其他」：${question.question}`);
+            throw new Error(`${this.label} 提问只接受列出的选项，不支持「其他」：${question.question}`);
           }
           const values = question.options.filter((option) => labels.includes(option.label)).map((option) => option.value);
           content[question.key] = question.multiSelect ? values : values[0]!;
@@ -436,7 +450,7 @@ export class KimiDriver extends BaseDriver {
         this.replyResult(pending.rpcId, { action: "accept", content });
       }
     } else {
-      if (questionAnswers !== undefined) throw new Error("Kimi 普通审批不接受 questionAnswers");
+      if (questionAnswers !== undefined) throw new Error(`${this.label} 普通审批不接受 questionAnswers`);
       this.resolveStandardPermission(pending, decision);
     }
     this.permissions.delete(requestId);
@@ -445,21 +459,28 @@ export class KimiDriver extends BaseDriver {
   async interrupt(): Promise<void> {
     this.cancelQueuedPrompts("用户停止了执行");
     this.cancelElicitations();
+    if (this.kind === "antigravity") {
+      for (const [requestId, pending] of this.permissions) {
+        this.replyResult(pending.rpcId, { outcome: { outcome: "cancelled" } });
+        this.permissions.delete(requestId);
+        this.callbacks.emit("permission_resolved", { requestId, decision: "deny" });
+      }
+    }
     if (!this.nativeSessionId) return;
     this.send({ jsonrpc: "2.0", method: "session/cancel", params: { sessionId: this.nativeSessionId } });
   }
 
   async stop(): Promise<void> {
     this.filesClosed = true;
-    const filesStopped = withTimeout(this.fileRequests, 1_000, "Kimi file operations").catch(error => {
-      log("warn", "Kimi file operation drain timed out", { sessionId: this.sessionId, message: errorMessage(error) });
+    const filesStopped = withTimeout(this.fileRequests, 1_000, `${this.label} file operations`).catch(error => {
+      log("warn", `${this.label} file operation drain timed out`, { sessionId: this.sessionId, message: errorMessage(error) });
     });
     this.cancelQueuedPrompts("worker 已停止");
     this.cancelElicitations();
     const terminalsStopped = this.cleanupTerminals();
     if (this.nativeSessionId && this.child?.stdin.writable) {
       try {
-        await withTimeout(this.request("session/close", { sessionId: this.nativeSessionId }), 1_000, "Kimi session/close");
+        await withTimeout(this.request("session/close", { sessionId: this.nativeSessionId }), 1_000, `${this.label} session/close`);
       } catch { /* process shutdown remains authoritative */ }
     }
     try { await super.stop(); }
@@ -484,7 +505,7 @@ export class KimiDriver extends BaseDriver {
       return;
     }
     if (typeof message.method !== "string") {
-      this.callbacks.emit("raw_event", { source: "kimi", raw: message });
+      this.callbacks.emit("raw_event", { source: this.kind, raw: message });
       return;
     }
     if (Object.hasOwn(message, "id")) {
@@ -495,7 +516,7 @@ export class KimiDriver extends BaseDriver {
       this.handleSessionUpdate(message.params ?? {});
       return;
     }
-    this.callbacks.emit("raw_event", { source: "kimi", method: message.method, params: message.params ?? {} });
+    this.callbacks.emit("raw_event", { source: this.kind, method: message.method, params: message.params ?? {} });
   }
 
   private handleServerRequest(message: Record<string, any>): void {
@@ -540,7 +561,7 @@ export class KimiDriver extends BaseDriver {
       this.handleTerminalRelease(message.id, message.params ?? {});
       return;
     }
-    this.replyError(message.id, -32601, `AIReins 未实现 Kimi 方法：${method}`);
+    this.replyError(message.id, -32601, `AIReins 未实现 ${this.label} 方法：${method}`);
   }
 
   private queueElicitation(message: Record<string, any>): void {
@@ -585,26 +606,26 @@ export class KimiDriver extends BaseDriver {
       });
     if (!valid) {
       this.replyResult(message.id, { action: "cancel" });
-      this.callbacks.emit("raw_event", { source: "kimi", method: message.method,
+      this.callbacks.emit("raw_event", { source: this.kind, method: message.method,
         warning: "elicitation 表单包含前端无法表达的字段，已按取消处理" });
       return;
     }
-    const requestId = `kimi:elicitation:${String(message.id)}`;
+    const requestId = `${this.kind}:elicitation:${String(message.id)}`;
     this.permissions.set(requestId, { rpcId: message.id, method: "elicitation/create", params, questions });
     this.callbacks.emit("permission_request", {
       requestId, gate: message.method, toolName: "AskUserQuestion",
-      interactionType: "ask_user_question", questionProtocol: "kimi_acp_elicitation_form_v1",
+      interactionType: "ask_user_question", questionProtocol: `${this.kind}_acp_elicitation_form_v1`,
       questions: questions.map((q) => ({ question: q.question, header: q.header,
         options: q.options.map(({ label, description }) => ({ label, description })), multiSelect: q.multiSelect })),
       otherSupported: false,
-      protocolLimitations: ["Kimi AskUserQuestion 的 form 桥接不接收「其他」自由文本"],
+      protocolLimitations: [`${this.label} AskUserQuestion 的 form 桥接不接收「其他」自由文本`],
     });
   }
 
   protected handleProcessExit(): void {
     this.filesClosed = true;
     void this.cleanupTerminals();
-    this.promptActive = false;
+    this.activePrompts = 0;
     this.cancelQueuedPrompts("worker 已退出");
     this.permissions.clear();
     this.rpc.clear();
@@ -626,6 +647,7 @@ export class KimiDriver extends BaseDriver {
       if (pending.method !== "elicitation/create") continue;
       if (this.child?.stdin.writable) this.replyResult(pending.rpcId, { action: "cancel" });
       this.permissions.delete(requestId);
+      if (this.kind === "antigravity") this.callbacks.emit("permission_resolved", { requestId, decision: "deny" });
     }
   }
 
@@ -635,7 +657,7 @@ export class KimiDriver extends BaseDriver {
     gate: string,
     payload: Record<string, unknown>,
   ): void {
-    const requestId = `kimi:${gate}:${String(message.id)}`;
+    const requestId = `${this.kind}:${gate}:${String(message.id)}`;
     this.permissions.set(requestId, {
       rpcId: message.id,
       method: pendingMethod,
@@ -663,7 +685,7 @@ export class KimiDriver extends BaseDriver {
     for (const entry of envEntries) {
       if (entry && typeof entry.name === "string") env[entry.name] = String(entry.value ?? "");
     }
-    env.WORKBENCH_PARENT_AGENT = "kimi";
+    env.WORKBENCH_PARENT_AGENT = this.kind;
     env.WORKBENCH_PARENT_SESSION_ID = this.nativeSessionId;
     const outputLimit = Math.max(1, Number(params.outputByteLimit) || 4 * 1024 * 1024);
     const processHandle = spawn(String(params.command), args, {
@@ -799,12 +821,12 @@ export class KimiDriver extends BaseDriver {
     }
     if (type === "config_option_update") {
       this.updateConfigOptions(update.configOptions ?? []);
-      this.callbacks.metadata({ config: { ...this.config } });
+      this.callbacks.metadata({ config: { ...this.config }, configSchema: this.getConfigSchema() });
       return;
     }
     if (type === "current_mode_update" && typeof update.currentModeId === "string") {
       this.config.permissionMode = update.currentModeId;
-      this.callbacks.metadata({ config: { ...this.config } });
+      this.callbacks.metadata({ config: { ...this.config }, configSchema: this.getConfigSchema() });
       return;
     }
     if (type === "agent_message_chunk") {
@@ -850,7 +872,7 @@ export class KimiDriver extends BaseDriver {
       return;
     }
     if (type === "usage_update") {
-      this.callbacks.emit("usage_updated", { used: update.used, size: update.size });
+      this.callbacks.emit("usage_updated", { used: update.used ?? update.contextWindow?.used, size: update.size ?? update.contextWindow?.size });
       return;
     }
     if (type === "available_commands_update") {
@@ -858,7 +880,7 @@ export class KimiDriver extends BaseDriver {
       this.callbacks.commands(commands);
       return;
     }
-    this.callbacks.emit("raw_event", { source: "kimi", update });
+    this.callbacks.emit("raw_event", { source: this.kind, update });
   }
 
   private request(method: string, params: unknown): Promise<any> {
@@ -872,15 +894,15 @@ export class KimiDriver extends BaseDriver {
   private async applyConfigOption(id: ConfigOptionId, value: string): Promise<void> {
     const schema = this.getConfigSchema();
     const option = schema.options.find((item) => item.id === id);
-    if (!option) throw new Error(`Kimi session/new 未提供配置项：${id}`);
+    if (!option) throw new Error(`${this.label} session/new 未提供配置项：${id}`);
     if (!option.values.some((item) => item.value === value)) {
-      throw new Error(`Kimi ${id} 不合法：${value}`);
+      throw new Error(`${this.label} ${id} 不合法：${value}`);
     }
     const result = await withTimeout(this.request("session/set_config_option", {
       sessionId: this.nativeSessionId,
-      configId: KIMI_CONFIG_IDS[id],
+      configId: this.kind === "antigravity" ? ({ model: "model", effort: "thought_level", permissionMode: "mode" } as const)[id] : KIMI_CONFIG_IDS[id],
       value,
-    }), 15_000, `Kimi session/set_config_option(${id})`);
+    }), 15_000, `${this.label} session/set_config_option(${id})`);
     if (Array.isArray(result?.configOptions)) {
       this.updateConfigOptions(result.configOptions);
     } else {
@@ -890,7 +912,7 @@ export class KimiDriver extends BaseDriver {
 
   private updateConfigOptions(configOptions: AcpConfigOption[]): void {
     this.configOptions = configOptions;
-    this.config = kimiConfigFromOptions(configOptions);
+    this.config = kimiConfigFromOptions(configOptions, this.kind);
   }
 
   private replyResult(id: string | number, result: unknown): void {
@@ -913,8 +935,12 @@ export class KimiDriver extends BaseDriver {
         ...(typeof item.input?.hint === "string" && item.input.hint
           ? { argHint: item.input.hint }
           : {}),
-        source: "kimi",
+        source: this.kind,
       }];
     });
   }
+}
+
+export class KimiDriver extends AcpDriver {
+  constructor(options: DriverOptions) { super(options, "kimi"); }
 }

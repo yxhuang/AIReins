@@ -1,6 +1,7 @@
 import type { AgentKind, Driver, DriverCapabilities, DriverOptions } from "../types.js";
 import { CLAUDE_CONFIG_SCHEMA, ClaudeDriver, probeClaudeModelLabels } from "./claude.js";
 import { CodexDriver, probeCodexConfigSchema } from "./codex.js";
+import { AntigravityDriver, probeAntigravityConfigSchema } from "./antigravity.js";
 import { KimiDriver, probeKimiConfigSchema } from "./kimi.js";
 
 export const DRIVER_CAPABILITIES: Record<AgentKind, DriverCapabilities> = {
@@ -10,6 +11,7 @@ export const DRIVER_CAPABILITIES: Record<AgentKind, DriverCapabilities> = {
     commands: true,
     mentions: true,
   },
+  antigravity: { usage: "context", interrupt: true, commands: true, mentions: true },
   codex: {
     usage: "detailed",
     interrupt: true,
@@ -26,18 +28,21 @@ export const DRIVER_CAPABILITIES: Record<AgentKind, DriverCapabilities> = {
 
 export function createDriver(agent: AgentKind, options: DriverOptions): Driver {
   if (agent === "claude") return new ClaudeDriver(options);
+  if (agent === "antigravity") return new AntigravityDriver(options);
   if (agent === "codex") return new CodexDriver(options);
   return new KimiDriver(options);
 }
 
 export async function getDriverMetadata(cwd: string): Promise<Record<AgentKind, Record<string, unknown>>> {
-  const [, codexSchema, kimiSchema] = await Promise.all([
+  const [, antigravitySchema, codexSchema, kimiSchema] = await Promise.all([
     probeClaudeModelLabels(cwd).catch(() => undefined),
+    probeSchema(() => probeAntigravityConfigSchema(cwd), "Antigravity ACP session/new.configOptions"),
     probeSchema(() => probeCodexConfigSchema(cwd), "Codex app-server model/list and v2 protocol schema"),
     probeSchema(() => probeKimiConfigSchema(cwd), "Kimi ACP session/new.configOptions"),
   ]);
   return {
     claude: { ...DRIVER_CAPABILITIES.claude, ...CLAUDE_CONFIG_SCHEMA },
+    antigravity: { ...DRIVER_CAPABILITIES.antigravity, ...antigravitySchema },
     codex: { ...DRIVER_CAPABILITIES.codex, ...codexSchema },
     kimi: { ...DRIVER_CAPABILITIES.kimi, ...kimiSchema },
   };

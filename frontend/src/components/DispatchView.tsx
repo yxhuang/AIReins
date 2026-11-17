@@ -147,7 +147,7 @@ export function DispatchTree({ groups, title, dispatchers = [], agent, model, hi
     </svg>
     <div className={`dispatch-root-row${topology.sidebranches.length ? " has-sidebranches" : ""}`}>
     <article className="dispatch-node dispatch-source" data-dispatch-anchor="dispatcher" data-source-agent={sourceAgent} title={sourceTitle}>
-      <div className="dispatch-source-head">{["claude", "codex", "kimi"].includes(sourceAgent) && <AgentIcon agent={sourceAgent as "claude" | "codex" | "kimi"} label={dispatcherLabel(sourceAgent)} />}<span>{dispatcherLabel(sourceAgent)}</span><span className="dispatch-role">{t("ui.DispatchView.dispatcher")}</span></div>
+      <div className="dispatch-source-head">{["claude", "antigravity", "codex", "kimi"].includes(sourceAgent) && <AgentIcon agent={sourceAgent as "claude" | "antigravity" | "codex" | "kimi"} label={dispatcherLabel(sourceAgent)} />}<span>{dispatcherLabel(sourceAgent)}</span><span className="dispatch-role">{t("ui.DispatchView.dispatcher")}</span></div>
       <p className="dispatch-session-title" title={sessionTitles}>{sessionSummary}</p>
       {model && <p className="dispatch-model" title={model}>{model}</p>}
     </article>

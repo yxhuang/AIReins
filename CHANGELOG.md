@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Google Antigravity joins Claude Code, Codex and Kimi through its official `agy acp` interface, with account-provided models and effort levels, streamed replies, tool approvals, attachments, context usage, slash commands and native session resume. Sessions created in AIReins retain their history; importing external Antigravity history and permanently deleting its native sessions are not supported yet.
+
+### Changed
+
+- New conversations default to Antigravity; its Gemini-style blue-purple star sits between Claude and Codex.
+
+### Fixed
+
+- Opening Settings with a large conversation history no longer scans every transcript once per attachment directory, which could block the pre-restart session check past its request timeout. A failed pre-restart check now says that no restart request was sent.
+
 ## 0.5.0 (2026-11-09)
 
 ### Added

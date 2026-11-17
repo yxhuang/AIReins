@@ -15,6 +15,8 @@ assert.ok(html.includes("无法恢复") && html.includes("原生本地历史"));
 assert.ok(html.includes('data-autofocus="true"'), "cancel receives default focus");
 const kimiHtml = renderToStaticMarkup(React.createElement(PermanentDeleteConfirm, {session:{...session,agent:"kimi",nativeSessionId:`session_${session.nativeSessionId}`},busy:false,error:null,onCancel(){},onConfirm(){}}));
 assert.ok(!kimiHtml.includes("未开放") && !kimiHtml.includes("disabled="), "Kimi can confirm permanent deletion");
+const agyHtml = renderToStaticMarkup(React.createElement(PermanentDeleteConfirm, {session:{...session,agent:"antigravity"},busy:false,error:null,onCancel(){},onConfirm(){}}));
+assert.ok(agyHtml.includes("Antigravity") && agyHtml.includes("没有已核实") && agyHtml.includes("disabled="), "Antigravity cannot permanently delete native history");
 const store = new Store();
 store.sessions = [session];
 store.historySelection = {agent:"codex",nativeSessionId:session.nativeSessionId};

@@ -3,9 +3,10 @@ import { once } from "node:events";
 import { ClaudeDriver } from "./drivers/claude.js";
 import { CodexDriver } from "./drivers/codex.js";
 import { KimiDriver } from "./drivers/kimi.js";
+import { AntigravityDriver } from "./drivers/antigravity.js";
 
 // Exercise actual worker process environments using a local shell, without invoking AI CLIs.
-for (const Driver of [ClaudeDriver, CodexDriver, KimiDriver]) {
+for (const Driver of [ClaudeDriver, AntigravityDriver, CodexDriver, KimiDriver]) {
   const received: any[] = [];
   const driver = new Driver({
     sessionId: "wb-parent", cwd: process.cwd(), config: {},
@@ -21,4 +22,4 @@ for (const Driver of [ClaudeDriver, CodexDriver, KimiDriver]) {
   assert.equal(code, 0);
   assert.deepEqual(received, [{ agent: driver.kind, session: "wb-parent", extra: "retained", delegate: "", upstream: "" }]);
 }
-console.log("✅ 三家实际 worker 环境：父会话标记正确，启动参数环境保留，上游标记不串入当前会话");
+console.log("✅ 四家实际 worker 环境：父会话标记正确，启动参数环境保留，上游标记不串入当前会话");

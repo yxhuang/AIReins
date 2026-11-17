@@ -357,7 +357,10 @@ function abnormalTurnReason(payload: Record<string, unknown>, agent: AgentKind):
     if (payload.error != null) return t("core.070");
     return typeof payload.status === "string" && payload.status !== "completed" ? payload.status : null;
   }
-  return typeof payload.stopReason === "string" && payload.stopReason !== "end_turn" ? payload.stopReason : null;
+  if (agent === "kimi" || agent === "antigravity") {
+    return typeof payload.stopReason === "string" && payload.stopReason !== "end_turn" ? payload.stopReason : null;
+  }
+  return null;
 }
 
 const externalHistoryMessages = new WeakMap<object, HistoryMessage[]>();

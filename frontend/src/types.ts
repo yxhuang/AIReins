@@ -1,7 +1,7 @@
 // 与 server/types.ts 对应的纯前端类型（只保留界面需要的字段形状）。
 // 后端是唯一事实源；这里不引入对 server/ 的编译期依赖，保持前端 tsconfig 独立。
 
-export type AgentKind = "claude" | "codex" | "kimi";
+export type AgentKind = "claude" | "antigravity" | "codex" | "kimi";
 export type SessionStatus = "starting" | "idle" | "running" | "dead" | "error";
 
 export interface StorageCategory {
@@ -64,7 +64,7 @@ export interface ConfigOptionValue {
   description?: string;
 }
 
-/** /api/meta 的 drivers.<agent>.options[] 项：前端配置控件的唯一事实源，不许硬编码值。 */
+/** CLI 元数据或会话级 schema 的配置候选，不许硬编码值。 */
 export interface DriverConfigOption {
   id: ConfigOptionId;
   name: string;
@@ -80,6 +80,11 @@ export interface DriverConfigOption {
    * 期间后端先广播 config_update_started，初始化成功后才有 config_updated）。
    */
   mutableVia?: "restart" | "control";
+}
+
+export interface DriverConfigSchema {
+  options: DriverConfigOption[];
+  source: string;
 }
 
 export interface UnifiedEvent {
@@ -169,6 +174,8 @@ export interface SessionRecord {
   effectiveModelSource?: EffectiveSource;
   effectiveEffortSource?: EffectiveSource;
   config: SessionConfig;
+  /** 当前会话 CLI 公布的候选；缺省时回落到 /api/meta。 */
+  configSchema?: DriverConfigSchema;
   /** 建会话时后端自动快照的写入路径；git 目录/跳过快照/旧会话为缺省或 null，缺失就不显示 */
   snapshotPath?: string | null;
   /** true = 免审批或不询问模式（claude bypass/dontAsk、codex full-access/旧 never、kimi yolo） */
