@@ -124,6 +124,10 @@ export function scanPages(root = DEFAULT_PAGES_ROOT): PageManifest[] {
     const manifestPath = join(root, directory.name, "manifest.json");
     try {
       const manifest = parseManifest(JSON.parse(readFileSync(manifestPath, "utf8")) as unknown);
+      if (manifest.id === "ai-usage") {
+        log("info", "built-in usage panel supersedes pages/ai-usage manifest", { manifestPath });
+        continue;
+      }
       if (ids.has(manifest.id)) throw new Error(`id 重复：${manifest.id}`);
       ids.add(manifest.id);
       pages.push(manifest);

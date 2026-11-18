@@ -47,7 +47,7 @@ AIReins 是一个跑在你自己电脑上的 AI 工作台。它通过官方 CLI 
 - **历史统一看，进出都自由。** 三家的原生历史在一处搜索、按目录筛选、续接。会话本来就写在各家自己的历史里，随时可以回到 CLI、VS Code 扩展、Codex App 接着用，Claude 会话开了 Remote Control 还能在 Claude App 里连上。（Claude 会话要出现在 CLI 和 VS Code 的历史列表里，需在 `prefs.json` 设 `claudeCodeEntrypoint`，见[配置](#配置)；不设也能用 `claude --resume <会话 ID>` 续接。）
 - **文件和终端就在旁边。** 右侧栏是文件窗口（浏览任意目录、预览、就地编辑、看 Git 状态）和多标签终端：Linux 与 macOS 打开你的默认 shell（`$SHELL`），WSL 下是 bash，还能开 Windows PowerShell。
 - **派单拓扑实时看。** 让一家 AI 当指挥、把活派给其他家时，派单流程图实时显示谁派给了谁、跑到哪一步、成没成；子代理同样按父子树展开。
-- **直达与 AI 用量。** 「直达」菜单放你自己的常用链接（网页、`vscode://`、`obsidian://` 等，改一个 JSON 文件即可）；可选内嵌 [AI-Usage](https://github.com/yxhuang/ai-usage) 面板，三家订阅额度一页看清；有固定时间窗口的额度条上还标着这个窗口的时间已过去多少，用得比时间快还是慢一眼就知道。设置里还能打开 Tibo 额度重置提醒（默认关闭）：每 10 分钟查询 [AIHOT](https://aihot.news/codex-reset) 收录的 Tibo 关于 Codex 额度重置的公告，所有打开的页面同步提醒，额度页底部列出详情。
+- **直达与内置 AI 用量。** 「直达」菜单放你自己的常用链接（网页、`vscode://`、`obsidian://` 等，改一个 JSON 文件即可）；侧栏内置 AI 用量面板，无需另装 Python 服务即可一页看清四家（Claude、Antigravity、Codex、Kimi）订阅额度；有固定时间窗口的额度条上还标着这个窗口的时间已过去多少，用得比时间快还是慢一眼就知道。设置里还能打开 Tibo 额度重置提醒（默认关闭）：每 10 分钟查询 [AIHOT](https://aihot.news/codex-reset) 收录的 Tibo 关于 Codex 额度重置的公告，所有打开的页面同步提醒，额度页底部列出详情。
 - **手机上也是整台电脑。** 经 Tailscale 连回，审批、看文件、开终端都能在手机上做。
 
 ## 看一眼
@@ -124,7 +124,7 @@ AI 越来越能干，能自己读代码、改文件、跑命令，一口气做�
 | **中途掌控** | 上下文用量圆环，可请求原生压缩；打断；Claude Code 与 Codex 支持运行中插话改方向和旁路追问，Kimi 运行中的消息排到当前回合结束后发送 |
 | **原生历史** | 搜索、按目录筛选三家 CLI 的原生历史并续接；在 AIReins 开的会话，在 CLI 和 VS Code 扩展里也能续接（Claude 会话要出现在历史列表里需设 `claudeCodeEntrypoint`），反过来也一样（Codex 同一线程同一时间只能有一个客户端写入，转到别处续接前先在 AIReins 里释放） |
 | **派单树** | 子代理与委派任务按父子树展开，派单流程图实时显示状态，桌面和手机都能看 |
-| **直达与扩展页** | 「直达」菜单合并仓库 `pages/links.json`（随 git 在各机器间同步）与本机 `~/.workbench/pages/links.json` 的链接；扩展页可嵌入 [AI-Usage](https://github.com/yxhuang/ai-usage) 等本地小工具 |
+| **AI 用量与直达** | 内置 Claude、Antigravity、Codex、Kimi 四家订阅额度面板，带时间进度刻度与重置卡明细；「直达」菜单合并仓库 `pages/links.json` 与本机 `~/.workbench/pages/links.json`，并支持自定义扩展页 |
 | **整台电脑** | 文件面板浏览任意可读目录，带 Git 状态与标签页；在家目录、Windows 盘符和会话目录里预览 Markdown、代码、图片、PDF，就地编辑 UTF-8 文本文件（超过 4 MiB 先确认再加载，上限 32 MiB）；文件与终端标签可排序、在主区和侧栏之间移动；多标签终端（远程入口默认关闭，需显式开启） |
 | **手机与发送** | 手机布局可加到主屏当 App；Taildrop 把文件或文件夹（打包 zip）发到你在线的设备 |
 | **多台电脑** | 列出 tailnet 里的其他电脑，一键添加，在一个菜单里切换到它们的 AIReins |
@@ -210,13 +210,9 @@ AIReins 监听 `http://127.0.0.1:8790`（可用 `WORKBENCH_PORT` 修改）。Win
 
 **平台差异**：原生 Linux 和 macOS 没有托盘、应用窗口、Windows 目录选择窗口和 PowerShell；终端用 AIReins 服务进程的 `$SHELL`（须是可执行的绝对路径，且在 `/etc/shells` 存在时列于其中）；不合格时 macOS 依次退回 `/bin/zsh`、bash，Linux 退回 bash。macOS 暂时只能浏览和预览文件，不能就地编辑，也不能用 Taildrop 发文件夹（单个文件可以）。作者没有 Mac，macOS 只在 CI 里测过，欢迎在 issue 里反馈。
 
-### 推荐搭配：ai-usage
+### 内置 AI 用量面板
 
-[ai-usage](https://github.com/yxhuang/ai-usage) 是独立的本地额度面板，显示 Claude、Codex 和 Kimi 的用量与重置窗口。强烈推荐一并安装：在 AIReins 侧栏查看剩余额度，更容易安排接下来使用哪个 Agent。它需要 Python 3.11+ 和 [uv](https://docs.astral.sh/uv/)。
-
-stdin 和 stdout 都连接终端时，`bash install.sh` 会询问是否安装并接入 ai-usage，回车即同意；非交互运行默认跳过。用 `bash install.sh --with-ai-usage` 明确接入，或用 `--without-ai-usage` 跳过；两个标志都能与 `--check` 组合，只读报告状态。已有 manifest 且服务可识别时不再询问。
-
-Linux/WSL 在 uv 与用户级 systemd 可用时调用 ai-usage 自带部署脚本；macOS 在其检出目录手工运行 `uv sync`，再运行 `uv run python -m server.launch`，然后重跑 `bash install.sh --with-ai-usage` 接入。接入沿用扩展页面机制，保留已有 manifest；AIReins 已运行时，由你择时执行 `aireins restart` 让侧栏出现，重启会中断所有会话。手工接入见[扩展页面说明](server/README.md#pages-扩展页面)。
+侧栏底部的「额度」按钮直接打开 AIReins 内置的订阅用量面板，覆盖 Claude、Antigravity、Codex 和 Kimi 四家，不再需要单独安装 Python/`uv` 的 `ai-usage` 服务。Claude 和 Codex 直接复用本机已登录的官方 CLI（以及活跃 Codex 会话的实时限额推送）；Antigravity 在打开面板或手动点刷新时通过官方 `agy` 命令按需读取额度桶与 AI credits；Kimi 可在面板左上角齿轮设置里粘贴 API key（以 `0600` 权限保存在本机 `~/.workbench/usage.json`，或直接读取环境变量 `KIMI_API_KEY`）。旧参数 `bash install.sh --with-ai-usage` 现输出迁移提示，保留已有检出目录与 manifest 不动。
 
 ## 手机远程
 
@@ -267,12 +263,6 @@ AIReins 把数据保存在 `~/.workbench`。`WORKBENCH_HOME` 可以移动服务�
 ## 可选集成
 
 - **delegate**：派单视图还会显示外部 `delegate` 工具写入 `~/.cache/delegate` 的运行（用法见[我自己怎么用](#我自己怎么用派单协作)）。没有它时，视图只显示原生子代理。
-- **AI-Usage**：[ai-usage](https://github.com/yxhuang/ai-usage) 是另一个独立的本地小工具，读本机已有凭据显示三家订阅额度。按它的 README 装好并启动（默认 `127.0.0.1:8788`），再新建 `~/.workbench/pages/ai-usage/manifest.json` 并重启 AIReins，侧栏底部的「额度」按钮就会在 AIReins 里打开它（`proxy: true` 让手机远程也能看）：
-
-  ```json
-  {"id":"ai-usage","name":"AI-Usage","icon":"📊","type":"iframe","url":"http://127.0.0.1:8788","proxy":true}
-  ```
-
 - **直达链接**：各机器共用的链接写进仓库 `pages/links.json`（随 git 同步），只在本机用的写进 `~/.workbench/pages/links.json`，同一 URL 以本机为准；刷新页面或重新打开「直达」即生效，`group` 用来分组：
 
   ```json

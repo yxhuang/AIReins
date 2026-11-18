@@ -47,7 +47,7 @@ Official remote options usually give you a window into one session. AIReins give
 - **One history, free to come and go.** Search, filter by folder and resume the native history of all three CLIs in one place. Sessions live in each CLI's own history, so you can pick them up again in the CLI, the VS Code extension or the Codex app, and reach a Claude session from the Claude app once Remote Control is on. (For Claude sessions to appear in the CLI and VS Code history lists, set `claudeCodeEntrypoint` in `prefs.json`, see [Configuration](#configuration); without it, `claude --resume <session ID>` still works.)
 - **Files and terminal at hand.** The right-hand panel holds a file window (browse any folder, preview, edit in place, see Git status) and a multi-tab terminal: your default shell (`$SHELL`) on Linux and macOS, bash plus Windows PowerShell under WSL.
 - **A live dispatch map.** When one agent leads and hands work to the others, the dispatch flow chart shows who sent what to whom, how far each run has got and whether it passed; sub-agents unfold as a parent/child tree too.
-- **Quick links and AI usage.** The Quick links menu holds your own links (web pages, `vscode://`, `obsidian://` and more, from one JSON file). An optional embedded [AI-Usage](https://github.com/yxhuang/ai-usage) panel shows the subscription quota of all three on one page; bars with a fixed time window also mark how much of that window has elapsed, so you can see at a glance whether you are spending faster than time. Turn on Tibo reset alerts in Settings (off by default) and AIReins checks [AIHOT](https://aihot.news/codex-reset) every 10 minutes for Tibo's Codex quota-reset announcements, alerting every open page and listing them at the bottom of the quota page.
+- **Quick links and built-in AI usage.** The Quick links menu holds your own links (web pages, `vscode://`, `obsidian://` and more, from one JSON file). A built-in AI usage panel in the sidebar shows the subscription quota of all four providers (Claude, Antigravity, Codex and Kimi) on one page without installing Python or an extra service; bars with a fixed time window also mark how much of that window has elapsed, so you can see at a glance whether you are spending faster than time. Turn on Tibo reset alerts in Settings (off by default) and AIReins checks [AIHOT](https://aihot.news/codex-reset) every 10 minutes for Tibo's Codex quota-reset announcements, alerting every open page and listing them at the bottom of the quota page.
 - **The whole computer on your phone.** Connect back over Tailscale to approve, read files and open a terminal from your phone.
 
 ## A look
@@ -122,7 +122,7 @@ Updating backend code requires `aireins restart`, which stops all running sessio
 | **Control mid-run** | Context-usage ring with native compaction; interrupt; Claude Code and Codex also let you steer a running turn and ask side questions, while Kimi queues messages until the current turn ends |
 | **Native history** | Search and filter the three CLIs' native history by folder and resume sessions; sessions started in AIReins resume in the CLIs and the VS Code extension (Claude sessions appear in the history lists only with `claudeCodeEntrypoint` set), and the other way round (a Codex thread allows one writer at a time, so release it in AIReins before resuming elsewhere) |
 | **Dispatch tree** | Sub-agents and delegated runs as a parent/child tree, with a live dispatch flow chart, on desktop and phone |
-| **Quick links and pages** | The Quick links menu merges the repository `pages/links.json` (synced across machines by git) with this machine's `~/.workbench/pages/links.json`; extension pages can embed local tools such as [AI-Usage](https://github.com/yxhuang/ai-usage) |
+| **AI usage and quick links** | Built-in subscription quota panel for Claude, Antigravity, Codex and Kimi with elapsed-window pace marks and reset-credit tracking; Quick links merges repository `pages/links.json` with `~/.workbench/pages/links.json`, plus custom extension pages |
 | **The whole computer** | File panel for any readable folder, with Git status and tabs; inside your home folder, Windows drives and the session folder, preview Markdown, code, images and PDF and edit UTF-8 text in place (files over 4 MiB load after a confirmation, up to 32 MiB); file and terminal tabs that can be reordered and moved between the main and side panes; multi-tab terminal (off on the remote entry until you enable it) |
 | **Phone and Taildrop** | Phone layout installable as a home-screen app; send files or folders (zipped) to your online Taildrop devices |
 | **Several computers** | Lists the other computers on your tailnet; add one with a click and switch between their AIReins instances from one menu |
@@ -208,13 +208,9 @@ AIReins listens on `http://127.0.0.1:8790` (change it with `WORKBENCH_PORT`). On
 
 **Platform differences**: native Linux and macOS have no tray, app window, Windows folder picker or PowerShell; the terminal uses the AIReins server process's `$SHELL` (an executable absolute path, listed in `/etc/shells` when that file exists), falling back to `/bin/zsh` and then bash on macOS, and to bash on Linux. On macOS you can browse and preview files but not edit them in place, and Taildrop sends single files but not folders. The author has no Mac and macOS is tested only in CI, so issue reports are very welcome.
 
-### Recommended companion: ai-usage
+### Built-in AI usage panel
 
-[ai-usage](https://github.com/yxhuang/ai-usage) is an independent local quota panel for Claude, Codex and Kimi. We strongly recommend installing it alongside AIReins: seeing each provider's remaining quota and reset windows in the sidebar helps you plan which agent to use. It requires Python 3.11+ and [uv](https://docs.astral.sh/uv/).
-
-With both input and output connected to a terminal, `bash install.sh` asks whether to install and connect ai-usage; Enter accepts. Non-interactive runs skip it. Use `bash install.sh --with-ai-usage` to opt in explicitly or `--without-ai-usage` to skip; both flags can be combined with `--check` for a read-only status report. A recognized service with an existing manifest does not prompt again.
-
-On Linux/WSL, the installer uses ai-usage's own user-level systemd deployment when uv and user systemd are available. On macOS, start it manually from its checkout with `uv sync` followed by `uv run python -m server.launch`, then rerun `bash install.sh --with-ai-usage`. Connection uses the existing extension-page mechanism and preserves existing manifests; if AIReins is already running, choose when to run `aireins restart` to show the sidebar page, as restarting interrupts all sessions. See [extension pages](server/README.md#pages-扩展页面) for manual connection.
+The sidebar's **Usage** button opens AIReins's built-in subscription quota panel for Claude, Antigravity, Codex and Kimi — no separate Python/`uv` companion service is needed. Claude and Codex reuse the local CLIs you have already signed in to (plus live Codex rate-limit updates from active sessions); Antigravity is queried on demand via official `agy` commands when you open the panel or click Refresh; Kimi subscription usage can be enabled by pasting a Kimi API key in the panel's gear settings (stored locally in `~/.workbench/usage.json` with `0600` permissions, or read from `KIMI_API_KEY`). Legacy `bash install.sh --with-ai-usage` prints a migration notice and leaves existing checkouts and manifests untouched.
 
 ## Remote access from your phone
 
@@ -265,12 +261,6 @@ Remote access is configured in `~/.workbench/remote.json`; see [server/README.md
 ## Optional integrations
 
 - **delegate**: the dispatch view also shows runs written by an external `delegate` tool to `~/.cache/delegate` (see [How I use it](#how-i-use-it-dispatching-work)). Without it, the view shows native sub-agents only.
-- **AI-Usage**: [ai-usage](https://github.com/yxhuang/ai-usage) is a separate local tool that reads the credentials already on your machine and shows the subscription quota of all three agents. Install and start it as its README describes (default `127.0.0.1:8788`), create `~/.workbench/pages/ai-usage/manifest.json` and restart AIReins; the AI-Usage button at the bottom of the sidebar then opens it inside AIReins (`proxy: true` makes it reachable from your phone too):
-
-  ```json
-  {"id":"ai-usage","name":"AI-Usage","icon":"📊","type":"iframe","url":"http://127.0.0.1:8788","proxy":true}
-  ```
-
 - **Quick links**: put links shared by all your machines in the repository `pages/links.json` (synced by git) and machine-only links in `~/.workbench/pages/links.json`; for the same URL the local entry wins. Reload the page or reopen Quick links to see them. `group` groups them:
 
   ```json

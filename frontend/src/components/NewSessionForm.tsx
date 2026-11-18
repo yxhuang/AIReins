@@ -5,7 +5,7 @@ import type { CreateSessionInput, SessionInfoKind } from "../api";
 import { NEW_SESSION_DRAFT_ID, store } from "../store";
 import { shallowEqual, useStore } from "../useStore";
 import { ConfigPills, PlusIcon, SendIcon, type MenuGroup } from "./ConfigMenu";
-import { configOptionsForModel, modelConfigPatch, newSessionConfig, pillText } from "../config-view";
+import { configOptionsForModel, modelConfigPatch, newSessionConfig, pillText, resolveNewSessionConfig } from "../config-view";
 import { DirectoryContents } from "./DirectoryBrowser";
 import { normalizeDirectoryPath } from "../directory-path";
 import { uploadAttachment } from "../api";
@@ -92,6 +92,7 @@ export function NewSessionForm({ children }: { children?: ReactNode }) {
   const activeCommand = filteredCommands[Math.min(selectedCommand, Math.max(0, filteredCommands.length - 1))];
   const attachEnabled = !busy && meta?.drivers[agent]?.mentions === true;
   const options = meta?.drivers[agent]?.options ?? [];
+  const config = resolveNewSessionConfig(agent, configSel, options);
   const windowsPaths = meta?.capabilities.windowsPaths === true;
   const applyCwd = (path: string) => {
     setCwd(path);
@@ -197,7 +198,6 @@ export function NewSessionForm({ children }: { children?: ReactNode }) {
     submitting.current = true;
     setBusy(true);
     setError(null);
-    const config = Object.fromEntries(Object.entries(configSel).filter(([, value]) => value));
     const input: CreateSessionInput = {
       snapshot: "skip",
       agent,
@@ -307,7 +307,7 @@ export function NewSessionForm({ children }: { children?: ReactNode }) {
           title={commands.length ? t("ui.SlashMenu.browse_slash_commands") : t("ui.NewSessionForm.no_commands")}
           aria-label={t("ui.SlashMenu.browse_slash_commands")} aria-haspopup="listbox" aria-expanded={slashOpen}
           onClick={() => { setSlashMenuOpen(value => !value); setDismissed(false); textareaRef.current?.focus(); }}>/</button>
-        <NewConfigPills options={options} selected={configSel} onChange={setConfigSel} agent={agent} busy={busy || !!createdSession.current} />
+        <NewConfigPills options={options} selected={config} onChange={setConfigSel} agent={agent} busy={busy || !!createdSession.current} />
         <button type="submit" className="send-btn new-submit" disabled={busy || !cwd.trim()}
           aria-label={t("ui.Sidebar.create_and_open")} title={t("ui.Sidebar.create_and_open")} aria-busy={busy}>
           {busy ? <span className="new-send-busy" role="status" aria-label={t("ui.Sidebar.creating")}>…</span> : <SendIcon />}

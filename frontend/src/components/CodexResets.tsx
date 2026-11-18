@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import type { CodexResetEvent, CodexResetStatus, CodexResetTime } from "../../../server/codex-resets";
 import { formatDate, formatRelativeTime, t } from "../i18n";
 import { store } from "../store";
+import { BUILTIN_USAGE_ID } from "../usage";
 import { useStore } from "../useStore";
 import { modalKeyDown } from "./useAnchoredMenu";
 
@@ -68,7 +69,6 @@ function Source() {
 export function CodexResetDialog() {
   const state = useStore(value => value.codexResets);
   const now = useStore(value => value.now);
-  const hasUsage = useStore(value => value.pages.some(page => page.id === "ai-usage"));
   const [hidden, setHidden] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -127,7 +127,7 @@ export function CodexResetDialog() {
       {error && <p className="new-error" role="alert">{error}</p>}
       <div className="codex-reset-actions">
         {alert.url && <a className="btn" href={alert.url} target="_blank" rel="noopener noreferrer">{t("ui.CodexResets.post")}</a>}
-        {hasUsage && <button type="button" className="btn codex-reset-open-usage" onClick={() => { store.navigatePage("ai-usage"); close(); }}>{t("ui.CodexResets.open_usage")}</button>}
+        <button type="button" className="btn codex-reset-open-usage" onClick={() => { store.navigatePage(BUILTIN_USAGE_ID); close(); }}>{t("ui.CodexResets.open_usage")}</button>
         <button ref={ack} type="button" className="btn btn-primary codex-reset-ack" disabled={saving} onClick={() => void acknowledge()}>{t(saving ? "ui.common.saving" : "ui.CodexResets.ack")}</button>
       </div>
       <div className="codex-reset-footer"><Source /><span>{t("ui.CodexResets.synced")}</span></div>

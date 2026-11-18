@@ -1,6 +1,7 @@
 import { t } from "./i18n";
 import type { AgentKind, ConfigOptionId, DriverConfigOption, EffectiveSource, SessionRecord } from "./types";
-export { configOptionsForModel, modelConfigPatch } from "../../shared/model-config";
+import { configOptionsForModel, modelConfigPatch } from "../../shared/model-config";
+export { configOptionsForModel, modelConfigPatch };
 
 /** 会话级候选随 CLI 更新；旧会话没有 schema 时才使用全局元数据。 */
 export function sessionConfigOptions(
@@ -10,11 +11,33 @@ export function sessionConfigOptions(
   return session.configSchema?.options ?? fallbackOptions;
 }
 
-/** 新建表单显式提交用户指定的默认模式，兼容尚未重启的服务端。 */
+/** 新建表单显式提交默认模式与档位，兼容尚未重启的服务端。 */
 export function newSessionConfig(agent: AgentKind): Partial<Record<ConfigOptionId, string>> {
   if (agent === "codex") return { permissionMode: "auto-review" };
   if (agent === "kimi") return { permissionMode: "auto" };
+  if (agent === "antigravity") return { effort: "high", permissionMode: "auto" };
   return {};
+}
+
+/** Antigravity 的 high 推理档位与 auto 审批受模型、账号及沙盒条件限制；meta 就绪后若无对应候选则回落 CLI 默认档位。 */
+export function resolveNewSessionConfig(
+  agent: AgentKind,
+  configSel: Partial<Record<ConfigOptionId, string>>,
+  options: DriverConfigOption[] = [],
+): Partial<Record<ConfigOptionId, string>> {
+  const cleaned = Object.fromEntries(Object.entries(configSel).filter(([, value]) => value));
+  if (agent === "antigravity" && options.length > 0) {
+    const modelOptions = configOptionsForModel(options, cleaned.model);
+    if (cleaned.effort === "high") {
+      const effort = modelOptions.find((option) => option.id === "effort");
+      if (!effort?.values.some((item) => item.value === "high")) delete cleaned.effort;
+    }
+    if (cleaned.permissionMode === "auto") {
+      const perm = modelOptions.find((option) => option.id === "permissionMode");
+      if (!perm?.values.some((item) => item.value === "auto")) delete cleaned.permissionMode;
+    }
+  }
+  return cleaned;
 }
 
 // 配置控件展示的纯逻辑（无 DOM 依赖，可单测）：mutableVia:"restart" 的代价标注、

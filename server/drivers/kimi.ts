@@ -156,18 +156,18 @@ export function acpConfigSchemaFromOptions(configOptions: AcpConfigOption[], age
     options: configOptions.flatMap((option) => {
       const id = ids[String(option.id ?? "")];
       if (!id) return [];
+      const values = (option.options ?? []).flatMap((value) => value.value === undefined ? [] : [{
+        value: String(value.value),
+        label: value.name ?? String(value.value),
+        ...(value.description ? { description: value.description } : {}),
+      }]);
+      const preferred = id === "effort" && agent === "antigravity" ? "high"
+        : id === "permissionMode" ? "auto" : undefined;
       return [{
         id,
         name: CONFIG_NAMES[id],
-        values: (option.options ?? []).flatMap((value) => {
-          if (value.value === undefined) return [];
-          return [{
-            value: String(value.value),
-            label: value.name ?? String(value.value),
-            ...(value.description ? { description: value.description } : {}),
-          }];
-        }),
-        default: id === "permissionMode" && agent === "kimi" ? "auto" : option.currentValue === undefined ? "" : String(option.currentValue),
+        values,
+        default: preferred && (agent === "kimi" || values.some((item) => item.value === preferred)) ? preferred : option.currentValue === undefined ? "" : String(option.currentValue),
         mutable: true,
       }];
     }),
@@ -313,9 +313,10 @@ export class AcpDriver extends BaseDriver {
     this.updateConfigOptions(result?.configOptions ?? []);
 
     if (requestedConfig.model) await this.applyConfigOption("model", requestedConfig.model);
-    if (requestedConfig.effort) await this.applyConfigOption("effort", requestedConfig.effort);
-    // Kimi 新会话默认 Auto；Antigravity 沿用 CLI 实际档位。所有修改仅作用于会话。
-    await this.applyConfigOption("permissionMode", requestedConfig.permissionMode ?? (this.kind === "antigravity" ? this.config.permissionMode ?? "default" : this.resumeSessionId ? "default" : "auto"));
+    const effort = this.startEffort(requestedConfig.effort);
+    if (effort !== undefined) await this.applyConfigOption("effort", effort);
+    const permissionMode = this.startPermissionMode(requestedConfig.permissionMode);
+    if (permissionMode !== undefined) await this.applyConfigOption("permissionMode", permissionMode);
     this.callbacks.metadata({
       nativeSessionId: this.nativeSessionId,
       config: { ...this.config },
@@ -938,6 +939,27 @@ export class AcpDriver extends BaseDriver {
         source: this.kind,
       }];
     });
+  }
+
+  private startEffort(requested: SessionConfig["effort"]): string | undefined {
+    if (this.kind === "kimi") return requested || undefined;
+    if (requested && requested !== "high") return requested;
+    // 以应用模型后的候选为准，切到无 high 档位的模型（如 Orchestrator）时自动沿用 CLI 默认档位。
+    const option = this.getConfigSchema().options.find((item) => item.id === "effort");
+    const wantHigh = requested === "high" || !this.resumeSessionId;
+    if (wantHigh && option?.values.some((item) => item.value === "high")) return "high";
+    return undefined;
+  }
+
+  private startPermissionMode(requested: SessionConfig["permissionMode"]): string | undefined {
+    if (this.kind === "kimi") return requested ?? (this.resumeSessionId ? "default" : "auto");
+    if (requested && requested !== "auto") return requested;
+    // 以应用模型和推理档位后的候选为准，兼容提交时仍使用旧元数据的表单。
+    const option = this.getConfigSchema().options.find((item) => item.id === "permissionMode");
+    const wantAuto = requested === "auto" || !this.resumeSessionId;
+    if (wantAuto && option?.values.some((item) => item.value === "auto")) return "auto";
+    if (this.config.permissionMode) return undefined;
+    return option?.values.some((item) => item.value === "default") ? "default" : undefined;
   }
 }
 

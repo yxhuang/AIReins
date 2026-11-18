@@ -70,8 +70,15 @@ await t("选历史会话：只有主区显示预览与导入，列表仍挂载�
   assert.ok(sidebarOf(back)?.includes('sidebar-panel-expanded'));
 });
 
-await t("页面旧链接：健康检查加载态在侧栏，仅一个面板展开", () => {
+await t("内置额度与扩展页面：内置面板直出 UsageView，扩展页走健康检查加载态，仅一个面板展开", () => {
   store.navigatePage("ai-usage");
+  const usageHtml = renderApp();
+  assert.ok(sidebarOf(usageHtml)?.includes('class="usage-view"'));
+  assert.ok(!sidebarOf(usageHtml)?.includes('class="page-frame"'), "内置额度面板不再使用 iframe");
+  assert.equal((usageHtml.match(/sidebar-panel-expanded/g) ?? []).length, 1);
+  assert.ok(usageHtml.includes('class="sidebar sidebar-page-open"'), "额度面板保持桌面加宽标记");
+
+  store.navigatePage("other");
   const html = renderApp();
   assert.ok(sidebarOf(html)?.includes('class="page-loading" role="status">正在加载…'));
   assert.ok(sidebarOf(html)?.includes('class="page-frame-area" aria-busy="true"'));

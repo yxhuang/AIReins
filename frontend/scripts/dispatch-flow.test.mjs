@@ -192,15 +192,45 @@ await t('三家独立会话分图，运行端与原生 ID 一起隔离；嵌套�
 await t('Antigravity 派单来源使用独立身份、图标与四家顺序', () => {
   const agents = ['kimi', 'antigravity', 'claude', 'codex'];
   const runs = agents.map(agent => run({ runId: `${agent}-dispatch`, parent: { agent, sessionId: `${agent}-source` } }));
-  const forests = flow.dispatchForests(runs, []);
+  const current = { id: 'antigravity-source', agent: 'antigravity', title: '当前会话' };
+  runs.push(run({ runId: 'antigravity-to-kimi', tool: 'kimi', parent: { agent: current.agent, sessionId: current.id } }));
+  const forests = flow.dispatchForests(runs, [current], runs, current.id);
   assert.deepEqual(forests.map(forest => forest.agent), ['claude', 'antigravity', 'codex', 'kimi']);
   const forest = forests[1];
   assert.equal(forest.title, 'Antigravity');
+  assert.deepEqual(forest.runs.map(item => item.tool), ['codex', 'kimi']);
+  assert.equal(forest.idleSession, undefined);
   const html = renderToStaticMarkup(React.createElement(DispatchTree, { groups: groupDispatches(forest.runs, now),
-    title: forest.title, agent: forest.agent, dispatchers: dispatcherSessions(forest.runs, []), model: null, now }));
+    title: forest.title, agent: forest.agent, dispatchers: dispatcherSessions(forest.runs, [current]), model: null, now }));
   assert.ok(html.includes('data-source-agent="antigravity"'));
   assert.ok(html.includes('agent-icon agent-antigravity'));
   assert.ok(html.includes('linearGradient'));
+  assert.match(html, /<button[^>]*data-tool="codex"/);
+  assert.match(html, /<button[^>]*data-tool="kimi"/);
+});
+
+await t('当前 Antigravity 会话无工单时仍显示 Codex 和 Kimi 空闲分支', () => {
+  const previousSessions = store.sessions;
+  const previousId = store.currentId;
+  const previousHash = window.location.hash;
+  try {
+    window.location.hash = '#/dispatches';
+    store.currentId = 'agy';
+    store.sessions = [{ id: 'agy', agent: 'antigravity', title: '当前 Antigravity 会话', config: { model: 'gemini-3.8-flash' } }];
+    const html = renderToStaticMarkup(React.createElement(DispatchView));
+    assert.ok(html.includes('data-source-agent="antigravity"'));
+    assert.ok(html.includes('当前 Antigravity 会话'));
+    assert.ok(html.includes('gemini-3.8-flash'));
+    assert.match(html, /<article class="dispatch-node dispatch-executor idle" data-tool="codex"/);
+    assert.match(html, /<article class="dispatch-node dispatch-executor idle" data-tool="kimi"/);
+    assert.doesNotMatch(html, /data-tool="copilot"/);
+    store.currentId = null;
+    assert.doesNotMatch(renderToStaticMarkup(React.createElement(DispatchView)), /data-source-agent="antigravity"/);
+  } finally {
+    window.location.hash = previousHash;
+    store.sessions = previousSessions;
+    store.currentId = previousId;
+  }
 });
 
 await t('同主体不同会话合为一树；Copilot 不作根，仍可作为第二层执行端', () => {

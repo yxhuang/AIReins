@@ -15,12 +15,7 @@ const chromium = process.env.CHROMIUM ?? join(cache,
   readdirSync(cache).filter((name) => name.startsWith("chromium_headless_shell-")).sort().at(-1),
   "chrome-headless-shell-linux64/chrome-headless-shell");
 const server = await createServer({ configFile: fileURLToPath(new URL("../vite.config.ts", import.meta.url)),
-  server: { host: "127.0.0.1", port: 0, strictPort: false }, logLevel: "error",
-  // 同源代理页替身：内容比面板高，用来验证 iframe 按内容撑高、外层滚动
-  plugins: [{ name: "ai-usage-fixture", configureServer: (vite) => { vite.middlewares.use("/pages/ai-usage/", (_req, res) => {
-    res.setHeader("content-type", "text/html; charset=utf-8");
-    res.end('<!doctype html><body style="margin:0"><div style="height:1500px">usage</div></body>');
-  }); } }] });
+  server: { host: "127.0.0.1", port: 0, strictPort: false }, logLevel: "error" });
 await server.listen();
 const base = `http://127.0.0.1:${server.httpServer.address().port}`;
 const browser = spawn(chromium, ["--no-sandbox", "--headless", "--remote-debugging-pipe", `--user-data-dir=${profile}`],
@@ -94,8 +89,8 @@ const fixtureScript = (locale) => `
   const fixtures = {
     '/api/meta': {defaultCwd:'/repo',capabilities:{terminal:false},drivers:Object.fromEntries(['claude','codex','kimi'].map(id=>[id,{configOptions:[],available:true}]))},
     '/api/sessions': {sessions:[]}, '/api/project-order': {paths:[]}, '/api/fs/dirs': {path:'/repo',parent:'/',dirs:[],files:[]},
-    '/api/pages': {pages:[{id:'ai-usage',name:'AI-Usage',icon:'📊',type:'iframe',url:'http://127.0.0.1:8788',proxy:true}]},
-    '/api/pages/ai-usage/health': {reachable:true,embeddable:true,reason:'Synthetic iframe fixture',durationMs:1},
+    '/api/pages': {pages:[]},
+    '/api/usage': ${JSON.stringify({ updated_at: iso(0), providers: [{ id: "codex", name: "Codex", plan: "Plus", status: "ok", error: null, fetched_at: iso(0), reset_credits: null, windows: [{ id: "5h", label: "5h", duration_ms: 18_000_000, used_pct: 12, resets_at: iso(7_200_000), note: null }, { id: "week", label: "Weekly", duration_ms: 604_800_000, used_pct: 25, resets_at: iso(86_400_000), note: null }] }] })},
     '/api/history': {sessions:[],truncated:false,skipped:0,empty:0,discovered:0,durationMs:0},
     '/api/links': {links:[]}, '/api/prefs': {idleReleaseMinutes:0,codexResetWatch:true},
     '/api/claude/settings': {remoteControlAtStartup:false},
@@ -113,10 +108,14 @@ const fixtureScript = (locale) => `
     if (!path.startsWith('/api/')) return realFetch(input,init);
     let data = fixtures[path] ?? {};
     if (init?.method && init.method!=='GET') {
-      window.__writes.push({path,method:init.method,body:init.body});
-      if (path!=='/api/codex-resets/ack' || init.method!=='POST') throw new Error('Unexpected API write '+path);
-      const id = JSON.parse(init.body).id;
-      window.__publishStatus({...window.__resetStatus,alerts:window.__resetStatus.alerts.filter(item=>item.id!==id)});
+      if (path==='/api/usage/open' && init.method==='POST') {
+        data = fixtures['/api/usage'] ?? {};
+      } else {
+        window.__writes.push({path,method:init.method,body:init.body});
+        if (path!=='/api/codex-resets/ack' || init.method!=='POST') throw new Error('Unexpected API write '+path);
+        const id = JSON.parse(init.body).id;
+        window.__publishStatus({...window.__resetStatus,alerts:window.__resetStatus.alerts.filter(item=>item.id!==id)});
+      }
     }
     if (path==='/api/codex-resets') data=window.__resetStatus;
     return Promise.resolve(new Response(JSON.stringify({code:0,data,msg:'',request_id:'fixture'}),{headers:{'content-type':'application/json'}}));
@@ -228,11 +227,10 @@ try {
     const before = await evaluate(first, "window.__writes.length");
     await click(first, ".codex-reset-open-usage");
     await waitFor(first, "document.querySelector('.codex-reset-card') && !document.querySelector('.codex-reset-dialog')");
-    await waitFor(first, "document.querySelector('.page-frame')?.getAttribute('src') === '/pages/ai-usage/'");
-    await waitFor(first, "document.querySelector('.page-frame').offsetHeight === 1500");
-    assert.ok(await evaluate(first, "(a => a.scrollHeight > a.clientHeight && getComputedStyle(a).overflowY === 'auto')(document.querySelector('.page-frame-area'))"), "AI 用量由外层滚动，iframe 不自滚");
-    assert.equal(await evaluate(first, "document.querySelectorAll('.page-fallback').length"), 0, "卡片覆盖正常 iframe 路径");
-    assert.ok(await evaluate(first, "document.querySelector('.codex-reset-card').compareDocumentPosition(document.querySelector('.page-frame')) & Node.DOCUMENT_POSITION_PRECEDING"), "卡片位于 iframe 下方");
+    await waitFor(first, "document.querySelector('.usage-view') && document.querySelector('.usage-card[data-provider=\"codex\"]')");
+    assert.ok(await evaluate(first, "getComputedStyle(document.querySelector('.usage-scroll')).overflowY === 'auto'"), "AI 用量面板内容区独立滚动");
+    assert.equal(await evaluate(first, "document.querySelectorAll('.page-frame').length"), 0, "内置面板不再渲染 iframe");
+    assert.ok(await evaluate(first, "document.querySelector('.codex-reset-card').compareDocumentPosition(document.querySelector('.usage-scroll')) & Node.DOCUMENT_POSITION_PRECEDING"), "重置卡片位于用量列表下方");
     assert.equal(await evaluate(first, "window.__writes.length"), before);
     assert.ok(await evaluate(second, "!!document.querySelector('.codex-reset-dialog')"), "另一页面保留未读弹窗");
   });

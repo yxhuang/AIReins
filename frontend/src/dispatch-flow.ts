@@ -269,8 +269,9 @@ export function dispatchParent(run: DispatchRun, runs: readonly DispatchRun[]): 
 }
 
 /** 同主体会话合并；沿完整记录解析祖先，嵌套派单归属原主体。Copilot 只作执行端。 */
-export function dispatchForests(runs: readonly DispatchRun[], _sessions: readonly DispatchSessionTitle[], ancestry: readonly DispatchRun[] = runs) {
-  const forests = new Map<string, { id: string; agent: string; title: string; runs: DispatchRun[] }>();
+export function dispatchForests(runs: readonly DispatchRun[], sessions: readonly DispatchSessionTitle[],
+  ancestry: readonly DispatchRun[] = runs, currentId: string | null = null) {
+  const forests = new Map<string, { id: string; agent: string; title: string; runs: DispatchRun[]; idleSession?: DispatchSessionTitle }>();
   for (const run of runs) {
     let root = run;
     const seen = new Set([run.runId]);
@@ -283,6 +284,10 @@ export function dispatchForests(runs: readonly DispatchRun[], _sessions: readonl
     const id = agent;
     const forest = forests.get(id) ?? { id, agent, title: dispatcherLabel(agent), runs: [] };
     forest.runs.push(run); forests.set(id, forest);
+  }
+  const current = sessions.find(session => session.id === currentId && session.agent === "antigravity");
+  if (current && !forests.has("antigravity")) {
+    forests.set("antigravity", { id: "antigravity", agent: "antigravity", title: dispatcherLabel("antigravity"), runs: [], idleSession: current });
   }
   return ["claude", "antigravity", "codex", "kimi"].flatMap(agent => {
     const forest = forests.get(agent);

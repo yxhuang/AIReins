@@ -24,6 +24,8 @@ import { getMeta, getServerHostName, SERVER_VERSION, whenMetaReady } from "./met
 import { appWindowEnabled, findWindowsChrome, openAppWindow, AppWindowError } from "./app-window.js";
 import { getTaildropTargets, getTailscalePeers, sendTaildrop, TaildropError } from "./tailscale-peers.js";
 import { createCodexResetWatch } from "./codex-resets.js";
+import { onCodexRateLimits } from "./drivers/codex.js";
+import { createUsageService, UsageInputError } from "./usage.js";
 import { busySessionCount, createPowerOff, powerOffEnabled } from "./power-off.js";
 import { applyUpdate, SelfUpdateError, updateStatus } from "./self-update.js";
 import { feishuSender, GateNotifier, larkCliSender, loadNotifyConfig, type NotifyConfig } from "./notify.js";
@@ -189,6 +191,19 @@ const codexResets = createCodexResetWatch({
   },
 });
 codexResets.start();
+
+const aiUsage = createUsageService({
+  configPath: join(workbenchHome, "usage.json"),
+  cachePath: join(workbenchHome, "usage-cache.json"),
+  cwd: process.cwd(), initialDelayMs: 5_000,
+  liveClaudeUsage: () => manager.queryLiveClaudeUsage(),
+  onChange: () => {
+    const frame = { type: "ai_usage_updated", data: aiUsage.summary(), settings: aiUsage.settings() };
+    for (const client of clients) sendWs(client, frame);
+  },
+});
+const stopCodexRateLimits = onCodexRateLimits((params) => aiUsage.ingestCodexRateLimits(params));
+aiUsage.start();
 
 startNotifier();
 
@@ -379,6 +394,8 @@ async function shutdown(signal: string): Promise<void> {
   clearInterval(heartbeat);
   clearInterval(idleReleaseSweep);
   codexResets.stop();
+  stopCodexRateLimits();
+  await aiUsage.stop();
   try {
     for (const client of clients) client.socket.close(1001, "server shutdown");
     for (const socket of terminalClients.keys()) socket.close(1001, "server shutdown");
@@ -684,6 +701,27 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       }
     } else if (method === "GET" && url.pathname === "/api/pages") {
       await respond(response, 200, 0, "success", { pages }, requestId);
+    } else if (method === "GET" && url.pathname === "/api/usage") { await respond(response, 200, 0, "success", aiUsage.summary(), requestId);
+    } else if (method === "POST" && url.pathname === "/api/usage/open") {
+      aiUsage.notifyPanelOpened(); await respond(response, 200, 0, "success", aiUsage.summary(), requestId);
+    } else if (method === "POST" && url.pathname === "/api/usage/refresh") {
+      try {
+        const provider = url.searchParams.get("provider") ?? "all";
+        await respond(response, 200, 0, "success", await aiUsage.refresh(provider), requestId);
+      } catch (error) {
+        if (error instanceof UsageInputError) throw new ApiError(400, 40067, error.message);
+        throw error;
+      }
+    } else if (url.pathname === "/api/usage/settings" && method === "GET") {
+      await respond(response, 200, 0, "success", aiUsage.settings(), requestId);
+    } else if (url.pathname === "/api/usage/settings" && method === "PUT") {
+      try {
+        const input = await readJson(request);
+        await respond(response, 200, 0, "success", await aiUsage.updateSettings(input), requestId);
+      } catch (error) {
+        if (error instanceof UsageInputError) throw new ApiError(400, 40067, error.message);
+        throw error;
+      }
     } else if (method === "GET" && url.pathname === "/api/links") {
       await respond(response, 200, 0, "success", { links: readLauncherLinks() }, requestId);
     } else if (url.pathname === "/api/codex-resets" && method === "GET") {

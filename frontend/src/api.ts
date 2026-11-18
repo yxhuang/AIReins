@@ -504,3 +504,30 @@ export function fetchCodexResets(): Promise<import("../../server/codex-resets").
 export function ackCodexReset(id: string): Promise<unknown> {
   return call("/api/codex-resets/ack", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id }) });
 }
+
+export function fetchUsage(open = false): Promise<import("./types").UsageSummary> {
+  if (open) return call("/api/usage/open", { method: "POST" });
+  return call("/api/usage", { cache: "no-store" });
+}
+
+export function refreshUsage(provider = "all"): Promise<import("./types").UsageSummary> {
+  return call(`/api/usage/refresh?provider=${encodeURIComponent(provider)}`, {
+    method: "POST",
+    signal: AbortSignal.timeout(45_000),
+  });
+}
+
+export function fetchUsageSettings(): Promise<import("./types").UsageSettingsView> {
+  return call("/api/usage/settings", { cache: "no-store" });
+}
+
+export function saveUsageSettings(patch: import("./types").UsageSettingsPatch): Promise<{
+  settings: import("./types").UsageSettingsView;
+  summary: import("./types").UsageSummary;
+}> {
+  return call("/api/usage/settings", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(patch),
+  });
+}

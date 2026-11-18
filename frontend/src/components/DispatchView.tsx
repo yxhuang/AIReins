@@ -28,6 +28,7 @@ export function DispatchView({ terminalOpen = false }: { terminalOpen?: boolean 
   const [error, setError] = useState("");
   const [loaded, setLoaded] = useState(false);
   const sessions = useStore(selectTitles, (a, b) => JSON.stringify(a) === JSON.stringify(b));
+  const currentId = useStore(state => state.currentId);
   useEffect(() => startDispatchPolling({
     visible: () => !selectedId && document.visibilityState !== "hidden"
       && !(terminalOpen && window.matchMedia("(max-width: 720px)").matches),
@@ -56,7 +57,8 @@ export function DispatchView({ terminalOpen = false }: { terminalOpen?: boolean 
 
   const groups = groupDispatches(runs, now);
   const visibleRuns = groups.flatMap((group) => group.runs);
-  const forests = dispatchForests(visibleRuns, sessions, runs);
+  const forests = dispatchForests(visibleRuns, sessions, runs, currentId);
+  const dispatchTreeCount = forests.filter(forest => forest.runs.length > 0).length;
   const running = forests.flatMap(forest => forest.runs).filter(run => run.status === "running").length;
 
   if (selectedId) return <DispatchDetail key={selectedId} runId={selectedId} sessions={sessions} terminalOpen={terminalOpen} />;
@@ -65,13 +67,15 @@ export function DispatchView({ terminalOpen = false }: { terminalOpen?: boolean 
     <section className="dispatch-view" aria-label={t("ui.DispatchView.dispatch_flow")}>
       {error && <p className="dispatch-error" role="alert">{t("ui.DispatchView.failed_to_load_dispatches_will_retry_automatically_sentence", { p0: (error) })}</p>}
       <section className="dispatch-panel" aria-label={t("ui.DispatchView.dispatch_topology")}>
-        <div className="dispatch-panel-head"><strong>{t("ui.DispatchView.active_dispatches")}</strong><span>{!loaded ? t("ui.common.loading") : running ? t("ui.DispatchView.dispatches_running_trees", { p0: (running), p1: (forests.length) }) : forests.length ? t("ui.DispatchView.trees_recently_ended", { p0: (forests.length) }) : t("ui.DispatchView.0_dispatches")}</span></div>
-        {forests.length ? forests.map((forest) => {
+        <div className="dispatch-panel-head"><strong>{t("ui.DispatchView.active_dispatches")}</strong><span>{!loaded ? t("ui.common.loading") : running ? t("ui.DispatchView.dispatches_running_trees", { p0: (running), p1: (dispatchTreeCount) }) : dispatchTreeCount ? t("ui.DispatchView.trees_recently_ended", { p0: (dispatchTreeCount) }) : t("ui.DispatchView.0_dispatches")}</span></div>
+        {forests.map((forest) => {
           const roots = forest.runs.filter((run) => !dispatchParent(run, runs) && run.parent?.agent === forest.agent);
+          const idle = forest.idleSession;
           return <DispatchTree key={forest.id} agent={forest.agent} groups={groupDispatches(forest.runs, now)}
-            title={forest.title} dispatchers={dispatcherSessions(roots, sessions)} model={dispatcherModel(roots, sessions)}
+            title={idle?.title ?? forest.title} dispatchers={dispatcherSessions(roots, sessions)}
+            model={idle?.model ? dispatchModelName(idle.model) : dispatcherModel(roots, sessions)}
             highlighted={highlighted} now={now} />;
-        }) : null}
+        })}
         {loaded && !error && !forests.length && <p className="dispatch-empty">{t("ui.DispatchView.no_dispatches_right_now")}</p>}
       </section>
       {highlighted.size > 0 && <p className="dispatch-note dispatch-highlight-note">{t("ui.DispatchView.highlighted_dispatches_linked_from_the_session_sentence", { p0: (highlighted.size) })}</p>}
@@ -89,7 +93,7 @@ export function DispatchTree({ groups, title, dispatchers = [], agent, model, hi
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set());
   const shownTools = new Set(expanded);
   for (const group of groups) if (group.runs.slice(3).some(run => highlighted.has(run.runId))) shownTools.add(group.tool);
-  const topology = buildDispatchTree(groups, now, shownTools);
+  const topology = buildDispatchTree(groups.filter(group => agent !== "antigravity" || group.tool !== "copilot" || group.runs.length > 0), now, shownTools);
   // Geometry changes only with topology/content/size; the elapsed clock does not redraw it.
   const layoutKey = JSON.stringify({ title, model, dispatchers, nodes: [...topology.sidebranches, ...topology.levels.flat()].map(node =>
     [node.id, node.parentId, node.mode, node.rows.map(row => row.id), node.more, node.expanded,

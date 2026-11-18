@@ -1056,10 +1056,13 @@ export class CodexDriver extends BaseDriver {
       this.callbacks.status(params.turn?.status === "failed" ? "error" : "idle");
       return;
     }
+    if (method === "account/rateLimits/updated") {
+      notifyCodexRateLimits(params);
+      return;
+    }
     const quiet = new Set([
       "remoteControl/status/changed", "thread/started", "thread/status/changed",
       "thread/goal/cleared", "mcpServer/startupStatus/updated", "serverRequest/resolved",
-      "account/rateLimits/updated",
     ]);
     if (!quiet.has(method)) this.callbacks.emit("raw_event", { source: "codex", method, params });
   }
@@ -1160,4 +1163,17 @@ interface ApplyingConfig {
   config: SessionConfig;
   clearModel: boolean;
   clearEffort: boolean;
+}
+
+const codexRateLimitListeners = new Set<(params: unknown) => void>();
+
+function notifyCodexRateLimits(params: unknown): void {
+  for (const listener of codexRateLimitListeners) {
+    try { listener(params); } catch { /* listener errors must not break session stream */ }
+  }
+}
+
+export function onCodexRateLimits(listener: (params: unknown) => void): () => void {
+  codexRateLimitListeners.add(listener);
+  return () => codexRateLimitListeners.delete(listener);
 }

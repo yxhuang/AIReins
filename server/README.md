@@ -6,7 +6,7 @@
 
 `agent: "antigravity"` 使用本机官方 `agy acp`（ACP v1，stdio JSON-RPC），复用 Kimi 的 ACP 事件、工具审批、附件和终端生命周期实现。沿用 CLI 已有登录，不读取或复制 OAuth token，不写全局设置；模型清单来自当前账号的 `session/new.configOptions`，不按订阅名推测可用模型。
 
-- 模型、推理和审批选项分别映射 `model` → `model`、`thought_level` → `effort`、`mode` → `permissionMode`。新建默认保留 CLI 实际审批档位，配置修改仅发送 `session/set_config_option`。模型变化后按 CLI 返回的新 options 更新推理档位；会话的 `configSchema` 随 `config_updated`、列表和快照同步到界面，候选变化即使当前值相同也广播。旧会话缺少该字段时才回落启动探测缓存。
+- 模型、推理和审批选项分别映射 `model` → `model`、`thought_level` → `effort`、`mode` → `permissionMode`。新建推理档位缺省用 `high`、审批档位缺省用 `auto`，应用模型后若候选缺少对应档位（如 `Orchestrator` 无 `high`）则沿用 CLI 当前档位。续接未传推理或审批档位时，保留 CLI 返回的当前值。配置修改仅发送 `session/set_config_option`。模型变化后按 CLI 返回的新 options 更新推理档位；会话的 `configSchema` 随 `config_updated`、列表和快照同步到界面，候选变化即使当前值相同也广播。旧会话缺少该字段时才回落启动探测缓存。
 - 支持文本/思考流、工具调用与更新、标准 ACP 审批和可表达的提问表单、文件和图片附件、命令清单、原生标题与 `usage_update` 上下文用量（`{used,size}`）。不把上下文用量当作订阅额度。
 - 会话释放与正常关闭使用 `session/close`；再次发送或新建续接使用原生 `session/resume`，保留 AIReins 自有 transcript。复制到终端的续接命令为 `agy --conversation <nativeId>`。运行中再次发送的消息立即交给原生 `session/prompt`，由 CLI 决定处理时机；每个请求独立返回，所有在途请求结束后才回到 idle，不把首个应答当作全部结束。中断发送 `session/cancel` 并取消未决审批；Kimi 仍使用 worker FIFO 队列。
 - 外部 Antigravity 原生历史格式尚未接入文件索引，因此 `/api/history?agent=antigravity` 返回空列表；在 AIReins 创建的会话仍由自己的注册表和 transcript 正常保存、展示与续接。不对该 CLI 做原生 JSONL 路径猜测、外部续聊指纹检查或自动崩溃恢复；不提供彻底删除原生会话。
@@ -499,6 +499,7 @@ Promise。复制前先检查目标文件系统可用空间至少为扫描量的 
 - Claude：CLI 启动 flag 与 stream-json control protocol；审批模式原生活改。模型和推理强度为 `mutable:true, mutableVia:"control"`。空闲且无待审批闸门时，模型发送 `set_model {model}`，推理强度发送 `apply_flag_settings {settings:{effortLevel}}`；success 后即时更新配置、有效值及前端。错误或 15 秒超时回落到原重启路径；释放的会话只保存新配置，下次拉起带入 `--model / --effort`。
 - Codex：模型选项来自 `model/list`；默认 model/effort 来自 `config/read(cwd)` 返回的有效合并配置，而不是模型内建默认。创建或续接线程后，再以 `thread/start` / `thread/resume` 返回的实际 `model / reasoningEffort` 和 `approvalPolicy + approvalsReviewer + sandbox` 更新 session；权限模式是三者的组合，不能只用 `approvalPolicy` 回填。若旧版 app-server 无法提供 `config/read`，schema 的 model/effort 默认值为 `null`，不会猜值。effort 可选覆盖仍限定为 `minimal / low / medium / high / xhigh`；三项活修改在下一次 `turn/start` 生效。
 - Kimi：三项和值全部从一次真实 `session/new` 返回的 `configOptions` 转换，不在 AIReins 手抄；新建会话的权限默认值由 AIReins 指定为 `auto`（Auto），模型与推理强度默认值沿用原生返回；三项均通过 `session/set_config_option` 活改。
+- Antigravity：三项均来自 ACP `configOptions`，通过 `session/set_config_option` 活改。审批候选含 `auto` 时，schema 的审批默认值为 `auto`，否则沿用 CLI 返回的当前档位。会话实际档位由会话的 `config.permissionMode` 提供。
 
 Codex 与 Kimi 的元数据探针失败时，对应 driver 返回 `options:[]` 和 `error`。Claude 启动时后台发一次不含用户消息的 stream-json `initialize` 控制请求，从应答的 `response.models` 中提取模型描述开头的名字与版本号，仅更新 `fable / opus / sonnet / haiku` 的显示标签；每个 Claude worker 的 initialize 应答也会刷新这些标签。`value` 和“跟随 Claude 配置”标签不变。探针失败或某条描述缺失时，该项保留静态“（最新）”标签，不妨碍建会话。
 
@@ -521,6 +522,8 @@ Codex 权限菜单已按当前官方三个常用预设更新（2026-10-01；本�
 旧会话续接仍接受原来保存的 `untrusted` 和 `never`，但菜单不再提供这两个旧值。旧 `never` 保留 `workspace-write` 沙盒，绝不自动升级为 Full access；旧值在前端作为当前值显示，可切换到新预设。新会话不得显式选择旧值。官方的 `Custom (config.toml)` 属于自定义权限组合，本菜单仅提供上述三个常用预设。协议回归在 `server/codex-permissions.test.ts`；运行 `node --import tsx server/codex-permissions.test.ts`。
 
 2026-10-03 起，新建表单显式提交 Codex `auto-review`、Kimi `auto`，刷新已构建的前端即可使用。服务端缺省也同步调整；旧会话保留已保存档位，无保存档位的旧会话续接仍用 Codex `on-request`、Kimi `default`。
+
+Antigravity 新建表单在元数据候选为空或包含 `auto` 时预选并提交 `auto`（当 CLI 支持 `auto` 时兼容尚未重启的旧后端；若未重启的旧后端运行在不支持 `auto` 的账号或无沙盒环境且前端尚未加载完元数据，须待元数据就绪或重启后端）。非空候选缺少 `auto` 时仅剥离预选的 `auto`，用户显式选择的 `default`、`plan` 等有效档位仍原样提交；选择「跟随配置」时省略 `permissionMode`，由服务端按当前会话候选决定默认档位。
 
 `GET /api/sessions/:id/snapshot` 不带 `tail=1` 时，`data` 仍为 `{session, seq, events}`，返回全量统一事件（包括现有验证脚本的用法）。`?tail=1` 返回 `{session, seq, events, hasMore, firstSeq}`，`events` 只含最近一段；`seq` 始终为整个会话的当前游标，不能改成分页首尾游标。`session.snapshotState` 携带由全量事件计算的 `latestUsage`、`commands`、`configSwitching`、`promptCacheTtlMs` 和 `promptCacheUsageAt`，`session.title` 也由完整会话确定；未产生的用量和切换态字段可省略，缓存未知时为 `null`。
 
@@ -672,6 +675,22 @@ worker 的 `processId` 原本就持久化；新启动的 POSIX worker 使用独�
 
 `resumedFrom.historyCursor` 为可选字段：带 `resumeSessionId` 创建时，服务端在 `manager.create` 之前用 `HistoryIndex.endCursor` 记下截止 cursor（偏移量 = 当时原生消息文件的大小，Kimi 取 `agents/main/wire.jsonl`；编码与 `/messages` 的 `nextCursor` 完全一致），写入 `resumedFrom` 并随注册表持久化。会话页的「导入前的历史对话」首页带上它，拿到的就是导入时刻之前的最新一页，导入之后的轮次不再混入该区块。计算失败（会话或文件不存在等）只记 warn 日志、照常创建且不带该字段；它是服务端内部字段，客户端请求体里的 `historyCursor` 一律被覆盖。旧会话没有该字段，历史区仍从最新一页开始。cursor 失效（原生文件被截断/改写，`/messages` 返回 400「消息 cursor 已失效」等）时前端退回不带 cursor 的最新一页，不整块报错。
 
+## 内置 AI 用量面板（`/api/usage`）
+
+AI 用量面板已由 Node 原生实现（`server/usage.ts`），覆盖 `claude` → `antigravity` → `codex` → `kimi` 四家，不再依赖外部 Python/uv `ai-usage` 服务或 iframe 反向代理：
+
+- `GET /api/usage`：纯只读返回 `{revision, updated_at, providers: UsageProvider[]}`（仅含当前启用的 provider）。
+- `POST /api/usage/open`：经写请求 `Origin` 校验（防跨站 GET 触发 CLI 探针）后异步调用 `notifyPanelOpened()`，按需补拉缺失或已过新鲜期的数据并立即返回当前 `UsageSummary`，不阻塞首帧渲染。
+- `POST /api/usage/refresh`：支持 `?provider=all|claude|antigravity|codex|kimi`（默认 `all`），重置退避并立即刷新目标 provider，返回最新 `UsageSummary`；未知 provider 返回 `400 / 40067`。
+- `GET /api/usage/settings` / `PUT /api/usage/settings`：读写 `${workbenchHome}/usage.json`（独占临时文件原子替换并强制收紧为 `0600`），管理四家显示开关、`claude.resetCredits` 手工重置卡，以及 `kimi` 的订阅密钥（严格可打印非空白 ASCII 校验）与 `useProxy` 开关。`GET` / `PUT` 响应只返回 `keyConfigured` 与 `keySource`（`config | env | file | none`），**绝不回显明文 `apiKey`**，日志亦不记录任何密钥或 OAuth 令牌；`apiKeyFile` 采用非阻塞普通文件校验且上限 64 KiB，绝不执行 shell 或阻塞 FIFO；传入 `kimi.apiKey: null` 清除已保存密钥。
+- 全局 WebSocket 控制帧：任一 provider 数据或设置变化时广播 `{type: "ai_usage_updated", data: UsageSummary, settings: UsageSettingsView}`（带单调递增 `revision`，与单会话 token 事件 `usage_updated` 区分）。
+- 四家数据源与合规边界：
+  - **Claude**：优先复用当前已运行且未在重启中的 Claude 会话（`manager.queryLiveClaudeUsage()` 调 `get_usage`，绝不唤醒已释放会话）；无活跃会话时才用一次性 `--no-session-persistence` 的 `claude -p --input-format stream-json --output-format stream-json` 发送 `control_request {subtype: "get_usage"}` 探测（剥除 `CLAUDE_CODE_ENTRYPOINT` 避免污染历史列表）。
+  - **Antigravity**：严格遵循按需查询（`onDemand: true`），通过官方只读非交互命令 `agy -p "/usage" --output-format json` 与 `agy -p "/credits" --output-format json` 读取模型组额度桶与 AI credits 余额；**绝不进入后台定时轮询循环**，仅在用户打开面板（5 分钟新鲜期缓存、失败至少冷却 60 秒）或手动点刷新时调用。
+  - **Codex**：后台通过短生命周期 `codex app-server --stdio` 调用 `account/rateLimits/read`，同时实时接入活跃 Codex 会话推送的 `account/rateLimits/updated` 通知（`onCodexRateLimits`）；app-server 不可达时回退读取本机最新 `rollout-*.jsonl` 中的 `rate_limits` 快照并标为 `stale`（`codex_local_fallback`）。
+  - **Kimi**：请求 `https://api.kimi.com/coding/v1/usages`，密钥优先级为 `usage.json` > 环境变量 `KIMI_API_KEY`（或自定义 `apiKeyEnv`）> `apiKeyFile` 正则提取（不执行 shell）；勾选 `useProxy` 时复用 `prefs.json` 的 `proxyUrl`（回退 `codexProxyUrl`）经原生 `node:http` + `node:tls` 建 HTTP `CONNECT` 隧道，不引入额外运行时依赖。
+- 后台调度与缓存：`claude`、`codex`、`kimi` 默认每 5 分钟轮询一次，失败按 `60s → 120s → … → 30m` 指数退避；缓存原子保存在 `${workbenchHome}/usage-cache.json`（`0600`），`ok` 快照超过 15 分钟未更新时在 `summary()` 中标为 `stale`。
+
 ## `pages/` 扩展页面
 
 `GET /api/links` 返回 `data: {links: [{name, url, icon?, group?}]}`，与 `/api/pages` 共用请求前置的访问控制。每次请求现读并合并两处：仓库 `pages/links.json`（随 git 同步的共享菜单）在前，用户目录 `${workbenchHome}/pages/links.json`（默认 `~/.workbench/pages/links.json`，本机追加）在后，同一 `url` 以本机条目原位覆盖；改文件后刷新页面或重新打开「直达」即可生效；新增接口本身需重启 AIReins。任一处文件缺失按该处为空；坏 JSON、非法顶层按该处为空并 warn（另一处照常返回），非法条目逐条跳过并 warn，不导致接口 500。`name`、`url` 为必填非空字符串，`icon`、`group` 为可选非空字符串，`icon` 可以是 emoji、`agent:claude` / `agent:codex` / `agent:kimi`（复用界面内置的三家品牌图标），或以 `<svg` 开头的内联 SVG（前端按 HTML 渲染，品牌标识可用 `<image href="data:image/png;base64,…">` 内嵌位图）；支持 http/https 和 `vscode://`、`obsidian://` 等显式 URL scheme，拒绝 `javascript:`、`data:`、`vbscript:`、`file:`、`blob:`、`filesystem:`、`about:` 和含控制字符或未编码空格的 URL。根目录文件不参与 `scanPages` 的子目录扫描。
@@ -682,9 +701,9 @@ worker 的 `processId` 原本就持久化；新启动的 POSIX worker 使用独�
 
 用户目录 `${workbenchHome}/pages`（默认 `~/.workbench/pages`）的每个直接子目录代表一个页面，子目录内必须有 `manifest.json`。server 仅在启动时扫描一次；增删或修改 manifest 后需重启，不做热插拔、沙箱或版本管理。单个 manifest 缺失、JSON 语法错误、字段无效或 `id` 重复时，该页面会被跳过并记录一条 warn 日志，不影响 server 启动。
 
-`bash install.sh --with-ai-usage` 在确认本机 ai-usage 的 `/api/summary` 响应形状后，生成缺失的 `${WORKBENCH_HOME:-$HOME/.workbench}/pages/ai-usage/manifest.json`（回环地址、`proxy: true`、`maxWidth: "33%"`），已有文件一律保留；安装器在冒烟启动前完成接入，AIReins 已运行时只提示择时 `aireins restart`，重启会中断所有会话。
+AI 用量面板现已内置（见上节），`scanPages` 扫描时会自动跳过 `id === "ai-usage"` 的遗留 manifest 并记录一条 info 日志，避免与内置入口重复，同时保留磁盘原文件不删除。`bash install.sh --with-ai-usage` 现输出中英双语迁移提示，不再安装或拉起外部 Python/uv 服务。
 
-例如在 `~/.workbench/pages/example/manifest.json` 放入下列配置；仓库不附带个人页面。`WORKBENCH_HOME` 可覆盖整个用户数据目录，代码调用仍可显式传入扫描根目录。
+其他自定义扩展页例如在 `~/.workbench/pages/example/manifest.json` 放入下列配置；仓库不附带个人页面。`WORKBENCH_HOME` 可覆盖整个用户数据目录，代码调用仍可显式传入扫描根目录。
 
 ```json
 {"id":"example","name":"示例页面","icon":"🌐","type":"iframe","url":"https://example.com"}
@@ -706,7 +725,7 @@ interface IframePageManifest {
 }
 ```
 
-`GET /api/pages` 的 `data` 为 `{pages: IframePageManifest[]}`，字段就是上述已校验的 manifest 字段。例如页面 `ai-usage` 默认指向 `http://127.0.0.1:8788`，也可用其配置端口。它可通过用户级 systemd 常驻运行；服务未启动时整页不可达，所需网络连接不可用时页面本身仍可能可达，但部分数据卡片会报错。因此健康接口只判断目标服务是否响应，不能判断数据是否完整。
+`GET /api/pages` 的 `data` 为 `{pages: IframePageManifest[]}`，字段就是上述已校验的 manifest 字段（不含已被内置面板接管的 `ai-usage`）。健康接口只判断目标服务是否响应，不能判断页面内部业务数据是否完整。
 
 `GET /api/pages/:id/health` 最多等待 2 秒，`data` 形状为：
 
@@ -900,7 +919,7 @@ Codex 0.157.1 没有多选字段，统一事件的 `multiSelect` 固定为 `fals
 
 `decision` 可为 `allow / deny / always`，也可附 `updatedInput`。Claude 的 `request_id` 原样保留并回填，`permissionSuggestions` 透传；Codex 按 server request 的 JSON-RPC `id` 应答；Kimi 每次 `terminal/create` 和 `fs/write_text_file` 都会额外产生不可绕过的最终审批事件。
 
-三家工具审批均遵循输入窗所选权限模式。Kimi 在新建、续接和切换时通过 `session/set_config_option` 实际设置 mode；新建未选择时明确设置 `auto`；无保存档位的旧会话续接仍设置 `default`，不继承机器的 yolo。AIReins 转发 CLI 发来的 `session/request_permission` 并回传允许/拒绝；已获 CLI 放行的 `terminal/create`、`fs/write_text_file` 直接执行，不重复审批。Codex 按 `approvalPolicy + approvalsReviewer + sandbox` 完整传递模式：`on-request` 为人工审批，`auto-review` 为自动审查，`full-access` 为无审批且移除工作区沙箱。原生 CLI 或托管环境的限制与交互提问仍保留。
+工具审批遵循会话的权限模式。Kimi 通过 `session/set_config_option` 设置 `mode`，新建缺省为 `auto`，无保存档位时续接仍用 `default`。Antigravity 通过同一方法设置 `mode`，以应用模型和推理档位后返回的候选为准。启动时若请求的 `auto` 不可用，或续接未传档位，沿用 CLI 当前档位。AIReins 转发 CLI 发来的 `session/request_permission` 并回传允许/拒绝；已获 CLI 放行的 `terminal/create`、`fs/write_text_file` 直接执行，不重复审批。Codex 按 `approvalPolicy + approvalsReviewer + sandbox` 完整传递模式：`on-request` 为人工审批，`auto-review` 为自动审查，`full-access` 为无审批且移除工作区沙箱。原生 CLI 或托管环境的限制与交互提问仍保留。
 
 ## curl + Node 22 WebSocket 演示
 

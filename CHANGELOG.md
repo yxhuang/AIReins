@@ -5,10 +5,12 @@
 ### Added
 
 - Google Antigravity joins Claude Code, Codex and Kimi through its official `agy acp` interface, with account-provided models and effort levels, streamed replies, tool approvals, attachments, context usage, slash commands and native session resume. Sessions created in AIReins retain their history; importing external Antigravity history and permanently deleting its native sessions are not supported yet.
+- A built-in AI usage panel natively displays subscription quotas, reset windows, elapsed-time pace marks and reset credits for all four providers (Claude, Antigravity, Codex and Kimi) in Node and React, with inline provider toggles and masked Kimi key configuration. Antigravity quota and AI credits are queried on demand via official `agy` commands when opening the panel or clicking Refresh.
 
 ### Changed
 
 - New conversations default to Antigravity; its Gemini-style blue-purple star sits between Claude and Codex.
+- AIReins no longer requires the external Python/`uv` `ai-usage` companion service or an extension-page iframe for subscription usage; legacy `pages/ai-usage` manifests are skipped automatically while existing files are preserved, and `install.sh --with-ai-usage` now prints a migration notice.
 
 ### Fixed
 

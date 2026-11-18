@@ -17,6 +17,7 @@ import { shallowEqual, useStore } from "./useStore";
 import { workbenchWindowTitle } from "./host-connections";
 import { CodexResetDialog } from "./components/CodexResets";
 import { BrandMark } from "./components/HostSwitcher";
+import { BUILTIN_USAGE_ID } from "./usage";
 
 const selectCurrentSession = (value: Store) =>
   value.currentId ? value.session(value.currentId) : undefined;
@@ -47,7 +48,6 @@ export function App() {
   const [collapsed, setCollapsed] = useState(false);
   const [headerTarget, setHeaderTarget] = useState<HTMLDivElement | null>(null);
   const [returnToSession, setReturnToSession] = useState(false);
-  const usagePage = useStore((value) => value.pages.find((page) => page.id === "ai-usage"));
   // 终端面板：隐藏 = CSS display:none，组件一旦挂载就常驻（xterm 实例与 WS 连接不丢）
   const termOpen = useStore((value) => value.termOpen);
   const filesOpen = useStore((value) => value.filesOpen);
@@ -148,10 +148,10 @@ export function App() {
           ) : current ? (
             <SessionView key={current.id} session={current} headerTarget={headerTarget} mobileTail={pendingTotal > 0 ? (
               <span className="gate-badge" title={t("core.000", { p0: pendingTotal })}>{pendingTotal}</span>
-            ) : undefined} usage={usagePage && { icon: usagePage.icon, open: () => {
+            ) : undefined} usage={{ icon: "📊", open: () => {
               setReturnToSession(true);
               setCollapsed(false);
-              store.navigatePage(usagePage.id);
+              store.navigatePage(BUILTIN_USAGE_ID);
             } }} />
           ) : (
             <section className="welcome-view">

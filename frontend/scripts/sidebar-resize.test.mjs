@@ -145,8 +145,8 @@ try {
       '/api/sessions': { sessions: [{id:'long-title',agent:'codex',agentId:'codex',cwd:'/repo',status:'idle',config:{},seq:0,
         createdAt:new Date().toISOString(),lastActivityAt:new Date().toISOString(),
         title:'拉宽侧栏后应当继续显示完整会话标题和后面更多的详细信息以便查看内容'}] }, '/api/project-order': { paths: ['/repo'] },
-      '/api/pages': { pages: [{id:'ai-usage',name:'AI 用量',icon:'📊',type:'iframe',url:'http://127.0.0.1:8788'}] },
-      '/api/pages/ai-usage/health': {reachable:false,embeddable:false,reason:'测试页面'},
+      '/api/pages': { pages: [] },
+      '/api/usage': { updated_at: null, providers: [] },
       '/api/history': {sessions:[],truncated:false,skipped:0,empty:0,discovered:0,durationMs:0},
       '/api/fs/dirs': {path:'/repo',parent:'/',dirs:[],files:[]},
       '/api/links': {links:[]}, '/api/prefs': {idleReleaseMinutes:0}, '/api/claude/settings': {remoteControlAtStartup:false},
@@ -157,8 +157,11 @@ try {
     window.fetch = (input, init) => {
       const path = new URL(typeof input === 'string' ? input : input.url, location.href).pathname;
       if (path.startsWith('/api/')) {
-        if (init?.method && init.method !== 'GET') throw new Error('Test attempted API write');
-        return Promise.resolve(new Response(JSON.stringify({code:0,data:fixtures[path]??{},msg:'',request_id:'test'}),{headers:{'content-type':'application/json'}}));
+        if (init?.method && init.method !== 'GET' && !(path === '/api/usage/open' && init.method === 'POST')) {
+          throw new Error('Test attempted API write');
+        }
+        const resolved = path === '/api/usage/open' ? fixtures['/api/usage'] : fixtures[path];
+        return Promise.resolve(new Response(JSON.stringify({code:0,data:resolved??{},msg:'',request_id:'test'}),{headers:{'content-type':'application/json'}}));
       }
       return realFetch(input, init);
     };
@@ -439,11 +442,14 @@ try {
       if(!path.startsWith('/api/'))return realFetch(input,init);
       let data=fixtures[path]??{};
       if(init?.method&&init.method!=='GET'){
+        if(path==='/api/usage/open'&&init.method==='POST'){data={updated_at:null,providers:[]};}
+        else{
         if(path!=='/api/project-order/move'||init.method!=='POST')throw new Error('Unexpected synthetic API write '+path);
         const operation=JSON.parse(init.body);f.writes.push(operation);
         const paths=f.paths.filter(value=>value!==operation.path),target=operation.before??operation.after;
         paths.splice(paths.indexOf(target)+(operation.after?1:0),0,operation.path);
         f.paths=paths;localStorage.setItem(fixtureKey,JSON.stringify(paths));data={paths};
+        }
       }else if(path==='/api/project-order')data={paths:f.paths};
       else if(path==='/api/history'){
         f.historyQueries.push(Object.fromEntries(url.searchParams));

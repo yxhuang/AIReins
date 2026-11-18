@@ -1753,6 +1753,25 @@ export class SessionManager {
       ...payload,
     };
   }
+
+  /** Reuse an already-running Claude worker for `get_usage` without waking released sessions. */
+  async queryLiveClaudeUsage(): Promise<Record<string, unknown> | null> {
+    for (const [id, worker] of this.workers.entries()) {
+      const session = this.sessions.get(id);
+      if (!session || session.agent !== "claude" || session.released) continue;
+      if (session.status !== "idle" && session.status !== "running") continue;
+      if (this.restartingSessions.has(id) || !worker.queryInfo) continue;
+      try {
+        const result = await worker.queryInfo("get_usage");
+        if (result && typeof result === "object" && !Array.isArray(result)) {
+          return result as Record<string, unknown>;
+        }
+      } catch {
+        continue;
+      }
+    }
+    return null;
+  }
 }
 
 function claudeEffectiveFields(

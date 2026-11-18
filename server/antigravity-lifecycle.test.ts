@@ -67,11 +67,14 @@ console.log("PASS: Antigravity 会话释放、终端续接命令、发送时恢�
 
 const { listParentDispatches } = await import("./dispatches.js");
 const dispatchRoot = join(root, "delegate");
-const runId = "20261116-010000-codex-antigravity-child";
-await mkdir(join(dispatchRoot, runId), { recursive: true });
-await writeFile(join(dispatchRoot, runId, "run.json"), JSON.stringify({ schema: 1, status: "running", pid: process.pid,
-  startedAt: new Date().toISOString(), parent: { agent: "antigravity", sessionId: session.id, entrypoint: "workbench" } }));
-const dispatches = await listParentDispatches(nativeSessionId, dispatchRoot, "antigravity", () => [session]);
-assert.equal(dispatches.length, 1);
-assert.equal(dispatches[0].runId, runId, "Antigravity 主会话的 AIReins ID 和原生 ID 共用派单归属");
+for (const tool of ["codex", "kimi"]) {
+  const directory = join(dispatchRoot, `20261116-010000-${tool}-antigravity-child`);
+  await mkdir(directory, { recursive: true });
+  await writeFile(join(directory, "run.json"), JSON.stringify({ schema: 1, status: "running", pid: process.pid,
+    startedAt: new Date().toISOString(), parent: { agent: "antigravity", sessionId: session.id, entrypoint: "workbench" } }));
+}
+for (const id of [session.id, nativeSessionId]) {
+  const dispatches = await listParentDispatches(id, dispatchRoot, "antigravity", () => [session]);
+  assert.deepEqual(dispatches.map(run => run.tool).sort(), ["codex", "kimi"], "Antigravity 主会话的 AIReins ID 和原生 ID 共用派单归属");
+}
 console.log("PASS: Antigravity 跨 CLI 派单保留父节点和会话 ID 别名");

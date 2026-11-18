@@ -445,3 +445,88 @@ export interface WorkbenchPrefs {
   codexResetWatch?: boolean;
   idleReleaseMinutes: number;
 }
+
+export type UsageProviderId = AgentKind;
+export type UsageProviderStatus = "ok" | "stale" | "auth_expired" | "error";
+
+export type UsageWindowNoteCode =
+  | { code: "weekly_cap"; cap: number }
+  | { code: "remaining_amount"; amount: string };
+
+export interface UsageWindow {
+  id: string;
+  label: string;
+  group?: string | null;
+  window_label?: string | null;
+  duration_ms?: number | null;
+  used_pct: number;
+  resets_at: string | null;
+  note: string | null;
+  note_code?: UsageWindowNoteCode | null;
+}
+
+export interface UsageResetCredit {
+  expires_at: string | null;
+  all_day?: boolean;
+  title?: string;
+}
+
+export interface UsageResetCredits {
+  available_count: number;
+  credits: UsageResetCredit[] | null;
+}
+
+export interface UsageProvider {
+  id: UsageProviderId;
+  name: string;
+  plan: string | null;
+  windows: UsageWindow[];
+  status: UsageProviderStatus;
+  error: string | null;
+  error_code?: string | null;
+  http_status?: number;
+  fetched_at: string;
+  reset_credits: UsageResetCredits | null;
+  credits_note?: string | null;
+  on_demand?: boolean;
+}
+
+export interface UsageSummary {
+  instance_id?: string;
+  revision?: number;
+  updated_at: string | null;
+  providers: UsageProvider[];
+}
+
+export interface UsageManualResetCredit {
+  title?: string;
+  expires?: string | null;
+}
+
+export interface UsageSettingsView {
+  instance_id?: string;
+  revision?: number;
+  providers: Record<UsageProviderId, { enabled: boolean }>;
+  kimi: {
+    keyConfigured: boolean;
+    keySource: "config" | "env" | "file" | "none";
+    apiKeyEnv: string;
+    apiKeyFile: string | null;
+    useProxy: boolean;
+  };
+  claude: {
+    resetCredits: UsageManualResetCredit[];
+  };
+}
+
+export interface UsageSettingsPatch {
+  providers?: Partial<Record<UsageProviderId, { enabled: boolean }>>;
+  kimi?: {
+    apiKey?: string | null;
+    apiKeyFile?: string | null;
+    useProxy?: boolean;
+  };
+  claude?: {
+    resetCredits?: UsageManualResetCredit[];
+  };
+}

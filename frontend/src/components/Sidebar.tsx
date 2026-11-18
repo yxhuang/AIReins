@@ -14,6 +14,8 @@ import { SettingsMenu } from "./SettingsMenu";
 import { HostSwitcher } from "./HostSwitcher";
 import { RecoverableLazy } from "./RecoverableLazy";
 import { PageView } from "./PageView";
+import { UsageView } from "./UsageView";
+import { BUILTIN_USAGE_ID } from "../usage";
 import { isUpcomingReset } from "./CodexResets";
 import { SidebarResize } from "./SidebarResize";
 import { shortSessionTitle, SidebarSessionTitle } from "./SessionTitle";
@@ -101,7 +103,8 @@ export function Sidebar({ collapsed, onToggle, returnToSession = false, mobileAc
   const historyOpen = useStore(selectHistoryOpen);
   const currentPageId = useStore((value) => value.currentPageId);
   const pages = useStore((value) => value.pages);
-  const currentPage = pages.find((page) => page.id === currentPageId);
+  const usageOpen = currentPageId === BUILTIN_USAGE_ID;
+  const currentPage = usageOpen ? undefined : pages.find((page) => page.id === currentPageId);
   const pageOpen = useStore((value) => value.currentPageId !== null);
   const sidebarRef = useRef<HTMLElement>(null);
   const closePanel = useCallback(() => {
@@ -386,8 +389,9 @@ export function Sidebar({ collapsed, onToggle, returnToSession = false, mobileAc
           </div>
         )}
         {panelOpen && !collapsed && (
-          <section className="sidebar-panel-expanded" aria-label={historyOpen ? t("ui.Sidebar.session_history_content") : currentPage?.name || t("ui.Sidebar.page_not_found")}>
+          <section className="sidebar-panel-expanded" aria-label={historyOpen ? t("ui.Sidebar.session_history_content") : usageOpen ? t("ui.SessionView.ai_usage") : currentPage?.name || t("ui.Sidebar.page_not_found")}>
             {historyOpen ? <div id="sidebar-history-panel" className="sidebar-panel-content"><RecoverableLazy load={loadHistoryView} componentProps={{}} label={t("ui.Sidebar.session_history_content")} onClose={closePanel} /></div>
+              : usageOpen ? <div id={`sidebar-page-${BUILTIN_USAGE_ID}`} className="sidebar-panel-content"><UsageView onCollapse={closePanel} /></div>
               : currentPage ? <div id={`sidebar-page-${currentPage.id}`} className="sidebar-panel-content"><PageView page={currentPage} sidebar onCollapse={closePanel} /></div>
               : <div className="sidebar-panel-content sidebar-panel-missing">{t("ui.Sidebar.this_page_may_have_been_removed_from")}</div>}
           </section>
@@ -395,6 +399,7 @@ export function Sidebar({ collapsed, onToggle, returnToSession = false, mobileAc
         <div className="sidebar-foot">
           <div className="sidebar-foot-pages">
             <HistoryNav collapsed={collapsed} onPrepare={preparePanel} onClose={closePanel} />
+            <UsageNav collapsed={collapsed} onPrepare={preparePanel} onClose={closePanel} />
             <PageNav collapsed={collapsed} onPrepare={preparePanel} onClose={closePanel} />
           </div>
           <div className="sidebar-foot-actions">
@@ -403,7 +408,7 @@ export function Sidebar({ collapsed, onToggle, returnToSession = false, mobileAc
           </div>
         </div>
       </div>
-      <SidebarResize collapsed={collapsed} usageOpen={currentPageId === "ai-usage" && !collapsed} onToggle={onToggle} />
+      <SidebarResize collapsed={collapsed} usageOpen={usageOpen && !collapsed} onToggle={onToggle} />
     </aside>
   );
 }
@@ -465,28 +470,50 @@ export function PageIcon({ icon }: { icon: string }) {
   );
 }
 
+/** 内置「AI 用量」侧栏入口。 */
+function UsageNav({ collapsed, onPrepare, onClose }: PanelNavProps) {
+  const open = useStore((value) => value.currentPageId === BUILTIN_USAGE_ID);
+  const resetPending = useStore((value) => !!value.codexResets?.enabled && value.codexResets.pending.some(event => isUpcomingReset(event, value.now)));
+  const name = t("ui.SessionView.ai_usage");
+  return (
+    <SidebarPanel name={name} open={open} collapsed={collapsed} onClose={onClose} header={
+      <button
+        type="button"
+        className={`page-nav-item sidebar-foot-usage${open ? " active" : ""}`}
+        title={open ? t("ui.Sidebar.back_collapse", { p0: name }) : name}
+        aria-label={open ? t("ui.Sidebar.back_collapse", { p0: name }) : name}
+        aria-expanded={open}
+        aria-controls={`sidebar-page-${BUILTIN_USAGE_ID}`}
+        onClick={() => {
+          onPrepare();
+          if (open) onClose();
+          else store.navigatePage(BUILTIN_USAGE_ID);
+        }}
+      >
+        {open ? <span className="page-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 5l-7 7 7 7" /></svg>
+        </span> : <PageIcon icon="📊" />}
+        {resetPending && <span className="codex-reset-dot" role="img" aria-label={t("ui.CodexResets.pending")} />}
+        {!collapsed && <span className="page-nav-name">{open ? t("ui.Sidebar.back") : t("ui.Sidebar.allowance")}</span>}
+      </button>
+    } />
+  );
+}
+
 /** 左栏底部扩展页面入口：来自 /api/pages，未知类型跳过并给小字提示。 */
 function PageNav({ collapsed, onPrepare, onClose }: PanelNavProps) {
   const pages = useStore((value) => value.pages);
+  const extraPages = pages.filter((page) => page.id !== BUILTIN_USAGE_ID);
   const skippedPages = useStore((value) => value.skippedPages);
-  const resetPending = useStore((value) => !!value.codexResets?.enabled && value.codexResets.pending.some(event => isUpcomingReset(event, value.now)));
   const currentPageId = useStore((value) => value.currentPageId);
-  const [desktop, setDesktop] = useState(false);
-  useEffect(() => {
-    const query = window.matchMedia("(min-width: 721px)");
-    const update = () => setDesktop(query.matches);
-    update();
-    query.addEventListener("change", update);
-    return () => query.removeEventListener("change", update);
-  }, []);
   return (
     <>
-      {pages.map((page) => (
+      {extraPages.map((page) => (
         <SidebarPanel key={page.id} name={page.name} open={currentPageId === page.id} collapsed={collapsed} onClose={onClose} header={
         <button
           type="button"
-          className={`page-nav-item${page.id === "ai-usage" ? " sidebar-foot-usage" : ""}${currentPageId === page.id ? " active" : ""}`}
-          title={currentPageId === page.id ? t("ui.Sidebar.back_collapse", { p0: (page.name) }) : collapsed || (desktop && page.id === "ai-usage") ? page.name : page.description || page.name}
+          className={`page-nav-item${currentPageId === page.id ? " active" : ""}`}
+          title={currentPageId === page.id ? t("ui.Sidebar.back_collapse", { p0: (page.name) }) : collapsed ? page.name : page.description || page.name}
           aria-label={currentPageId === page.id ? t("ui.Sidebar.back_collapse", { p0: (page.name) }) : page.name}
           aria-expanded={currentPageId === page.id}
           aria-controls={`sidebar-page-${page.id}`}
@@ -499,12 +526,11 @@ function PageNav({ collapsed, onPrepare, onClose }: PanelNavProps) {
           {currentPageId === page.id ? <span className="page-icon" aria-hidden="true">
             <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 5l-7 7 7 7" /></svg>
           </span> : <PageIcon icon={page.icon} />}
-          {page.id === "ai-usage" && resetPending && <span className="codex-reset-dot" role="img" aria-label={t("ui.CodexResets.pending")} />}
-          {!collapsed && <span className="page-nav-name">{currentPageId === page.id ? t("ui.Sidebar.back") : page.id === "ai-usage" ? t("ui.Sidebar.allowance") : page.name}</span>}
+          {!collapsed && <span className="page-nav-name">{currentPageId === page.id ? t("ui.Sidebar.back") : page.name}</span>}
         </button>
         } />
       ))}
-      {currentPageId && !pages.some((page) => page.id === currentPageId) && !collapsed && (
+      {currentPageId && currentPageId !== BUILTIN_USAGE_ID && !extraPages.some((page) => page.id === currentPageId) && !collapsed && (
         <SidebarPanel name={t("ui.Sidebar.page_not_found")} open collapsed={false} onClose={onClose} header={
           <button type="button" className="page-nav-item active" aria-expanded="true" onClick={onClose}>{t("ui.Sidebar.page_not_found")}</button>
         } />

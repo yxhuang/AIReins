@@ -612,6 +612,79 @@ await t("新建页：默认 Antigravity、四家顺序、动态配置与显式�
   });
 });
 
+await t("新建页：Antigravity 预选 High 与 Auto，随候选变化过滤，允许手动切换与跟随配置", async () => {
+  const model = { id: "model", values: [{ value: "runtime-model", label: "Runtime model" }, { value: "orchestrator-model", label: "Orchestrator model" }], default: "runtime-model", mutable: true };
+  const effort = {
+    id: "effort",
+    values: [{ value: "low", label: "Low" }, { value: "medium", label: "Medium" }, { value: "high", label: "High" }],
+    default: "medium",
+    valuesByModel: { "orchestrator-model": [] },
+    mutable: true,
+  };
+  const mode = { id: "permissionMode", values: [{ value: "default", label: "Default" }, { value: "auto", label: "Auto" }, { value: "plan", label: "Plan" }], default: "default", mutable: true };
+  const metadata = options => ({ drivers: { antigravity: { options } }, capabilities: {} });
+  const pills = f => treeFind(f.update(), node => node.type?.name === "NewConfigPills").props;
+  const submit = async f => {
+    f.update().props.onSubmit({ preventDefault() {} });
+    await finishNewCreate();
+    return f.calls[0].config;
+  };
+  for (const meta of [null, metadata([]), metadata([model, effort, mode])]) {
+    await withNewForm({ cwd: "/project", meta }, async f => {
+      assert.deepEqual(pills(f).selected, { effort: "high", permissionMode: "auto" });
+      assert.deepEqual(await submit(f), { effort: "high", permissionMode: "auto" });
+    });
+  }
+  await withNewForm({ cwd: "/project", meta: null }, async f => {
+    assert.deepEqual(pills(f).selected, { effort: "high", permissionMode: "auto" });
+    store.meta = metadata([model, { ...effort, values: effort.values.slice(0, 2) }, { ...mode, values: [mode.values[0]] }]);
+    assert.deepEqual(pills(f).selected, {});
+    assert.equal(await submit(f), undefined);
+  });
+  const menus = f => {
+    const node = treeFind(f.update(), n => n.type?.name === "NewConfigPills");
+    const sub = componentFixture(() => node.type(node.props));
+    try {
+      const rendered = sub();
+      return { main: rendered.props.main, perm: rendered.props.perm.group };
+    } finally { sub.dispose(); }
+  };
+  await withNewForm({ cwd: "/project", meta: metadata([model]) }, async f => {
+    pills(f).onChange(previous => ({ ...previous, model: "runtime-model" }));
+    assert.deepEqual(pills(f).selected, { model: "runtime-model" });
+    store.meta = metadata([model, effort, mode]);
+    assert.deepEqual(pills(f).selected, { model: "runtime-model", effort: "high", permissionMode: "auto" });
+    assert.equal(menus(f).main.find(m => m.group.id === "effort").text, "High", "旧后端 default=medium 时新建胶囊仍显示预选 High");
+    menus(f).main.find(m => m.group.id === "model").group.onSelect("orchestrator-model");
+    assert.deepEqual(pills(f).selected, { model: "orchestrator-model", permissionMode: "auto" }, "切到无 high 候选的模型时自动过滤默认 effort");
+    menus(f).main.find(m => m.group.id === "model").group.onSelect("runtime-model");
+    menus(f).main.find(m => m.group.id === "effort").group.onSelect("medium");
+    menus(f).perm.onSelect("default");
+    assert.deepEqual(pills(f).selected, { model: "runtime-model", effort: "medium", permissionMode: "default" });
+    menus(f).perm.onSelect("plan");
+    store.meta = metadata([model, { ...effort, values: effort.values.slice(0, 2) }, { ...mode, values: [{ value: "default", label: "Default" }, { value: "plan", label: "Plan" }] }]);
+    assert.deepEqual(pills(f).selected, { model: "runtime-model", effort: "medium", permissionMode: "plan" }, "无 high/auto 时保留显式选中的档位与模式");
+    menus(f).main.find(m => m.group.id === "effort").group.onSelect("");
+    menus(f).perm.onSelect("");
+    assert.deepEqual(pills(f).selected, { model: "runtime-model" });
+    assert.deepEqual(await submit(f), { model: "runtime-model" });
+  });
+  await withNewForm({ cwd: "/project", meta: metadata([model, effort, mode]) }, async f => {
+    f.agent("claude").props.onClick();
+    assert.deepEqual(pills(f).selected, {});
+    f.agent("antigravity").props.onClick();
+    assert.deepEqual(pills(f).selected, { effort: "high", permissionMode: "auto" });
+    assert.ok(menus(f).perm.items.some(item => item.value === "plan"));
+    menus(f).main.find(m => m.group.id === "effort").group.onSelect("low");
+    menus(f).perm.onSelect("plan");
+    assert.deepEqual(await submit(f), { effort: "low", permissionMode: "plan" });
+  });
+  await withNewForm({ cwd: "/project", meta: metadata([model, effort, mode]) }, async f => {
+    menus(f).perm.onSelect("default");
+    assert.deepEqual(await submit(f), { effort: "high", permissionMode: "default" });
+  });
+});
+
 await t("新建页：冷启动可打开插件/MCP，先建空会话并保留首条消息与附件，不发给模型", async () => {
   const oldDocument = globalThis.document;
   globalThis.document = { addEventListener() {}, removeEventListener() {} };

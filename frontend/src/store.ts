@@ -14,6 +14,9 @@ import type {
   SessionOrganizationPatch,
   SessionStatus,
   UnifiedEvent,
+  UsageSettingsPatch,
+  UsageSettingsView,
+  UsageSummary,
   FilePreviewState,
   TerminalInfo,
   WorkFile,
@@ -23,7 +26,8 @@ import { createSession, deleteSession, fetchCommands, fetchEarlierEvents, fetchF
 import { fetchProjectOrder, moveProjectOrder, moveSession, patchSession } from "./api";
 import { selectSidebarSections } from "./sidebar-sessions";
 import type { CodexResetStatus } from "../../server/codex-resets";
-import { fetchCodexResets, ackCodexReset } from "./api";
+import { fetchCodexResets, ackCodexReset, fetchUsage, fetchUsageSettings, refreshUsage, saveUsageSettings } from "./api";
+import { BUILTIN_USAGE_ID } from "./usage";
 import { fetchDirectories, fetchWorkFile, openWorkPathInSystem, saveWorkFile } from "./api";
 import { sessionTitle } from "../../shared/session-title";
 import { LIFECYCLE_EVENTS } from "../../shared/session-order";
@@ -166,6 +170,12 @@ export class Store {
   pages: PageManifest[] = [];
   codexResets: CodexResetStatus | null = null;
   private codexResetsVersion = 0;
+  usageSummary: UsageSummary | null = null;
+  usageSettings: UsageSettingsView | null = null;
+  usageLoading = false;
+  usageRefreshing = false;
+  usageError: string | null = null;
+  private usageVersion = 0;
   skippedPages: SkippedPage[] = [];
   currentPageId: string | null = null;
   /** 侧栏面板：historyOpen 与 currentPageId 互斥，保留右侧当前会话。 */
@@ -391,7 +401,7 @@ export class Store {
     // 无 hash 进入（托盘 / 快捷方式 / PWA 冷启动）时回到上次打开的会话
     let restored: string | null = null;
     // 桌面派单/历史/页面面板的 hash 不带会话 ID，刷新时同样把上次的会话放回主区
-    const panelRestore = /^#\/(?:dispatches|history$|page\/)/.test(window.location.hash)
+    const panelRestore = /^#\/(?:dispatches|history$|usage$|page\/)/.test(window.location.hash)
       && !this.isMobileNavigation() && !this.readMobileEntry();
     if (!window.location.hash || panelRestore) {
       try { restored = localStorage.getItem(LAST_SESSION_KEY); } catch { /* 存储不可用就停在主页 */ }
@@ -494,6 +504,11 @@ export class Store {
     }
     this.historyOpen = false;
     this.historySelection = null;
+    if (window.location.hash === "#/usage") {
+      this.currentPageId = BUILTIN_USAGE_ID;
+      this.notify();
+      return;
+    }
     const pageId = window.location.hash.match(/^#\/page\/([^/]+)$/)?.[1];
     if (pageId) {
       this.currentPageId = decodeURIComponent(pageId);
@@ -609,7 +624,7 @@ export class Store {
 
   private mobileRouteFromHash(hash: string): MobileRoute {
     const session = hash.match(/^#\/session\/([^/]+)$/)?.[1];
-    const page = hash.match(/^#\/page\/([^/]+)$/)?.[1];
+    const page = hash === "#/usage" ? BUILTIN_USAGE_ID : hash.match(/^#\/page\/([^/]+)$/)?.[1];
     const dispatchesOpen = /^#\/dispatches(?:\/[^?]+)?(?:\?runs=.*)?$/.test(hash);
     const termOpen = hash === "#/terminal";
     const filesOpen = hash === "#/files";
@@ -1327,6 +1342,130 @@ export class Store {
     await this.refreshCodexResets();
   }
 
+  private usageSettingsVersion = 0;
+  private activeUsageInstanceId: string | null = null;
+  private retiredUsageInstances = new Set<string>();
+
+  private adoptUsageInstance(instanceId: string | undefined): "same_or_unset" | "switched" | "retired" {
+    if (!instanceId) return "same_or_unset";
+    if (this.retiredUsageInstances.has(instanceId)) return "retired";
+    if (!this.activeUsageInstanceId) {
+      this.activeUsageInstanceId = instanceId;
+      return "same_or_unset";
+    }
+    if (this.activeUsageInstanceId === instanceId) return "same_or_unset";
+    this.retiredUsageInstances.add(this.activeUsageInstanceId);
+    this.activeUsageInstanceId = instanceId;
+    return "switched";
+  }
+
+  private isStaleUsageRevision(
+    incoming: { instance_id?: string; revision?: number },
+    current: { instance_id?: string; revision?: number } | null,
+  ): boolean {
+    if (incoming.instance_id && this.retiredUsageInstances.has(incoming.instance_id)) return true;
+    if (!current) return false;
+    if (incoming.instance_id && current.instance_id && incoming.instance_id !== current.instance_id) {
+      return false;
+    }
+    if (typeof incoming.revision === "number" && typeof current.revision === "number") {
+      return incoming.revision < current.revision;
+    }
+    return false;
+  }
+
+  private acceptUsageSummary(data: UsageSummary): boolean {
+    if (this.isStaleUsageRevision(data, this.usageSummary)) return false;
+    const status = this.adoptUsageInstance(data.instance_id);
+    if (status === "retired") return false;
+    this.usageSummary = data;
+    if (status === "switched" && this.usageSettings && this.usageSettings.instance_id !== data.instance_id) {
+      void this.loadUsageSettings();
+    }
+    return true;
+  }
+
+  private acceptUsageSettings(settings: UsageSettingsView): boolean {
+    if (this.isStaleUsageRevision(settings, this.usageSettings)) return false;
+    const status = this.adoptUsageInstance(settings.instance_id);
+    if (status === "retired") return false;
+    this.usageSettings = settings;
+    if (status === "switched" && this.usageSummary && this.usageSummary.instance_id !== settings.instance_id) {
+      void this.loadUsage(false);
+    }
+    return true;
+  }
+
+  async loadUsage(open = false): Promise<void> {
+    const version = ++this.usageVersion;
+    if (!this.usageSummary) this.usageLoading = true;
+    this.notify();
+    try {
+      const data = await fetchUsage(open);
+      if (version !== this.usageVersion && typeof data.revision !== "number") return;
+      if (this.acceptUsageSummary(data)) this.usageError = null;
+    } catch (error) {
+      if (version !== this.usageVersion) return;
+      this.usageError = error instanceof Error ? error.message : String(error);
+    } finally {
+      this.usageLoading = false;
+      this.notify();
+    }
+  }
+
+  async refreshAllUsage(provider = "all"): Promise<void> {
+    if (this.usageRefreshing) return;
+    const version = ++this.usageVersion;
+    this.usageRefreshing = true;
+    this.usageError = null;
+    this.notify();
+    try {
+      const data = await refreshUsage(provider);
+      if (version === this.usageVersion || typeof data.revision === "number") {
+        this.acceptUsageSummary(data);
+      }
+    } catch (error) {
+      this.usageError = error instanceof Error ? error.message : String(error);
+    } finally {
+      this.usageRefreshing = false;
+      this.notify();
+    }
+  }
+
+  async loadUsageSettings(): Promise<UsageSettingsView | null> {
+    const version = ++this.usageSettingsVersion;
+    try {
+      const settings = await fetchUsageSettings();
+      if (version !== this.usageSettingsVersion && typeof settings.revision !== "number") {
+        return this.usageSettings;
+      }
+      this.acceptUsageSettings(settings);
+      this.notify();
+      return this.usageSettings;
+    } catch (error) {
+      if (version === this.usageSettingsVersion) {
+        this.usageError = error instanceof Error ? error.message : String(error);
+        this.notify();
+      }
+      return null;
+    }
+  }
+
+  async updateUsageSettings(patch: UsageSettingsPatch): Promise<UsageSettingsView> {
+    const version = ++this.usageVersion;
+    const sVersion = ++this.usageSettingsVersion;
+    const result = await saveUsageSettings(patch);
+    if (sVersion === this.usageSettingsVersion || typeof result.settings.revision === "number") {
+      this.acceptUsageSettings(result.settings);
+    }
+    if (version === this.usageVersion || typeof result.summary.revision === "number") {
+      this.acceptUsageSummary(result.summary);
+    }
+    this.usageError = null;
+    this.notify();
+    return this.usageSettings ?? result.settings;
+  }
+
   session(id: string): SessionRecord | undefined {
     if (this.indexedSessions !== this.sessions || this.sessionsById.size !== this.sessions.length) {
       this.sessionsById = new Map(this.sessions.map(session => [session.id, session]));
@@ -1681,8 +1820,10 @@ export class Store {
       // 广播可能发生在首次连接前或断线期间，pending 状态在连接建立后补查。
       if (!this.meta || this.meta.metadataPending) void this.refreshMeta();
       void this.refreshCodexResets();
-      this.reconnectDelay = 1000;
+      if (this.currentPageId === BUILTIN_USAGE_ID || this.usageSummary !== null) void this.loadUsage(false);
+      if (this.usageSettings !== null) void this.loadUsageSettings();
       const reconnected = this.hasOpenedSocket;
+      this.reconnectDelay = 1000;
       this.hasOpenedSocket = true;
       void this.alignAfterSocketOpen(reconnected, socket);
       this.notify();
@@ -1738,6 +1879,19 @@ export class Store {
       if (!frame.data || typeof frame.data !== "object") return;
       this.codexResetsVersion++;
       this.codexResets = frame.data as CodexResetStatus;
+      this.notify();
+      return;
+    }
+    if (type === "ai_usage_updated") {
+      const data = frame.data as UsageSummary | undefined;
+      if (!data || typeof data !== "object" || !Array.isArray(data.providers)) return;
+      this.usageVersion++;
+      const accepted = this.acceptUsageSummary(data);
+      if (accepted && frame.settings && typeof frame.settings === "object") {
+        this.usageSettingsVersion++;
+        this.acceptUsageSettings(frame.settings as UsageSettingsView);
+      }
+      this.usageLoading = false;
       this.notify();
       return;
     }
