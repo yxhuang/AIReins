@@ -686,7 +686,7 @@ AI 用量面板已由 Node 原生实现（`server/usage.ts`），覆盖 `claude`
 - 全局 WebSocket 控制帧：任一 provider 数据或设置变化时广播 `{type: "ai_usage_updated", data: UsageSummary, settings: UsageSettingsView}`（带单调递增 `revision`，与单会话 token 事件 `usage_updated` 区分）。
 - 四家数据源与合规边界：
   - **Claude**：优先复用当前已运行且未在重启中的 Claude 会话（`manager.queryLiveClaudeUsage()` 调 `get_usage`，绝不唤醒已释放会话）；无活跃会话时才用一次性 `--no-session-persistence` 的 `claude -p --input-format stream-json --output-format stream-json` 发送 `control_request {subtype: "get_usage"}` 探测（剥除 `CLAUDE_CODE_ENTRYPOINT` 避免污染历史列表）。
-  - **Antigravity**：严格遵循按需查询（`onDemand: true`），通过官方只读非交互命令 `agy -p "/usage" --output-format json` 与 `agy -p "/credits" --output-format json` 读取模型组额度桶与 AI credits 余额；**绝不进入后台定时轮询循环**，仅在用户打开面板（5 分钟新鲜期缓存、失败至少冷却 60 秒）或手动点刷新时调用。
+  - **Antigravity**：严格遵循按需查询（`onDemand: true`），仅在用户打开面板（5 分钟新鲜期缓存、失败至少冷却 60 秒）或手动点刷新时调用官方只读命令 `agy -p "/usage" --output-format json` 与 `agy -p "/credits" --output-format json`，兼容 CLI 的 `command.data` 输出。免费账户的模型组额度来自 `/usage`，积分查询无数据时仍显示模型额度。
   - **Codex**：后台通过短生命周期 `codex app-server --stdio` 调用 `account/rateLimits/read`，同时实时接入活跃 Codex 会话推送的 `account/rateLimits/updated` 通知（`onCodexRateLimits`）；app-server 不可达时回退读取本机最新 `rollout-*.jsonl` 中的 `rate_limits` 快照并标为 `stale`（`codex_local_fallback`）。
   - **Kimi**：请求 `https://api.kimi.com/coding/v1/usages`，密钥优先级为 `usage.json` > 环境变量 `KIMI_API_KEY`（或自定义 `apiKeyEnv`）> `apiKeyFile` 正则提取（不执行 shell）；勾选 `useProxy` 时复用 `prefs.json` 的 `proxyUrl`（回退 `codexProxyUrl`）经原生 `node:http` + `node:tls` 建 HTTP `CONNECT` 隧道，不引入额外运行时依赖。
 - 后台调度与缓存：`claude`、`codex`、`kimi` 默认每 5 分钟轮询一次，失败按 `60s → 120s → … → 30m` 指数退避；缓存原子保存在 `${workbenchHome}/usage-cache.json`（`0600`），`ok` 快照超过 15 分钟未更新时在 `summary()` 中标为 `stale`。

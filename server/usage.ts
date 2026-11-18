@@ -559,8 +559,9 @@ function unwrapJsonPayload(raw: unknown): Rec {
   const top = asRecord(raw);
   if (!top) throw new Error("JSON output is not an object");
   if (Array.isArray(top.groups) || "remaining_credits" in top || "plan_name" in top) return top;
-  for (const key of ["result", "data", "output", "quota", "usage"]) {
-    const nested = asRecord(top[key]);
+  const command = asRecord(top.command);
+  for (const value of [command?.data, top.result, top.data, top.output, top.quota, top.usage]) {
+    const nested = asRecord(value);
     if (nested && (Array.isArray(nested.groups) || "remaining_credits" in nested || "plan_name" in nested)) {
       return nested;
     }

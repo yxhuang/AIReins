@@ -172,6 +172,32 @@ createInterface({ input: process.stdin }).on("line", (line) => {
     assert.deepEqual(multi.windows[1]!.note_code, { code: "remaining_amount", amount: "0" });
     assert.equal(multi.windows[2]!.duration_ms, 7 * 24 * 3_600_000);
 
+    const headlessUsage = {
+      status: "SUCCESS",
+      usage: { total_tokens: 0 },
+      command: {
+        name: "usage",
+        data: {
+          groups: [{
+            name: "Gemini Models",
+            buckets: [{ id: "gemini-weekly", name: "Weekly Limit Remaining", window: "weekly", remaining_fraction: 0.75 }],
+          }],
+        },
+      },
+    };
+    const free = parseAntigravityUsagePayload(headlessUsage, null, nowMs);
+    assert.equal(free.status, "ok");
+    assert.equal(free.windows.length, 1);
+    assert.equal(free.windows[0]!.duration_ms, 7 * 24 * 3_600_000);
+    assert.equal(free.windows[0]!.used_pct, 25);
+    assert.equal(free.credits_note, undefined);
+
+    const withCredits = parseAntigravityUsagePayload(headlessUsage, {
+      command: { name: "credits", data: { plan_name: "Pro", remaining_credits: 20 } },
+    }, nowMs);
+    assert.equal(withCredits.plan, "Pro");
+    assert.equal(withCredits.credits_note, "20");
+
     // Zero credits shown explicitly as "0", and empty/all-disabled groups report antigravity_no_limits.
     const zeroAndEmpty = parseAntigravityUsagePayload(
       { groups: [{ name: "Gemini Models", buckets: [{ name: "5h", disabled: true }] }] },
