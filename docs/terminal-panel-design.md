@@ -189,7 +189,7 @@ M1 就能满足「随时可以使用 terminal」。M2 之前刷新页面会断�
 1. **PTY 用预编译版 `@lydell/node-pty`**（固定 `1.2.0-beta.15`，同 node-pty API，自带 linux-x64 二进制）。本机没有 C++ 工具链，官方 node-pty 装不上；主会话已实测 spawn、`resize` 后 `stty size` 从 24×80 变 40×120。依赖已由主会话装好，前后端执行端都不改 `package.json` 的依赖。
 2. **工作区级**：终端不绑会话，切会话不杀；新建时 cwd 取当前所看会话的 cwd，没有会话取 `meta.defaultCwd`。
 3. **ANSI 黄按 §4 三条**：终端内容区豁免配色不变量；终端 chrome 禁暖色；调色板的 yellow / bright-yellow 往橄榄 / 赭石偏，拉开与琥珀金的距离。结论写进 `styles.css` 顶部不变量注释。
-4. **鉴权已由 `server/access.ts` 解决**（本机 Host/Origin 白名单、远程 Tailscale 身份白名单）。**手机远程入口也开放终端**，但须 `~/.workbench/remote.json` 显式 `"terminal": true` 才开（缺省关）；该文件由用户自己改。
+4. **鉴权已由 `server/access.ts` 解决**（本机 Host/Origin 白名单、远程 Tailscale 身份白名单）。**手机远程入口也开放终端**，但须 `~/.workbench/remote.json` 显式 `"terminal": true` 才开（缺省关）；设置菜单可即时更新该字段。
 
 范围：本轮做 §7 的 **M1 + 刷新 / 断线后按 id 重连并回放 scrollback**（手机锁屏重连是常态，没它不可用）。搜索等 M3 项留到以后。
 
@@ -199,6 +199,7 @@ M1 就能满足「随时可以使用 terminal」。M2 之前刷新页面会断�
 
 REST（沿用现有 `{code, msg, data}` 包装）：
 
+- `PUT /api/remote-terminal`，body `{ enabled: boolean }` → `data: { enabled }`。要求已配置远程入口，沿用当前入口的写操作鉴权。关闭时断开远程终端连接，PTY 继续运行。
 - `GET /api/terminals` → `data: { terminals: TerminalInfo[] }`
 - `POST /api/terminals`，body `{ cwd?: string, shell?: "bash" | "powershell", cols: number, rows: number }` → `data: TerminalInfo`。cwd 缺省或不存在时用 server 的 defaultCwd；可选 `shell: "bash" | "powershell"`（白名单，不收路径；缺省和旧客户端 `"bash"` 均表示本机 Unix 缺省 shell，选择规则见本节「平台兼容」）。powershell 的 cwd 只在 `/mnt/<盘符>` 下才沿用，否则用 Windows 用户目录（从 WSL 追加的 Windows PATH 里取 `/mnt/c/Users/<名>`，取不到用 `/mnt/c`）；powershell 优先 `/mnt/c/Program Files/PowerShell/7/pwsh.exe`，其次 PATH 中 `/mnt/` 目录里的 `pwsh.exe`（Store 版启动别名），都没有则 Windows PowerShell 5.1，参数 `-NoLogo`。`TerminalInfo` 带 `kind`。
 - `POST /api/terminals/:id/kill` → `data: { ok: true }`。结束进程，不是删文件；不用 DELETE 动词。

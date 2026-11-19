@@ -14,7 +14,7 @@ import { CodexCommandPanel, type CodexCommandResult } from "./CodexCommandPanel"
 import { attachmentMention, localImageMimeType, prepareImageForUpload, type Attachment } from "../attachments";
 import { MAX_MENTIONS, store, type Store } from "../store";
 import { shallowEqual, useStore } from "../useStore";
-import { GateBlock, QuestionBlock, RawLine, ReadOnlyToolGroup, SystemLine, TextBlockView, ThoughtBlockView, ToolCard, UserBlockView } from "./StreamItems";
+import { GateBlock, LiveTurnDuration, QuestionBlock, RawLine, ReadOnlyToolGroup, SystemLine, TextBlockView, ThoughtBlockView, ToolCard, TurnDurationMeta, UserBlockView } from "./StreamItems";
 import { ExternalHistoryView } from "./HistoryTimeline";
 import { ResumedHistory } from "./ResumedHistory";
 import { ClockIcon, ConfigPills, PlusIcon, SendIcon, StopIcon, type MenuGroup, type MenuItem } from "./ConfigMenu";
@@ -77,13 +77,16 @@ export function SessionWorkspaceHeader({ session, title, dispatchRuns, backgroun
  *  usage 是收进「⋯」的 AI 用量入口，两者由 App 提供。 */
 export function SessionView({ session, mobileTail, usage, headerTarget }: { session: SessionRecord; mobileTail?: ReactNode; usage?: UsageEntry; headerTarget?: HTMLElement | null }) {
   const running = session.status === "running" || session.status === "starting";
+  const antigravityBgRunning = session.agent === "antigravity" && session.status === "idle" && (session.backgroundTasks?.length ?? 0) > 0;
+  const backgroundBusy = session.status === "idle" && ((session.backgroundTasks?.length ?? 0) > 0 || (session.activeDispatchCount ?? 0) > 0);
+  const turnActive = running || backgroundBusy;
   const dead = session.status === "dead";
   const selectData = useCallback((value: Store) => value.data.get(session.id), [session.id]);
   const data = useStore(selectData);
   const snapshotError = useStore(useCallback((value: Store) => value.snapshotErrors.get(session.id), [session.id]));
   const wsState = useStore(selectWsState);
-  // 三家均按原生会话身份查询派单；后台任务计数仍由 Claude 原生事件提供。
-  const backgroundCount = session.agent === "claude" ? session.backgroundTasks?.length ?? 0 : 0;
+  // 按原生会话身份查询派单；Claude 后台任务与 Antigravity 在途后台工具/续跑共用 backgroundTasks。
+  const backgroundCount = session.backgroundTasks?.length ?? 0;
   const dispatchRuns = useSessionDispatches(session.nativeSessionId ?? session.id, backgroundCount, session.agent);
   const renderBuilder = useMemo(() => createRenderItemsBuilder(session.agent), [session.id, session.agent]);
   const items = useMemo(
@@ -96,6 +99,8 @@ export function SessionView({ session, mobileTail, usage, headerTarget }: { sess
 
   const focusView = useStore(selectFocusView);
   const prefixVersion = renderBuilder.prefixVersion;
+  const activeTurn = renderBuilder.activeTurn;
+  const streamingTailText = renderBuilder.streamingTailText;
   const shown = useMemo(() => renderBuilder.display(focusView, session.cwd, data?.toolFrames),
     [renderBuilder, data, focusView, session.cwd]);
 
@@ -206,32 +211,44 @@ export function SessionView({ session, mobileTail, usage, headerTarget }: { sess
     void store.recoverMissingPendingGate(session.id);
   };
 
-  const renderItem = (item: (typeof shown)[number], index: number) => {
+  const renderItem = (item: (typeof shown)[number], index: number, lastIndexByTurn: ReadonlyMap<number, number>) => {
     const isLast = index === shown.length - 1;
     const next = shown[index + 1];
+    const ownerTurn = renderBuilder.itemUserTurn(item);
+    const endsTurn = ownerTurn > 0 && index === lastIndexByTurn.get(ownerTurn);
+    const timing = endsTurn ? renderBuilder.turnTiming(ownerTurn) : undefined;
+    const durationNode = timing
+      ? (turnActive && ownerTurn === activeTurn
+          ? <LiveTurnDuration startedAtMs={timing.startedAtMs} />
+          : timing.hasResponse
+            ? <TurnDurationMeta durationMs={timing.durationMs} startedAtMs={timing.startedAtMs} endedAtMs={timing.endedAtMs} apiDurationMs={timing.apiDurationMs} />
+            : null)
+      : null;
+    const wrap = (node: ReactNode) => <Fragment key={item.key}>{node}{durationNode}</Fragment>;
     if (item.kind === "tool-group") {
       const continues = (next?.kind === "text" || next?.kind === "thought" || next?.kind === "tool" || next?.kind === "tool-group") && next.turn === item.turn;
-      return <ReadOnlyToolGroup key={item.key} item={item} agent={session.agent} cwd={session.cwd} continues={continues} />;
+      return wrap(<ReadOnlyToolGroup key={item.key} item={item} agent={session.agent} cwd={session.cwd} continues={continues} />);
     }
     if (item.kind === "text" || item.kind === "thought" || item.kind === "tool") {
       const continues = (next?.kind === "text" || next?.kind === "thought" || next?.kind === "tool" || next?.kind === "tool-group") && next.turn === item.turn;
       const dot = item.kind === "tool" ? ` timeline-${item.status}` : "";
-      // 仅静态助手正文交给浏览器跳过离屏布局；审批、工具和流式尾块保持原样。
-      const deferred = item.kind === "text" && !(isLast && running) ? " timeline-deferred-text" : "";
+      const streamingText = isLast && (running || (antigravityBgRunning && streamingTailText));
+      // 仅静态助手正文交给浏览器跳过离屏布局；审批、工具和流式尾块（含 Antigravity 续跑输出）保持原样。
+      const deferred = item.kind === "text" && !streamingText ? " timeline-deferred-text" : "";
       const view = item.kind === "text"
-        ? <TextBlockView item={item} streaming={isLast && running} cwd={session.cwd} sessionId={session.id} />
+        ? <TextBlockView item={item} streaming={streamingText} showCursor={isLast && running} cwd={session.cwd} sessionId={session.id} />
         : item.kind === "thought" ? <ThoughtBlockView item={item} /> : <ToolCard item={item} agent={session.agent} cwd={session.cwd} sessionId={session.id} />;
-      return <div key={item.key} className={`timeline-item${continues ? " timeline-continues" : ""}${dot}${deferred}`}>{view}</div>;
+      return wrap(<div key={item.key} className={`timeline-item${continues ? " timeline-continues" : ""}${dot}${deferred}`}>{view}</div>);
     }
     switch (item.kind) {
       case "user":
-        return <UserBlockView key={item.key} item={item} />;
+        return wrap(<UserBlockView key={item.key} item={item} />);
       case "external-history":
-        return <ExternalHistoryView key={item.key} item={item} agent={session.agent} cwd={session.cwd} sessionId={session.id} />;
+        return wrap(<ExternalHistoryView key={item.key} item={item} agent={session.agent} cwd={session.cwd} sessionId={session.id} />);
       case "gate": {
         // AskUserQuestion 渲染为提问选择卡片；与普通闸门共用 pendingGates/贴条机制
         const Block = item.questions?.length ? QuestionBlock : GateBlock;
-        return (
+        return wrap(
           <Block
             key={item.key}
             item={item}
@@ -241,33 +258,47 @@ export function SessionView({ session, mobileTail, usage, headerTarget }: { sess
               if (el) gateRefs.current.set(item.requestId, el);
               else gateRefs.current.delete(item.requestId);
             }}
-          />
+          />,
         );
       }
       case "system":
-        return <SystemLine key={item.key} item={item} />;
+        return wrap(<SystemLine key={item.key} item={item} />);
       case "raw":
-        return <RawLine key={item.key} item={item} />;
+        return wrap(<RawLine key={item.key} item={item} />);
       default:
         return null;
     }
   };
   // Keep one keyed children array: moving rows between prefix/tail arrays would
   // remount tools and gates when new blocks arrive, losing their local state.
-  const rowCache = useRef<{ deps: unknown[]; rows: ReactNode[]; length: number } | null>(null);
+  const rowCache = useRef<{ deps: unknown[]; rows: ReactNode[]; length: number; lastIndexByTurn: Map<number, number> } | null>(null);
   const rows = useMemo(() => {
-    const deps = [items, prefixVersion, focusView, session.id, session.agent, session.cwd, dead, running];
+    const deps = [items, prefixVersion, focusView, session.id, session.agent, session.cwd, dead, running, turnActive, antigravityBgRunning, activeTurn, streamingTailText];
     const cached = rowCache.current;
     if (cached && deps.every((value, i) => value === cached.deps[i])) {
-      for (const i of renderBuilder.changedDisplayIndices) cached.rows[i] = renderItem(shown[i]!, i);
-      for (let i = Math.max(0, cached.length - 1); i < shown.length; i++) cached.rows[i] = renderItem(shown[i]!, i);
+      const changed = new Set(renderBuilder.changedDisplayIndices);
+      for (let i = cached.length; i < shown.length; i++) {
+        const ownerTurn = renderBuilder.itemUserTurn(shown[i]!);
+        if (ownerTurn === 0) continue;
+        const previous = cached.lastIndexByTurn.get(ownerTurn);
+        if (previous !== undefined) changed.add(previous);
+        cached.lastIndexByTurn.set(ownerTurn, i);
+      }
+      for (let i = Math.max(0, cached.length - 1); i < shown.length; i++) changed.add(i);
+      const { lastIndexByTurn } = cached;
+      for (const i of changed) cached.rows[i] = renderItem(shown[i]!, i, lastIndexByTurn);
       cached.length = shown.length;
       return cached.rows;
     }
-    const rows = shown.map(renderItem);
-    rowCache.current = { deps, rows, length: shown.length };
+    const lastIndexByTurn = new Map<number, number>();
+    shown.forEach((item, index) => {
+      const ownerTurn = renderBuilder.itemUserTurn(item);
+      if (ownerTurn > 0) lastIndexByTurn.set(ownerTurn, index);
+    });
+    const rows = shown.map((item, index) => renderItem(item, index, lastIndexByTurn));
+    rowCache.current = { deps, rows, length: shown.length, lastIndexByTurn };
     return rows;
-  }, [items, data, prefixVersion, focusView, session.id, session.agent, session.cwd, dead, running]);
+  }, [items, data, prefixVersion, focusView, session.id, session.agent, session.cwd, dead, running, turnActive, antigravityBgRunning, activeTurn, streamingTailText]);
 
   return (
     <div className={`session agent-${session.agent}`}>
@@ -1630,7 +1661,13 @@ export function Composer({ session, dead, errored }: { session: SessionRecord; d
           {session.agent === "claude" && <RemoteControlPill session={session} />}
           <ConfigControls session={session} />
           {session.agent === "claude" && <CacheTimer session={session} className="cache-timer-bar" />}
-          {showComposerInterrupt(session.status, caps?.interrupt, session.processId, text) && (
+          {showComposerInterrupt(
+            session.status,
+            caps?.interrupt,
+            session.processId,
+            text,
+            session.agent === "antigravity" && session.status === "idle" && (session.backgroundTasks?.length ?? 0) > 0,
+          ) && (
             <button type="button" className="composer-interrupt" aria-label={t("ui.SessionView.interrupt")} title={t("ui.SessionView.interrupt_current_execution")}
               onClick={() => store.interrupt(session.id)}><StopIcon /></button>
           )}

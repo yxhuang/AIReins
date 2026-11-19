@@ -98,6 +98,8 @@ export class SessionManager {
   private readonly sideQuestions = new Set<string>();
   private readonly sessions = new Map<string, SessionRecord>();
   private readonly workers = new Map<string, Driver>();
+  private readonly turnStartedAt = new Map<string, number>();
+  private readonly activeDispatchCounts = new Map<string, number>();
   private readonly damagedTranscripts = new Set<string>();
   private readonly releases = new Map<string, Promise<unknown>>();
   private readonly movingSessions = new Set<string>();
@@ -208,17 +210,59 @@ export class SessionManager {
 
   list(): SessionRecord[] {
     return [...this.sessions.values()]
-      .map((session) => ({ ...cloneSession(session),
-        title: sessionTitle({ ...session, title: this.titles.get(session.id) ?? "新会话" }, undefined),
-        ...fallbackTitleMetadata(session, this.titles.get(session.id)),
-        pendingGateCount: session.status === "dead" ? 0 : this.pendingGates.get(session.id)?.size ?? 0,
-      }))
+      .map((session) => {
+        const activeDispatches = session.status === "dead" ? 0 : this.activeDispatchCounts.get(session.id) ?? 0;
+        return { ...cloneSession(session),
+          title: sessionTitle({ ...session, title: this.titles.get(session.id) ?? "新会话" }, undefined),
+          ...fallbackTitleMetadata(session, this.titles.get(session.id)),
+          pendingGateCount: session.status === "dead" ? 0 : this.pendingGates.get(session.id)?.size ?? 0,
+          ...(activeDispatches > 0 ? { activeDispatchCount: activeDispatches } : {}),
+        };
+      })
       .sort((left, right) => right.lastActivityAt.localeCompare(left.lastActivityAt));
   }
 
   get(id: string): SessionRecord | undefined {
     const session = this.sessions.get(id);
-    return session ? { ...cloneSession(session), ...fallbackTitleMetadata(session, this.titles.get(id)), title: sessionTitle({ ...session, title: this.titles.get(id) ?? "新会话" }, undefined) } : undefined;
+    if (!session) return undefined;
+    const activeDispatches = session.status === "dead" ? 0 : this.activeDispatchCounts.get(id) ?? 0;
+    return {
+      ...cloneSession(session),
+      ...fallbackTitleMetadata(session, this.titles.get(id)),
+      title: sessionTitle({ ...session, title: this.titles.get(id) ?? "新会话" }, undefined),
+      ...(activeDispatches > 0 ? { activeDispatchCount: activeDispatches } : {}),
+    };
+  }
+
+  hasLiveWorker(): boolean {
+    return this.workers.size > 0;
+  }
+
+  /** 更新各会话的运行中外部派单/原生子代理计数（纯内存运行态，不写注册表或 transcript）。 */
+  setActiveDispatchCounts(counts: ReadonlyMap<string, number>): boolean {
+    const next = new Map<string, number>();
+    for (const [id, count] of counts) {
+      const session = this.sessions.get(id);
+      if (session && session.status !== "dead" && Number.isFinite(count) && count > 0) {
+        next.set(id, Math.floor(count));
+      }
+    }
+    if (next.size === this.activeDispatchCounts.size
+      && [...next.entries()].every(([id, count]) => this.activeDispatchCounts.get(id) === count)) {
+      return false;
+    }
+    this.activeDispatchCounts.clear();
+    for (const [id, count] of next) this.activeDispatchCounts.set(id, count);
+    return true;
+  }
+
+  getActiveDispatchCounts(): Record<string, number> {
+    const result: Record<string, number> = {};
+    for (const [id, count] of this.activeDispatchCounts) {
+      const session = this.sessions.get(id);
+      if (session && session.status !== "dead" && count > 0) result[id] = count;
+    }
+    return result;
   }
 
   listProjectOrder(): string[] { return [...this.projectOrder]; }
@@ -349,8 +393,15 @@ export class SessionManager {
     if (!tail) return { session: this.get(id)!, seq: session.seq, events: readTranscript(session.transcriptPath) };
     setTranscriptCacheIdle(session.transcriptPath, session.released === true || session.status === "idle");
     const { state, title, titleIsFallback, ...page } = readTranscriptTail(session.transcriptPath);
+    const activeDispatches = session.status === "dead" ? 0 : this.activeDispatchCounts.get(id) ?? 0;
     return {
-      session: { ...cloneSession(session), ...fallbackTitleMetadata(session, this.titles.get(id) ?? (titleIsFallback ? undefined : title)), title: sessionTitle({ ...session, title: this.titles.get(id) ?? title }, undefined), snapshotState: state },
+      session: {
+        ...cloneSession(session),
+        ...fallbackTitleMetadata(session, this.titles.get(id) ?? (titleIsFallback ? undefined : title)),
+        title: sessionTitle({ ...session, title: this.titles.get(id) ?? title }, undefined),
+        ...(activeDispatches > 0 ? { activeDispatchCount: activeDispatches } : {}),
+        snapshotState: state,
+      },
       seq: session.seq,
       ...page,
     };
@@ -576,7 +627,18 @@ export class SessionManager {
       const message = this.normalizeUserMessage(id, input);
       const steer = record.status === "running";
       if (record.status === "starting") throw new Error("会话正在启动，请稍候再发送消息");
-      const receipt = await worker.sendUserMessage(message, { steer });
+      const previousTurnStartedAt = this.turnStartedAt.get(id);
+      if (!steer) this.turnStartedAt.set(id, Date.now());
+      let receipt;
+      try {
+        receipt = await worker.sendUserMessage(message, { steer });
+      } catch (error) {
+        if (!steer) {
+          if (previousTurnStartedAt === undefined) this.turnStartedAt.delete(id);
+          else this.turnStartedAt.set(id, previousTurnStartedAt);
+        }
+        throw error;
+      }
       this.promptedSessions.add(id);
       this.emit(id, "user_message", { ...(clientRequestId ? { clientRequestId } : {}),
         ...(message.text !== undefined ? { text: message.text } : {}),
@@ -584,6 +646,7 @@ export class SessionManager {
         ...(message.mentions?.length ? { mentions: message.mentions } : {}),
         ...(steer ? { steer: true } : {}),
         ...(receipt?.queued ? { queued: true } : {}),
+        ...(receipt?.promptId ? { promptId: receipt.promptId } : {}),
       });
     } finally {
       this.checkingSessions.delete(id);
@@ -923,6 +986,8 @@ export class SessionManager {
     this.pendingMarkReads.delete(id);
     this.pendingGates.delete(id);
     this.titles.delete(id);
+    this.turnStartedAt.delete(id);
+    this.activeDispatchCounts.delete(id);
     const updates = this.partialUpdates.get(id);
     if (updates) for (const update of updates.values()) if (update.timer) clearTimeout(update.timer);
     this.partialUpdates.delete(id);
@@ -1041,7 +1106,8 @@ export class SessionManager {
     if (record.status !== "idle") return `会话当前状态为 ${record.status}，空闲时才能释放`;
     if ((this.pendingGates.get(id)?.size ?? 0) > 0) return "会话有待处理的审批闸门，处理后才能释放";
     // 释放会停掉 worker，连带杀掉它的后台任务（委派的 codex 等）
-    if (record.backgroundTasks?.length) return `会话还有 ${record.backgroundTasks.length} 个后台任务在运行，结束后才能释放`;
+    const activeTasks = (record.backgroundTasks?.length ?? 0) + (this.activeDispatchCounts.get(id) ?? 0);
+    if (activeTasks > 0) return `会话还有 ${activeTasks} 个后台任务在运行，结束后才能释放`;
     if (!record.nativeSessionId) return "会话还没有原生会话 id（首轮完成前），无法释放";
     if (requireWorker && !this.workers.has(id)) return "会话没有活动 worker";
     return null;
@@ -1122,6 +1188,23 @@ export class SessionManager {
     if (!ephemeral && (["tool_call_completed", "permission_request", "turn_completed", "session_error", "process_exited"].includes(type)
       || (type === "tool_call_updated" && payload.inputComplete))) this.flushPartialUpdates(id);
     const timestamp = new Date().toISOString();
+    let eventPayload = payload;
+    if (!ephemeral && type === "user_message" && payload.steer !== true) {
+      const startedAt = Date.parse(timestamp);
+      if (Number.isFinite(startedAt)) this.turnStartedAt.set(id, startedAt);
+    } else if (!ephemeral && type === "turn_completed") {
+      const hasDuration = typeof payload.durationMs === "number" && Number.isFinite(payload.durationMs) && payload.durationMs >= 0;
+      const startedAt = this.turnStartedAt.get(id);
+      if (!hasDuration && startedAt !== undefined) {
+        const endedAt = Date.parse(timestamp);
+        if (Number.isFinite(endedAt)) {
+          eventPayload = { ...payload, durationMs: Math.max(0, endedAt - startedAt) };
+        }
+      }
+    } else if (!ephemeral && (type === "process_exited" || type === "worker_released")) {
+      this.turnStartedAt.delete(id);
+      if (type === "process_exited") this.activeDispatchCounts.delete(id);
+    }
     const event: UnifiedEvent = {
       type,
       sessionId: id,
@@ -1129,7 +1212,7 @@ export class SessionManager {
       seq: ephemeral ? session.seq : session.seq + 1,
       ...(ephemeral ? { ephemeral: true as const } : {}),
       timestamp,
-      payload,
+      payload: eventPayload,
     };
     if (ephemeral) {
       for (const listener of this.listeners) listener(event);

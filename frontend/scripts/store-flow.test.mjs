@@ -1230,6 +1230,91 @@ await t("K11复核：直接发送命令被拒可恢复，断线失败不暂存",
   assert.equal(sent.length, 1, "被拒或断线都不能自动重发");
 });
 
+await t("活跃派单计数：迟到快照与组织更新不得覆盖最新 WS 清零，先到 WS 计数保留给新会话", async () => {
+  const s = new Store();
+  const s1 = { ...makeSession("s-dispatch-1"), activeDispatchCount: 1 };
+  s.sessions = [s1];
+  // 1) 快照在途拿到旧 count=1，途中 WS 清零，快照晚到不得恢复成 1
+  let releaseSnapshot;
+  const previousFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    if (String(url).includes("/snapshot")) {
+      await new Promise((resolve) => { releaseSnapshot = resolve; });
+      return envelope({ session: { ...s1, activeDispatchCount: 1 }, seq: 0, events: [] });
+    }
+    if (String(url).includes("/commands")) return envelope({ commands: [] });
+    throw new Error(`未打桩 ${url}`);
+  };
+  try {
+    const snap = s.resync(s1.id);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    s.handleFrame({ type: "session_dispatches_updated", counts: { "s-dispatch-new": 2 } });
+    assert.equal(s.session(s1.id)?.activeDispatchCount, undefined, "WS 缺失项必须清零");
+    releaseSnapshot();
+    await snap;
+    assert.equal(s.session(s1.id)?.activeDispatchCount, undefined, "迟到快照不得覆盖 WS 清零");
+    // 2) 随后新会话经 session_organization_updated 出现时，继承先前 WS 帧的 count=2，s1 保持清零
+    s.handleFrame({
+      type: "session_organization_updated",
+      sessions: [{ ...s1, activeDispatchCount: 1 }, makeSession("s-dispatch-new")],
+      projectOrder: ["/work"],
+    });
+    assert.equal(s.session(s1.id)?.activeDispatchCount, undefined);
+    assert.equal(s.session("s-dispatch-new")?.activeDispatchCount, 2, "先到 WS 帧的新会话计数不得丢失");
+  } finally {
+    globalThis.fetch = previousFetch;
+  }
+});
+
+await t("WS 断线和强制换连接均使旧派单映射失效，重连的空映射重新成为权威", async () => {
+  const previous = { WebSocket: globalThis.WebSocket, window: globalThis.window, fetch: globalThis.fetch };
+  class Socket {
+    static OPEN = 1;
+    readyState = 1;
+    listeners = new Map();
+    addEventListener(event, callback) { this.listeners.set(event, callback); }
+    close() { this.listeners.get("close")?.(); }
+  }
+  globalThis.WebSocket = Socket;
+  globalThis.window = { location: { protocol: "http:", host: "localhost" } };
+  const s = new Store();
+  const session = makeSession("s-reconnect-dispatch");
+  stubFetch(session);
+  const organization = (summary = session) => s.handleFrame({
+    type: "session_organization_updated", sessions: [summary], projectOrder: [],
+  });
+  const counts = (value) => s.handleFrame({ type: "session_dispatches_updated", counts: value });
+  try {
+    organization();
+    s.connect();
+    counts({ [session.id]: 1 });
+    assert.equal(s.session(session.id)?.activeDispatchCount, 1);
+    let resolveOldRefresh;
+    globalThis.fetch = () => new Promise(resolve => { resolveOldRefresh = resolve; });
+    const oldRefresh = s.refreshSessions();
+    s.socket.close();
+    organization();
+    assert.equal(s.session(session.id)?.activeDispatchCount, undefined, "断线后组织帧不得恢复旧计数");
+
+    s.reconnectNow();
+    resolveOldRefresh(envelope({ sessions: [{ ...session, activeDispatchCount: 1 }] }));
+    await oldRefresh;
+    assert.equal(s.session(session.id)?.activeDispatchCount, undefined, "上条连接发起的迟到 REST 请求不得恢复旧计数");
+    stubFetch(session);
+    counts({ [session.id]: 1 });
+    s.reconnectNow(true);
+    await s.refreshSessions();
+    organization();
+    assert.equal(s.session(session.id)?.activeDispatchCount, undefined, "强制重连后不得恢复旧计数");
+    counts({});
+    organization({ ...session, activeDispatchCount: 1 });
+    assert.equal(s.session(session.id)?.activeDispatchCount, undefined, "新连接的全量空映射必须生效");
+  } finally {
+    clearTimeout(s.reconnectTimer);
+    Object.assign(globalThis, previous);
+  }
+});
+
 await import("./snapshot-paging.test.mjs");
 await import("./session-organization-flow.test.mjs");
 if (!process.exitCode) console.log(`✅ store 流程回归全过（${pass} 例）`);

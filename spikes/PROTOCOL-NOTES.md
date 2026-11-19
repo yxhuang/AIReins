@@ -20,7 +20,7 @@ Codex schema 由本机 `codex app-server generate-json-schema` 导出：TurnStee
 
 清理：Claude 用 `--no-session-persistence`；Codex 用隔离 CODEX_HOME + ephemeral thread，完成后 unsubscribe/退出；Kimi 三个探针会话均先 close 后 session/delete，成功回读见 `kimi.ndjson:146,163,297`（含没有推理的配置预检会话）。
 
-契约：服务端按发送时状态决定插话；已接受的 user_message.payload 带 `steer:true`，Kimi 同时带 `queued:true`。待审批闸门期间统一拒绝发送/插话，拒绝不写 user_message、不调用 CLI。启动中拒绝发送。插话失败不改当前运行状态、不自动另开回合；可重发。Kimi 队列不跨 worker 重启，停止、退出或 RPC 失败会取消并发 session_error 提示；queued 标记记录该消息发送时采用的降级路径。
+契约：服务端按发送时状态决定插话；已接受的 user_message.payload 带 `steer:true`，Kimi 同时带 `queued:true`。待审批闸门期间统一拒绝发送/插话，拒绝不写 user_message、不调用 CLI。启动中拒绝发送。插话失败不改当前运行状态、不自动另开回合；可重发。Kimi 队列不跨 worker 重启，停止、退出或 RPC 失败会发出 `session_error {source:"steer_queue", cancelledPromptIds}`。queued 标记记录该消息发送时采用的降级路径。
 
 ## Claude Remote Control（2026-09-29）
 
@@ -815,6 +815,10 @@ AIReins 仅开放上述白名单操作；错误与读回状态同时返回，旧
 
 真实 Flash low 冒烟通过：首轮仅返回校验串，关闭 worker 后用同一 ID `session/resume`，第二轮仍能复述该串；`agent_message_chunk` 流式到达，`usage_update` 为 `{used,size}`，本机窗口 size=1048576。命令清单包含 compact 和来自共享 Skills 清单的技能。`user_message_chunk` 是 CLI 的输入回显，AIReins 不重复生成 user_message。
 
-共享 ACP runtime 复用 Kimi 的 JSON-RPC、工具/权限/文件/终端闭环；两家单独映射配置 ID、来源标识和默认审批档位。Antigravity 运行中消息直接发送原生 `session/prompt`；2026-11-17 Flash low 实测两个请求都独立返回 `end_turn`，追加要求进入后续回复，因此不能假定第二次发送只有一个总应答。driver 计数所有在途请求，最后一个结束才 idle；Kimi 继续 FIFO。会话 `configSchema` 随启动、配置应答及配置通知传到前端，不再固定使用启动时全局候选。取消会回复未决标准审批为 cancelled，并清除对应 AIReins 闸门。
+共享 ACP runtime 复用 Kimi 的 JSON-RPC、工具/权限/文件/终端闭环；两家单独映射配置 ID、来源标识和默认审批档位。Antigravity 运行中消息直接发送原生 `session/prompt`；2026-11-17 Flash low 实测两个请求都独立返回 `end_turn`，追加要求进入后续回复，因此不能假定第二次发送只有一个总应答。driver 计数所有在途请求，最后一个结束才 idle。Antigravity 与 Kimi 由 AIReins 为每次发送分配 `promptId`，写入发送、完成或失败事件，可在 ACP 响应倒序时独立结算耗时。Kimi 继续 FIFO。会话 `configSchema` 随启动、配置应答及配置通知传到前端，不再固定使用启动时全局候选。取消会回复未决标准审批为 cancelled，并清除对应 AIReins 闸门。
 
 11-17 真实 Flash low 补验：文件工具写入成功；图片附件识别出 3 个红圆；原生 `/compact` 完成，随后仍能复述写入校验串；CLI 命令清单有 44 项、含共享 `refine-prompt`，未出现 OneSkill 旧备份命令。两次定向写入（工作区内及隔离目录外的指定测试文件）均未触发权限请求，因此真实审批卡仍待验；协议审批回归继续通过。真实浏览器/手机操作未执行，不把自动化映射检查当作真实页面验收。原生历史导入和原生单会话删除暂未接入，现有 native JSONL reader 明确跳过 Antigravity。
+
+11-19 真实 1.5.12 委派 Codex 会话抓包观察：后台 `run_command`（如 `delegate codex`）在 `tool_call` 进入 `in_progress` 后，模型停止调工具等待完成时，`session/prompt` 会提前返回 `{stopReason:"end_turn", usage:{...}}`（此时该 `tool_call` 尚未 `completed`，且返回体无 `duration_ms` 字段）。后台命令完成后，CLI 在无新 `session/prompt` 下推送 `tool_call_update(status:"completed")`，并在数秒至二十余秒后自动唤醒（reactive wakeup）继续推送 `agent_thought_chunk` / `tool_call` / `agent_message_chunk`，每步结束均发送 `usage_update` 且不再返回新的 `turn_completed`。`invoke_subagent` 启动调用本身在 ~1–2 秒即返回 `completed` 且空 `content`，无独立子代理完成协议帧，子代理完成后经同一 reactive wakeup 路径唤醒主会话。AIReins 据此在 `AcpDriver`（仅 `antigravity`）维护在途工具、原生子代理有界保活（15 分钟上限）与「等待唤醒 / 已唤醒」两阶段收尾窗口并通过 `backgroundTasks` 保活，中断后建立失效边界屏蔽迟到通知，同时通过 `countActiveDispatchesBySession` 补充跨进程 `delegate` 运行态计数。
+
+AIReins 按启动工具 ID 和各自到期时间记录原生子代理。子代理开始唤醒时固定要结算的条目，以免条目到期后误移除还在运行的子代理。ACP 唤醒帧没有子代理 ID，仍有待回报条目时优先把无法归属的唤醒记入已到期且未回报的条目。独立后台工具唤醒不消耗子代理条目。后台工具唤醒宽限跨并发 prompt 和等待期间新开的 prompt 保留原截止时刻，即使新 prompt 的 RPC 失败也继续等待。中断时 AIReins 为仍在途的工具补发 `tool_call_completed`，状态为 `cancelled`。工具进入终态后按工具 ID 过滤迟到通知及重复终态，直到 TTL 到期。

@@ -651,7 +651,9 @@ function Exit-Workbench {
                 if ($null -eq $session.status) { throw (T '会话状态字段缺失，暂不停止服务。' 'The session status field is missing; the service was not stopped.') }
             }
             # 先判非空：PowerShell 5.1 里 @($null).Count 是 1，缺字段（旧服务）会被误算成有后台任务
-            $running = @($sessions | Where-Object { $_.status -eq 'running' -or ($_.backgroundTasks -and @($_.backgroundTasks).Count -gt 0) }).Count
+            $running = @($sessions | Where-Object {
+                $_.status -eq 'running' -or ($_.backgroundTasks -and @($_.backgroundTasks).Count -gt 0) -or ($null -ne $_.activeDispatchCount -and [int]$_.activeDispatchCount -gt 0)
+            }).Count
         } catch {
             # 仅连接拒绝视为服务不在；超时、HTTP/格式错误交给下面的确认框。
             $cause = $_.Exception

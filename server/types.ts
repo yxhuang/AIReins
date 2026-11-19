@@ -34,7 +34,7 @@ export interface RemoteControlState {
   sessionUrl?: string;
   reason?: string;
 }
-/** Claude 的后台任务（后台 Bash、后台子代理等），来自 CLI 的 system/background_tasks_changed 全量清单。 */
+/** 会话后台任务（Claude 的 system/background_tasks_changed，或 Antigravity 的在途后台工具与自动唤醒续跑）。 */
 export interface BackgroundTask {
   id: string;
   type: string;
@@ -129,7 +129,9 @@ export interface SendUserMessageOptions {
 
 export interface SendUserMessageReceipt {
   /** Kimi 不支持当前回合插话：已接收至 worker 内存队列。 */
-  queued: true;
+  queued?: true;
+  /** 独立执行请求 ID（Antigravity / Kimi），用于精确配对并发或排队回合的耗时。 */
+  promptId?: string;
 }
 
 export interface UnifiedEvent {
@@ -214,8 +216,10 @@ export interface SessionRecord {
   configSchema?: DriverConfigSchema;
   riskyMode: boolean;
   remoteControl?: RemoteControlState;
-  /** 仅 Claude：worker 当前的后台任务；非空时会话虽 idle 仍在干活。不跨 worker 保留。 */
+  /** worker 当前的后台任务（Claude 后台任务 / Antigravity 在途后台工具与自动唤醒）；非空时会话虽 idle 仍在干活。不跨 worker 保留。 */
   backgroundTasks?: BackgroundTask[];
+  /** 运行中归属于本会话的外部派单与原生子代理数（纯运行时计算，不落盘）。 */
+  activeDispatchCount?: number;
 }
 
 export interface DriverCapabilities {

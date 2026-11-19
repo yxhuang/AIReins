@@ -1889,6 +1889,38 @@ body.resizing {
   text-align: center;
 }
 
+/* 单回合 AI 回答用时：贴在回合末项下方，克制不抢正文视觉权重 */
+.turn-duration {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding-left: 30px;
+  margin-top: -4px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+  user-select: none;
+}
+.user-block + .turn-duration {
+  margin-top: 0;
+}
+.turn-duration-icon {
+  flex: 0 0 auto;
+  opacity: 0.78;
+}
+.turn-duration-live {
+  color: var(--text-muted);
+}
+.turn-duration-pulse {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--dot-working);
+  animation: timeline-pulse 1.2s ease-in-out infinite;
+  flex: 0 0 auto;
+}
+
 .system-error { color: var(--danger); }
 .system-created { opacity: 0.65; }
 
@@ -3161,7 +3193,7 @@ body.resizing {
 
 /* 减少动态：关光标闪烁、徽标脉冲与浮层动画 */
 @media (prefers-reduced-motion: reduce) {
-  .cursor, .gate-badge, .settings-panel, .cmd-panel, .cfg-menu, .attach-menu, .row-menu, .timeline-item.timeline-running::before { animation: none; }
+  .cursor, .gate-badge, .settings-panel, .cmd-panel, .cfg-menu, .attach-menu, .row-menu, .timeline-item.timeline-running::before, .turn-duration-pulse { animation: none; }
   .segmented-slider { transition: none; }
 }
 
@@ -3843,6 +3875,7 @@ body.resizing {
   .composer { padding-inline: 10px; }
   .stream { padding-inline: 10px; }
   .timeline-item { padding-left: 13px; }
+  .turn-duration { padding-left: 13px; }
   .timeline-item::before { left: 1px; }
   .timeline-item.timeline-continues::after { left: 4px; }
   .tool-head { min-height: 40px; padding-block: 9px; }

@@ -601,8 +601,10 @@ const SessionRow = memo(function SessionRow({
   const [confirming, setConfirming] = useState(false);
   const [permanently, setPermanently] = useState(false);
   const [busy, setBusy] = useState(false);
-  // 主回合已结束但还有后台任务（委派的 codex 等）在跑：仍算「正在工作」
-  const backgroundBusy = session.status === "idle" && (session.backgroundTasks?.length ?? 0) > 0;
+  // 主回合已结束但还有后台任务或运行中子任务/派单在跑：仍算「正在工作」
+  const backgroundTaskCount = session.backgroundTasks?.length ?? 0;
+  const activeDispatchCount = session.activeDispatchCount ?? 0;
+  const backgroundBusy = session.status === "idle" && (backgroundTaskCount > 0 || activeDispatchCount > 0);
   const [error, setError] = useState<string | null>(null);
   const rowRef = useRef<HTMLButtonElement>(null);
   const cancelBtnRef = useRef<HTMLButtonElement>(null);
@@ -935,16 +937,33 @@ const SessionRow = memo(function SessionRow({
               !
             </span>
           )}
-          {dot && (
-            <span
-              className={`status-dot status-${dot}`}
-              role="img"
-              aria-label={backgroundBusy ? t("ui.Sidebar.background_tasks", { p0: (session.backgroundTasks!.length) }) : STATUS_LABELS[session.status] ?? session.status}
-              title={backgroundBusy
-                ? t("ui.Sidebar.background_tasks_2", { p0: (session.backgroundTasks!.length), p1: (session.backgroundTasks!.map((task) => task.description || task.type).join("；")) })
-                : STATUS_HINTS[session.status] ?? session.status}
-            />
-          )}
+          {dot && (() => {
+            const bgDescriptions = (session.backgroundTasks ?? []).map((task) =>
+              task.id === "antigravity:reactive" && task.description === "reactive_wakeup"
+                ? t("ui.Sidebar.reactive_wakeup_task")
+                : task.id === "antigravity:subagent" && task.description === "subagent_pending"
+                  ? t("ui.Sidebar.subagent_pending_task")
+                  : (task.description || task.type),
+            );
+            const bgLabel = backgroundTaskCount > 0 ? t("ui.Sidebar.background_tasks", { p0: backgroundTaskCount }) : "";
+            const bgTitle = backgroundTaskCount > 0
+              ? t("ui.Sidebar.background_tasks_2", { p0: backgroundTaskCount, p1: bgDescriptions.join("；") }) : "";
+            const dispatchLabel = activeDispatchCount > 0 ? t("ui.Sidebar.active_dispatches", { p0: activeDispatchCount }) : "";
+            const dotAriaLabel = backgroundBusy
+              ? (bgLabel && dispatchLabel ? t("ui.Sidebar.background_and_dispatches", { p0: bgLabel, p1: dispatchLabel }) : (bgLabel || dispatchLabel))
+              : STATUS_LABELS[session.status] ?? session.status;
+            const dotTitle = backgroundBusy
+              ? (bgTitle && dispatchLabel ? t("ui.Sidebar.background_and_dispatches", { p0: bgTitle, p1: dispatchLabel }) : (bgTitle || dispatchLabel))
+              : STATUS_HINTS[session.status] ?? session.status;
+            return (
+              <span
+                className={`status-dot status-${dot}`}
+                role="img"
+                aria-label={dotAriaLabel}
+                title={dotTitle}
+              />
+            );
+          })()}
           <span className="row-time" title={relativeTime(session.lastActivityAt, now)}>
             {relativeTimeShort(session.lastActivityAt, now)}
           </span>

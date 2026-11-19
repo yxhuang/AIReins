@@ -1,9 +1,10 @@
 import { t } from "./i18n";
 import type { SessionRecord } from "./types";
 
-/** 与托盘 Exit-Workbench 相同：同一会话同时 running / 有后台任务只计一次。 */
-export function restartBusyCount(sessions: Pick<SessionRecord, "status" | "backgroundTasks">[]): number {
-  return sessions.filter((session) => session.status === "running" || (session.backgroundTasks?.length ?? 0) > 0).length;
+/** 与托盘 Exit-Workbench 相同：同一会话同时 running / 有后台任务 / 有运行中派单只计一次。 */
+export function restartBusyCount(sessions: Pick<SessionRecord, "status" | "backgroundTasks" | "activeDispatchCount">[]): number {
+  return sessions.filter((session) => session.status === "running"
+    || (session.backgroundTasks?.length ?? 0) > 0 || (session.activeDispatchCount ?? 0) > 0).length;
 }
 
 interface ConnectionSource {

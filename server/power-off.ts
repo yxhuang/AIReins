@@ -19,9 +19,9 @@ export interface PowerOffStatus {
 }
 
 /** 比重启的 restartBusyCount 多算 starting：发送前重建 worker、新建会话时短暂处于该状态，不能被当成已完成。 */
-export function busySessionCount(sessions: Pick<SessionRecord, "status" | "backgroundTasks">[]): number {
+export function busySessionCount(sessions: Pick<SessionRecord, "status" | "backgroundTasks" | "activeDispatchCount">[]): number {
   return sessions.filter((session) => session.status === "running" || session.status === "starting"
-    || (session.backgroundTasks?.length ?? 0) > 0).length;
+    || (session.backgroundTasks?.length ?? 0) > 0 || (session.activeDispatchCount ?? 0) > 0).length;
 }
 
 /**
@@ -29,8 +29,10 @@ export function busySessionCount(sessions: Pick<SessionRecord, "status" | "backg
  * 过了生效时刻 graceMs 还活着，说明关机没发生（如在 Windows 侧被取消），回到 idle 并带错误。
  * ponytail: 等待状态只在内存，AIReins 重启即丢失；需要跨重启再落盘。
  */
-export function createPowerOff({ busy, run, pollMs = 5000, delayMs = 60_000, graceMs = 60_000, now = Date.now }: {
+export function createPowerOff({ busy, checkBusy, run, pollMs = 5000, delayMs = 60_000, graceMs = 60_000, now = Date.now }: {
   busy: () => number;
+  /** 实际排定关机前的新鲜异步检查（可绕过缓存）；失败时保守按繁忙处理不放行。 */
+  checkBusy?: () => Promise<number>;
   run: (args: string[]) => Promise<unknown>;
   pollMs?: number;
   delayMs?: number;
@@ -41,6 +43,7 @@ export function createPowerOff({ busy, run, pollMs = 5000, delayMs = 60_000, gra
   let error: string | undefined;
   let deadline: number | undefined;
   let timer: NodeJS.Timeout | undefined;
+  let polling = false;
   // 所有操作排队串行：取消一定等前一个排定命令落地再 abort，并发的取消/重新请求看到的都是落定后的状态。
   let queue: Promise<unknown> = Promise.resolve();
   const serial = <T>(op: () => Promise<T>): Promise<T> => {
@@ -49,6 +52,11 @@ export function createPowerOff({ busy, run, pollMs = 5000, delayMs = 60_000, gra
     return next;
   };
   const stopWaiting = () => { clearInterval(timer); timer = undefined; };
+  const liveBusy = async (): Promise<number> => {
+    if (!checkBusy) return busy();
+    try { return await checkBusy(); }
+    catch { return Math.max(1, busy()); }
+  };
   const status = (): PowerOffStatus => {
     if (state === "scheduled" && deadline !== undefined && now() > deadline + graceMs) {
       state = "idle";
@@ -75,11 +83,17 @@ export function createPowerOff({ busy, run, pollMs = 5000, delayMs = 60_000, gra
     request: () => serial(async (): Promise<PowerOffStatus> => {
       if (state !== "idle") return status();
       error = undefined;
-      if (busy() === 0) await fire();
+      if (await liveBusy() === 0) await fire();
       else {
         state = "waiting";
         timer = setInterval(() => {
-          if (busy() === 0) void serial(async () => { if (state === "waiting") await fire(); });
+          if (polling) return;
+          polling = true;
+          void serial(async () => {
+            try {
+              if (state === "waiting" && await liveBusy() === 0) await fire();
+            } finally { polling = false; }
+          });
         }, pollMs);
       }
       return status();

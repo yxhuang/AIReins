@@ -10,7 +10,7 @@ What AIReins is designed for:
 - **Loopback only.** Both listeners bind to `127.0.0.1`. The local entry (default port 8790) serves the browser on the same computer. The optional remote entry (`~/.workbench/remote.json`) is reached only through [Tailscale Serve](https://tailscale.com/kb/1312/serve), which forwards from your tailnet to loopback.
 - **Who can connect remotely.** A remote request must carry the `Tailscale-User-Login` header that Serve injects (Serve strips any client-supplied copy), and the login must be listed in `allowedLogins`. Write requests and WebSocket handshakes must also carry an `Origin` that exactly matches the configured origin.
 - **Browser attacks.** Every request is checked against a Host allowlist (blocks DNS rebinding). On the local entry, write requests and WebSocket handshakes that carry an `Origin` must come from a local AIReins page (blocks cross-site request forgery and WebSocket hijacking). AIReins's own frontend is served with `X-Frame-Options: DENY` and `frame-ancestors 'none'`; extension pages under `/pages/` keep their upstream headers.
-- **Remote terminal is opt-in.** The free-form terminal is available on the remote entry only when `remote.json` sets `"terminal": true`.
+- **Remote terminal is opt-in.** The free-form terminal is available on the remote entry only when `remote.json` sets `"terminal": true`. Local users and allowlisted Tailscale users can change that field in Settings → Host. Remote changes require the same Host, Origin, and Tailscale identity checks as other writes.
 
 What AIReins does **not** protect against:
 

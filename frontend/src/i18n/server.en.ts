@@ -6,6 +6,8 @@ const messages: Record<string, string> = {
   "server.codexResetAckSaveFailed": "Could not save the reset acknowledgement. Please try again.",
   "server.codexResetAckId": "id must be a non-empty string (up to 256 characters)",
   "server.codexResetWatchBoolean": "codexResetWatch must be a boolean",
+  "server.remoteTerminalNotConfigured": "Remote access is not configured on this host",
+  "server.remoteTerminalConfigChanged": "The remote access configuration changed. Restart AIReins before toggling the remote terminal.",
   "server.message000": "Host is not in the {p0} allowlist: {p1}",
   "server.message001": "Local",
   "server.message002": "Remote",

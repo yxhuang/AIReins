@@ -593,6 +593,8 @@ const dictionary: Record<string, string> = {
   "ui.SelfUpdate.built": "Build complete",
   "ui.SelfUpdate.tray_restart_needed": "The Windows tray files were updated. When idle, exit the tray and reopen it to apply them. Exiting the tray stops every session.",
   "ui.SettingsMenu.host": "Host",
+  "ui.SettingsMenu.remote_terminal": "Remote terminal",
+  "ui.SettingsMenu.remote_terminal_hint": "Allowlisted Tailscale accounts can run shell commands on this host when enabled. Changes take effect immediately.",
   "ui.SettingsMenu.hosts_and_connections": "Hosts and connections",
   "ui.SettingsMenu.cancel_shutdown_waiting_for_sessions": "Cancel shutdown (waiting for {p0, plural, one {# session} other {# sessions}})",
   "ui.SettingsMenu.cancel_shutdown": "Cancel shutdown",
@@ -970,6 +972,15 @@ const dictionary: Record<string, string> = {
   "ui.UsageView.err_http_status": "Upstream returned HTTP {status}",
   "ui.UsageView.err_parse": "Failed to parse usage response",
   "ui.UsageView.err_internal": "Internal probe error; please retry shortly",
-  "ui.UsageView.err_unknown": "Unknown error"
+  "ui.UsageView.err_unknown": "Unknown error",
+  "ui.Sidebar.reactive_wakeup_task": "Waiting for subagent or background continuation",
+  "ui.Sidebar.subagent_pending_task": "Waiting for subagent to finish",
+  "ui.Sidebar.active_dispatches": "{p0, plural, one {# running subagent or dispatch} other {# running subagents or dispatches}}",
+  "ui.Sidebar.background_and_dispatches": "{p0}; {p1}",
+  "ui.StreamItems.turn_duration": "Took {duration}",
+  "ui.StreamItems.turn_duration_live": "Working · {duration}",
+  "ui.StreamItems.turn_duration_title": "Turn response time: {duration} ({start} → {end})",
+  "ui.StreamItems.turn_duration_title_api": "Turn response time: {duration} ({start} → {end}, model API {api})",
+  "ui.StreamItems.turn_duration_live_title": "Turn started at {start}; elapsed {duration}"
 };
 export default dictionary;

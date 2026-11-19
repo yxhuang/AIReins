@@ -773,6 +773,10 @@ export class ClaudeDriver extends BaseDriver {
         result: message.result,
         isError: Boolean(message.is_error),
         stopReason: message.stop_reason,
+        ...(typeof message.duration_ms === "number" && Number.isFinite(message.duration_ms) && message.duration_ms >= 0
+          ? { durationMs: Math.round(message.duration_ms) } : {}),
+        ...(typeof message.duration_api_ms === "number" && Number.isFinite(message.duration_api_ms) && message.duration_api_ms >= 0
+          ? { apiDurationMs: Math.round(message.duration_api_ms) } : {}),
         ...(interrupted ? { interrupted: true } : {}),
       });
       // 未回显的插话会由 CLI 紧接着另起一轮跑，保持 running：误判 idle 时下一次发送会走

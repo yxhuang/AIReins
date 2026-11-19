@@ -8,6 +8,7 @@ import type {
   ThoughtBlock,
   ToolGroupView,
   ToolView,
+  TurnTiming,
   UserBlock,
 } from "../render-items";
 import {
@@ -27,7 +28,7 @@ import { useStore } from "../useStore";
 import { uploadsFileUrl } from "../api";
 import type { AgentKind, ImageMention } from "../types";
 import { summarizeTool, type ToolSummary } from "../tool-summary";
-import { asRecord } from "../format";
+import { asRecord, formatClockTime, formatTurnDuration } from "../format";
 import { fileRoot } from "../file-preview";
 import { DiffView, lineDiff } from "./DiffView";
 import { MarkdownMessage, UserMessageText } from "./MarkdownMessage";
@@ -87,14 +88,21 @@ function MentionImage({ mention }: { mention: ImageMention }) {
   );
 }
 
-export const TextBlockView = memo(function TextBlockView({ item, streaming, cwd, sessionId }: { item: TextBlock; streaming: boolean; cwd?: string; sessionId?: string }) {
+export const TextBlockView = memo(function TextBlockView({ item, streaming, showCursor = streaming, cwd, sessionId }: {
+  item: TextBlock; streaming: boolean; showCursor?: boolean; cwd?: string; sessionId?: string;
+}) {
   return (
     <div className="text-block">
       <MarkdownMessage text={item.text} streaming={streaming} cwd={cwd} sessionId={sessionId} />
-      {streaming && <span className="cursor" aria-hidden="true">▍</span>}
+      {showCursor && <span className="cursor" aria-hidden="true">▍</span>}
     </div>
   );
-}, (previous, next) => previous.item.text === next.item.text && previous.streaming === next.streaming && previous.cwd === next.cwd && previous.sessionId === next.sessionId);
+}, (previous, next) =>
+  previous.item.text === next.item.text
+  && previous.streaming === next.streaming
+  && (previous.showCursor ?? previous.streaming) === (next.showCursor ?? next.streaming)
+  && previous.cwd === next.cwd
+  && previous.sessionId === next.sessionId);
 
 export const ThoughtBlockView = memo(function ThoughtBlockView({ item }: { item: ThoughtBlock }) {
   const [open, setOpen] = useState(false);
@@ -548,6 +556,50 @@ export function RawLine({ item }: { item: RawBlock }) {
       <button type="button" className="raw-head" onClick={() => setOpen((v) => !v)}>
         <span className="chevron">{open ? "▾" : "▸"}</span>{t("ui.StreamItems.debug_event")}</button>
       {open && <pre className="code-block">{item.text}</pre>}
+    </div>
+  );
+}
+
+function TurnClockIcon() {
+  return (
+    <svg className="turn-duration-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <circle cx="12" cy="12" r="9" />
+      <path d="M12 7v5l3 2" />
+    </svg>
+  );
+}
+
+/** 单回合已完成的 AI 回答耗时（接收标量 props，避免可变对象引用别名干扰 memo，不订阅全局秒表）。 */
+export const TurnDurationMeta = memo(function TurnDurationMeta({
+  durationMs, startedAtMs, endedAtMs, apiDurationMs,
+}: Pick<TurnTiming, "durationMs" | "startedAtMs" | "endedAtMs" | "apiDurationMs">) {
+  const duration = formatTurnDuration(durationMs);
+  const start = formatClockTime(startedAtMs);
+  const end = formatClockTime(endedAtMs);
+  const title = apiDurationMs !== undefined
+    ? t("ui.StreamItems.turn_duration_title_api", { duration, start, end, api: formatTurnDuration(apiDurationMs) })
+    : t("ui.StreamItems.turn_duration_title", { duration, start, end });
+  return (
+    <div className="turn-duration" title={title}>
+      <TurnClockIcon />
+      <span className="turn-duration-text">{t("ui.StreamItems.turn_duration", { duration })}</span>
+    </div>
+  );
+});
+
+const selectClockNow = (value: { now: number }) => value.now;
+
+/** 进行中回合的实时耗时（含后台任务/子代理等待期）；仅本小条订阅 store.now，不设 live region 避免每秒读屏。 */
+export function LiveTurnDuration({ startedAtMs }: { startedAtMs: number }) {
+  const now = useStore(selectClockNow);
+  const elapsedMs = Math.max(0, now - startedAtMs);
+  const duration = formatTurnDuration(elapsedMs);
+  const start = formatClockTime(startedAtMs);
+  return (
+    <div className="turn-duration turn-duration-live" title={t("ui.StreamItems.turn_duration_live_title", { start, duration })}>
+      <span className="turn-duration-pulse" aria-hidden="true" />
+      <TurnClockIcon />
+      <span className="turn-duration-text">{t("ui.StreamItems.turn_duration_live", { duration })}</span>
     </div>
   );
 }

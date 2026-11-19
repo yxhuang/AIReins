@@ -1,8 +1,9 @@
-import { readFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import { readFileSync, realpathSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import type { IncomingHttpHeaders } from "node:http";
 import { log } from "./logger.js";
 
-/** ~/.workbench/remote.json：手机经 Tailscale Serve 访问的入口配置（用户手写，server 只读）。 */
+/** ~/.workbench/remote.json：Tailscale Serve 入口配置，设置菜单只更新 terminal。 */
 export interface RemoteConfig {
   /** 远程专用监听端口：同样只 bind 127.0.0.1，由 tailscale serve 转发进来 */
   port: number;
@@ -77,13 +78,18 @@ export function loadRemoteConfig(path: string, localPort: number): RemoteConfig 
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
     throw error;
   }
+  return parseRemoteConfig(text, path, localPort).config;
+}
+
+function parseRemoteConfig(text: string, path: string, localPort: number) {
   let value: unknown;
   try {
     value = JSON.parse(text);
   } catch {
     throw new Error(`${path} 不是有效 JSON`);
   }
-  const { port, origin, allowedLogins, terminal } = (value ?? {}) as Record<string, unknown>;
+  const data = (value ?? {}) as Record<string, unknown>;
+  const { port, origin, allowedLogins, terminal } = data;
   if (typeof port !== "number" || !Number.isInteger(port) || port < 1 || port > 65_535 || port === localPort) {
     throw new Error(`${path}：port 必须是 1–65535 的整数，且不能等于本机端口 ${localPort}`);
   }
@@ -100,10 +106,33 @@ export function loadRemoteConfig(path: string, localPort: number): RemoteConfig 
   if (terminal !== undefined && typeof terminal !== "boolean") {
     log("warn", "remote.json terminal 类型无效，终端保持关闭", { path });
   }
-  return {
+  const config: RemoteConfig = {
     port, origin, allowedLogins,
     ...(terminal !== undefined ? { terminal: terminal === true } : {}),
   };
+  return { config, data };
+}
+
+export function saveRemoteTerminal(path: string, localPort: number, active: RemoteConfig, enabled: boolean): boolean {
+  const target = realpathSync(path);
+  const { config: current, data } = parseRemoteConfig(readFileSync(target, "utf8"), path, localPort);
+  // 监听仍使用启动时的访问规则。配置另有改动时，先重启以免旧白名单修改新入口。
+  if (current.port !== active.port || current.origin !== active.origin ||
+      JSON.stringify(current.allowedLogins) !== JSON.stringify(active.allowedLogins)) return false;
+
+  if (data.terminal === enabled) return true;
+  data.terminal = enabled;
+  const temporary = `${target}.${randomUUID()}.tmp`;
+  try {
+    writeFileSync(temporary, `${JSON.stringify(data, null, 2)}\n`, { mode: 0o600, flag: "wx" });
+    renameSync(temporary, target);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "EEXIST") {
+      try { unlinkSync(temporary); } catch { /* preserve the original error */ }
+    }
+    throw error;
+  }
+  return true;
 }
 
 /** https://<机器名>.<tailnet>.ts.net 这种规范写法（tailscale serve 只给 ts.net 域名签证书）。 */

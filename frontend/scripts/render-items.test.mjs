@@ -7,7 +7,11 @@ import { strict as assert } from "node:assert";
 await import("./codex-commands.test.mjs");
 
 // 用 tsx 把 TS 模块加载进来
-const { buildRenderItems, buildHistoryRenderItems, createRenderItemsBuilder, focusVisible, groupReadOnlyTools, gateFromEvent, promptCacheExpiry } = await import("../src/render-items.ts");
+const { buildRenderItems, buildHistoryRenderItems, buildHistoryTurnTimings, createRenderItemsBuilder, focusVisible, groupReadOnlyTools, gateFromEvent, promptCacheExpiry } = await import("../src/render-items.ts");
+const { formatTurnDuration } = await import("../src/format.ts");
+const { sidebarStatusDot } = await import("../src/sidebar-sessions.ts");
+const { restartBusyCount } = await import("../src/restart.ts");
+const { showComposerInterrupt } = await import("../src/session-ui.ts");
 const {
   filterCommands,
   isSubsequence,
@@ -765,6 +769,230 @@ t("external history accepts old text events and new mixed tool events", () => {
   assert.deepEqual(items[1].messages.map(m => m.role), ["user", "tool", "assistant"]);
   assert.equal(items[1].messages[1].tool.result, "/repo");
   assert.equal(items[1].truncated, true);
+});
+
+t("formatTurnDuration 与每回合耗时计算（含旧 transcript、Claude API 耗时及 Antigravity 续跑延展）", () => {
+  assert.equal(formatTurnDuration(420), "0.4s");
+  assert.equal(formatTurnDuration(3260), "3.3s");
+  assert.equal(formatTurnDuration(42_400), "42s");
+  assert.equal(formatTurnDuration(135_000), "2m 15s");
+  assert.equal(formatTurnDuration(3_912_000), "1h 5m 12s");
+
+  const at = (seq, type, timestamp, payload = {}) => ({
+    type, sessionId: "s1", agentId: "s1", seq, timestamp, payload,
+  });
+  // 1) Claude 原生 durationMs + apiDurationMs；2) 旧记录无 durationMs 按时间戳差计算
+  const claudeBuilder = createRenderItemsBuilder("claude");
+  const claudeEvents = [
+    at(1, "user_message", "2026-11-19T08:00:00.000Z", { text: "第一问" }),
+    at(2, "agent_text_delta", "2026-11-19T08:00:08.000Z", { text: "第一答" }),
+    at(3, "turn_completed", "2026-11-19T08:00:12.000Z", { subtype: "success", durationMs: 11800, apiDurationMs: 6400 }),
+    at(4, "user_message", "2026-11-19T08:01:00.000Z", { text: "第二问" }),
+    at(5, "agent_text_delta", "2026-11-19T08:01:25.000Z", { text: "第二答" }),
+    at(6, "turn_completed", "2026-11-19T08:01:30.000Z", { subtype: "success" }),
+  ];
+  claudeBuilder.update(claudeEvents);
+  const shown = claudeBuilder.display(false, "/work");
+  assert.equal(claudeBuilder.itemUserTurn(shown[1]), 1);
+  assert.equal(claudeBuilder.itemUserTurn(shown[3]), 2);
+  assert.equal(claudeBuilder.turnTiming(1)?.durationMs, 11800);
+  assert.equal(claudeBuilder.turnTiming(1)?.apiDurationMs, 6400);
+  assert.equal(claudeBuilder.turnTiming(2)?.durationMs, 30_000);
+
+  // 3) Antigravity reactive wakeup 在 turn_completed 之后继续输出，总耗时应推算到最后一条活动事件，且不可变替换 TurnTiming
+  const agBuilder = createRenderItemsBuilder("antigravity");
+  const agBase = [
+    at(1, "user_message", "2026-11-19T08:10:00.000Z", { text: "派给 Codex 复核" }),
+    at(2, "tool_call_started", "2026-11-19T08:10:05.000Z", { toolCallId: "t1", toolName: "delegate codex" }),
+    at(3, "turn_completed", "2026-11-19T08:10:30.000Z", { stopReason: "end_turn", durationMs: 30_000 }),
+  ];
+  agBuilder.update(agBase);
+  const beforeWake = agBuilder.turnTiming(1);
+  assert.equal(beforeWake?.durationMs, 30_000);
+  // 单独迟到一条 usage_updated 不应启动续跑延长
+  agBase.push(at(4, "usage_updated", "2026-11-19T08:11:00.000Z", { used: 90, size: 1000 }));
+  agBuilder.update(agBase);
+  assert.equal(agBuilder.turnTiming(1)?.durationMs, 30_000, "单条迟到 usage_updated 不得改写已完成用时");
+  agBase.push(
+    at(5, "tool_call_completed", "2026-11-19T08:12:00.000Z", { toolCallId: "t1", status: "completed" }),
+    at(6, "agent_text_delta", "2026-11-19T08:12:20.000Z", { text: "复核完成" }),
+    at(7, "usage_updated", "2026-11-19T08:12:25.000Z", { used: 100, size: 1000 }),
+  );
+  agBuilder.update(agBase);
+  const agShown = agBuilder.display(false, "/work");
+  assert.equal(agBuilder.itemUserTurn(agShown.at(-1)), 1, "reactive wakeup 续跑归属同一用户回合");
+  assert.notEqual(agBuilder.turnTiming(1), beforeWake, "增量更新必须返回新 TurnTiming 对象引用");
+  assert.equal(agBuilder.turnTiming(1)?.extendedAfterComplete, true);
+  assert.equal(agBuilder.turnTiming(1)?.durationMs, 145_000);
+
+  // 4) 迟到工具完成按原回合归属，不串到新一回合；Claude 迟到 usage_updated 不覆盖原生 durationMs
+  const crossBuilder = createRenderItemsBuilder("claude");
+  crossBuilder.update([
+    at(1, "user_message", "2026-11-19T08:20:00.000Z", { text: "问1" }),
+    at(2, "tool_call_started", "2026-11-19T08:20:01.000Z", { toolCallId: "old-tool", toolName: "Bash" }),
+    at(3, "turn_completed", "2026-11-19T08:20:10.000Z", { subtype: "success", durationMs: 9500 }),
+    at(4, "usage_updated", "2026-11-19T08:20:15.000Z", { usage: {} }),
+    at(5, "user_message", "2026-11-19T08:21:00.000Z", { text: "问2" }),
+    at(6, "tool_call_completed", "2026-11-19T08:21:02.000Z", { toolCallId: "old-tool", result: "done" }),
+  ]);
+  assert.equal(crossBuilder.turnTiming(1)?.durationMs, 9500, "Claude 迟到 usage_updated 不得覆盖原生 durationMs");
+  assert.equal(crossBuilder.turnTiming(2)?.hasResponse, false, "上一回合迟到的工具完成不得误算作新回合响应");
+
+  // 5) Kimi FIFO 排队消息按独立回合各自计时
+  const kimiBuilder = createRenderItemsBuilder("kimi");
+  kimiBuilder.update([
+    at(1, "user_message", "2026-11-19T08:30:00.000Z", { text: "第一条" }),
+    at(2, "agent_text_delta", "2026-11-19T08:30:05.000Z", { text: "第一答" }),
+    at(3, "user_message", "2026-11-19T08:30:06.000Z", { text: "排队第二条", steer: true, queued: true }),
+    at(4, "turn_completed", "2026-11-19T08:30:10.000Z", { stopReason: "end_turn", durationMs: 10_000 }),
+    at(5, "agent_text_delta", "2026-11-19T08:30:14.000Z", { text: "第二答" }),
+    at(6, "turn_completed", "2026-11-19T08:30:18.000Z", { stopReason: "end_turn", durationMs: 8_000 }),
+  ]);
+  assert.equal(kimiBuilder.turnTiming(1)?.durationMs, 10_000);
+  assert.equal(kimiBuilder.turnTiming(2)?.durationMs, 8_000);
+
+  // 6) 历史消息按时间戳推算回合耗时
+  const histTimings = buildHistoryTurnTimings([
+    { role: "user", text: "q1", timestamp: "2026-11-19T09:00:00.000Z" },
+    { role: "assistant", text: "a1", timestamp: "2026-11-19T09:00:18.500Z" },
+  ]);
+  assert.equal(histTimings.get(1)?.durationMs, 18_500);
+});
+
+t("Antigravity 并发 prompt 倒序完成时按 promptId 记录各回合耗时", () => {
+  const builder = createRenderItemsBuilder("antigravity");
+  builder.update([
+    ev(1, "user_message", { text: "A", promptId: "a" }),
+    ev(2, "agent_text_delta", { text: "开始回答 A" }),
+    ev(3, "user_message", { text: "B", promptId: "b", steer: true }),
+    ev(4, "turn_completed", { promptId: "b", durationMs: 2300 }),
+    ev(5, "agent_text_delta", { text: "完成回答 A" }),
+    ev(6, "turn_completed", { promptId: "a", durationMs: 5100 }),
+  ]);
+  assert.deepEqual(builder.display(false, "/work").map(item => builder.itemUserTurn(item)), [1, 1, 2, 1]);
+  assert.equal(builder.turnTiming(1)?.durationMs, 5100);
+  assert.equal(builder.turnTiming(2)?.durationMs, 2300);
+});
+
+t("Antigravity 最早在途 prompt 完成或失败后，后续流归属剩余 prompt", () => {
+  for (const failed of [false, true]) {
+    const builder = createRenderItemsBuilder("antigravity");
+    builder.update([
+      ev(1, "user_message", { text: "A", promptId: "a" }),
+      ev(2, "agent_text_delta", { text: "A 的回答" }),
+      ev(3, "user_message", { text: "B", promptId: "b", steer: true }),
+      failed ? ev(4, "session_error", { promptId: "a", source: "session/prompt", message: "A failed" })
+        : ev(4, "turn_completed", { promptId: "a", durationMs: 1500 }),
+      ev(5, "thought_delta", { text: "B 的思考" }),
+      ev(6, "agent_text_delta", { text: "B 的回答" }),
+      ev(7, "tool_call_started", { toolCallId: "b-tool" }),
+      ev(8, "tool_call_completed", { toolCallId: "b-tool" }),
+      ev(9, "turn_completed", { promptId: "b", durationMs: 2700 }),
+    ].map(event => ({ ...event, timestamp: new Date(event.seq * 1000).toISOString() })));
+    const output = builder.display(false, "/work").slice(-3);
+    assert.deepEqual(output.map(item => item.kind), ["thought", "text", "tool"]);
+    assert.deepEqual(output.map(item => builder.itemUserTurn(item)), [2, 2, 2]);
+    assert.equal(builder.turnTiming(1)?.durationMs, failed ? 1000 : 1500);
+    assert.equal(builder.turnTiming(2)?.durationMs, 2700);
+  }
+});
+
+t("Kimi 取消指定排队 prompt 或旧版整队时，后续回答仍归属于正确回合", () => {
+  for (const targeted of [true, false]) {
+    const builder = createRenderItemsBuilder("kimi");
+    builder.update([
+      ev(1, "user_message", { text: "A", promptId: "a" }),
+      ev(2, "user_message", { text: "B", promptId: "b", steer: true, queued: true }),
+      ev(3, "user_message", { text: "C", promptId: "c", steer: true, queued: true }),
+      ev(4, "session_error", { source: "steer_queue", ...(targeted ? { cancelledPromptIds: ["b"] } : {}) }),
+      ev(5, "turn_completed", { promptId: "a", durationMs: 1000 }),
+      ...(targeted ? [] : [ev(6, "user_message", { text: "D", promptId: "d" })]),
+      ev(7, "agent_text_delta", { text: "下一条回答" }),
+      ev(8, "turn_completed", { promptId: targeted ? "c" : "d", durationMs: 2800 }),
+    ]);
+    const answer = builder.display(false, "/work").at(-1);
+    assert.equal(builder.itemUserTurn(answer), targeted ? 3 : 4);
+    assert.equal(builder.turnTiming(2)?.hasResponse, false);
+    assert.equal(builder.turnTiming(targeted ? 3 : 4)?.durationMs, 2800);
+  }
+});
+
+t("Antigravity 清空后台任务后，用量事件只在新续跑输出后恢复推进计时", () => {
+  const builder = createRenderItemsBuilder("antigravity");
+  const events = [];
+  const append = (type, payload) => {
+    const seq = events.length + 1;
+    events.push({ ...ev(seq, type, payload), timestamp: new Date(seq * 1000).toISOString() });
+    builder.update(events);
+  };
+  append("user_message", { text: "派单" });
+  append("turn_completed", { durationMs: 1000 });
+  append("agent_text_delta", { text: "已唤醒" });
+  append("usage_updated", {});
+  assert.equal(builder.turnTiming(1)?.durationMs, 3000);
+  append("background_tasks_updated", { tasks: [] });
+  append("usage_updated", {});
+  assert.equal(builder.turnTiming(1)?.durationMs, 3000);
+  append("thought_delta", { text: "再次唤醒" });
+  append("usage_updated", {});
+  assert.equal(builder.turnTiming(1)?.durationMs, 7000);
+});
+
+t("Antigravity 迟到的已结束或未知工具事件不能解封回合用时", () => {
+  const builder = createRenderItemsBuilder("antigravity");
+  const events = [];
+  const append = (type, payload) => {
+    const seq = events.length + 1;
+    events.push({ ...ev(seq, type, payload), timestamp: new Date(seq * 1000).toISOString() });
+    builder.update(events);
+  };
+  append("user_message", { text: "派单" });
+  append("turn_completed", { durationMs: 1000 });
+  append("tool_call_started", { toolCallId: "reactive" });
+  append("tool_call_completed", { toolCallId: "reactive" });
+  append("background_tasks_updated", { tasks: [] });
+  for (const [type, id] of [
+    ["tool_call_completed", "reactive"], ["tool_call_updated", "reactive"],
+    ["tool_call_completed", "unknown"], ["tool_call_updated", "unknown"],
+  ]) {
+    append(type, { toolCallId: id });
+    append("usage_updated", {});
+    assert.equal(builder.turnTiming(1)?.durationMs, 3000, `${type} ${id}`);
+    assert.equal(builder.turnTiming(1)?.endedAtMs, 4000);
+  }
+  append("tool_call_started", { toolCallId: "next" });
+  append("tool_call_completed", { toolCallId: "next" });
+  assert.equal(builder.turnTiming(1)?.endedAtMs, 15_000);
+});
+
+t("只有最后一条事件为文本 delta 时，Antigravity 尾块才处于续跑流式状态", () => {
+  for (const [type, payload] of [
+    ["usage_updated", {}],
+    ["tool_call_started", { toolCallId: "review" }],
+    ["turn_completed", { durationMs: 1000 }],
+    ["background_tasks_updated", { tasks: [{ id: "antigravity:reactive" }] }],
+  ]) {
+    const builder = createRenderItemsBuilder("antigravity");
+    assert.equal(builder.streamingTailText, false);
+    const events = [ev(1, "agent_text_delta", { text: "**答复**\n".repeat(4000) })];
+    builder.update(events);
+    assert.equal(builder.streamingTailText, true);
+    events.push(ev(2, type, payload));
+    builder.update(events);
+    assert.equal(builder.streamingTailText, false, type);
+  }
+});
+
+t("sidebarStatusDot、restartBusyCount 与后台中断按钮判定", () => {
+  const now = Date.parse("2026-11-19T09:00:00.000Z");
+  const base = { id: "s1", status: "idle", lastActivityAt: "2026-11-19T08:59:00.000Z" };
+  assert.equal(sidebarStatusDot(base, 0, now), "idle");
+  assert.equal(sidebarStatusDot({ ...base, activeDispatchCount: 1 }, 0, now), "running");
+  assert.equal(sidebarStatusDot({ ...base, backgroundTasks: [{ id: "antigravity:reactive", type: "subagent", description: "reactive_wakeup" }] }, 0, now), "running");
+  assert.equal(restartBusyCount([base, { ...base, id: "s2", activeDispatchCount: 1 }]), 1);
+  assert.equal(showComposerInterrupt("idle", true, 123, "", false), false);
+  assert.equal(showComposerInterrupt("idle", true, 123, "", true), true);
+  assert.equal(showComposerInterrupt("idle", false, 123, "", true), false);
 });
 
 if (!process.exitCode) console.log(`✅ render-items / commands 单测全过（${pass} 例）`);

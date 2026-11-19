@@ -552,14 +552,15 @@ function validId(runId: string): boolean {
 }
 
 /** Both the requested and resolved directory must be immediate children of the root. */
-async function resolveRun(runId: string, root: string): Promise<string | null> {
+async function resolveRun(runId: string, root: string, strict = false): Promise<string | null> {
   if (!validId(runId)) return null;
   try {
     const canonicalRoot = await realpath(root);
     const directory = await realpath(join(canonicalRoot, runId));
     if (dirname(directory) !== canonicalRoot || !(await stat(directory)).isDirectory()) return null;
     return directory;
-  } catch {
+  } catch (error) {
+    if (strict && (error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     return null;
   }
 }
@@ -668,17 +669,21 @@ function startFromId(runId: string): string | null {
   return Number.isNaN(value.getTime()) ? null : value.toISOString();
 }
 
-async function readDispatch(runId: string, directory: string, includePrompt = true): Promise<Dispatch> {
+async function readDispatch(runId: string, directory: string, includePrompt = true, strict = false): Promise<Dispatch> {
   const match = RUN_ID.exec(runId)!;
   const result: Dispatch = {
     runId, tool: match[3]!, name: match[4]!, cwd: null, model: null, effort: null,
     status: "unknown", startedAt: startFromId(runId), endedAt: null, elapsedS: null,
     exit: null, files: null, session: null, parent: null, promptHead: null,
   };
+  const run = await readJson(directory, "run.json").catch(error => {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+    if (strict) throw error;
+    return undefined;
+  });
   try {
-    const run = await readJson(directory, "run.json");
     if (run && run.schema !== 1) throw new Error("不支持的派单 schema");
-    const data = run ?? await readJson(directory, "meta.json");
+    const data = run === null ? await readJson(directory, "meta.json") : run;
     if (data) {
       result.name = stringValue(data.name) ?? result.name;
       result.cwd = stringValue(data.cwd);
@@ -725,10 +730,10 @@ async function readDispatch(runId: string, directory: string, includePrompt = tr
       result.session = stderr?.text.match(/^\s*session id:\s*([0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})\s*$/imu)?.[1] ?? null;
     }
   } catch {
-    result.status = "unknown";
+    if (result.status !== "running") result.status = "unknown";
   }
   try { if (includePrompt) result.promptHead = await promptHead(directory); }
-  catch { result.status = "unknown"; }
+  catch { if (result.status !== "running") result.status = "unknown"; }
   return result;
 }
 
@@ -740,7 +745,8 @@ export async function listDispatches(limit: string | number | null = null, root 
   const dispatches = nativeRuns.sort((a, b) => a.runId < b.runId ? 1 : a.runId > b.runId ? -1 : 0).slice(0, count);
   await Promise.all(dispatches.map(async (run) => {
     const directory = await resolveRun(run.runId, root);
-    try { if (directory) run.promptHead = await promptHead(directory); } catch { run.status = "unknown"; }
+    try { if (directory) run.promptHead = await promptHead(directory); }
+    catch { if (run.status !== "running") run.status = "unknown"; }
   }));
   const sessions = await listSessions();
   const native = await allNativeSubagents(root, sessions);
@@ -757,10 +763,14 @@ export async function getDispatch(runId: string, root = rootDirectory()): Promis
   if (!directory) return null;
   const dispatch = (await allDispatches(root)).find((run) => run.runId === runId);
   if (!dispatch) return null;
-  try { dispatch.promptHead = await promptHead(directory); } catch { dispatch.status = "unknown"; }
+  try { dispatch.promptHead = await promptHead(directory); }
+  catch { if (dispatch.status !== "running") dispatch.status = "unknown"; }
   const readOptional = async (filename: string, limit?: number, tail = false) => {
     try { return await readText(directory, filename, limit, tail); }
-    catch { dispatch.status = "unknown"; return null; }
+    catch {
+      if (dispatch.status !== "running") dispatch.status = "unknown";
+      return null;
+    }
   };
   const prompt = await readOptional("prompt.txt", CHUNK_SIZE);
   const summary = await readOptional("summary.txt");
@@ -781,31 +791,37 @@ export async function getDispatch(runId: string, root = rootDirectory()): Promis
 }
 
 /** No list cap: history and parent links must include older-started, still-running jobs. */
-async function scanDispatches(root: string): Promise<Dispatch[]> {
+async function scanDispatches(root: string, strict = false): Promise<Dispatch[]> {
   let entries;
-  try { entries = await readdir(root, { withFileTypes: true }); } catch { return []; }
+  try { entries = await readdir(root, { withFileTypes: true }); }
+  catch (error) {
+    if ((error as NodeJS.ErrnoException)?.code === "ENOENT") return [];
+    throw error;
+  }
   const result: Dispatch[] = [];
   for (const entry of entries) {
     if (!validId(entry.name)) continue;
-    const directory = await resolveRun(entry.name, root);
-    if (directory) result.push(await readDispatch(entry.name, directory, false));
+    const directory = await resolveRun(entry.name, root, strict);
+    if (directory) result.push(await readDispatch(entry.name, directory, false, strict));
   }
   await attachCodexSubagents(result, process.env.WORKBENCH_CODEX_HISTORY_DIR || join(homedir(), ".codex", "sessions"));
   return result;
 }
 
-/** 每个 root 共享一次在途扫描；TTL 从扫描完成起算，失败不缓存。 */
-export function createDispatchScanCache(scan: (root: string) => Promise<Dispatch[]>, now = Date.now) {
+/** 每个 root 共享一次在途扫描；TTL 从扫描完成起算，失败不缓存；bypassCache=true 时跳过旧缓存执行新鲜扫描。 */
+export function createDispatchScanCache(scan: (root: string, bypassCache?: boolean) => Promise<Dispatch[]>, now = Date.now) {
   const cache = new Map<string, { expires: number; pending: Promise<Dispatch[]> }>();
-  return async (root: string): Promise<Dispatch[]> => {
+  return async (root: string, bypassCache = false): Promise<Dispatch[]> => {
     let entry = cache.get(root);
-    if (!entry || entry.expires <= now()) {
-      entry = { expires: Infinity, pending: Promise.resolve().then(() => scan(root)) };
-      cache.set(root, entry);
+    if (bypassCache || !entry || entry.expires <= now()) {
+      entry = { expires: Infinity, pending: Promise.resolve().then(() => scan(root, bypassCache)) };
+      // 严格扫描成功后才刷新共享缓存，普通列表可以并行使用容错扫描。
+      if (!bypassCache) cache.set(root, entry);
       const current = entry;
       try {
         await current.pending;
         current.expires = now() + 2000;
+        if (bypassCache) cache.set(root, current);
       } catch (error) {
         if (cache.get(root) === current) cache.delete(root);
         throw error;
@@ -821,7 +837,7 @@ export function createDispatchScanCache(scan: (root: string) => Promise<Dispatch
 const allDispatches = createDispatchScanCache(scanDispatches, () => Date.now());
 // Native records have no delegate history/detail files; parent links include them.
 const claudeScans = new Map<string, { fingerprint: string; list: ReturnType<typeof createDispatchScanCache> }>();
-async function allClaudeSubagents(root: string, sessions: readonly ClaudeParentSession[]): Promise<Dispatch[]> {
+async function allClaudeSubagents(root: string, sessions: readonly ClaudeParentSession[], bypassCache = false): Promise<Dispatch[]> {
   const projectsRoot = process.env.WORKBENCH_CLAUDE_PROJECTS_DIR || join(homedir(), ".claude", "projects");
   const unique = new Map<string, ClaudeParentSession>();
   for (const session of sessions) {
@@ -833,13 +849,13 @@ async function allClaudeSubagents(root: string, sessions: readonly ClaudeParentS
   const fingerprint = JSON.stringify([projectsRoot, candidates]);
   let entry = claudeScans.get(root);
   if (!entry || entry.fingerprint !== fingerprint) {
-    entry = { fingerprint, list: createDispatchScanCache(async (directory) => readClaudeSubagents(await allDispatches(directory),
+    entry = { fingerprint, list: createDispatchScanCache(async (directory, bypass) => readClaudeSubagents(await allDispatches(directory, bypass),
       projectsRoot, Date.now(), candidates), () => Date.now()) };
     claudeScans.delete(root);
     if (claudeScans.size >= 256) claudeScans.delete(claudeScans.keys().next().value!);
     claudeScans.set(root, entry);
   }
-  return entry.list(root);
+  return entry.list(root, bypassCache);
 }
 
 function eventTime(value: unknown): string | null {
@@ -957,13 +973,13 @@ export function createKimiSubagentReader() {
 
 const readKimiSubagents = createKimiSubagentReader();
 const nativeScans = new Map<string, { fingerprint: string; list: ReturnType<typeof createDispatchScanCache> }>();
-async function allNativeSubagents(root: string, sessions: readonly DispatchParentSession[]): Promise<Dispatch[]> {
+async function allNativeSubagents(root: string, sessions: readonly DispatchParentSession[], bypassCache = false): Promise<Dispatch[]> {
   const codexRoot = process.env.WORKBENCH_CODEX_HISTORY_DIR || join(homedir(), ".codex", "sessions");
   const kimiRoot = process.env.WORKBENCH_KIMI_HISTORY_DIR || join(homedir(), ".kimi-code", "sessions");
   const fingerprint = JSON.stringify([codexRoot, kimiRoot, sessions]);
   let entry = nativeScans.get(root);
   if (!entry || entry.fingerprint !== fingerprint) {
-    entry = { fingerprint, list: createDispatchScanCache(async () => {
+    entry = { fingerprint, list: createDispatchScanCache(async (_dir, bypass) => {
       const codexSessions = sessions.filter((session) => session.agent === "codex"
         && session.nativeSessionId && NATIVE_ID.test(session.nativeSessionId));
       const roots: Dispatch[] = codexSessions.map((session) => ({
@@ -987,7 +1003,7 @@ async function allNativeSubagents(root: string, sessions: readonly DispatchParen
       }
       const [kimi, claude] = await Promise.all([
         readKimiSubagents(kimiRoot, sessions),
-        allClaudeSubagents(root, sessions.filter((session) => (session.agent ?? "claude") === "claude")),
+        allClaudeSubagents(root, sessions.filter((session) => (session.agent ?? "claude") === "claude"), bypass),
       ]);
       return [...output.values(), ...kimi, ...claude];
     }) };
@@ -995,7 +1011,65 @@ async function allNativeSubagents(root: string, sessions: readonly DispatchParen
     if (nativeScans.size >= 256) nativeScans.delete(nativeScans.keys().next().value!);
     nativeScans.set(root, entry);
   }
-  return entry.list(root);
+  return entry.list(root, bypassCache);
+}
+
+/** 统计归属于各 AIReins 会话的运行中派单及原生子代理数量；fresh=true 绕过 2 秒缓存执行新鲜扫描。 */
+export async function countActiveDispatchesBySession(
+  sessions: readonly DispatchParentSession[],
+  root = rootDirectory(),
+  options: { fresh?: boolean } = {},
+): Promise<Map<string, number>> {
+  const fresh = options.fresh === true;
+  const active = sessions.map((session) => ({
+    id: session.id,
+    agent: session.agent,
+    cwd: session.cwd,
+    ...(session.nativeCwd ? { nativeCwd: session.nativeCwd } : {}),
+    ...(session.nativeSessionId ? { nativeSessionId: session.nativeSessionId } : {}),
+    ...(session.model !== undefined ? { model: session.model } : {}),
+    ...(session.createdAt ? { createdAt: session.createdAt } : {}),
+  }));
+  const byAlias = new Map<string, Set<string>>();
+  const addAlias = (agent: string, alias: string | undefined, sessionId: string) => {
+    if (!alias) return;
+    const key = `${agent}\0${alias}`;
+    let set = byAlias.get(key);
+    if (!set) { set = new Set(); byAlias.set(key, set); }
+    set.add(sessionId);
+  };
+  for (const session of active) {
+    if (!session.id) continue;
+    const agent = session.agent ?? "claude";
+    addAlias(agent, session.id, session.id);
+    addAlias(agent, session.nativeSessionId, session.id);
+  }
+  const counts = new Map<string, number>();
+  if (!byAlias.size) return counts;
+  const runs = [...await allDispatches(root, fresh), ...await allNativeSubagents(root, active, fresh)];
+  const byRunId = new Map(runs.map((run) => [run.runId, run]));
+  const byToolSession = new Map<string, Dispatch>();
+  for (const run of runs) {
+    if (run.session) byToolSession.set(`${run.tool}\0${run.session}`, run);
+  }
+  for (const run of runs) {
+    if (run.status !== "running") continue;
+    const matched = new Set<string>();
+    const seen = new Set<string>();
+    let current: Dispatch | undefined = run;
+    while (current?.parent && !seen.has(current.runId)) {
+      seen.add(current.runId);
+      const source: NonNullable<Dispatch["parent"]> = current.parent;
+      if (source.sessionId) {
+        const ids = byAlias.get(`${source.agent}\0${source.sessionId}`);
+        if (ids) for (const id of ids) matched.add(id);
+      }
+      current = source.runId ? byRunId.get(source.runId)
+        : source.sessionId ? byToolSession.get(`${source.agent}\0${source.sessionId}`) : undefined;
+    }
+    for (const id of matched) counts.set(id, (counts.get(id) ?? 0) + 1);
+  }
+  return counts;
 }
 
 export async function listParentDispatches(parent: string, root = rootDirectory(), agent?: AgentKind,

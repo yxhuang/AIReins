@@ -136,7 +136,10 @@ node frontend/scripts/smoke-ws.mjs  # 需后端；会创建测试会话、批准
 - 顺序追加事件由持久 reducer 增量折叠，更新条目使用新对象；分组和已完成行缓存，持久文本增量仅更新末尾，临时工具参数只更新对应显示行。事件窗口引用替换、`dropped`、乱序/重复 seq 和 Codex 回溯输出依赖会全量重建。流式 Markdown 每 100ms 最多解析一次，停止流式后立即使用完整原文，代码着色仍等整轮结束。正文实际提交后同步贴底与“回到最新”状态，阅读历史时保持滚动位置。回归见 [long-session-scroll.test.mjs](scripts/long-session-scroll.test.mjs)、 [long-session-render.test.mjs](scripts/long-session-render.test.mjs)。
 - 助手用 `react-markdown` + GFM，禁原始 HTML、过滤 URL，外链加 noopener/noreferrer；单换行保留，代码块内横滚，表格占满消息宽度、单元格内自动换行（长路径可断开），复制使用原文并提示失败。见 [MarkdownMessage.tsx](src/components/MarkdownMessage.tsx)。
 - 代码按需加载轻量词法着色，源码先转义；无/未知语言或 >2000 行纯文本，流式整轮结束后着色并丢弃过期结果；不是完整语法解析器，支持语言见 [code-highlight.ts](src/code-highlight.ts)、[highlight-languages.ts](src/highlight-languages.ts)。
-- 同回合 text/thought/tool 共用时间线，闸门/提问独立；正常结束不额外显示系统行，异常如实显示。连续 ≥3 个成功只读工具合并摘要，读取路径去重，未知工具回落原名/原始内容；命令先展示 20 行，可展开全部。见 [tool-summary.ts](src/tool-summary.ts)、[render-items.ts](src/render-items.ts)。
+- 同回合 text/thought/tool 共用时间线，闸门和提问独立。连续 ≥3 个成功只读工具合并摘要，读取路径去重，未知工具回落原名和原始内容。命令先展示 20 行，可展开全部。正常结束省略系统行，异常如实显示。
+- 每个回合只在最后一条可见行显示用时（`.turn-duration`，悬停查看起止时刻及 Claude 的可选 API 耗时），交错消息也只显示一次。优先使用 `turn_completed.durationMs`，旧记录按事件时间戳计算。Antigravity 并发和 Kimi 排队回合按 `promptId` 配对，Kimi 收到 `cancelledPromptIds` 后移除对应排队回合的执行资格。Antigravity 当前 prompt 结束或失败后，接下来的文本、思考和新工具归到最早仍在途的 prompt。进行中的回合以独立组件订阅 `store.now`，遵循 `prefers-reduced-motion`。
+- Antigravity 续跑用时延展至最后一条活动事件。后台任务清空后，迟到的 `usage_updated`、已结束工具的重复更新以及缺少起始记录的工具更新都不能解封计时。新文本、思考或工具活动可以再次推进用时。后台等待时保留已完成长回复的 Markdown 排版，续跑尾部收到文本增量时才开启流式节流。
+- 左侧栏 `sidebarStatusDot` 将 `backgroundTasks` 与 `activeDispatchCount` 视为工作中。断开和新建 WS 连接时使上条连接的派单映射失效，新一代的全量 `session_dispatches_updated`（含空映射）按版本协调列表、快照和组织更新。见 [tool-summary.ts](src/tool-summary.ts)、[render-items.ts](src/render-items.ts)、[sidebar-sessions.ts](src/sidebar-sessions.ts)。
 - 正常会话与专注视图均不显示原始通知的「调试事件」卡片；实时更新、重新打开已有会话和视图切换遵循同一显示规则。标准化的错误、工具结果、审批和提问照常显示，服务端事件和 transcript 不变。归一层仍由 `RAW_EVENT_NOISE` 去除已知重复通知，hook 失败或未知状态、未知事件、独有命令输出及 Claude 后台完成通知等原始内容保留在事件记录中供排错。
 - 按停止后回合结束显示中性行「已打断，可直接发消息继续」，不进出错态：Claude 认 driver 的 `interrupted:true`，Codex 认 `status:"interrupted"`，Kimi/Antigravity 认 ACP `stopReason:"cancelled"`；见 [render-items.ts](src/render-items.ts)。
 - Focus view 在「/」菜单切换并按浏览器保存：实时及历史隐藏工具、思考、调试和中性系统行，保留用户/助手、闸门/提问与错误；见 `focusVisible`、[HistoryTimeline.tsx](src/components/HistoryTimeline.tsx)。
@@ -180,6 +183,8 @@ node frontend/scripts/smoke-ws.mjs  # 需后端；会创建测试会话、批准
 - 空闲释放档位 0/15/30/60/120 分钟，经 `/api/prefs` 保存，写失败回滚；running、待审批、RC 已连接等跳过，释放事件更新列表。设置重启先重读忙会话数，有忙会话时弹与清理存储同款的确认弹层（默认聚焦取消，「仍要重启」才继续），重启中/失败提示也用同款弹层；前置会话检查失败会明确提示尚未发送重启请求，可稍后重试。POST 202 后须观察 WS 断开再恢复，60 秒超时提示失败；见 [restart.ts](src/restart.ts)。「关机」先弹与清理存储同款的确认弹层（默认聚焦取消），确认后交给后端 `/api/power-off`：无忙会话直接关机，否则后端等全部完成再关；等待/已排定时按钮显示状态并可点击取消，此时菜单打开期间每 3 秒刷新状态。设置面板桌面两栏，各为一个 `.settings-col`：左「外观 │ 重启 AIReins、更新 AIReins 并排一行」，右「会话（底部存储占用与清理）│ 主机（主机与连接、关机并排一行）」；并排按钮用 `.settings-action-row` 各占一半，文字长时在按钮内换行；手机按同序单栏，外观最先，组内内容不变。「主机与连接」关闭设置并派发 `OPEN_HOST_MENU_EVENT`，直接打开左上角品牌按钮的主机菜单。「更新 AIReins」（[SelfUpdate.tsx](src/components/SelfUpdate.tsx)）点击即弹同款弹层并调 `GET /api/update` 与远端对比：只落后时列出远端新提交，普通更新确认「拉取并构建」，涉及依赖、安装/部署/启动组件时预告并确认「拉取并安装」，自动运行 `bash install.sh --update`；安装失败后重新检查会显示「完成上次安装 / 重试安装」，无需再次拉取。完成后给「刷新页面」，需要后端重启时另给「重启 AIReins」（走上面的重启流程）；WSL 的托盘文件更新后单独提示择时退出并重开托盘，明确退出会停止所有会话，更新过程本身不重启服务；只领先或有未提交改动时列出本地提交与改动，提交说明输入框预填按改动目录生成的默认说明，可改，清空也用默认，确认「提交并推送」；分叉只说明、交给终端；执行中不可关闭。 更新检查与推送的网络代理来自后端本机偏好 `proxyUrl`，与浏览器代理独立；超时显示具体时限，推送失败说明本地提交已保留，可重新检查后再次推送。
 
 ## 外观与通用边界
+
+- 已配置远程入口的主机在「设置 → 主机」显示「远程终端」。本机和远程均可切换，保存后刷新能力并同步更新终端入口。关闭时断开远程终端连接。
 
 - 设置菜单通过缩小组内留白和项目间距降低高度，保留原字号和控件最小高度；桌面存储明细预留两行，较长内容自然撑开，超出视口时仍可滚动。
 - 配色裁决以 [styles.css 顶部注释](src/styles.css) 为准：`--gate` 系专属闸门/提问/待处理，消息与终端内容有明确例外；终端 chrome 中性/冷色，会话状态点红绿灯。浅色外框 chrome（`#F0EEE6`）、画布 bg（`#F5F4ED`）、输入框与浮起 surface（暖白 `#FAF8F2`）分层，滚动条使用暖灰轨道与较深滑块；显式浅色与跟随系统浅色均生效，避免大面积纯白。别把旧“暖色只用于审批”当完整规则。

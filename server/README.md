@@ -8,7 +8,9 @@
 
 - 模型、推理和审批选项分别映射 `model` → `model`、`thought_level` → `effort`、`mode` → `permissionMode`。新建推理档位缺省用 `high`、审批档位缺省用 `auto`，应用模型后若候选缺少对应档位（如 `Orchestrator` 无 `high`）则沿用 CLI 当前档位。续接未传推理或审批档位时，保留 CLI 返回的当前值。配置修改仅发送 `session/set_config_option`。模型变化后按 CLI 返回的新 options 更新推理档位；会话的 `configSchema` 随 `config_updated`、列表和快照同步到界面，候选变化即使当前值相同也广播。旧会话缺少该字段时才回落启动探测缓存。
 - 支持文本/思考流、工具调用与更新、标准 ACP 审批和可表达的提问表单、文件和图片附件、命令清单、原生标题与 `usage_update` 上下文用量（`{used,size}`）。不把上下文用量当作订阅额度。
-- 会话释放与正常关闭使用 `session/close`；再次发送或新建续接使用原生 `session/resume`，保留 AIReins 自有 transcript。复制到终端的续接命令为 `agy --conversation <nativeId>`。运行中再次发送的消息立即交给原生 `session/prompt`，由 CLI 决定处理时机；每个请求独立返回，所有在途请求结束后才回到 idle，不把首个应答当作全部结束。中断发送 `session/cancel` 并取消未决审批；Kimi 仍使用 worker FIFO 队列。
+- 会话释放与正常关闭使用 `session/close`；再次发送或新建续接使用原生 `session/resume`，保留 AIReins 自有 transcript。复制到终端的续接命令为 `agy --conversation <nativeId>`。运行中再次发送的消息立即交给原生 `session/prompt`，由 CLI 决定处理时机；每个请求按入站帧顺序同步结算并记录各自 `durationMs`，所有在途请求结束后才回到 idle，不把首个应答当作全部结束。若 `session/prompt` 返回 `end_turn` 时仍有未完成的 `tool_call`（如后台运行的 `delegate codex` 命令），或本轮启动了原生子代理（`invoke_subagent` / `swarm add`）尚未唤醒回报，driver 先通过 `backgroundTasks` 上报在途工具或子代理保活态（因 ACP 协议仅提供启动信号，原生子代理保活上限 15 分钟）再落回 `idle`；工具完成后进入「等待唤醒」宽限期（35 秒，不被前序 `usage_update` 截断），收到真实唤醒输出（思考/文本/工具）进入「已唤醒」态，在无在途工具与待回复子代理且收到 `usage_update` 经 2.5 秒确认无后续工具调用后清空。每条原生子代理启动调用分别计时，子代理开始唤醒时锁定最早仍待回报的条目，收尾只结算该条目。同批有未到期子代理时，未回报的过期条目优先吸收无法归属的迟到唤醒。独立后台工具唤醒保留待回报子代理。后台工具的唤醒宽限跨 prompt 保留原截止时刻，最后一条 prompt 结束或失败后按剩余宽限继续等待。中断先为未结束的工具补写取消终态，再清空后台态。已完成、失败或取消的工具 ID 在 10 分钟内继续过滤迟到更新和重复终态。退出或释放立即清空。
+- 运行中跨进程派单与原生子代理（`dispatches.ts` 的 `countActiveDispatchesBySession`）在有在线客户端、活 worker 或关机等待时每 3 秒复用 2 秒扫描缓存统计，并在空闲自动释放、手动释放与排定关机前串行执行绕过缓存的扫描。保护性扫描会报告候选目录解析失败和 `run.json` 读取失败，候选已消失时继续。可选日志无法读取时保留已确认的运行状态。扫描报错时，本次释放跳过或失败，关机继续等待。普通派单列表仍可将损坏记录显示为未知，严格扫描只在成功后刷新两者的共享缓存。计数作为纯运行时字段 `activeDispatchCount` 附带在列表/详情/快照中（不写入 `sessions.json` 或 transcript），WS 在 `ready` 后下发全量 `session_dispatches_updated {counts}`（允许空映射），计数变化时再次广播；非零时阻止手动/自动释放，并计入关机、重启与 Windows 托盘退出繁忙会话数。
+- 回合用时不消耗额外模型 token：Claude `turn_completed` 透传原生 `duration_ms` / `duration_api_ms` 为 `durationMs` / `apiDurationMs`；Antigravity 与 Kimi 从各自 `session/prompt` 实际执行时刻计时，通过 `user_message` 和 `turn_completed` 中的 `promptId` 配对各条 `durationMs`，单请求失败的 `session_error` 也带该 ID；Codex 及缺失原生字段的回合由 `SessionManager` 按非 steer `user_message` 到 `turn_completed` 的服务端时间戳差自动补写 `durationMs` 并随 transcript 持久化。
 - 外部 Antigravity 原生历史格式尚未接入文件索引，因此 `/api/history?agent=antigravity` 返回空列表；在 AIReins 创建的会话仍由自己的注册表和 transcript 正常保存、展示与续接。不对该 CLI 做原生 JSONL 路径猜测、外部续聊指纹检查或自动崩溃恢复；不提供彻底删除原生会话。
 - 元数据后台探测会创建并关闭一个无提示的空 ACP 会话；未核实删除接口，保留该原生记录。缺少 CLI 或认证时 options 为空并返回探测错误，不影响其他 CLI。旧版 metadata 缓存也立即补上 Antigravity 基础能力。
 
@@ -100,7 +102,7 @@ Claude 停止走 `control_request {subtype:"interrupt"}`（与 CLI/扩展按 Esc
 - `port`：1–65535，不能与本机端口相同，且须与 Serve 转发目标一致。
 - `origin`：手机地址栏里的源；全小写，无路径、无结尾斜杠。
 - `allowedLogins`：允许访问的 Tailscale 登录名。未知时可先填占位值，手机打开页面后，403 提示会显示实际登录名。
-- `terminal`：可选布尔值。只有显式设为 `true` 才允许远程入口使用自由终端；缺省或类型不对均按 `false` 处理，类型错误会记日志。新安装自动生成 `terminal: false`，已有配置不覆盖；要开启远程终端，编辑此文件设为 `"terminal": true`，然后由用户执行 `aireins restart`。
+- `terminal`：可选布尔值。只有显式设为 `true` 才允许远程入口使用自由终端；缺省或类型不对均按 `false` 处理，类型错误会记日志。新安装自动生成 `terminal: false`，已有配置不覆盖。已配置远程入口时，本机和获准登录的远程用户可在「设置 → 主机 → 远程终端」切换该字段并立即生效；直接编辑文件仍需重启。
 
 Serve 会剥掉客户端自带的同名身份头，再注入真实身份。远程端口只绑定 `127.0.0.1`；DNS 重绑定网页的 Host 过不了检查。本机进程可伪造此头，但本来就能访问本机入口。
 
@@ -437,7 +439,9 @@ Codex 的 `session` 缺失时，从 `stderr.log` 前 8KB 的 `session id: <uuid>
 
 ## 终端
 
-用户自由终端属于工作区，与会话和 Kimi ACP 的 `terminal/create` 完全隔离。它在 server 进程内存中保存，断开 WebSocket 或隐藏面板不会结束 PTY；server 重启会结束全部 PTY。`GET /api/meta` 的 `data.capabilities.terminal` 按请求入口返回：本机入口为 `true`，远程入口仅在 `remote.json` 显式配置 `"terminal": true` 时为 `true`。关闭时以下 REST 均返回 HTTP 403，`/ws/terminal` 拒绝升级。两个监听都只绑定 `127.0.0.1`；远程访问须经 Tailscale Serve，并通过既有 Host、Origin 和 Tailscale 身份检查。自由终端直接运行用户 shell，不经过 agent 审批闸门。
+用户自由终端属于工作区，与会话和 Kimi ACP 的 `terminal/create` 完全隔离。它在 server 进程内存中保存，断开 WebSocket 或隐藏面板不会结束 PTY；server 重启会结束全部 PTY。`GET /api/meta` 的 `data.capabilities.terminal` 按请求入口返回：本机入口为 `true`，远程入口仅在 `remote.json` 显式配置 `"terminal": true` 时为 `true`。关闭时以下终端 REST 均返回 HTTP 403，`/ws/terminal` 拒绝升级。两个监听都只绑定 `127.0.0.1`；远程访问须经 Tailscale Serve，并通过既有 Host、Origin 和 Tailscale 身份检查。自由终端直接运行用户 shell，不经过 agent 审批闸门。
+
+远程入口已配置时，`GET /api/meta` 另返回 `data.remoteTerminalEnabled`，供两个入口的设置菜单读取。`PUT /api/remote-terminal` 接受 `{ enabled: boolean }`，通过同一入口的写请求鉴权后，只持久化 `remote.json` 的 `terminal` 字段并立即生效。监听地址、端口或登录白名单有未加载的文件改动时返回 HTTP 409，重启后可继续切换。关闭时立刻断开远程终端 WebSocket，保留 PTY 和本机连接，并通过普通 WebSocket 的 `meta_updated` 通知页面更新。
 
 REST 沿用 `{code,msg,data,request_id}` 信封：
 
@@ -1067,12 +1071,13 @@ Codex 输入框 `$` 在光标 token 处打开名称+描述面板，支持过滤�
 
 **插话**
 - 会话运行中发送普通文本或附件，即为插话：`user_message.payload.steer=true`。空闲时发送仍走原通道，不带 `steer` 字段。
-- 三家的插话方式：
+- 各执行端的插话方式：
   - **Claude**：沿用 stream-json 的默认 priority，CLI 会在当前回合的下一个工具间隙注入消息。
   - **Codex**：用 `turn/steer{threadId,expectedTurnId,input}`。不得附带新回合配置，也不得回退到 `turn/start`。
     - 侧聊和标题通知先单独分流；其余带 `threadId`（或 `thread.id`）的通知仅在属于当前主线程时处理。子代理通知不得改写主线程的回合 ID、运行状态、用量或输出，以免插话/中断目标串线；不带线程标识的通知保持原兼容行为。
   - **Kimi**：不支持在当前回合内插话（运行中再发 `session/prompt` 会返回 `-32600 turn.agent_busy`）。插话消息进入 worker 的先进先出队列，事件带 `queued=true`，等原 `session/prompt` 响应后再按顺序发出；队列期间会话保持 running。
-- Kimi 队列只存在内存里，重启后不恢复。停止、进程退出或 RPC 失败时，剩余消息全部取消，并产生 `source=steer_queue` 的 `session_error`。
+  - **Antigravity**：运行中立即发送独立的原生 `session/prompt`，每个请求单独结算。
+- Kimi 队列只存在 worker 内存中。停止、进程退出或 RPC 失败时，剩余消息全部取消，并发出 `session_error`，其中 `source` 为 `steer_queue`，`cancelledPromptIds` 列出被取消的请求。
 - 有待审批闸门时，普通发送和插话一律拒绝：不调用 CLI，也不写 `user_message`。
 - CLI 拒绝插话，或当前回合已经结束时，错误返回给调用方，原回合状态不变，也不自动开新回合，用户可以重发。
 

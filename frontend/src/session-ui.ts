@@ -17,8 +17,16 @@ export function syncStreamViewport(container: { scrollHeight: number; scrollTop:
   return awayFromLatest(container.scrollHeight, container.scrollTop, container.clientHeight);
 }
 
-export function showComposerInterrupt(status: string, supported: boolean | undefined, processId: number | undefined, text: string): boolean {
-  return status === "running" && Boolean(supported && processId && text.trim());
+export function showComposerInterrupt(
+  status: string,
+  supported: boolean | undefined,
+  processId: number | undefined,
+  text: string,
+  backgroundInterruptible = false,
+): boolean {
+  if (!supported || !processId) return false;
+  if (backgroundInterruptible) return true;
+  return status === "running" && Boolean(text.trim());
 }
 
 /** Antigravity 与 Claude 使用 /skill-name；Kimi 暂无确切 skill 语法，不给 R。 */

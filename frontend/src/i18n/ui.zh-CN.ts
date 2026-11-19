@@ -593,6 +593,8 @@ const dictionary: Record<string, string> = {
   "ui.SelfUpdate.built": "构建完成",
   "ui.SelfUpdate.tray_restart_needed": "Windows 托盘已更新，需空闲时退出托盘并重新打开才能生效。退出托盘会停止所有会话。",
   "ui.SettingsMenu.host": "主机",
+  "ui.SettingsMenu.remote_terminal": "远程终端",
+  "ui.SettingsMenu.remote_terminal_hint": "开启后，获准访问的 Tailscale 账号可以在此主机上执行终端命令。切换立即生效。",
   "ui.SettingsMenu.hosts_and_connections": "主机与连接",
   "ui.SettingsMenu.cancel_shutdown_waiting_for_sessions": "取消关机（等 {p0} 个会话完成）",
   "ui.SettingsMenu.cancel_shutdown": "取消关机",
@@ -970,6 +972,15 @@ const dictionary: Record<string, string> = {
   "ui.UsageView.err_http_status": "接口返回异常状态（HTTP {status}）",
   "ui.UsageView.err_parse": "响应报文解析失败",
   "ui.UsageView.err_internal": "内部探测异常，请稍后重试",
-  "ui.UsageView.err_unknown": "未知错误"
+  "ui.UsageView.err_unknown": "未知错误",
+  "ui.Sidebar.reactive_wakeup_task": "等待子任务或后台续跑完成",
+  "ui.Sidebar.subagent_pending_task": "等待子代理完成",
+  "ui.Sidebar.active_dispatches": "运行中 {p0} 个子任务",
+  "ui.Sidebar.background_and_dispatches": "{p0}；{p1}",
+  "ui.StreamItems.turn_duration": "用时 {duration}",
+  "ui.StreamItems.turn_duration_live": "执行中 · {duration}",
+  "ui.StreamItems.turn_duration_title": "本回合回答用时 {duration}（{start} → {end}）",
+  "ui.StreamItems.turn_duration_title_api": "本回合回答用时 {duration}（{start} → {end}，模型 API {api}）",
+  "ui.StreamItems.turn_duration_live_title": "本回合开始于 {start}，当前已耗时 {duration}"
 };
 export default dictionary;

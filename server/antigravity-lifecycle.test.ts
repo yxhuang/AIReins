@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { createPowerOff } from "./power-off.js";
 import type { Driver, DriverConfigSchema, DriverOptions, SessionConfig, UserMessageInput } from "./types.js";
 
 const root = await mkdtemp(join(tmpdir(), "aireins-antigravity-lifecycle-"));
@@ -26,7 +27,7 @@ class FakeDriver implements Driver {
     assert.equal(this.stopped, false);
     this.sent.push(message);
     this.options.callbacks.status("running");
-    queueMicrotask(() => {
+    setImmediate(() => {
       this.options.callbacks.emit("agent_text_delta", { text: "fixture reply" });
       this.options.callbacks.emit("turn_completed", { stopReason: "end_turn" });
       this.options.callbacks.status("idle");
@@ -65,7 +66,7 @@ assert.equal(restored.getSnapshot(session.id)!.events.filter(event => event.type
 await restored.shutdown();
 console.log("PASS: Antigravity 会话释放、终端续接命令、发送时恢复与正常重启后的历史保存");
 
-const { listParentDispatches } = await import("./dispatches.js");
+const { getDispatch, listDispatches, listParentDispatches, countActiveDispatchesBySession } = await import("./dispatches.js");
 const dispatchRoot = join(root, "delegate");
 for (const tool of ["codex", "kimi"]) {
   const directory = join(dispatchRoot, `20261116-010000-${tool}-antigravity-child`);
@@ -77,4 +78,85 @@ for (const id of [session.id, nativeSessionId]) {
   const dispatches = await listParentDispatches(id, dispatchRoot, "antigravity", () => [session]);
   assert.deepEqual(dispatches.map(run => run.tool).sort(), ["codex", "kimi"], "Antigravity 主会话的 AIReins ID 和原生 ID 共用派单归属");
 }
-console.log("PASS: Antigravity 跨 CLI 派单保留父节点和会话 ID 别名");
+const activeCounts = await countActiveDispatchesBySession([session], dispatchRoot);
+assert.equal(activeCounts.get(session.id), 2, "按会话聚合统计全部运行中外部派单");
+
+const freshRoot = join(root, "fresh-delegate");
+await mkdir(freshRoot);
+assert.equal((await countActiveDispatchesBySession([session], freshRoot)).size, 0);
+const freshRun = join(freshRoot, "20261116-010000-codex-fresh-child");
+await mkdir(freshRun);
+await writeFile(join(freshRun, "run.json"), JSON.stringify({ schema: 1, status: "running", pid: process.pid,
+  parent: { agent: "antigravity", sessionId: session.id } }));
+await mkdir(join(freshRun, "stderr.log"));
+await mkdir(join(freshRun, "prompt.txt"));
+await mkdir(join(freshRun, "last.txt"));
+await mkdir(join(freshRoot, "20261116-010001-kimi-missing-run"));
+assert.equal((await countActiveDispatchesBySession([session], freshRoot)).size, 0, "常规扫描仍命中空缓存");
+assert.equal((await countActiveDispatchesBySession([session], freshRoot, { fresh: true })).get(session.id), 1);
+assert.equal((await listDispatches(null, freshRoot)).find(run => run.tool === "codex")?.status, "running");
+assert.equal((await getDispatch("20261116-010000-codex-fresh-child", freshRoot))?.status, "running");
+await assert.rejects(countActiveDispatchesBySession([session], join(freshRun, "run.json"), { fresh: true }), { code: "ENOTDIR" });
+
+const loopRoot = join(root, "loop-delegate");
+const loopRun = "20261116-010000-kimi-loop-child";
+await mkdir(loopRoot);
+await symlink(loopRun, join(loopRoot, loopRun));
+assert.deepEqual(await listDispatches(null, loopRoot), []);
+await assert.rejects(countActiveDispatchesBySession([session], loopRoot, { fresh: true }), { code: "ELOOP" });
+
+const unreadableRoot = join(root, "unreadable-delegate");
+const unreadableRun = "20261116-010000-kimi-unreadable-child";
+await mkdir(join(unreadableRoot, unreadableRun, "run.json"), { recursive: true });
+const protectedScan = assert.rejects(
+  countActiveDispatchesBySession([session], unreadableRoot, { fresh: true }), /普通文件|EISDIR/,
+);
+const [tolerantRuns] = await Promise.all([listDispatches(null, unreadableRoot), protectedScan]);
+assert.equal(tolerantRuns.find(run => run.runId === unreadableRun)?.status, "unknown");
+
+let checks = 0;
+const commands: string[][] = [];
+const powerOff = createPowerOff({
+  busy: () => 0,
+  checkBusy() {
+    const error = new Error("fresh scan failed");
+    if (++checks === 1) throw error;
+    return Promise.reject(error);
+  },
+  async run(args) { commands.push(args); },
+  pollMs: 5,
+});
+try {
+  assert.equal((await powerOff.request()).state, "waiting");
+  await new Promise<void>(resolve => setTimeout(resolve, 30));
+  assert.ok(checks > 1, "等待期间也执行新鲜扫描");
+  assert.equal(powerOff.status().state, "waiting");
+  assert.deepEqual(commands, []);
+} finally { await powerOff.cancel(); }
+
+// 活跃派单计数不落盘，但体现在 list/get/snapshot 中，并阻止手动与自动释放误杀父会话；同时校验每回合顺序与 durationMs 落盘
+const timed = manager();
+const timedSession = await timed.create({ agent: "antigravity", cwd: root, snapshot: "skip" });
+await timed.sendUserMessage(timedSession.id, { text: "timed turn" });
+await new Promise<void>(resolve => setImmediate(resolve));
+const timedEvents = timed.getSnapshot(timedSession.id)!.events;
+const timedUser = timedEvents.find(event => event.type === "user_message");
+const timedTurn = timedEvents.find(event => event.type === "turn_completed");
+assert.ok(timedUser && timedTurn && timedUser.seq < timedTurn.seq, "user_message 应先于 turn_completed 落盘");
+assert.ok(typeof timedTurn.payload.durationMs === "number" && timedTurn.payload.durationMs >= 0,
+  "SessionManager 应为缺少 durationMs 的 turn_completed 自动记录非负回合耗时");
+assert.equal(timed.setActiveDispatchCounts(new Map([[timedSession.id, 2]])), true);
+assert.equal(timed.setActiveDispatchCounts(new Map([[timedSession.id, 2]])), false);
+assert.equal(timed.get(timedSession.id)!.activeDispatchCount, 2);
+assert.equal(timed.list().find(item => item.id === timedSession.id)!.activeDispatchCount, 2);
+assert.equal(timed.getSnapshot(timedSession.id, true)!.session.activeDispatchCount, 2);
+// 有活跃派单时，手动释放与空闲自动释放均拒绝
+await assert.rejects(() => timed.release(timedSession.id, "manual"), /后台任务/);
+await timed.releaseIdleSessions(1, new Date(Date.now() + 10 * 60_000));
+assert.equal(timed.get(timedSession.id)!.released, undefined, "有运行中派单时不得空闲释放父会话");
+assert.equal(timed.setActiveDispatchCounts(new Map()), true);
+assert.equal(timed.get(timedSession.id)!.activeDispatchCount, undefined);
+await timed.releaseIdleSessions(1, new Date(Date.now() + 10 * 60_000));
+assert.equal(timed.get(timedSession.id)!.released, true, "派单结束后可正常空闲释放");
+await timed.shutdown();
+console.log("PASS: Antigravity 跨 CLI 派单归属、运行态计数保活与每回合耗时记录");

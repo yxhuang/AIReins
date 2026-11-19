@@ -6,6 +6,7 @@ import { lstat, readdir, readFile, realpath, rm, unlink, writeFile } from "node:
 import { kimiHistoryRoot } from "../history.js";
 import { pathToFileURL } from "node:url";
 import type {
+  BackgroundTask,
   ConfigOptionId,
   DriverOptions,
   DriverConfigSchema,
@@ -25,6 +26,8 @@ import { StdioRpcProbe } from "./rpc-probe.js";
 interface PendingRpc {
   resolve(value: any): void;
   reject(error: Error): void;
+  /** 可选同步完成钩子：按 stdout 入站行顺序即时结算，避免与同批后续通知产生微任务竞态。 */
+  onSettle?(ok: boolean, value: any): void;
 }
 
 interface KimiPermission {
@@ -290,7 +293,35 @@ export class AcpDriver extends BaseDriver {
   private terminalCounter = 0;
   private configOptions: AcpConfigOption[] = [];
   private activePrompts = 0;
-  private readonly queuedPrompts: Record<string, unknown>[][] = [];
+  private hasPrompted = false;
+  private promptSeq = 0;
+  private readonly queuedPrompts: Array<{ prompt: Record<string, unknown>[]; promptId: string }> = [];
+  private readonly inFlightTools = new Map<string, BackgroundTask>();
+  private readonly subagentStarterCalls = new Set<string>();
+  private readonly subagentKillAllCalls = new Set<string>();
+  /** 已补发取消终态的工具 ID，过期前屏蔽包括重复终态在内的迟到帧。 */
+  private readonly ignoredToolCallIds = new Map<string, number>();
+  private readonly completedToolCallIds = new Map<string, number>();
+  /** 待回报的原生子代理：starter toolCallId -> 有界保活截止时间戳，彼此独立计数。 */
+  private readonly pendingNativeSubagents = new Map<string, number>();
+  private settlingSubagentId: string | null = null;
+  private unclaimedExpiredSubagents = 0;
+  private settlingExpiredSubagent = false;
+  /** 并发 prompt 期间若先结束了某个后台工具，记录唤醒宽限截止时刻，留给最后一条 prompt 结束时接续。 */
+  private readonly backgroundToolCallIds = new Set<string>();
+  private pendingWakeDeadlineMs = 0;
+  private wakeGraceEndsAtMs = 0;
+  private wakeSource: "none" | "tool" | "subagent" = "none";
+  private interruptedUntilNextPrompt = false;
+  private reactivePhase: "idle" | "waiting_wake" | "awake" = "idle";
+  private reactiveTimer?: ReturnType<typeof setTimeout>;
+  private lastPublishedBackgroundKey = "[]";
+  /** Antigravity reactive wakeup 收尾确认、工具唤醒与原生子代理有界保活时长（毫秒）；单测可覆盖。 */
+  protected reactiveSettleMs = 2_500;
+  protected reactiveWakeGraceMs = 35_000;
+  protected reactiveFallbackMs = 35_000;
+  protected reactiveSubagentGraceMs = 15 * 60_000;
+  protected ignoredToolTtlMs = 10 * 60_000;
 
   async start(): Promise<void> {
     this.spawnProcess(this.kind === "antigravity" ? "agy" : "kimi", ["acp"]);
@@ -374,45 +405,86 @@ export class AcpDriver extends BaseDriver {
     }
     if (text) prompt.push({ type: "text", text });
     prompt.push(...attachments);
+    const promptId = `${this.kind}:p${++this.promptSeq}`;
     if (options?.steer) {
       if (!this.activePrompts) throw new Error(`${this.label} 当前回合已结束，请重发消息`);
       if (this.kind === "kimi") {
-        this.queuedPrompts.push(prompt);
-        return { queued: true };
+        this.queuedPrompts.push({ prompt, promptId });
+        return { queued: true, promptId };
       }
       // Antigravity 接收运行中追加的 session/prompt，由原生 CLI 决定何时处理。
     }
-    this.startPrompt(prompt);
+    this.startPrompt(prompt, promptId);
+    return { promptId };
   }
 
-  private startPrompt(prompt: Record<string, unknown>[]): void {
+  private startPrompt(prompt: Record<string, unknown>[], promptId: string): void {
+    this.hasPrompted = true;
     this.activePrompts++;
+    const startedAt = Date.now();
+    if (this.kind === "antigravity") {
+      this.interruptedUntilNextPrompt = false;
+      this.pruneTerminalToolIds(startedAt);
+      // 原生子代理在各自条目上已有绝对截止时刻，单独保留工具的剩余宽限。
+      if (this.reactivePhase === "waiting_wake" && this.wakeSource === "tool" && this.wakeGraceEndsAtMs > startedAt) {
+        this.pendingWakeDeadlineMs = Math.max(this.pendingWakeDeadlineMs, this.wakeGraceEndsAtMs);
+      }
+      this.clearReactiveTimer();
+      this.wakeGraceEndsAtMs = 0;
+      this.settlingSubagentId = null;
+      this.settlingExpiredSubagent = false;
+      this.reactivePhase = "idle";
+      this.wakeSource = "none";
+      this.syncAntigravityBackgroundTasks();
+    }
     this.callbacks.status("running");
-    void this.request("session/prompt", {
-      sessionId: this.nativeSessionId,
-      prompt,
-    }).then((result) => {
-      this.activePrompts--;
-      this.callbacks.emit("turn_completed", {
-        stopReason: result?.stopReason,
-        result,
-      });
-      const next = this.queuedPrompts.shift();
-      if (next) this.startPrompt(next);
-      else if (this.activePrompts === 0) this.callbacks.status("idle");
-    }).catch((error) => {
-      this.activePrompts--;
-      this.cancelQueuedPrompts("当前回合失败");
-      this.callbacks.emit("session_error", { message: errorMessage(error), source: "session/prompt" });
-      this.callbacks.status(this.activePrompts > 0 ? "running" : "error");
+    const id = this.rpcId++;
+    this.rpc.set(id, {
+      resolve: () => {},
+      reject: () => {},
+      onSettle: (ok, value) => {
+        this.activePrompts = Math.max(0, this.activePrompts - 1);
+        if (ok) {
+          this.callbacks.emit("turn_completed", {
+            stopReason: value?.stopReason,
+            result: value,
+            promptId,
+            durationMs: Math.max(0, Date.now() - startedAt),
+          });
+        } else {
+          this.cancelQueuedPrompts("当前回合失败");
+          this.callbacks.emit("session_error", { message: errorMessage(value), source: "session/prompt", promptId });
+        }
+        if (this.kind === "antigravity") {
+          for (const toolId of this.inFlightTools.keys()) this.backgroundToolCallIds.add(toolId);
+          if (this.activePrompts === 0) this.enterAntigravityIdleGuard();
+        }
+        const next = this.queuedPrompts.shift();
+        if (next) this.startPrompt(next.prompt, next.promptId);
+        else if (this.activePrompts === 0) {
+          const backgroundBusy = this.kind === "antigravity" && (this.inFlightTools.size > 0 || this.reactivePhase !== "idle");
+          this.callbacks.status(ok || backgroundBusy ? "idle" : "error");
+        } else if (!ok) {
+          this.callbacks.status("running");
+        }
+      },
     });
+    try {
+      this.send({ jsonrpc: "2.0", id, method: "session/prompt", params: { sessionId: this.nativeSessionId, prompt } });
+    } catch (error) {
+      const pending = this.rpc.get(id);
+      this.rpc.delete(id);
+      pending?.onSettle?.(false, error);
+    }
   }
 
   private cancelQueuedPrompts(reason: string): void {
-    const count = this.queuedPrompts.length;
+    const cancelledPromptIds = this.queuedPrompts.map((entry) => entry.promptId);
     this.queuedPrompts.length = 0;
-    if (count) this.callbacks.emit("session_error", {
-      source: "steer_queue", message: `${this.label} 的 ${count} 条排队消息已取消：${reason}`,
+    if (cancelledPromptIds.length) this.callbacks.emit("session_error", {
+      source: "steer_queue",
+      cancelledPromptIds,
+      message: `${this.label} 的 ${cancelledPromptIds.length} 条排队消息已取消：${reason}`,
     });
   }
 
@@ -461,6 +533,10 @@ export class AcpDriver extends BaseDriver {
     this.cancelQueuedPrompts("用户停止了执行");
     this.cancelElicitations();
     if (this.kind === "antigravity") {
+      for (const toolCallId of this.inFlightTools.keys()) {
+        this.callbacks.emit("tool_call_completed", { toolCallId, isError: true, status: "cancelled", content: "Cancelled" });
+      }
+      this.resetAntigravityBackgroundState(true, true);
       for (const [requestId, pending] of this.permissions) {
         this.replyResult(pending.rpcId, { outcome: { outcome: "cancelled" } });
         this.permissions.delete(requestId);
@@ -473,6 +549,7 @@ export class AcpDriver extends BaseDriver {
 
   async stop(): Promise<void> {
     this.filesClosed = true;
+    this.resetAntigravityBackgroundState(false, false);
     const filesStopped = withTimeout(this.fileRequests, 1_000, `${this.label} file operations`).catch(error => {
       log("warn", `${this.label} file operation drain timed out`, { sessionId: this.sessionId, message: errorMessage(error) });
     });
@@ -500,8 +577,14 @@ export class AcpDriver extends BaseDriver {
       const pending = this.rpc.get(id);
       if (pending) {
         this.rpc.delete(id);
-        if (message.error) pending.reject(new Error(message.error.message ?? JSON.stringify(message.error)));
-        else pending.resolve(message.result);
+        if (pending.onSettle) {
+          if (message.error) pending.onSettle(false, new Error(message.error.message ?? JSON.stringify(message.error)));
+          else pending.onSettle(true, message.result);
+        } else if (message.error) {
+          pending.reject(new Error(message.error.message ?? JSON.stringify(message.error)));
+        } else {
+          pending.resolve(message.result);
+        }
       }
       return;
     }
@@ -625,6 +708,7 @@ export class AcpDriver extends BaseDriver {
 
   protected handleProcessExit(): void {
     this.filesClosed = true;
+    this.resetAntigravityBackgroundState(false, false);
     void this.cleanupTerminals();
     this.activePrompts = 0;
     this.cancelQueuedPrompts("worker 已退出");
@@ -831,25 +915,33 @@ export class AcpDriver extends BaseDriver {
       return;
     }
     if (type === "agent_message_chunk") {
+      if (this.shouldDropAntigravityUpdate()) return;
+      this.noteAntigravityReactiveStream();
       this.callbacks.emit("agent_text_delta", { text: update.content?.text ?? "" });
       return;
     }
     if (type === "agent_thought_chunk") {
+      if (this.shouldDropAntigravityUpdate()) return;
+      this.noteAntigravityReactiveStream();
       this.callbacks.emit("thought_delta", { text: update.content?.text ?? "" });
       return;
     }
-    if (type === "tool_call") {
-      this.callbacks.emit("tool_call_started", {
-        toolCallId: update.toolCallId,
-        toolName: update.title,
-        input: update.rawInput ?? update.content ?? [],
-        status: update.status,
-        ...(typeof update.kind === "string" ? { kind: update.kind } : {}),
-        ...(Array.isArray(update.locations) ? { locations: update.locations } : {}),
-      });
-      return;
-    }
-    if (type === "tool_call_update") {
+    if (type === "tool_call" || type === "tool_call_update") {
+      if (this.shouldDropAntigravityUpdate(update.toolCallId)) return;
+      const terminal = update.status === "completed" || update.status === "failed"
+        || (this.kind === "antigravity" && update.status === "cancelled");
+      if (type === "tool_call") {
+        this.noteAntigravityToolStarted(update, terminal);
+        this.callbacks.emit("tool_call_started", {
+          toolCallId: update.toolCallId,
+          toolName: update.title,
+          input: update.rawInput ?? update.content ?? [],
+          status: update.status,
+          ...(typeof update.kind === "string" ? { kind: update.kind } : {}),
+          ...(Array.isArray(update.locations) ? { locations: update.locations } : {}),
+        });
+        if (!terminal || this.kind !== "antigravity") return;
+      }
       const payload = {
         toolCallId: update.toolCallId,
         toolName: update.title,
@@ -859,21 +951,28 @@ export class AcpDriver extends BaseDriver {
         ...(typeof update.kind === "string" ? { kind: update.kind } : {}),
         ...(Array.isArray(update.locations) ? { locations: update.locations } : {}),
       };
-      if (["completed", "failed"].includes(update.status)) {
+      if (terminal) {
+        if (this.kind === "antigravity" && typeof update.toolCallId === "string") {
+          this.completedToolCallIds.set(update.toolCallId, Date.now() + this.ignoredToolTtlMs);
+        }
         const terminalOutput = terminalOutputForEvent(update.content,
           (terminalId) => this.terminals.get(terminalId) ?? this.releasedTerminals.get(terminalId));
         this.callbacks.emit("tool_call_completed", {
           ...payload,
-          isError: update.status === "failed",
+          isError: update.status !== "completed",
           ...(terminalOutput ? { terminalOutput } : {}),
         });
+        this.noteAntigravityToolCompleted(update);
       } else {
+        this.noteAntigravityToolUpdated(update);
         this.callbacks.emit("tool_call_updated", payload);
       }
       return;
     }
     if (type === "usage_update") {
+      if (this.shouldDropAntigravityUpdate()) return;
       this.callbacks.emit("usage_updated", { used: update.used ?? update.contextWindow?.used, size: update.size ?? update.contextWindow?.size });
+      this.noteAntigravityUsageUpdate();
       return;
     }
     if (type === "available_commands_update") {
@@ -882,6 +981,269 @@ export class AcpDriver extends BaseDriver {
       return;
     }
     this.callbacks.emit("raw_event", { source: this.kind, update });
+  }
+
+  private pruneTerminalToolIds(now = Date.now()): void {
+    for (const ids of [this.ignoredToolCallIds, this.completedToolCallIds]) {
+      for (const [id, expiresAt] of ids) {
+        if (expiresAt <= now) ids.delete(id);
+      }
+    }
+  }
+
+  private pruneExpiredSubagents(now = Date.now()): void {
+    for (const [id, expiresAt] of this.pendingNativeSubagents) {
+      if (expiresAt > now) continue;
+      this.pendingNativeSubagents.delete(id);
+      if (id !== this.settlingSubagentId) this.unclaimedExpiredSubagents++;
+    }
+    if (this.pendingNativeSubagents.size === 0) this.unclaimedExpiredSubagents = 0;
+  }
+
+  private nextSubagentGraceMs(now = Date.now()): number {
+    this.pruneExpiredSubagents(now);
+    let maxExpires = 0;
+    for (const expiresAt of this.pendingNativeSubagents.values()) {
+      if (expiresAt > maxExpires) maxExpires = expiresAt;
+    }
+    return maxExpires > now ? maxExpires - now : 0;
+  }
+
+  /** 在发布事件前屏蔽中断后的输出，以及已终结工具的迟到帧。 */
+  private shouldDropAntigravityUpdate(toolCallId?: unknown): boolean {
+    if (this.kind !== "antigravity") return false;
+    if (this.interruptedUntilNextPrompt) return true;
+    if (typeof toolCallId !== "string") return false;
+    this.pruneTerminalToolIds();
+    return this.ignoredToolCallIds.has(toolCallId) || this.completedToolCallIds.has(toolCallId);
+  }
+
+  private clearReactiveTimer(): void {
+    if (!this.reactiveTimer) return;
+    clearTimeout(this.reactiveTimer);
+    this.reactiveTimer = undefined;
+  }
+
+  private scheduleReactiveClear(delayMs: number, consumeOneSubagent = false): void {
+    this.clearReactiveTimer();
+    this.reactiveTimer = setTimeout(() => {
+      this.reactiveTimer = undefined;
+      if (this.activePrompts > 0 || this.inFlightTools.size > 0) return;
+      const now = Date.now();
+      this.pruneExpiredSubagents(now);
+      if (consumeOneSubagent) {
+        if (this.settlingExpiredSubagent) this.unclaimedExpiredSubagents = Math.max(0, this.unclaimedExpiredSubagents - 1);
+        else if (this.settlingSubagentId !== null) this.pendingNativeSubagents.delete(this.settlingSubagentId);
+      }
+      this.settlingSubagentId = null;
+      this.settlingExpiredSubagent = false;
+      const remainingSubagentMs = this.nextSubagentGraceMs(now);
+      if (remainingSubagentMs > 0) {
+        this.waitForAntigravityWake("subagent", now + remainingSubagentMs);
+        return;
+      }
+      this.reactivePhase = "idle";
+      this.wakeSource = "none";
+      this.wakeGraceEndsAtMs = 0;
+      this.syncAntigravityBackgroundTasks();
+    }, delayMs);
+    this.reactiveTimer.unref();
+  }
+
+  private waitForAntigravityWake(source: "tool" | "subagent", deadlineMs: number): void {
+    this.reactivePhase = "waiting_wake";
+    this.wakeSource = source;
+    this.wakeGraceEndsAtMs = deadlineMs;
+    this.settlingSubagentId = null;
+    this.settlingExpiredSubagent = false;
+    if (this.inFlightTools.size === 0) this.scheduleReactiveClear(Math.max(0, deadlineMs - Date.now()));
+    else this.clearReactiveTimer();
+    this.syncAntigravityBackgroundTasks();
+  }
+
+  /** 最后一个在途 session/prompt 结束时，接续未完成工具、并发期间刚结束工具的剩余唤醒宽限或待回报原生子代理。 */
+  private enterAntigravityIdleGuard(): void {
+    if (this.interruptedUntilNextPrompt) {
+      this.syncAntigravityBackgroundTasks();
+      return;
+    }
+    const now = Date.now();
+    const wakeRemaining = this.pendingWakeDeadlineMs > now ? this.pendingWakeDeadlineMs - now : 0;
+    this.pendingWakeDeadlineMs = 0;
+    if (this.inFlightTools.size === 0) {
+      if (wakeRemaining > 0) {
+        this.waitForAntigravityWake("tool", now + wakeRemaining);
+        return;
+      }
+      const subagentRemaining = this.nextSubagentGraceMs(now);
+      if (subagentRemaining > 0) {
+        this.waitForAntigravityWake("subagent", now + subagentRemaining);
+        return;
+      }
+    }
+    this.syncAntigravityBackgroundTasks();
+  }
+
+  private antigravityToolTask(update: Record<string, any>, previous?: BackgroundTask): BackgroundTask | null {
+    const id = typeof update.toolCallId === "string" ? update.toolCallId : "";
+    if (!id) return null;
+    const rawTitle = typeof update.title === "string" && update.title.trim() ? update.title.replace(/\s+/g, " ").trim() : previous?.description ?? "tool";
+    return {
+      id,
+      type: typeof update.kind === "string" && update.kind ? update.kind : previous?.type ?? "tool",
+      description: rawTitle.slice(0, 120),
+    };
+  }
+
+  private trackNativeSubagentLifecycleTool(id: string, update: Record<string, any>): void {
+    const title = typeof update.title === "string" ? update.title : "";
+    const input = update.rawInput && typeof update.rawInput === "object" ? update.rawInput as Record<string, unknown> : null;
+    if (/\binvoke_subagent\b/i.test(title) || (/\bswarm\b/i.test(title) && input?.action === "add")) {
+      this.subagentStarterCalls.add(id);
+    }
+    if (/\bmanage_subagents\b/i.test(title) && input?.Action === "kill_all") {
+      this.subagentKillAllCalls.add(id);
+    }
+  }
+
+  private noteAntigravityToolStarted(update: Record<string, any>, terminal: boolean): void {
+    if (this.kind !== "antigravity" || !this.hasPrompted || this.interruptedUntilNextPrompt) return;
+    const id = typeof update.toolCallId === "string" ? update.toolCallId : "";
+    if (!id) return;
+    this.trackNativeSubagentLifecycleTool(id, update);
+    if (terminal) return;
+    const task = this.antigravityToolTask(update);
+    if (!task) return;
+    this.inFlightTools.set(task.id, task);
+    this.noteAntigravityReactiveStream();
+  }
+
+  private noteAntigravityToolUpdated(update: Record<string, any>): void {
+    if (this.kind !== "antigravity" || !this.hasPrompted || this.interruptedUntilNextPrompt) return;
+    const id = typeof update.toolCallId === "string" ? update.toolCallId : "";
+    if (!id) return;
+    this.trackNativeSubagentLifecycleTool(id, update);
+    const task = this.antigravityToolTask(update, this.inFlightTools.get(id));
+    if (!task) return;
+    this.inFlightTools.set(id, task);
+    this.noteAntigravityReactiveStream();
+  }
+
+  private noteAntigravityToolCompleted(update: Record<string, any>): void {
+    if (this.kind !== "antigravity" || !this.hasPrompted || this.interruptedUntilNextPrompt) return;
+    const id = typeof update.toolCallId === "string" ? update.toolCallId : "";
+    const succeeded = update.status === "completed";
+    const wasSubagentStarter = id ? this.subagentStarterCalls.delete(id) : false;
+    const wasKillAll = id ? this.subagentKillAllCalls.delete(id) : false;
+    const hadInFlight = id ? this.inFlightTools.delete(id) : false;
+    const wasBackgroundTool = id ? this.backgroundToolCallIds.delete(id) : false;
+    const now = Date.now();
+    if (wasSubagentStarter && succeeded && id) {
+      this.pruneExpiredSubagents(now);
+      this.pendingNativeSubagents.set(id, now + this.reactiveSubagentGraceMs);
+    }
+    if (wasKillAll && succeeded) {
+      this.pendingNativeSubagents.clear();
+      this.unclaimedExpiredSubagents = 0;
+    }
+    if (this.activePrompts > 0) {
+      // 仅对已跨过前序 prompt 结束边界的后台工具保留唤醒宽限，普通同步工具不触发。
+      if (hadInFlight && wasBackgroundTool && !wasSubagentStarter) {
+        this.pendingWakeDeadlineMs = Math.max(this.pendingWakeDeadlineMs, now + this.reactiveWakeGraceMs);
+      }
+      return;
+    }
+    if (hadInFlight && !wasSubagentStarter) {
+      // 只有独立后台工具开启新的唤醒窗口，续跑中的同步工具沿用当前唤醒来源。
+      if (wasBackgroundTool || this.reactivePhase !== "awake") this.waitForAntigravityWake("tool", now + this.reactiveWakeGraceMs);
+      else this.noteAntigravityReactiveStream();
+    } else if (this.inFlightTools.size > 0) {
+      this.clearReactiveTimer();
+      this.syncAntigravityBackgroundTasks();
+    } else {
+      const subagentRemaining = this.nextSubagentGraceMs(now);
+      if (subagentRemaining > 0) {
+        this.waitForAntigravityWake("subagent", now + subagentRemaining);
+      } else if (this.reactivePhase !== "idle") {
+        this.waitForAntigravityWake("tool", now + this.reactiveWakeGraceMs);
+      }
+    }
+  }
+
+  private noteAntigravityReactiveStream(): void {
+    if (this.kind !== "antigravity" || !this.hasPrompted || this.activePrompts > 0 || this.interruptedUntilNextPrompt) return;
+    if (this.reactivePhase !== "awake") {
+      this.pruneExpiredSubagents();
+      if (this.wakeSource === "none") this.wakeSource = this.pendingNativeSubagents.size > 0 ? "subagent" : "tool";
+      // ACP 唤醒没有子代理 ID，优先吸收可能来自刚到期条目的迟到回报。
+      if (this.wakeSource === "subagent" && this.settlingSubagentId === null) {
+        if (this.unclaimedExpiredSubagents > 0) this.settlingExpiredSubagent = true;
+        else this.settlingSubagentId = this.pendingNativeSubagents.keys().next().value ?? null;
+      }
+    }
+    this.reactivePhase = "awake";
+    this.wakeGraceEndsAtMs = 0;
+    if (this.inFlightTools.size === 0) this.scheduleReactiveClear(this.reactiveFallbackMs, this.wakeSource === "subagent");
+    else this.clearReactiveTimer();
+    this.syncAntigravityBackgroundTasks();
+  }
+
+  private noteAntigravityUsageUpdate(): void {
+    // 仅在真正收到唤醒输出（awake）且无在途工具时才按收尾确认窗口结算；若本次唤醒来自子代理则只消费一条子代理记录。
+    if (this.kind !== "antigravity" || !this.hasPrompted || this.activePrompts > 0
+      || this.interruptedUntilNextPrompt || this.reactivePhase !== "awake"
+      || this.inFlightTools.size > 0) return;
+    this.scheduleReactiveClear(this.reactiveSettleMs, this.wakeSource === "subagent");
+  }
+
+  private syncAntigravityBackgroundTasks(): void {
+    if (this.kind !== "antigravity") return;
+    this.pruneExpiredSubagents();
+    const tasks: BackgroundTask[] = this.activePrompts > 0
+      ? []
+      : this.inFlightTools.size > 0
+        ? [...this.inFlightTools.values()]
+        : this.reactivePhase !== "idle"
+          ? [{
+            id: this.reactivePhase === "waiting_wake" && this.wakeSource === "subagent" && this.pendingNativeSubagents.size > 0
+              ? "antigravity:subagent" : "antigravity:reactive",
+            type: "subagent",
+            description: this.reactivePhase === "waiting_wake" && this.wakeSource === "subagent" && this.pendingNativeSubagents.size > 0
+              ? "subagent_pending" : "reactive_wakeup",
+          }]
+          : [];
+    const key = JSON.stringify(tasks);
+    if (key === this.lastPublishedBackgroundKey) return;
+    this.lastPublishedBackgroundKey = key;
+    this.callbacks.metadata({ backgroundTasks: tasks });
+  }
+
+  private resetAntigravityBackgroundState(publish: boolean, markInterrupted: boolean): void {
+    this.clearReactiveTimer();
+    const now = Date.now();
+    if (markInterrupted) {
+      this.pruneTerminalToolIds(now);
+      for (const id of this.inFlightTools.keys()) this.ignoredToolCallIds.set(id, now + this.ignoredToolTtlMs);
+      this.interruptedUntilNextPrompt = true;
+    } else this.interruptedUntilNextPrompt = false;
+    if (!publish) {
+      this.ignoredToolCallIds.clear();
+      this.completedToolCallIds.clear();
+    }
+    this.inFlightTools.clear();
+    this.backgroundToolCallIds.clear();
+    this.subagentStarterCalls.clear();
+    this.subagentKillAllCalls.clear();
+    this.pendingNativeSubagents.clear();
+    this.settlingSubagentId = null;
+    this.settlingExpiredSubagent = false;
+    this.unclaimedExpiredSubagents = 0;
+    this.pendingWakeDeadlineMs = 0;
+    this.wakeGraceEndsAtMs = 0;
+    this.wakeSource = "none";
+    this.reactivePhase = "idle";
+    if (publish) this.syncAntigravityBackgroundTasks();
+    else this.lastPublishedBackgroundKey = "[]";
   }
 
   private request(method: string, params: unknown): Promise<any> {

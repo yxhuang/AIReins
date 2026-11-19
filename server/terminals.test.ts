@@ -222,9 +222,9 @@ let remotePort = await freePort();
 while (remotePort === localPort) remotePort = await freePort();
 const testHome = await mkdtemp(join(tmpdir(), "workbench-terminal-test-"));
 const remoteOrigin = "https://desk.tail1234.ts.net";
-await writeFile(join(testHome, "remote.json"), JSON.stringify({
-  port: remotePort, origin: remoteOrigin, allowedLogins: ["me@github"],
-}));
+const remoteConfigPath = join(testHome, "remote.json");
+const remoteConfig = { port: remotePort, origin: remoteOrigin, allowedLogins: ["me@github"], custom: { keep: true } };
+await writeFile(remoteConfigPath, JSON.stringify(remoteConfig));
 const child = spawnChild(process.execPath, ["--import", "tsx", join(serverDir, "index.ts")], {
   cwd: fileURLToPath(new URL("..", import.meta.url)),
   env: { ...process.env, HOME: testHome, SHELL: "/bin/bash", WORKBENCH_HOME: testHome, WORKBENCH_PORT: String(localPort) },
@@ -248,21 +248,22 @@ try {
   });
 
   const headers = { host: "desk.tail1234.ts.net", origin: remoteOrigin, "tailscale-user-login": "me@github" };
-  function httpCall(method: string, path: string): Promise<{ status: number; data: any }> {
+  function httpCall(method: string, path: string, body?: object, requestHeaders: Record<string, string> = headers): Promise<{ status: number; data: any }> {
     return new Promise((done, fail) => {
-      const req = request({ hostname: "127.0.0.1", port: remotePort, method, path, headers }, (res) => {
+      const req = request({ hostname: "127.0.0.1", port: remotePort, method, path, headers: requestHeaders }, (res) => {
         let body = "";
         res.on("data", (chunk: Buffer) => { body += chunk.toString("utf8"); });
         res.on("end", () => done({ status: res.statusCode ?? 0, data: JSON.parse(body) }));
       });
       req.on("error", fail);
-      req.end();
+      req.end(body === undefined ? undefined : JSON.stringify(body));
     });
   }
   const meta = await httpCall("GET", "/api/meta");
   assert.equal(meta.status, 200);
   assert.equal(meta.data.data.terminalShell, "bash");
   assert.equal(meta.data.data.capabilities.terminal, false);
+  assert.equal(meta.data.data.remoteTerminalEnabled, false, "远程入口关闭终端时仍报告设置状态");
   for (const [method, path] of [["GET", "/api/terminals"], ["POST", "/api/terminals"], ["POST", "/api/terminals/term_missing/kill"]]) {
     const response = await httpCall(method, path);
     assert.equal(response.status, 403, `${method} ${path}`);
@@ -275,6 +276,23 @@ try {
     socket.on("error", () => undefined);
   });
   assert.equal(wsStatus, 403);
+
+  const settingsPath = "/api/remote-terminal";
+  assert.equal((await httpCall("PUT", settingsPath, { enabled: true }, { ...headers, origin: "https://other.example" })).status, 403);
+  assert.equal((await httpCall("PUT", settingsPath, { enabled: true }, { ...headers, "tailscale-user-login": "other@github" })).status, 403);
+  assert.equal((await httpCall("PUT", settingsPath, { enabled: true }, { ...headers, host: "other.example" })).status, 403);
+  const { origin: _origin, ...withoutOrigin } = headers;
+  assert.equal((await httpCall("PUT", settingsPath, { enabled: true }, withoutOrigin)).status, 403);
+  assert.equal((await httpCall("PUT", settingsPath, { enabled: "true" })).status, 400);
+  assert.deepEqual(JSON.parse(readFileSync(remoteConfigPath, "utf8")), remoteConfig, "拒绝的请求不改配置");
+  assert.equal((await httpCall("PUT", settingsPath, { enabled: true, allowedLogins: ["other@github"] })).status, 200);
+  const enabledMeta = (await httpCall("GET", "/api/meta")).data.data;
+  assert.equal(enabledMeta.remoteTerminalEnabled, true);
+  assert.equal(enabledMeta.capabilities.terminal, true, "打开后无需重启");
+  assert.deepEqual(JSON.parse(readFileSync(remoteConfigPath, "utf8")), { ...remoteConfig, terminal: true });
+  assert.equal((await httpCall("GET", "/api/terminals")).status, 200);
+  const remoteTerminal = new WebSocket(`ws://127.0.0.1:${remotePort}/ws/terminal`, { headers });
+  await once(remoteTerminal, "open");
 
   // 本机入口：detach 后该连接不再收旧终端输出，PTY 照常运行，重新 attach 能回放。
   const localBase = `http://127.0.0.1:${localPort}`;
@@ -302,6 +320,18 @@ try {
   assert.equal(frames.length, before, "detach 后不再推送该终端输出");
   send({ type: "attach", terminalId: bashTerm.id });
   await waitFor(() => frames.some((f) => f.type === "data" && String(f.data).includes("DETACH_42")), "重新 attach 回放 detach 期间的输出");
+  const remoteClosed = once(remoteTerminal, "close", { signal: AbortSignal.timeout(5000) });
+  assert.equal((await httpCall("PUT", settingsPath, { enabled: false })).status, 200);
+  await remoteClosed;
+  assert.equal((await httpCall("GET", "/api/meta")).data.data.capabilities.terminal, false);
+  assert.equal((await httpCall("GET", "/api/terminals")).status, 403);
+  assert.deepEqual(JSON.parse(readFileSync(remoteConfigPath, "utf8")), { ...remoteConfig, terminal: false });
+  assert.equal(ws.readyState, WebSocket.OPEN, "关闭远程终端不影响本机连接");
+  assert.equal((await fetch(`${localBase}/api/meta`).then((response) => response.json())).data.capabilities.terminal, true);
+  const editedConfig = { ...remoteConfig, terminal: false, allowedLogins: ["other@github"] };
+  await writeFile(remoteConfigPath, JSON.stringify(editedConfig));
+  assert.equal((await httpCall("PUT", settingsPath, { enabled: true })).status, 409, "未加载的鉴权改动必须先重启");
+  assert.deepEqual(JSON.parse(readFileSync(remoteConfigPath, "utf8")), editedConfig);
   ws.close();
 } finally {
   child.kill("SIGTERM");

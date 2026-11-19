@@ -39,6 +39,28 @@ export function compactTokens(n: number): string {
   return `${(n / 1_000_000).toFixed(2)}M`;
 }
 
+// 单回合回答耗时紧凑格式：0.4s / 3.2s / 42s / 2m 15s / 1h 5m 12s。
+export function formatTurnDuration(ms: number): string {
+  if (!Number.isFinite(ms) || ms < 0) return "0s";
+  if (ms < 1000) return `${Math.max(0.1, Math.round(ms / 100) / 10).toFixed(1)}s`;
+  if (ms < 10_000) return `${(Math.round(ms / 100) / 10).toFixed(1)}s`;
+  const totalSeconds = Math.round(ms / 1000);
+  if (totalSeconds < 60) return `${totalSeconds}s`;
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  if (hours > 0) return seconds > 0 ? `${hours}h ${minutes}m ${seconds}s` : `${hours}h ${minutes}m`;
+  return seconds > 0 ? `${minutes}m ${seconds}s` : `${minutes}m`;
+}
+
+// 回合起止时刻（本地 HH:MM:SS），用于耗时悬停详情。
+export function formatClockTime(ms: number): string {
+  if (!Number.isFinite(ms)) return "";
+  const date = new Date(ms);
+  const pad = (value: number) => String(value).padStart(2, "0");
+  return `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+}
+
 import { sessionTitle as sharedSessionTitle } from "../../shared/session-title";
 export { truncateDisplayWidth } from "../../shared/session-title";
 export function sessionTitle(session: Parameters<typeof sharedSessionTitle>[0], events?: Parameters<typeof sharedSessionTitle>[1]): string {

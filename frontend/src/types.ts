@@ -181,8 +181,10 @@ export interface SessionRecord {
   /** true = 免审批或不询问模式（claude bypass/dontAsk、codex full-access/旧 never、kimi yolo） */
   riskyMode: boolean;
   remoteControl?: RemoteControlState;
-  /** 仅 Claude：后台任务清单；非空时虽 idle 仍在干活（列表状态点显示黄色） */
+  /** worker 后台任务清单（Claude 后台任务 / Antigravity 在途后台工具与自动唤醒）；非空时虽 idle 仍在干活 */
   backgroundTasks?: BackgroundTask[];
+  /** 运行中归属于本会话的外部派单与原生子代理数（纯运行时状态） */
+  activeDispatchCount?: number;
 }
 
 /** GET /api/sessions/:id/commands 与 commands_updated 的命令项；name 不含开头的 /。 */
@@ -242,6 +244,8 @@ export interface MetaInfo {
   platform?: "wsl" | "linux" | "darwin" | "unsupported";
   /** 服务端缺省 Unix shell 的名称；旧后端省略时回退 bash。 */
   terminalShell?: string;
+  /** 远程监听已配置时报告主机设置，与当前入口的终端能力分开。 */
+  remoteTerminalEnabled?: boolean;
   capabilities: { terminal: boolean; windowsDirectoryPicker?: boolean; systemOpen?: boolean; appWindow?: boolean; powerOff?: boolean;
     windowsPaths?: boolean; powershell?: boolean; fileEdit?: boolean; taildrop?: boolean; folderTaildrop?: boolean;
     windowsTray?: boolean; remoteGateway?: boolean };

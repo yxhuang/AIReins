@@ -46,6 +46,14 @@ export function fetchMeta(): Promise<MetaInfo> {
   return call<MetaInfo>("/api/meta");
 }
 
+export function saveRemoteTerminal(enabled: boolean): Promise<{ enabled: boolean }> {
+  return call("/api/remote-terminal", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ enabled }),
+  });
+}
+
 /** 只确认原生压缩请求已接受；完成与用量由当前会话事件更新。 */
 export function compactSessionContext(id: string): Promise<{ accepted: true }> {
   return call(`/api/sessions/${encodeURIComponent(id)}/compact`, {

@@ -162,6 +162,18 @@ export interface ToolGroupView {
   summaryParts: { verb: string; count: string }[];
 }
 
+/** 单回合（用户提问 → AI 完成回答）的时间统计，纯本地计算/读取，不消耗模型 token。 */
+export interface TurnTiming {
+  turn: number;
+  startedAtMs: number;
+  endedAtMs: number;
+  durationMs: number;
+  apiDurationMs?: number;
+  hasResponse: boolean;
+  completed: boolean;
+  extendedAfterComplete: boolean;
+}
+
 type StreamRenderItem = RenderItem | ToolGroupView;
 
 /** 摘要器的分类是私有实现：复用公开展示结果，不另建名字/ACP kind 分类表。
@@ -246,6 +258,31 @@ export function buildHistoryRenderItems(messages: readonly HistoryMessage[]): Re
     };
     return { kind: message.role === "thought" ? "thought" : "text", key, seq: index, turn, text: message.text };
   });
+}
+
+/** 按原生历史消息的时间戳推算每回合耗时；缺少时间戳的回合省略。 */
+export function buildHistoryTurnTimings(messages: readonly HistoryMessage[]): Map<number, TurnTiming> {
+  const timings = new Map<number, TurnTiming>();
+  let turn = 0;
+  for (const message of messages) {
+    const ts = message.timestamp ? Date.parse(message.timestamp) : NaN;
+    if (message.role === "user") {
+      turn++;
+      if (Number.isFinite(ts)) {
+        timings.set(turn, {
+          turn, startedAtMs: ts, endedAtMs: ts, durationMs: 0,
+          hasResponse: false, completed: true, extendedAfterComplete: false,
+        });
+      }
+      continue;
+    }
+    const timing = timings.get(turn);
+    if (!timing || !Number.isFinite(ts)) continue;
+    timing.hasResponse = true;
+    timing.endedAtMs = Math.max(timing.endedAtMs, ts);
+    timing.durationMs = Math.max(0, timing.endedAtMs - timing.startedAtMs);
+  }
+  return timings;
 }
 
 // 从 permission_request payload 提取闸门视图；三家 payload 形状不同，宽容处理。
@@ -382,10 +419,27 @@ function renderItemsReducer(events: UnifiedEvent[], agent: AgentKind) {
   let lastText: TextBlock | undefined;
   let lastThought: ThoughtBlock | undefined;
   let turn = 0;
+  let userTurn = 0;
+  let nextUserTurn = 0;
+  let lastEventWasTextDelta = false;
+  const promptTurnById = new Map<string, number>();
+  const openAntigravityTurns: number[] = [];
+  let queuedKimiTurns: Array<{ turn: number; promptId?: string }> = [];
+  const sealedTurns = new Set<number>();
+  const turnTimings = new Map<number, TurnTiming>();
+  const itemUserTurns = new WeakMap<RenderItem, number>();
+  const toolOwnerTurns = new Map<string, number>();
 
   const breakRun = () => {
     lastText = undefined;
     lastThought = undefined;
+  };
+
+  const closeAntigravityTurn = (targetTurn: number) => {
+    const index = openAntigravityTurns.indexOf(targetTurn);
+    if (index < 0) return;
+    openAntigravityTurns.splice(index, 1);
+    if (targetTurn === userTurn && openAntigravityTurns.length > 0) userTurn = openAntigravityTurns[0]!;
   };
 
   const positions = new WeakMap<RenderItem, number>();
@@ -394,12 +448,48 @@ function renderItemsReducer(events: UnifiedEvent[], agent: AgentKind) {
     const next = { ...item };
     items[index] = next;
     positions.set(next, index);
+    const ownerTurn = itemUserTurns.get(item);
+    if (ownerTurn !== undefined) itemUserTurns.set(next, ownerTurn);
     return next;
+  };
+  const updateTiming = (targetTurn: number, patch: Partial<TurnTiming>) => {
+    const current = turnTimings.get(targetTurn);
+    if (!current) return;
+    // 不可变替换对象，避免 React memo 比较器因共享可变引用而跳过重绘。
+    turnTimings.set(targetTurn, { ...current, ...patch });
+  };
+  const noteTurnActivity = (ts: number, targetTurn = userTurn, allowStartExtension = true) => {
+    const timing = turnTimings.get(targetTurn);
+    if (!timing) return;
+    if (timing.completed) {
+      if (agent !== "antigravity") return;
+      if (allowStartExtension) sealedTurns.delete(targetTurn);
+      else if (!timing.extendedAfterComplete || sealedTurns.has(targetTurn)) return;
+      const endedAtMs = Number.isFinite(ts) ? Math.max(timing.endedAtMs, ts) : timing.endedAtMs;
+      updateTiming(targetTurn, {
+        hasResponse: true,
+        extendedAfterComplete: true,
+        endedAtMs,
+        durationMs: Math.max(0, endedAtMs - timing.startedAtMs),
+      });
+      return;
+    }
+    const endedAtMs = Number.isFinite(ts) ? Math.max(timing.endedAtMs, ts) : timing.endedAtMs;
+    updateTiming(targetTurn, {
+      hasResponse: true,
+      endedAtMs,
+      durationMs: Math.max(0, endedAtMs - timing.startedAtMs),
+    });
   };
   const append = (event: UnifiedEvent) => {
     const p = event.payload;
+    const promptId = typeof p.promptId === "string" && p.promptId ? p.promptId : undefined;
+    const ts = Date.parse(event.timestamp);
+    const previousLength = items.length;
+    let assignedTurn = openAntigravityTurns.length === 1 ? openAntigravityTurns[0]! : userTurn;
     switch (event.type) {
       case "agent_text_delta": {
+        noteTurnActivity(ts, assignedTurn);
         const text = String(p.text ?? "");
         if (lastText) {
           lastText = replace(lastText);
@@ -412,6 +502,7 @@ function renderItemsReducer(events: UnifiedEvent[], agent: AgentKind) {
         break;
       }
       case "thought_delta": {
+        noteTurnActivity(ts, assignedTurn);
         const text = String(p.text ?? "");
         if (lastThought) {
           lastThought = replace(lastThought);
@@ -427,7 +518,26 @@ function renderItemsReducer(events: UnifiedEvent[], agent: AgentKind) {
         breakRun();
         if (p.steer !== true) userTexts.clear();
         if (typeof p.text === "string" && p.text) userTexts.add(p.text);
-        if (p.steer !== true) turn++;
+        const queued = agent === "kimi" && p.queued === true;
+        if (p.steer !== true) {
+          turn++;
+          userTurn = ++nextUserTurn;
+          assignedTurn = userTurn;
+          openAntigravityTurns.length = 0;
+        } else if (promptId || queued) {
+          assignedTurn = ++nextUserTurn;
+          if (queued) queuedKimiTurns.push({ turn: assignedTurn, ...(promptId ? { promptId } : {}) });
+        }
+        if (p.steer !== true || promptId || queued) {
+          if (promptId) promptTurnById.set(promptId, assignedTurn);
+          if (agent === "antigravity") openAntigravityTurns.push(assignedTurn);
+          if (Number.isFinite(ts)) {
+            turnTimings.set(assignedTurn, {
+              turn: assignedTurn, startedAtMs: ts, endedAtMs: ts, durationMs: 0,
+              hasResponse: false, completed: false, extendedAfterComplete: false,
+            });
+          }
+        }
         const mentions = mentionsFromPayload(p.mentions);
         items.push({
           kind: "user",
@@ -464,8 +574,10 @@ function renderItemsReducer(events: UnifiedEvent[], agent: AgentKind) {
         break;
       }
       case "tool_call_started": {
+        noteTurnActivity(ts, assignedTurn);
         breakRun();
         const id = String(p.toolCallId ?? event.seq);
+        toolOwnerTurns.set(id, assignedTurn);
         const toolName = String(p.toolName ?? "tool");
         const view: ToolView = {
           kind: "tool",
@@ -487,7 +599,9 @@ function renderItemsReducer(events: UnifiedEvent[], agent: AgentKind) {
         break;
       }
       case "tool_call_updated": {
-        let view = tools.get(String(p.toolCallId ?? ""));
+        const id = String(p.toolCallId ?? "");
+        let view = tools.get(id);
+        if (!view || view.status === "running") noteTurnActivity(ts, toolOwnerTurns.get(id) ?? assignedTurn, view !== undefined);
         if (view) {
           view = replace(view);
           tools.set(view.toolCallId, view);
@@ -496,7 +610,9 @@ function renderItemsReducer(events: UnifiedEvent[], agent: AgentKind) {
         break;
       }
       case "tool_call_completed": {
-        let view = tools.get(String(p.toolCallId ?? ""));
+        const id = String(p.toolCallId ?? "");
+        let view = tools.get(id);
+        if (!view || view.status === "running") noteTurnActivity(ts, toolOwnerTurns.get(id) ?? assignedTurn, view !== undefined);
         if (view) {
           view = replace(view);
           tools.set(view.toolCallId, view);
@@ -554,6 +670,42 @@ function renderItemsReducer(events: UnifiedEvent[], agent: AgentKind) {
         breakRun();
         userTexts.clear();
         turn++;
+        const targetTurn = (promptId ? promptTurnById.get(promptId) : undefined) ?? userTurn;
+        assignedTurn = targetTurn;
+        closeAntigravityTurn(targetTurn);
+        const timing = turnTimings.get(targetTurn);
+        if (timing) {
+          const endedAtMs = Number.isFinite(ts) ? Math.max(timing.endedAtMs, ts) : timing.endedAtMs;
+          const apiDurationMs = typeof p.apiDurationMs === "number" && Number.isFinite(p.apiDurationMs) && p.apiDurationMs >= 0
+            ? p.apiDurationMs : timing.apiDurationMs;
+          const explicitDurationMs = typeof p.durationMs === "number" && Number.isFinite(p.durationMs) && p.durationMs >= 0
+            ? p.durationMs : undefined;
+          const wallDurationMs = Math.max(0, endedAtMs - timing.startedAtMs);
+          // 首次完成优先用服务端耗时，旧记录的重复完成按墙钟推进。
+          const durationMs = timing.completed || timing.extendedAfterComplete
+            ? Math.max(timing.durationMs, wallDurationMs)
+            : explicitDurationMs ?? wallDurationMs;
+          updateTiming(targetTurn, {
+            hasResponse: true,
+            completed: true,
+            endedAtMs,
+            durationMs,
+            ...(apiDurationMs !== undefined ? { apiDurationMs } : {}),
+          });
+        }
+        const completedQueued = promptId ? queuedKimiTurns.findIndex(entry => entry.promptId === promptId) : -1;
+        if (completedQueued >= 0) {
+          queuedKimiTurns.splice(completedQueued, 1);
+        } else if (targetTurn === userTurn) {
+          const nextQueued = queuedKimiTurns.shift();
+          if (nextQueued) {
+            userTurn = nextQueued.turn;
+            // Kimi 排队消息的实际执行从前一个回合结束时开始。
+            if (Number.isFinite(ts)) {
+              updateTiming(userTurn, { startedAtMs: ts, endedAtMs: ts, durationMs: 0 });
+            }
+          }
+        }
         const reason = abnormalTurnReason(p, agent);
         // 用户按停止：三家分别报 interrupted 标记 / interrupted / cancelled，按中性提示而非出错
         if (p.interrupted === true || reason === "interrupted" || reason === "cancelled") {
@@ -571,6 +723,19 @@ function renderItemsReducer(events: UnifiedEvent[], agent: AgentKind) {
       }
       case "session_error":
         breakRun();
+        if (p.source === "steer_queue") {
+          if (Array.isArray(p.cancelledPromptIds)) {
+            const cancelled = new Set(p.cancelledPromptIds.filter((id): id is string => typeof id === "string"));
+            for (const id of cancelled) promptTurnById.delete(id);
+            queuedKimiTurns = queuedKimiTurns.filter(entry => !entry.promptId || !cancelled.has(entry.promptId));
+          } else {
+            for (const entry of queuedKimiTurns) if (entry.promptId) promptTurnById.delete(entry.promptId);
+            queuedKimiTurns.length = 0;
+          }
+        } else if (promptId && promptTurnById.has(promptId)) {
+          assignedTurn = promptTurnById.get(promptId)!;
+          closeAntigravityTurn(assignedTurn);
+        }
         items.push({
           kind: "system",
           key: `sys:${event.seq}`,
@@ -630,13 +795,37 @@ function renderItemsReducer(events: UnifiedEvent[], agent: AgentKind) {
         });
         break;
       }
+      case "usage_updated": {
+        noteTurnActivity(ts, userTurn, false);
+        break;
+      }
+      case "background_tasks_updated":
+        if (agent === "antigravity" && userTurn > 0 && Array.isArray(p.tasks) && p.tasks.length === 0) {
+          sealedTurns.add(userTurn);
+        }
+        break;
       default:
-        // usage_updated 等不在流内渲染（会话头单独展示）。
         break;
     }
+    for (let i = previousLength; i < items.length; i++) itemUserTurns.set(items[i]!, assignedTurn);
     if (items.length) positions.set(items[items.length - 1]!, items.length - 1);
+    lastEventWasTextDelta = event.type === "agent_text_delta";
   };
-  return { items, append, tools };
+  const itemUserTurn = (item: StreamRenderItem): number => {
+    if (item.kind === "tool-group") return itemUserTurns.get(item.tools[0]!) ?? 0;
+    const direct = itemUserTurns.get(item);
+    if (direct !== undefined) return direct;
+    if (item.kind === "tool") {
+      const base = tools.get(item.toolCallId);
+      if (base) return itemUserTurns.get(base) ?? 0;
+    }
+    return 0;
+  };
+  return {
+    items, append, tools, turnTimings, itemUserTurn,
+    get activeTurn() { return openAntigravityTurns[0] ?? userTurn; },
+    get streamingTailText() { return lastEventWasTextDelta; },
+  };
 }
 
 // 工具入参的展示文本：claude 流式给 partialInput 字符串，kimi 给 content/rawInput，宽容处理。
@@ -663,6 +852,10 @@ export function createRenderItemsBuilder(agent: AgentKind) {
     /** 临时工具帧只重绘这些显示行，不使持久前缀失效。 */
     changedDisplayIndices: [] as number[],
     firstUser: undefined as UnifiedEvent | undefined,
+    get activeTurn(): number { return reducer.activeTurn; },
+    get streamingTailText(): boolean { return reducer.streamingTailText; },
+    turnTiming(turn: number): TurnTiming | undefined { return reducer.turnTimings.get(turn); },
+    itemUserTurn(item: StreamRenderItem): number { return reducer.itemUserTurn(item); },
     display(focus: boolean, cwd: string, toolFrames?: ReadonlyMap<string, UnifiedEvent>): StreamRenderItem[] {
       const items = reducer.items;
       let cached = displayCache;

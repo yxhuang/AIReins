@@ -159,6 +159,9 @@ export class Store {
   projectOrder: string[] = [];
   /** 组织更改不推进会话 seq；防止在途旧 REST 响应撤销已收到的广播。 */
   private organizationVersion = 0;
+  /** 活跃派单计数不推进会话 seq；保留最近一次全量 WS 计数以防止旧列表/快照/组织响应覆盖。 */
+  private dispatchVersion = 0;
+  private latestDispatchCounts: Map<string, number> | null = null;
   meta: MetaInfo | null = null;
   private metaVersion = 0;
   currentId: string | null = null;
@@ -374,11 +377,12 @@ export class Store {
     this.refreshTickSchedule();
   }
 
-  /** 状态跨 running/starting 边界时立即切换频率；同档位不重置现有 timer。 */
+  /** 状态跨 running/starting 或后台任务/活跃派单边界时立即切换频率；同档位不重置现有 timer。 */
   private refreshTickSchedule(): void {
     if (!this.clockStarted) return;
     const active = this.sessions.some(
-      (session) => session.status === "running" || session.status === "starting",
+      (session) => session.status === "running" || session.status === "starting"
+        || (session.backgroundTasks?.length ?? 0) > 0 || (session.activeDispatchCount ?? 0) > 0,
     );
     const delay = active ? ACTIVE_TICK_MS : IDLE_TICK_MS;
     if (this.tickTimer !== undefined && this.tickDelay === delay) return;
@@ -428,7 +432,7 @@ export class Store {
     await Promise.all([metadata, projectOrder, pages]);
   }
 
-  private async refreshMeta(): Promise<void> {
+  async refreshMeta(): Promise<void> {
     const version = ++this.metaVersion;
     try {
       const meta = await fetchMeta();
@@ -1486,13 +1490,14 @@ export class Store {
 
   async refreshSessions(): Promise<void> {
     const organizationVersion = this.organizationVersion;
+    const dispatchVersion = this.dispatchVersion;
     try {
       const sessions = await fetchSessions();
       // REST 请求途中收到的较新 WS 摘要不能被旧列表覆盖。
       // 已 DELETE 的会话同理：旧的列表响应不得把它复活成打不开的残行。
       this.sessions = sessions.filter((session) => !this.removed.has(session.id)).map((session) => {
         const live = this.session(session.id);
-        return this.mergeSessionSummary(session, live, organizationVersion !== this.organizationVersion);
+        return this.mergeSessionSummary(session, live, organizationVersion !== this.organizationVersion, dispatchVersion);
       });
       this.sessionsLoaded = true;
       if (this.isMobileNavigation() && this.currentId && !this.session(this.currentId)) this.onHashChange();
@@ -1576,6 +1581,7 @@ export class Store {
     this.snapshotGen.set(id, gen);
     this.snapshotErrors.delete(id);
     const organizationVersion = this.organizationVersion;
+    const dispatchVersion = this.dispatchVersion;
     this.olderInflight.delete(id);
     const buffered = this.snapshotBuffers.get(id) ?? [];
     this.snapshotBuffers.set(id, buffered);
@@ -1587,10 +1593,11 @@ export class Store {
         const snapshot = await fetchSnapshot(id, true);
         if (this.snapshotGen.get(id) === gen) {
           const live = this.session(id);
-          const session = organizationVersion !== this.organizationVersion && live
+          const merged = organizationVersion !== this.organizationVersion && live
             ? { ...snapshot.session, pinned: live.pinned, customTitle: live.customTitle, cwd: live.cwd, worktree: live.worktree,
               orderKey: live.orderKey, orderActivity: live.orderActivity }
             : snapshot.session;
+          const session = this.applyDispatchCount(merged, dispatchVersion);
           this.applySnapshot(id, session, snapshot.seq, snapshot.events, snapshot.hasMore, snapshot.firstSeq);
           applied = true;
           this.snapshotBuffers.delete(id);
@@ -1767,13 +1774,17 @@ export class Store {
       .map(event => String(event.payload.toolCallId ?? "")));
     this.data.set(id, { events: retained, seq, dropped, pendingGates, latestUsage, paged, hasMore, firstSeq: firstSeq ?? sorted[0]?.seq ?? 0,
       finalizedTools, toolFrames: new Map(), ...cache });
+    const updatedSession = this.applyDispatchCount(
+      { ...session, title: session.title ?? sessionTitle({}, events), pendingGateCount: pendingGates.size },
+      this.dispatchVersion,
+    );
     const index = this.sessions.findIndex((s) => s.id === id);
     if (index >= 0) {
       const next = [...this.sessions];
-      next[index] = { ...session, title: session.title ?? sessionTitle({}, events), pendingGateCount: pendingGates.size };
+      next[index] = updatedSession;
       this.sessions = next;
     } else {
-      this.sessions = [...this.sessions, { ...session, title: session.title ?? sessionTitle({}, events), pendingGateCount: pendingGates.size }];
+      this.sessions = [...this.sessions, updatedSession];
     }
   }
 
@@ -1807,6 +1818,8 @@ export class Store {
     if (this.socket && this.socket.readyState <= WebSocket.OPEN) return;
     // 强制重连会忽略旧 close 回调；新连接也须解除旧传输的提交锁。
     this.permissionRequests.clear();
+    this.latestDispatchCounts = null;
+    this.dispatchVersion++;
     this.wsState = "connecting";
     this.notify();
     const protocol = window.location.protocol === "https:" ? "wss" : "ws";
@@ -1817,8 +1830,10 @@ export class Store {
     socket.addEventListener("open", () => {
       if (this.socket !== socket) return; // 已被 reconnectNow 换掉的旧连接
       this.wsState = "open";
-      // 广播可能发生在首次连接前或断线期间，pending 状态在连接建立后补查。
-      if (!this.meta || this.meta.metadataPending) void this.refreshMeta();
+      // 广播可能发生在首次连接前或断线期间，远程终端设置也可能已变。
+      if (!this.meta || this.meta.metadataPending || (this.hasOpenedSocket && this.meta.remoteTerminalEnabled !== undefined)) {
+        void this.refreshMeta();
+      }
       void this.refreshCodexResets();
       if (this.currentPageId === BUILTIN_USAGE_ID || this.usageSummary !== null) void this.loadUsage(false);
       if (this.usageSettings !== null) void this.loadUsageSettings();
@@ -1841,6 +1856,8 @@ export class Store {
       this.wsState = "closed";
       this.socket = null;
       this.permissionRequests.clear();
+      this.latestDispatchCounts = null;
+      this.dispatchVersion++;
       this.notify();
       this.reconnectTimer = setTimeout(() => this.connect(), this.reconnectDelay);
       this.reconnectDelay = Math.min(this.reconnectDelay * 2, 15_000);
@@ -1893,6 +1910,31 @@ export class Store {
       }
       this.usageLoading = false;
       this.notify();
+      return;
+    }
+    if (type === "session_dispatches_updated") {
+      const counts = frame.counts;
+      if (!counts || typeof counts !== "object" || Array.isArray(counts)) return;
+      this.dispatchVersion++;
+      const latest = new Map<string, number>();
+      for (const [id, raw] of Object.entries(counts as Record<string, unknown>)) {
+        if (typeof raw === "number" && Number.isFinite(raw) && raw > 0) latest.set(id, Math.floor(raw));
+      }
+      this.latestDispatchCounts = latest;
+      let changed = false;
+      const next = this.sessions.map((session) => {
+        const count = session.status !== "dead" ? latest.get(session.id) : undefined;
+        if ((session.activeDispatchCount ?? undefined) === count) return session;
+        changed = true;
+        const copy = { ...session };
+        if (count !== undefined) copy.activeDispatchCount = count;
+        else delete copy.activeDispatchCount;
+        return copy;
+      });
+      if (changed) {
+        this.sessions = next;
+        this.notify();
+      }
       return;
     }
     if (type === "session_organization_updated") {
@@ -2097,6 +2139,11 @@ export class Store {
         // 空闲自动释放没有客户端动作，靠这条事件把列表项对齐成已释放
         session.released = true;
         session.processId = undefined;
+        session.backgroundTasks = undefined;
+      }
+      if (event.type === "process_exited") {
+        session.backgroundTasks = undefined;
+        session.activeDispatchCount = undefined;
       }
       if (!streamDelta || session.lastActivityAt !== previous.lastActivityAt
         || session.status !== previous.status || session.pendingGateCount !== previous.pendingGateCount) {
@@ -2494,13 +2541,31 @@ export class Store {
     return session;
   }
 
-  private mergeSessionSummary(incoming: SessionRecord, live?: SessionRecord, preserveOrganization = false): SessionRecord {
+  private applyDispatchCount(session: SessionRecord, requestDispatchVersion?: number): SessionRecord {
+    const merged = { ...session };
+    if (merged.status === "dead") {
+      delete merged.activeDispatchCount;
+      return merged;
+    }
+    let count = merged.activeDispatchCount;
+    if (requestDispatchVersion !== this.dispatchVersion) {
+      if (this.latestDispatchCounts !== null) count = this.latestDispatchCounts.get(merged.id);
+      else if (requestDispatchVersion !== undefined) count = this.session(merged.id)?.activeDispatchCount;
+    }
+    if (count && count > 0) merged.activeDispatchCount = count;
+    else delete merged.activeDispatchCount;
+    return merged;
+  }
+
+  private mergeSessionSummary(incoming: SessionRecord, live?: SessionRecord, preserveOrganization = false, requestDispatchVersion?: number): SessionRecord {
     const summary = live && live.seq > incoming.seq ? live : incoming;
     const organization = preserveOrganization && live ? live : incoming;
-    return { ...summary, title: organization.title, nativeTitle: organization.nativeTitle,
+    const combined: SessionRecord = { ...summary, title: organization.title, nativeTitle: organization.nativeTitle,
       pinned: organization.pinned, customTitle: organization.customTitle,
       cwd: organization.cwd, worktree: organization.worktree,
-      orderKey: organization.orderKey, orderActivity: organization.orderActivity };
+      orderKey: organization.orderKey, orderActivity: organization.orderActivity,
+      activeDispatchCount: incoming.activeDispatchCount };
+    return this.applyDispatchCount(combined, requestDispatchVersion);
   }
 
   async refreshProjectOrder(): Promise<void> {
@@ -2525,10 +2590,11 @@ export class Store {
 
   private async applyOrganization(id: string, request: () => Promise<SessionRecord>): Promise<void> {
     const version = this.organizationVersion;
+    const dispatchVersion = this.dispatchVersion;
     const session = await request();
     if (this.removed.has(id)) return;
     const live = this.session(id);
-    const updated = this.mergeSessionSummary(session, live, version !== this.organizationVersion);
+    const updated = this.mergeSessionSummary(session, live, version !== this.organizationVersion, dispatchVersion);
     this.organizationVersion++;
     this.sessions = live ? this.sessions.map((item) => item.id === id ? updated : item) : [...this.sessions, updated];
     this.notify();

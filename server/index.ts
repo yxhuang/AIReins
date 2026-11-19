@@ -10,8 +10,8 @@ import type { Duplex } from "node:stream";
 import { fileURLToPath } from "node:url";
 import { acceptsGzip, compressResponse } from "./response-compression.js";
 import { WebSocket, WebSocketServer } from "ws";
-import { checkAccess, loadRemoteConfig, localPolicy, remotePolicy, type AccessPolicy, type RemoteConfig } from "./access.js";
-import { DispatchQueryError, getDispatch, getDispatchLog, getDispatchMessages, listDispatches, listDispatchHistory, listParentDispatches } from "./dispatches.js";
+import { checkAccess, loadRemoteConfig, localPolicy, remotePolicy, saveRemoteTerminal, type AccessPolicy, type RemoteConfig } from "./access.js";
+import { countActiveDispatchesBySession, DispatchQueryError, getDispatch, getDispatchLog, getDispatchMessages, listDispatches, listDispatchHistory, listParentDispatches } from "./dispatches.js";
 import { log } from "./logger.js";
 import { DirListError, listDirectories } from "./dir-list.js";
 import { pickWindowsDirectory, pickWindowsFile, WindowsPickerError, windowsPickerEnabled } from "./windows-directory-picker.js";
@@ -62,6 +62,7 @@ const STATIC_ROOT = process.env.WORKBENCH_STATIC_DIR
   ? resolve(process.env.WORKBENCH_STATIC_DIR)
   : resolve(fileURLToPath(new URL("../frontend/dist", import.meta.url)));
 const LOCAL_POLICY = localPolicy(PORT);
+const REMOTE_CONFIG_PATH = join(workbenchHome, "remote.json");
 const REMOTE_CONFIG = readRemoteConfig();
 // 测试设 WORKBENCH_NO_APP_WINDOW=1，避免真的启动 Chrome。
 const APP_CHROME = process.env.WORKBENCH_NO_APP_WINDOW ? null : findWindowsChrome();
@@ -69,7 +70,7 @@ const APP_CHROME = process.env.WORKBENCH_NO_APP_WINDOW ? null : findWindowsChrom
 /** 配置错误不影响本机入口。 */
 function readRemoteConfig(): RemoteConfig | null {
   try {
-    return loadRemoteConfig(join(workbenchHome, "remote.json"), PORT);
+    return loadRemoteConfig(REMOTE_CONFIG_PATH, PORT);
   } catch (error) {
     log("error", "remote.json 无效，远程入口未开启", { message: error instanceof Error ? error.message : String(error) });
     return null;
@@ -111,6 +112,10 @@ const manager = new SessionManager();
 // 关机命令仅由本机 prefs 配置；无参数排定关机，abort 取消。
 const powerOff = createPowerOff({
   busy: () => busySessionCount(manager.list()),
+  checkBusy: async () => {
+    await syncActiveDispatches({ fresh: true, throwOnError: true });
+    return busySessionCount(manager.list());
+  },
   run: async (args) => {
     try {
       if (!powerOffEnabled(prefs.shutdownCommand)) throw new Error("未配置可执行的关机命令");
@@ -132,7 +137,7 @@ const clients = new Set<WsClientState>();
 void whenMetaReady().then(() => {
   for (const client of clients) sendWs(client, { type: "meta_updated" });
 });
-const terminalClients = new Map<WebSocket, boolean>();
+const terminalClients = new Map<WebSocket, { alive: boolean; remote: boolean }>();
 // 包含未完成的 HTTP 请求和已升级连接，避免遗漏不在 WS 客户端表里的 socket。
 const connections = new Set<Duplex>();
 
@@ -153,12 +158,12 @@ const heartbeat = setInterval(() => {
     client.alive = false;
     client.socket.ping();
   }
-  for (const [socket, alive] of terminalClients) {
-    if (!alive) {
+  for (const [socket, client] of terminalClients) {
+    if (!client.alive) {
       socket.terminate();
       continue;
     }
-    terminalClients.set(socket, false);
+    client.alive = false;
     if (socket.readyState === WebSocket.OPEN) socket.ping();
   }
 }, 25_000);
@@ -166,11 +171,55 @@ heartbeat.unref();
 
 // 空闲自动释放：每分钟扫一次，N 来自 prefs（PUT /api/prefs 立即生效）；0 = 关闭。
 const idleReleaseSweep = setInterval(() => {
-  void manager.releaseIdleSessions(prefs.idleReleaseMinutes).catch((error) => {
-    log("warn", "idle release sweep failed", { message: error instanceof Error ? error.message : String(error) });
-  });
+  void syncActiveDispatches({ fresh: true, throwOnError: true })
+    .then(() => manager.releaseIdleSessions(prefs.idleReleaseMinutes))
+    .catch((error) => {
+      log("warn", "idle release sweep failed", { message: error instanceof Error ? error.message : String(error) });
+    });
 }, 60_000);
 idleReleaseSweep.unref();
+
+// 运行中外部派单与原生子代理跟踪：常规每 3 秒同步；释放/关机前绕过 2 秒缓存执行新鲜扫描，失败不放行。
+let dispatchSweepPromise: Promise<void> | null = null;
+async function syncActiveDispatches(options: { fresh?: boolean; throwOnError?: boolean } = {}): Promise<void> {
+  const fresh = options.fresh === true;
+  const throwOnError = options.throwOnError === true;
+  while (dispatchSweepPromise) {
+    if (!fresh) return;
+    // 等旧扫描发布完，再独立扫描，避免旧结果反过来覆盖释放/关机检查。
+    await dispatchSweepPromise.catch(() => undefined);
+  }
+  if (shuttingDown) return;
+  if (!fresh && clients.size === 0 && !manager.hasLiveWorker() && powerOff.status().state !== "waiting") return;
+  const sessions = manager.list().filter((session) => session.status !== "dead");
+  if (sessions.length === 0) {
+    if (manager.setActiveDispatchCounts(new Map())) {
+      const frame = { type: "session_dispatches_updated", counts: manager.getActiveDispatchCounts() };
+      for (const client of clients) sendWs(client, frame);
+    }
+    return;
+  }
+  let run!: Promise<void>;
+  run = (async () => {
+    try {
+      const counts = await countActiveDispatchesBySession(sessions, undefined, { fresh });
+      if (shuttingDown) return;
+      if (manager.setActiveDispatchCounts(counts)) {
+        const frame = { type: "session_dispatches_updated", counts: manager.getActiveDispatchCounts() };
+        for (const client of clients) sendWs(client, frame);
+      }
+    } catch (error) {
+      log("warn", "active dispatch sweep failed", { message: error instanceof Error ? error.message : String(error) });
+      if (throwOnError) throw error;
+    } finally {
+      if (dispatchSweepPromise === run) dispatchSweepPromise = null;
+    }
+  })();
+  dispatchSweepPromise = run;
+  await run;
+}
+const dispatchActivitySweep = setInterval(() => { void syncActiveDispatches(); }, 3_000);
+dispatchActivitySweep.unref();
 
 manager.onEvent((event) => {
   for (const client of clients) sendEvent(client, event);
@@ -258,7 +307,7 @@ function handleUpgrade(request: IncomingMessage, socket: Duplex, head: Buffer, p
       socket.end("HTTP/1.1 403 Forbidden\r\nConnection: close\r\nContent-Length: 0\r\n\r\n");
       return;
     }
-    terminalWss.handleUpgrade(request, socket, head, (websocket) => terminalWss.emit("connection", websocket, request));
+    terminalWss.handleUpgrade(request, socket, head, (websocket) => handleTerminalConnection(websocket, policy.kind === "remote"));
     return;
   }
   if (url.pathname !== "/ws") {
@@ -281,6 +330,9 @@ wss.on("connection", (socket, request) => {
     catch (error) { sendWs(client, { type: "error", code: 40401, msg: error instanceof Error ? error.message : String(error) }); }
   }
   sendWs(client, { type: "ready", serverVersion: SERVER_VERSION, sessionId, afterSeq });
+  // 新建连/重连时立刻下发一次全量活跃派单映射（含空映射），让断线期间结束的派单即时清零。
+  sendWs(client, { type: "session_dispatches_updated", counts: manager.getActiveDispatchCounts() });
+  void syncActiveDispatches();
 
   socket.on("message", (data) => {
     handleWsMessage(client, data.toString("utf8")).catch((error) => {
@@ -295,10 +347,12 @@ wss.on("connection", (socket, request) => {
   socket.on("error", (error) => log("warn", "websocket error", { message: error.message, sessionId }));
 });
 
-terminalWss.on("connection", (socket) => {
-  terminalClients.set(socket, true);
+function handleTerminalConnection(socket: WebSocket, remote: boolean): void {
+  const client = { alive: true, remote };
+  terminalClients.set(socket, client);
   const attachments = new Map<string, () => void>();
   socket.on("message", (raw, isBinary) => {
+    if (socket.readyState !== WebSocket.OPEN || (remote && REMOTE_CONFIG?.terminal !== true)) return;
     if (isBinary) {
       sendTerminalWs(socket, { type: "error", message: "终端 WS 消息必须是 JSON 文本帧" });
       return;
@@ -343,9 +397,9 @@ terminalWss.on("connection", (socket) => {
     for (const detach of attachments.values()) detach();
     terminalClients.delete(socket);
   });
-  socket.on("pong", () => terminalClients.set(socket, true));
+  socket.on("pong", () => { client.alive = true; });
   socket.on("error", (error) => log("warn", "terminal websocket error", { message: error.message }));
-});
+}
 
 function sendTerminalWs(socket: WebSocket, value: unknown): void {
   if (socket.readyState !== WebSocket.OPEN) return;
@@ -393,6 +447,7 @@ async function shutdown(signal: string): Promise<void> {
   log("info", "workbench server stopping", { signal });
   clearInterval(heartbeat);
   clearInterval(idleReleaseSweep);
+  clearInterval(dispatchActivitySweep);
   codexResets.stop();
   stopCodexRateLimits();
   await aiUsage.stop();
@@ -442,12 +497,29 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
         ...meta,
         claudeDefaults: readClaudeDefaultSettings(),
         hostName: getServerHostName(REMOTE_CONFIG?.origin),
+        remoteTerminalEnabled: REMOTE_CONFIG ? REMOTE_CONFIG.terminal === true : undefined,
         platform,
         terminalShell: basename(resolveShell(undefined).file),
         capabilities: getPlatformCapabilities({ local: policy.kind === "local", remoteTerminal: REMOTE_CONFIG?.terminal,
           chrome: appWindowEnabled(policy, APP_CHROME), picker: windowsPickerEnabled(policy.kind === "local"),
           shellOpen: systemOpenEnabled(policy.kind === "local"), powerOff: powerOffEnabled(prefs.shutdownCommand) }),
       }, requestId);
+    } else if (method === "PUT" && url.pathname === "/api/remote-terminal") {
+      if (!REMOTE_CONFIG) throw new ApiError(409, 40901, "此主机尚未配置远程入口");
+      const input = await readJson(request, 4096);
+      const enabled = (input as Record<string, unknown> | null)?.enabled;
+      if (typeof enabled !== "boolean") throw new ApiError(400, 40061, "enabled 必须是布尔值");
+      if (!saveRemoteTerminal(REMOTE_CONFIG_PATH, PORT, REMOTE_CONFIG, enabled)) {
+        throw new ApiError(409, 40901, "远程入口配置已更改，请重启 AIReins 后再切换终端");
+      }
+      REMOTE_CONFIG.terminal = enabled;
+      if (!enabled) {
+        for (const [socket, client] of terminalClients) {
+          if (client.remote) socket.terminate();
+        }
+      }
+      for (const client of clients) sendWs(client, { type: "meta_updated" });
+      await respond(response, 200, 0, "success", { enabled }, requestId);
     } else if (method === "POST" && url.pathname === "/api/open-app-window") {
       if (policy.kind !== "local") throw new ApiError(403, 40300, "仅本机入口可打开 AIReins 窗口");
       try {
@@ -540,6 +612,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
     } else if (url.pathname === "/api/terminals" && method === "POST") {
       requireTerminalEnabled(policy);
       const input = await readJson(request);
+      requireTerminalEnabled(policy);
       if (!input || typeof input !== "object" || Array.isArray(input)) throw new ApiError(400, 40040, "请求体必须是 JSON 对象");
       try {
         const { cwd, shell, cols, rows } = input as Record<string, unknown>;
@@ -905,6 +978,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
         const id = decodeURIComponent(releaseMatch[1]);
         if (!manager.get(id)) throw new ApiError(404, 40401, `会话不存在：${id}`);
         try {
+          await syncActiveDispatches({ fresh: true, throwOnError: true });
           const result = await manager.release(id, "manual");
           await respond(response, 200, 0, "success", result, requestId);
         } catch (error) {

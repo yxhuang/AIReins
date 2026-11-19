@@ -7,7 +7,7 @@ import { WorkbenchStorage } from "./WorkbenchStorage";
 import { SelfUpdate } from "./SelfUpdate";
 import { OPEN_HOST_MENU_EVENT } from "./HostSwitcher";
 import { BODY_FONT_MAX, BODY_FONT_MIN, BODY_FONT_STEP, BODY_FONT_STORAGE_KEY, TERM_FONT_MAX, TERM_FONT_MIN, TERM_FONT_STORAGE_KEY, applyBodyFontSize, bodyFontSize, readBodyFontSize, readTermFontSize, termFontSize } from "../body-font";
-import { fetchClaudeStartupSettings, fetchPrefs, fetchSessions, powerOff, restartWorkbench, saveClaudeStartupSettings, savePrefs, type PowerOffStatus } from "../api";
+import { fetchClaudeStartupSettings, fetchPrefs, fetchSessions, powerOff, restartWorkbench, saveClaudeStartupSettings, savePrefs, saveRemoteTerminal, type PowerOffStatus } from "../api";
 import { restartAndReconnect, restartBusyCount } from "../restart";
 import { store } from "../store";
 import { useStore } from "../useStore";
@@ -133,6 +133,9 @@ function applyTheme(choice: ThemeChoice) {
 
 export function SettingsMenu() {
   const powerSupported = useStore(value => value.meta?.capabilities?.powerOff === true);
+  const remoteTerminalEnabled = useStore(value => value.meta?.remoteTerminalEnabled);
+  const [remoteTerminalSaving, setRemoteTerminalSaving] = useState(false);
+  const [remoteTerminalError, setRemoteTerminalError] = useState("");
   const serverVersion = useStore(value => value.meta?.serverVersion);
   const [open, setOpen] = useState(false);
   const [storageDialogOpen, setStorageDialogOpen] = useState(false);
@@ -400,6 +403,20 @@ export function SettingsMenu() {
     }
   };
 
+  const toggleRemoteTerminal = async () => {
+    if (remoteTerminalEnabled === undefined || remoteTerminalSaving) return;
+    setRemoteTerminalSaving(true);
+    setRemoteTerminalError("");
+    try {
+      await saveRemoteTerminal(!remoteTerminalEnabled);
+      await store.refreshMeta();
+    } catch (error) {
+      setRemoteTerminalError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setRemoteTerminalSaving(false);
+    }
+  };
+
   const choose = (id: string, value: string) => {
     if (id === "language") {
       const next = value === "zh-CN" || value === "en" ? value : "system";
@@ -532,6 +549,20 @@ export function SettingsMenu() {
             {renderGroup(SESSIONS_GROUP, <WorkbenchStorage dialogOpen={storageDialogOpen} onDialogOpenChange={setStorageDialogOpen} />)}
             <section className="settings-group">
               <h3 className="settings-group-title">{t("ui.SettingsMenu.host")}</h3>
+              {remoteTerminalEnabled !== undefined && (
+                <div className="settings-item">
+                  <div className="settings-row">
+                    <span className="settings-item-label" id="settings-remote-terminal">{t("ui.SettingsMenu.remote_terminal")}</span>
+                    <button type="button" role="switch" className="settings-switch" aria-checked={remoteTerminalEnabled}
+                      aria-labelledby="settings-remote-terminal" aria-describedby="settings-remote-terminal-hint"
+                      disabled={remoteTerminalSaving} onClick={() => void toggleRemoteTerminal()}>
+                      <span className={`slash-switch${remoteTerminalEnabled ? " on" : ""}`} aria-hidden="true" />
+                    </button>
+                  </div>
+                  <span className="settings-hint" id="settings-remote-terminal-hint">{t("ui.SettingsMenu.remote_terminal_hint")}</span>
+                  {remoteTerminalError && <span className="new-error" role="alert">{remoteTerminalError}</span>}
+                </div>
+              )}
               <div className="settings-action-row">
                 <button type="button" className="settings-action" onClick={openHostMenu} aria-haspopup="menu">{t("ui.SettingsMenu.hosts_and_connections")}</button>
                 {powerSupported && <button type="button" className={`settings-action settings-power${powerActive ? " is-pending" : ""}`} ref={powerButton}

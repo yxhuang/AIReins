@@ -129,16 +129,17 @@ export function selectProjectSessions(sessions: SessionRecord[], options: Pick<S
   const sorted = [...sessions].sort((a, b) => sortTime(b) - sortTime(a));
   if (options.expanded || options.searching) return { sessions: sorted, hiddenCount: 0 };
   let ordinaryCount = 0;
-  const visible = sorted.filter(session => session.id === options.currentId || (session.backgroundTasks?.length ?? 0) > 0
+  const visible = sorted.filter(session => session.id === options.currentId
+    || (session.backgroundTasks?.length ?? 0) > 0 || (session.activeDispatchCount ?? 0) > 0
     || ["running", "starting", "needs-user"].includes(sidebarStatusDot(session, options.pendingCount(session.id), options.now) ?? "")
     || ordinaryCount++ < 8);
   return { sessions: visible, hiddenCount: sorted.length - visible.length };
 }
 
-/** 空闲点只表示近期活动；后台工作、错误及未决闸门不受时间影响。 */
+/** 空闲点只表示近期活动；后台工作、活跃子代理/派单、错误及未决闸门不受时间影响。 */
 export function sidebarStatusDot(session: SessionRecord, pending: number, now: number): string | null {
   if (pending > 0) return 'needs-user';
-  if (session.status === 'idle' && (session.backgroundTasks?.length ?? 0) > 0) return 'running';
+  if (session.status === 'idle' && ((session.backgroundTasks?.length ?? 0) > 0 || (session.activeDispatchCount ?? 0) > 0)) return 'running';
   if (session.status === 'running' || session.status === 'starting' || session.status === 'error') return session.status;
   if (session.status === 'idle' && activityTime(session) >= now - SIDEBAR_WORKING_WINDOW_MS) return 'idle';
   return null;
