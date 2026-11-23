@@ -4,11 +4,11 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>AIReins</title>
-  <meta name="description" content="Let the agents run. Keep the reins. A local workbench for Claude Code, Codex and Kimi Code, from your desktop or phone.">
+  <meta name="description" content="Let the agents run. Keep the reins. A local workbench for Claude Code, Antigravity, Codex and Kimi Code, from your desktop or phone.">
   <meta name="color-scheme" content="light dark">
   <meta property="og:type" content="website">
   <meta property="og:title" content="AIReins">
-  <meta property="og:description" content="Let the agents run. Keep the reins. A local workbench for Claude Code, Codex and Kimi Code, from your desktop or phone.">
+  <meta property="og:description" content="Let the agents run. Keep the reins. A local workbench for Claude Code, Antigravity, Codex and Kimi Code, from your desktop or phone.">
   <link rel="canonical" href="https://yxhuang.github.io/AIReins/">
   <meta property="og:url" content="https://yxhuang.github.io/AIReins/">
   <meta property="og:site_name" content="AIReins">
@@ -18,9 +18,9 @@
   <meta property="og:image:alt" content="AIReins: Let the agents run. Keep the reins.">
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:title" content="AIReins">
-  <meta name="twitter:description" content="Let the agents run. Keep the reins. A local workbench for Claude Code, Codex and Kimi Code, from your desktop or phone.">
+  <meta name="twitter:description" content="Let the agents run. Keep the reins. A local workbench for Claude Code, Antigravity, Codex and Kimi Code, from your desktop or phone.">
   <meta name="twitter:image" content="https://yxhuang.github.io/AIReins/assets/banner-en-light.png">
-  <script type="application/ld+json">{"@context":"https://schema.org","@type":"SoftwareApplication","name":"AIReins","applicationCategory":"DeveloperApplication","operatingSystem":"Linux, Windows (WSL2), macOS (experimental)","description":"A local web workbench that drives the official Claude Code, Codex and Kimi Code CLIs from your desktop or phone over your own tailnet.","url":"https://yxhuang.github.io/AIReins/","codeRepository":"https://github.com/yxhuang/AIReins","license":"https://opensource.org/licenses/MIT","offers":{"@type":"Offer","price":"0","priceCurrency":"USD"}}</script>
+  <script type="application/ld+json">{"@context":"https://schema.org","@type":"SoftwareApplication","name":"AIReins","softwareVersion":"0.6.0","applicationCategory":"DeveloperApplication","operatingSystem":"Linux, Windows (WSL2), macOS (experimental)","description":"A local web workbench that drives the official Claude Code, Antigravity, Codex and Kimi Code CLIs from your desktop or phone over your own tailnet.","url":"https://yxhuang.github.io/AIReins/","codeRepository":"https://github.com/yxhuang/AIReins","license":"https://opensource.org/licenses/MIT","offers":{"@type":"Offer","price":"0","priceCurrency":"USD"}}</script>
   <link rel="icon" href="./assets/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="./assets/apple-touch-icon.png">
   <link rel="stylesheet" href="./style.css">
@@ -49,8 +49,12 @@
     <!-- README: What it is / Why "Reins"; 中文：这是什么 / 为什么叫 AIReins。 -->
     <section class="hero wrap" aria-labelledby="hero-title">
       <div class="hero-copy">
+        <a class="release-pill" href="https://github.com/yxhuang/AIReins/releases/tag/v0.6.0">
+          <span class="release-tag">v0.6.0</span>
+          <span data-i18n="releaseBanner">Google Antigravity · Built-in 4-provider usage panel</span>
+        </a>
         <h1 id="hero-title"><span data-i18n="heroLine1">Let the agents run.</span><span data-i18n="heroLine2">Keep the reins.</span></h1>
-        <p class="hero-description" data-i18n="heroDescription">Your AI workbench, on your own computer. Use Claude Code, Codex and Kimi Code from a browser on your desktop or phone.</p>
+        <p class="hero-description" data-i18n="heroDescription">Your AI workbench, on your own computer. Use Claude Code, Antigravity, Codex and Kimi Code from a browser on your desktop or phone.</p>
         <div class="actions">
           <a class="button button-primary" href="https://github.com/yxhuang/AIReins" data-i18n="github">View on GitHub</a>
           <a class="text-link" href="https://github.com/yxhuang/AIReins#get-started" data-doc="start" data-i18n="getStarted">Get started</a>
@@ -64,6 +68,7 @@
       </div>
       <ul class="agent-list" aria-label="Official CLIs" data-i18n-aria="officialClis">
         <li class="claude"><span aria-hidden="true"></span>Claude Code</li>
+        <li class="antigravity"><span aria-hidden="true"></span>Antigravity</li>
         <li class="codex"><span aria-hidden="true"></span>Codex</li>
         <li class="kimi"><span aria-hidden="true"></span>Kimi Code</li>
       </ul>
@@ -72,33 +77,33 @@
     <!-- README: Highlights / Why "Reins" / Features; 中文：特点 / 为什么叫 AIReins / 功能一览。 -->
     <section class="features wrap section" id="features" aria-labelledby="features-title">
       <div class="section-intro">
-        <h2 id="features-title" data-i18n="featuresTitle">One workbench for all three.</h2>
-        <p data-i18n="featuresIntro">Keep the tools you already use. Bring the work into one place.</p>
+        <h2 id="features-title" data-i18n="featuresTitle">One workbench for all four.</h2>
+        <p data-i18n="featuresIntro">Keep the official CLIs you already use. Bring sessions, files, quotas and approvals into one place.</p>
       </div>
       <div class="feature-grid">
         <article>
           <h3 data-i18n="harnessTitle">Your setup comes with you.</h3>
-          <p data-i18n="harnessText">Official CLIs, existing logins. Your instructions, skills, hooks, MCP servers and plugins load as usual. Claude plugin, MCP and settings panels are available before the first message.</p>
+          <p data-i18n="harnessText">Official CLIs (claude, agy, codex, kimi), existing logins. Your CLAUDE.md, AGENTS.md, GEMINI.md, skills, hooks, MCP servers and plugins load as usual, with per-session model and effort pickers.</p>
         </article>
         <article>
           <h3 data-i18n="controlTitle">The next move is yours.</h3>
-          <p data-i18n="controlText">Approve or deny tool calls, answer questions and interrupt a run. Click the context ring to request native compaction; pending decisions across sessions stay in one place.</p>
+          <p data-i18n="controlText">Approve or deny tool calls, answer questions, interrupt or steer mid-run, and see per-turn durations live. Click the context ring for native compaction and recall submitted prompts with ↑ / ↓.</p>
         </article>
         <article>
-          <h3 data-i18n="historyTitle">Pick up where you left off.</h3>
-          <p data-i18n="historyText">Search and resume native CLI history. Reorder conversations within a directory, or drag an idle conversation to another directory to continue there. New activity restores automatic ordering.</p>
+          <h3 data-i18n="usageTitle">Quotas and reset notices built in.</h3>
+          <p data-i18n="usageText">Track Claude, Antigravity, Codex and Kimi subscription quotas in one native panel with elapsed-window pace marks, per-provider refresh and opt-in four-provider reset announcements — no extra service needed.</p>
         </article>
         <article>
           <h3 data-i18n="wholeTitle">The whole computer, not one session.</h3>
-          <p data-i18n="wholeText">Browse any folder, including Windows drives under WSL. Preview and edit files, flip through a folder’s images, open Office files in their own apps on the local machine, and use a multi-tab terminal.</p>
+          <p data-i18n="wholeText">Browse any folder, including Windows drives under WSL. Preview and edit files, flip through folder images, open Office files locally, and use a multi-tab terminal (remote access toggled right in Settings).</p>
         </article>
         <article>
           <h3 data-i18n="leadTitle">One leads, the others follow.</h3>
-          <p data-i18n="leadText">With a delegation tool, let one agent hand work to another and follow the whole dispatch tree live, on desktop or phone. Native sub-agents show up as a tree either way.</p>
+          <p data-i18n="leadText">Follow external delegate runs, native sub-agents, and Antigravity Orchestrator phases and Swarm workers live in one parent/child dispatch tree, on desktop or phone.</p>
         </article>
         <article>
-          <h3 data-i18n="privateTitle">No vendor relay. No account. No telemetry.</h3>
-          <p data-i18n="privateText">Traffic stays on your tailnet. Sessions are the CLIs’ own history, so you can resume them in the terminal or VS Code as usual.</p>
+          <h3 data-i18n="privateTitle">No vendor relay. Native history stays yours.</h3>
+          <p data-i18n="privateText">Traffic stays on your tailnet with zero telemetry. Search and resume native Claude, Codex and Kimi history, resume AIReins Antigravity sessions via ACP, and reorder or drag conversations across folders.</p>
         </article>
       </div>
     </section>
@@ -107,14 +112,14 @@
     <section class="desktop-section wrap section" id="workbench" aria-labelledby="desktop-title">
       <div class="section-intro">
         <h2 id="desktop-title" data-i18n="desktopTitle">See the work as it happens.</h2>
-        <p data-i18n="desktopText">Sessions together, approvals in view, sub-agents in a tree. Reorder file and terminal tabs and move them between the main and side panes.</p>
+        <p data-i18n="desktopText">Sessions together, approvals in view, live turn durations, and Antigravity Orchestrator/Swarm nodes alongside sub-agents. Reorder file and terminal tabs and move them between the main and side panes.</p>
       </div>
       <figure class="screenshot desktop-shot">
         <picture data-image="desktop">
           <source media="(prefers-color-scheme: dark)" srcset="./assets/desktop-en-dark.png">
           <img src="./assets/desktop-en-light.png" width="3040" height="2040" loading="lazy" decoding="async" alt="Desktop: sessions from three agents on the left, a Claude session with a pending approval in the middle, and the dispatch flow chart on the right showing Codex and Kimi runs live">
         </picture>
-        <figcaption data-i18n="dispatchNote">The dispatch chart also shows runs from an external delegation tool when connected. Without one, it shows native sub-agents.</figcaption>
+        <figcaption data-i18n="dispatchNote">The dispatch chart also shows runs from an external delegation tool when connected. Without one, it shows native sub-agents and Antigravity Orchestrator/Swarm activity.</figcaption>
       </figure>
     </section>
 
@@ -123,8 +128,8 @@
       <div class="phone-layout wrap">
         <div class="phone-copy">
           <h2 id="phone-title" data-i18n="phoneTitle">Step away. Stay in control.</h2>
-          <p data-i18n="phoneText">Connect back over Tailscale. Approve tools, answer questions and browse files. Recover unconfirmed inputs, retry failed views and read tables with wrapping cells.</p>
-          <p class="small" data-i18n="terminalNote">Add it to your home screen to open it like an app. The remote terminal is off by default; enable it when you need it.</p>
+          <p data-i18n="phoneText">Connect back over Tailscale. Approve tools, answer questions, check four-provider quotas and browse files. Recover unconfirmed inputs, retry failed views and read wrapping tables.</p>
+          <p class="small" data-i18n="terminalNote">Add it to your home screen to open it like an app. The remote terminal is off by default; toggle it anytime in Settings → Host.</p>
         </div>
         <figure class="screenshot mobile-shot">
           <picture data-image="mobile">
@@ -148,7 +153,7 @@
           <img src="./assets/how-en-light.png" width="2560" height="1120" loading="lazy" decoding="async" alt="Six steps: open, your tailnet, one process, official CLIs, whole computer, your call">
         </picture>
       </figure>
-      <p class="how-text" data-i18n="howText">On the same computer, your browser connects directly to loopback. From another device, join your tailnet: Tailscale Serve forwards to AIReins’ remote entry, which checks Host/Origin and allows only the Tailscale logins you approve. The local Node process drives the official CLIs and writes sessions to their own history.</p>
+      <p class="how-text" data-i18n="howText">On the same computer, your browser connects directly to loopback. From another device, join your tailnet: Tailscale Serve forwards to AIReins’ remote entry, which checks Host/Origin and allows only the Tailscale logins you approve. The local Node process drives the four official CLIs over stream-json, ACP and codex app-server.</p>
     </section>
 
     <!-- README: Before you start / Security / Remote access from your phone; 中文：说在前面 / 安全 / 手机远程。 -->
@@ -173,7 +178,10 @@
       <div>
         <h2 id="start-title" data-i18n="startTitle">Keep the reins in your hand.</h2>
         <p data-i18n="startText">One command installs and builds it; prerequisites and remote setup are in the README.</p>
-        <pre class="install"><code>git clone https://github.com/yxhuang/AIReins.git &amp;&amp; cd AIReins &amp;&amp; bash install.sh</code></pre>
+        <div class="install-box">
+          <pre class="install"><code>git clone https://github.com/yxhuang/AIReins.git &amp;&amp; cd AIReins &amp;&amp; bash install.sh</code></pre>
+          <button type="button" class="copy-button" data-copy-install data-i18n="copy">Copy</button>
+        </div>
         <p class="small" data-i18n="platforms">Windows + WSL2 and native Linux supported. macOS is experimental, with CI coverage only.</p>
       </div>
       <a class="button button-primary" href="https://github.com/yxhuang/AIReins#get-started" data-doc="start" data-i18n="startButton">Get started in the README</a>
@@ -184,7 +192,7 @@
   <footer class="site-footer wrap">
     <a class="brand" href="#" aria-label="AIReins"><img src="./assets/icon.svg" alt="" width="28" height="28" loading="lazy"><span>AIReins</span></a>
     <div class="footer-links">
-      <a href="https://github.com/yxhuang/AIReins/releases/tag/v0.5.0" data-i18n="release">v0.5.0 · Release notes</a>
+      <a href="https://github.com/yxhuang/AIReins/releases/tag/v0.6.0" data-i18n="release">v0.6.0 · Release notes</a>
       <a href="https://github.com/yxhuang/AIReins/blob/main/LICENSE" data-i18n="license">Code: MIT License</a>
       <a href="https://github.com/yxhuang/AIReins/blob/main/NOTICE" data-i18n="notice">Name &amp; marks: NOTICE</a>
       <a href="https://github.com/yxhuang/AIReins">GitHub</a>
