@@ -14,6 +14,7 @@ import type {
   SessionOrganizationPatch,
   SessionStatus,
   UnifiedEvent,
+  UsageProviderId,
   UsageSettingsPatch,
   UsageSettingsView,
   UsageSummary,
@@ -25,9 +26,10 @@ import type {
 import { createSession, deleteSession, fetchCommands, fetchEarlierEvents, fetchFiles, fetchMeta, fetchPages, fetchSessions, fetchSnapshot, releaseSession, type CreateSessionInput, type SessionInfoKind } from "./api";
 import { fetchProjectOrder, moveProjectOrder, moveSession, patchSession } from "./api";
 import { selectSidebarSections } from "./sidebar-sessions";
-import type { CodexResetStatus } from "../../server/codex-resets";
+import type { QuotaResetStatus } from "../../server/codex-resets";
+import type { QuotaResetProvider } from "../../shared/quota-reset-feeds";
 import { fetchCodexResets, ackCodexReset, fetchUsage, fetchUsageSettings, refreshUsage, saveUsageSettings } from "./api";
-import { BUILTIN_USAGE_ID } from "./usage";
+import { BUILTIN_USAGE_ID, USAGE_PROVIDER_ORDER } from "./usage";
 import { fetchDirectories, fetchWorkFile, openWorkPathInSystem, saveWorkFile } from "./api";
 import { sessionTitle } from "../../shared/session-title";
 import { LIFECYCLE_EVENTS } from "../../shared/session-order";
@@ -35,6 +37,7 @@ import { extractMentionTokens, stripMentionCandidates } from "./mentions";
 import { partitionPages, type SkippedPage } from "./pages";
 import { normalizeHistoryDirectory } from "./history";
 import type { Attachment } from "./attachments";
+import { connectComposerHistory, disconnectComposerHistory, rememberComposerInput } from "./composer-history";
 
 // 全局 WS 收全部会话实时事件；首连和重连按已加载会话的 afterSeq 补发。
 // 未加载会话只维护列表摘要；快照期间缓存事件，落地后追加更大的 seq。
@@ -171,12 +174,12 @@ export class Store {
   newSessionRequest = 0;
   /** 扩展页面列表（仅 type:"iframe"；未知类型进 skippedPages）与当前打开的页面 id */
   pages: PageManifest[] = [];
-  codexResets: CodexResetStatus | null = null;
+  codexResets: QuotaResetStatus | null = null;
   private codexResetsVersion = 0;
   usageSummary: UsageSummary | null = null;
   usageSettings: UsageSettingsView | null = null;
   usageLoading = false;
-  usageRefreshing = false;
+  usageRefreshing: ReadonlySet<UsageProviderId> = new Set();
   usageError: string | null = null;
   private usageVersion = 0;
   skippedPages: SkippedPage[] = [];
@@ -1341,8 +1344,8 @@ export class Store {
     } catch { /* 旧后端/断网保留快照，重连时重取。 */ }
   }
 
-  async ackCodexReset(id: string): Promise<void> {
-    await ackCodexReset(id);
+  async ackCodexReset(id: string, provider?: QuotaResetProvider): Promise<void> {
+    await ackCodexReset(id, provider);
     await this.refreshCodexResets();
   }
 
@@ -1417,23 +1420,30 @@ export class Store {
     }
   }
 
-  async refreshAllUsage(provider = "all"): Promise<void> {
-    if (this.usageRefreshing) return;
+  async refreshAllUsage(provider: UsageProviderId | "all" = "all"): Promise<void> {
+    const targets = (provider === "all" ? USAGE_PROVIDER_ORDER : [provider]).filter((id) =>
+      !this.usageRefreshing.has(id) && this.usageSettings?.providers[id]?.enabled !== false);
+    if (targets.length === 0) return;
     const version = ++this.usageVersion;
-    this.usageRefreshing = true;
+    this.usageRefreshing = new Set([...this.usageRefreshing, ...targets]);
     this.usageError = null;
     this.notify();
-    try {
-      const data = await refreshUsage(provider);
-      if (version === this.usageVersion || typeof data.revision === "number") {
-        this.acceptUsageSummary(data);
+    // 每个 HTTP 响应都可独立更新卡片，WS 断线时也不用等最慢的 provider。
+    await Promise.all(targets.map(async (id) => {
+      try {
+        const data = await refreshUsage(id);
+        if (version === this.usageVersion || typeof data.revision === "number") {
+          this.acceptUsageSummary(data);
+        }
+      } catch (error) {
+        this.usageError = error instanceof Error ? error.message : String(error);
+      } finally {
+        const pending = new Set(this.usageRefreshing);
+        pending.delete(id);
+        this.usageRefreshing = pending;
+        this.notify();
       }
-    } catch (error) {
-      this.usageError = error instanceof Error ? error.message : String(error);
-    } finally {
-      this.usageRefreshing = false;
-      this.notify();
-    }
+    }));
   }
 
   async loadUsageSettings(): Promise<UsageSettingsView | null> {
@@ -1816,6 +1826,7 @@ export class Store {
 
   private connect(): void {
     if (this.socket && this.socket.readyState <= WebSocket.OPEN) return;
+    disconnectComposerHistory();
     // 强制重连会忽略旧 close 回调；新连接也须解除旧传输的提交锁。
     this.permissionRequests.clear();
     this.latestDispatchCounts = null;
@@ -1851,8 +1862,9 @@ export class Store {
         // 无法解析的帧直接忽略。
       }
     });
-    socket.addEventListener("close", () => {
+    socket.addEventListener("close", (event) => {
       if (this.socket !== socket) return; // 已被 reconnectNow 换掉的旧连接
+      disconnectComposerHistory(event?.code === 1001 && event.reason === "server shutdown");
       this.wsState = "closed";
       this.socket = null;
       this.permissionRequests.clear();
@@ -1895,7 +1907,7 @@ export class Store {
     if (type === "codex_resets_updated") {
       if (!frame.data || typeof frame.data !== "object") return;
       this.codexResetsVersion++;
-      this.codexResets = frame.data as CodexResetStatus;
+      this.codexResets = frame.data as QuotaResetStatus;
       this.notify();
       return;
     }
@@ -1946,7 +1958,10 @@ export class Store {
       this.notify();
       return;
     }
-    if (type === "ready") return;
+    if (type === "ready") {
+      if (typeof frame.serverInstanceId === "string" && frame.serverInstanceId) connectComposerHistory(frame.serverInstanceId);
+      return;
+    }
     if (type === "replay_complete") {
       const id = String(frame.sessionId ?? "");
       const buffered = this.replayBuffers.get(id) ?? [];
@@ -2302,7 +2317,10 @@ export class Store {
    */
   sendComposerInput(sessionId: string, text: string, extraMentions?: Mention[]): Promise<boolean> {
     return this.dispatchComposerInput(sessionId, text, extraMentions).then((ok) => {
-      if (ok && this.drafts.get(sessionId)?.trim() === text.trim()) this.clearDraft(sessionId);
+      if (ok) {
+        rememberComposerInput(text);
+        if (this.drafts.get(sessionId)?.trim() === text.trim()) this.clearDraft(sessionId);
+      }
       return ok;
     });
   }

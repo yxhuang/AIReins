@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createCodexResetWatch } from "./codex-resets.js";
+import { createCodexResetWatch, createQuotaResetWatch } from "./codex-resets.js";
 
 const root = mkdtempSync(join(tmpdir(), "aireins-resets-"));
 const fixture = JSON.parse(readFileSync(new URL("./test-fixtures/codex-resets-recent.json", import.meta.url), "utf8"));
@@ -35,6 +35,50 @@ function newActivity(payload: typeof fixture, key: string, action = "announce", 
   activity.eventIds = copy.events.map((e: { id: string }) => e.id);
   copy.activities.unshift(activity);
   return copy;
+}
+
+// 每个来源有自己的基线、ETag 和已读；一家的失败不阻断其他来源。
+{
+  const directory = join(root, "multiple-sources");
+  let round = 0;
+  const sent: string[] = [];
+  const requests: { input: string; etag: string | null }[] = [];
+  const options = {
+    directory, now: () => Date.parse("2026-10-16T00:02:00Z"), warn: () => {},
+    send: async (text: string) => { sent.push(text); },
+    fetch: (async (input, init) => {
+      const endpoint = String(input);
+      requests.push({ input: endpoint, etag: new Headers(init?.headers).get("If-None-Match") });
+      if (!round) return json(fixture, { etag: `"${endpoint}"` });
+      if (endpoint.includes("claude-resets")) return new Response(null, { status: 503 });
+      if (endpoint.includes("grok-bot-resets")) return new Response(null, { status: 304 });
+      return json(newActivity(fixture, "same-id", "confirm"));
+    }) as typeof fetch,
+  };
+  const watch = createQuotaResetWatch(options);
+  watch.start();
+  await new Promise<void>(resolve => setImmediate(resolve));
+  assert.equal(requests.length, 0);
+  watch.setEnabled(true);
+  await new Promise<void>(resolve => setImmediate(resolve));
+  assert.deepEqual(requests.map(request => request.input).sort(), ["antigravity", "claude", "codex", "grok-bot"].map(provider => `https://aihot.news/api/v1/${provider}-resets/recent`));
+  assert.equal(sent.length, 0);
+  watch.stop();
+
+  round++;
+  const restored = createQuotaResetWatch({ ...options, enabled: true });
+  restored.start();
+  await new Promise<void>(resolve => setImmediate(resolve));
+  restored.stop();
+  assert.equal(requests.length, 8);
+  assert.ok(requests.slice(4).every(request => request.etag === `"${request.input}"`));
+  assert.equal(sent.length, 2);
+  assert.ok(sent.some(text => text.startsWith("[AIReins] Antigravity") && text.includes("https://aihot.news/antigravity-reset")));
+  const antigravity = () => restored.status().sources?.find(source => source.provider === "antigravity")?.status;
+  assert.equal(antigravity()?.alerts[0]?.id, "same-id");
+  restored.ack("same-id", "antigravity");
+  assert.equal(antigravity()?.alerts.length, 0);
+  assert.equal(restored.status().alerts[0]?.id, "same-id");
 }
 
 // 默认关闭：构造/start/poll 都不访问网络；开启立即查询，关闭后停止。
@@ -85,7 +129,7 @@ function newActivity(payload: typeof fixture, key: string, action = "announce", 
   assert.equal(status.alerts[0].originalText, "Original source text");
   assert.equal(status.alerts[0].events.length, fresh.events.length);
   assert.equal(status.alerts[0].context[0].text, "将在接下来 2 小时内落地");
-  assert.equal(t.sent.length, 1); assert.match(t.sent[0], /^\[AIReins\] Tibo 预告额度重置/);
+  assert.equal(t.sent.length, 1); assert.match(t.sent[0], /^\[AIReins\] Codex 预告额度重置/);
   assert.match(t.sent[0], /事件帖优先正文/); assert.match(t.sent[0], /数据来源 AIHOT https:\/\/aihot.news\/codex-reset/);
   t.advance(); t.responses.push(json(fresh)); await t.watch.poll(); assert.equal(t.sent.length, 1);
   const confirm = newActivity(fresh, "confirmed-post", "confirm");

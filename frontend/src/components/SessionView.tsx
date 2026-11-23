@@ -30,6 +30,7 @@ import { shortSessionTitle } from "./SessionTitle";
 import { MarkdownCommitContext } from "./MarkdownMessage";
 import { ContextUsage } from "./ContextUsage";
 import { PendingMessages } from "./PendingMessages";
+import { rememberComposerInput, useComposerHistory } from "../composer-history";
 
 const selectMeta = (value: Store) => value.meta;
 const selectWsState = (value: Store) => value.wsState;
@@ -83,6 +84,7 @@ export function SessionView({ session, mobileTail, usage, headerTarget }: { sess
   const dead = session.status === "dead";
   const selectData = useCallback((value: Store) => value.data.get(session.id), [session.id]);
   const data = useStore(selectData);
+  const nativePayloadUnavailable = useMemo(() => data?.events.some(event => event.nativePayloadUnavailable), [data?.events]);
   const snapshotError = useStore(useCallback((value: Store) => value.snapshotErrors.get(session.id), [session.id]));
   const wsState = useStore(selectWsState);
   // 按原生会话身份查询派单；Claude 后台任务与 Antigravity 在途后台工具/续跑共用 backgroundTasks。
@@ -105,6 +107,7 @@ export function SessionView({ session, mobileTail, usage, headerTarget }: { sess
     [renderBuilder, data, focusView, session.cwd]);
 
   const streamRef = useRef<HTMLDivElement>(null);
+  const streamContentRef = useRef<HTMLDivElement>(null);
   const earlierRef = useRef<HTMLDivElement>(null);
   const readingAnchor = useRef<{ element?: HTMLElement; top: number; height: number; scrollTop: number } | null>(null);
   const gateRefs = useRef(new Map<string, HTMLElement>());
@@ -148,21 +151,24 @@ export function SessionView({ session, mobileTail, usage, headerTarget }: { sess
   // 贴底跟随：是否贴底按用户最后一次滚动时的位置记，初始为贴底。
   // 不能在更新后再量——进会话、刷新、重连补齐时整批事件一次撑高，更新后量永远不在底部。
   const stickToBottom = useRef(true);
+  const lastFollowedTop = useRef(0);
   const hiddenPendingUpdater = useRef(updateHiddenPending);
   hiddenPendingUpdater.current = updateHiddenPending;
   // Stable context value: streaming deltas must not invalidate every old message.
-  const onMarkdownCommit = useCallback(() => {
+  const syncViewport = useCallback(() => {
     const container = streamRef.current;
     if (!container || readingAnchor.current) return;
     setShowLatest(syncStreamViewport(container, stickToBottom.current));
+    if (stickToBottom.current) lastFollowedTop.current = container.scrollTop;
     hiddenPendingUpdater.current();
   }, []);
   const loadEarlier = useCallback(() => {
     void store.loadOlder(session.id, () => {
       const container = streamRef.current;
-      if (!container) return;
+      const content = streamContentRef.current;
+      if (!container || !content) return;
       const box = container.getBoundingClientRect();
-      const element = [...container.children].find((child) => child instanceof HTMLElement
+      const element = [...content.children].find((child) => child instanceof HTMLElement
         && child !== earlierRef.current && child.getBoundingClientRect().bottom > box.top) as HTMLElement | undefined;
       readingAnchor.current = { element, top: element?.getBoundingClientRect().top ?? 0, height: container.scrollHeight, scrollTop: container.scrollTop };
       stickToBottom.current = false;
@@ -171,9 +177,11 @@ export function SessionView({ session, mobileTail, usage, headerTarget }: { sess
   const onStreamScroll = useCallback(() => {
     const container = streamRef.current;
     if (container) {
-      const away = awayFromLatest(container.scrollHeight, container.scrollTop, container.clientHeight);
-      stickToBottom.current = !away;
-      setShowLatest(away);
+      const { scrollTop, scrollHeight, clientHeight } = container;
+      const away = awayFromLatest(scrollHeight, scrollTop, clientHeight);
+      // 延迟布局可能先撑高内容，再收到上次程序贴底的 scroll 事件。
+      if (!away || scrollTop !== lastFollowedTop.current) stickToBottom.current = !away;
+      setShowLatest(!stickToBottom.current);
     }
     updateHiddenPending();
   }, [updateHiddenPending]);
@@ -185,9 +193,20 @@ export function SessionView({ session, mobileTail, usage, headerTarget }: { sess
         ? anchor.scrollTop + anchor.element.getBoundingClientRect().top - anchor.top
         : anchor.scrollTop + container.scrollHeight - anchor.height;
       readingAnchor.current = null;
-    } else if (container && stickToBottom.current) container.scrollTop = container.scrollHeight;
-    if (container) setShowLatest(awayFromLatest(container.scrollHeight, container.scrollTop, container.clientHeight));
-  }, [items, data?.seq, data?.dropped, data?.events, data?.prependVersion, data?.toolFrames]);
+    }
+    syncViewport();
+  }, [items, data?.seq, data?.dropped, data?.events, data?.prependVersion, data?.toolFrames, syncViewport]);
+
+  useLayoutEffect(() => {
+    const container = streamRef.current;
+    const content = streamContentRef.current;
+    if (!container || !content) return;
+    // 离屏正文展开及图片载入可以改变高度而不触发 React 提交。
+    const observer = new ResizeObserver(syncViewport);
+    observer.observe(content);
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, [syncViewport]);
 
   useEffect(() => {
     const container = streamRef.current;
@@ -314,36 +333,35 @@ export function SessionView({ session, mobileTail, usage, headerTarget }: { sess
       {session.riskyMode && (
         <div className="risky-banner" role="alert">{t("ui.SessionView.tool_approvals_follow_the_permission_mode_selected")}</div>
       )}
+      {nativePayloadUnavailable && <p className="system-line" role="status">{t("ui.SessionView.native_payload_unavailable")}</p>}
 
       <div className="stream-region">
-      <div className="stream" ref={streamRef} onScroll={onStreamScroll} style={{ overflowAnchor: "none" }}>
-        {/* 续接会话：历史消息区在实时事件流上方，向上翻即可见（不默认折叠） */}
-        {session.resumedFrom && <ResumedHistory session={session} streamRef={streamRef} />}
-        {data?.hasMore && (
-          <div className="earlier-messages" ref={earlierRef} role="status">
-            {data.olderError
-              ? <button type="button" onClick={loadEarlier} title={data.olderError}>{t("ui.SessionView.failed_to_load_earlier_messages_click_to")}</button>
-              : t("ui.SessionView.loading_earlier_messages")}
+        <div className="stream" ref={streamRef} onScroll={onStreamScroll} style={{ overflowAnchor: "none" }}>
+          <div className="stream-content" ref={streamContentRef}>
+            {/* 续接会话：历史消息区在实时事件流上方，向上翻即可见（不默认折叠） */}
+            {session.resumedFrom && <ResumedHistory session={session} streamRef={streamRef} />}
+            {data?.hasMore && (
+              <div className="earlier-messages" ref={earlierRef} role="status">
+                {data.olderError
+                  ? <button type="button" onClick={loadEarlier} title={data.olderError}>{t("ui.SessionView.failed_to_load_earlier_messages_click_to")}</button>
+                  : t("ui.SessionView.loading_earlier_messages")}
+              </div>
+            )}
+            {snapshotError && <p className="system-line" role="alert">{snapshotError}{" "}
+              <button type="button" className="btn" onClick={() => void store.resync(session.id)}>{t("ui.common.retry")}</button>
+            </p>}
+            {!data && !snapshotError && <p className="system-line">{t("ui.SessionView.loading_session")}</p>}
+            {data && data.dropped > 0 && (
+              <p className="system-line">{t("ui.SessionView.earlier_events_omitted_due_to_the_memory_sentence", { p0: (data.dropped) })}</p>
+            )}
+            <MarkdownCommitContext value={syncViewport}>{rows}</MarkdownCommitContext>
           </div>
-        )}
-        {snapshotError && <p className="system-line" role="alert">{snapshotError}{" "}
-          <button type="button" className="btn" onClick={() => void store.resync(session.id)}>{t("ui.common.retry")}</button>
-        </p>}
-        {!data && !snapshotError && <p className="system-line">{t("ui.SessionView.loading_session")}</p>}
-        {data && data.dropped > 0 && (
-          <p className="system-line">{t("ui.SessionView.earlier_events_omitted_due_to_the_memory_sentence", { p0: (data.dropped) })}</p>
-        )}
-        <MarkdownCommitContext value={onMarkdownCommit}>{rows}</MarkdownCommitContext>
-      </div>
+        </div>
 
-      {showLatest && <button type="button" className="back-to-latest" onClick={() => {
-        const container = streamRef.current;
-        if (!container) return;
-        stickToBottom.current = true;
-        container.scrollTop = container.scrollHeight;
-        setShowLatest(false);
-        updateHiddenPending();
-      }}>{t("ui.SessionView.back_to_latest")}</button>}
+        {showLatest && <button type="button" className="back-to-latest" onClick={() => {
+          stickToBottom.current = true;
+          syncViewport();
+        }}>{t("ui.SessionView.back_to_latest")}</button>}
       </div>
 
       {pendingGateIds.length > 0 && hiddenPending > 0 && (
@@ -785,6 +803,7 @@ export function Composer({ session, dead, errored }: { session: SessionRecord; d
   useStore((value) => value.mentionVersion);
   // 草稿随会话恢复：SessionView 按会话 id key 重挂载，useState 惰性初始值即该会话草稿
   const [text, setText] = useState(() => store.getDraft(session.id));
+  const history = useComposerHistory(text, setText);
   const [cursor, setCursor] = useState(0);
   const [selected, setSelected] = useState(0);
   // dead/error 会话的「新建会话并续接」提交态
@@ -1167,6 +1186,7 @@ export function Composer({ session, dead, errored }: { session: SessionRecord; d
     setCodexResult({ name });
     try {
       const data = await runCodexCommand(session.id, name, args);
+      if (submittedText !== undefined) rememberComposerInput(args ? `/${name} ${args}` : `/${name}`);
       setCodexResult(current => current ? { name, data } : null);
       if (name === "new" && data.session) {
         const next = data.session as SessionRecord;
@@ -1192,14 +1212,17 @@ export function Composer({ session, dead, errored }: { session: SessionRecord; d
   };
 
   const confirm = (cmd: CommandInfo, fillOnly: boolean) => {
+    const commandText = `/${cmd.name}`;
     if (!fillOnly && session.agent === "claude" && cmd.name === "mcp") {
       noteCommandUsed(session.agent, cmd.name);
+      rememberComposerInput(commandText);
       setText(""); setDismissed(false); setInfoKind("mcp");
       return;
     }
-    if (!fillOnly && parseSideCommand(session.agent, `/${cmd.name}`) !== null) {
+    if (!fillOnly && parseSideCommand(session.agent, commandText) !== null) {
       // 侧问命令：补全面板里回车直接打开空面板（Tab 仍只填充，便于接着写问题）
       noteCommandUsed(session.agent, cmd.name);
+      rememberComposerInput(commandText);
       setText("");
       setDismissed(false);
       setSideQuestion({ question: "" });
@@ -1211,11 +1234,14 @@ export function Composer({ session, dead, errored }: { session: SessionRecord; d
       if (session.agent === "codex") {
         if (codexBusy.current) return;
         setText("");
-        void executeCodex(cmd.name, undefined, text || `/${cmd.name}`);
-      } else if (store.sendCommand(session.id, cmd.name, "")) setText("");
+        void executeCodex(cmd.name, undefined, text || commandText);
+      } else if (store.sendCommand(session.id, cmd.name, "")) {
+        rememberComposerInput(commandText);
+        setText("");
+      }
     } else {
       // 有参数（或 Tab 只填充）：填入「/name 」，光标留在末尾参数位等用户补完
-      setText(`/${cmd.name} `);
+      setText(`${commandText} `);
     }
     setDismissed(false);
   };
@@ -1236,8 +1262,10 @@ export function Composer({ session, dead, errored }: { session: SessionRecord; d
     const trimmed = text.trim();
     if (dead) return;
     if (!trimmed && readyMentions.length === 0) return;
+    history.reset();
     if (session.agent === "claude" && trimmed === "/mcp") {
       noteCommandUsed(session.agent, "mcp");
+      rememberComposerInput(trimmed);
       setText(""); setDismissed(false); setInfoKind("mcp");
       return;
     }
@@ -1245,6 +1273,7 @@ export function Composer({ session, dead, errored }: { session: SessionRecord; d
     if (side !== null) {
       // 侧问不进主对话：打开面板直接提问，附件条留在输入框
       noteCommandUsed(session.agent, /^\/(\S+)/.exec(trimmed)![1]!);
+      rememberComposerInput(trimmed);
       setText("");
       setDismissed(false);
       setSideQuestion({ question: side });
@@ -1313,7 +1342,7 @@ export function Composer({ session, dead, errored }: { session: SessionRecord; d
 
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     // IME 组合期间：Enter/Tab 等都是输入法上屏键，不当确认也不发送
-    if (e.nativeEvent.isComposing) return;
+    if (e.nativeEvent.isComposing || composing || e.keyCode === 229) return;
     if (skillOpen) {
       if (e.key === "ArrowDown" || e.key === "ArrowUp") {
         e.preventDefault();
@@ -1381,6 +1410,12 @@ export function Composer({ session, dead, errored }: { session: SessionRecord; d
         return;
       }
       // 无匹配时 Enter 落回普通发送（未知路径本就不会附加）
+    }
+    const recalledAt = history.onKeyDown(e);
+    if (recalledAt !== null) {
+      setCursor(recalledAt);
+      setDismissed(true);
+      return;
     }
     if (e.key === "Enter" && !e.shiftKey && (!TOUCH || e.metaKey || e.ctrlKey)) {
       e.preventDefault();
@@ -1582,6 +1617,7 @@ export function Composer({ session, dead, errored }: { session: SessionRecord; d
                   : t("ui.SessionView.message_this_agent_enter_to_send_shift")
             }
             onChange={(e) => {
+              history.reset();
               setText(e.target.value);
               setCursor(e.target.selectionStart);
               setDismissed(false);

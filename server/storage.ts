@@ -1,12 +1,18 @@
-import { lstatSync, readdirSync, unlinkSync } from "node:fs";
+import { lstatSync, readFileSync, readdirSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { join, relative, resolve, sep } from "node:path";
-import { removeUploadDirs, uploadDirReferences, workbenchHome } from "./persistence.js";
+import { removeUploadDirs, transcriptPathFor, uploadDirReferences, workbenchHome } from "./persistence.js";
+import { scanNativePresence } from "./native-presence.js";
+import { reclaimNativePayloads } from "./native-payload-replay.js";
+import { DEFAULT_STORAGE_BUDGET_BYTES, storageCleanupTarget } from "./prefs.js";
+import { archiveTranscript } from "./transcript-archive.js";
+import { log } from "./logger.js";
 import type { SessionManager } from "./session-manager.js";
-import type { SessionRecord } from "./types.js";
+import { AGENTS, type SessionRecord } from "./types.js";
 
 export interface StorageCategory { bytes: number; files: number; sessions: number }
 export interface StorageStats {
   totalBytes: number;
+  automatic: { budgetBytes: number; targetBytes: number };
   categories: Record<"transcripts" | "uploads" | "logs" | "other", StorageCategory>;
   cleanable: {
     bytes: number;
@@ -29,7 +35,7 @@ export function validateStorageCleanInput(input: unknown): boolean {
   return (input as { includeEnded: boolean }).includeEnded;
 }
 
-interface FileEntry { path: string; rel: string; bytes: number; regular: boolean }
+interface FileEntry { path: string; rel: string; bytes: number; regular: boolean; version: string }
 interface Inventory { files: FileEntry[]; dirs: string[] }
 interface Plan { logs: FileEntry[]; transcripts: FileEntry[]; uploadIds: string[]; files: FileEntry[] }
 
@@ -48,7 +54,7 @@ function inventory(paths = [resolve(workbenchHome)]): Inventory {
       if (rel) result.dirs.push(rel);
       for (const name of readdirSync(path)) visit(join(path, name));
     } else if (rel) {
-      result.files.push({ path, rel, bytes: stat.size, regular: stat.isFile() });
+      result.files.push({ path, rel, bytes: stat.size, regular: stat.isFile(), version: storageVersion(stat) });
     }
   }
   for (const path of paths) visit(path);
@@ -56,6 +62,9 @@ function inventory(paths = [resolve(workbenchHome)]): Inventory {
 }
 const sum = (files: FileEntry[]) => files.reduce((total, file) => total + file.bytes, 0);
 const inDir = (file: FileEntry, dir: string) => file.rel.startsWith(`${dir}${sep}`);
+function storageVersion(stat: { dev: number; ino: number; size: number; mtimeMs: number; ctimeMs: number }): string {
+  return `${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeMs}:${stat.ctimeMs}`;
+}
 
 function planFor(scan: Inventory, sessions: SessionRecord[], references = uploadDirReferences(sessions)): Plan {
   const ids = new Set(sessions.map((session) => session.id));
@@ -75,7 +84,7 @@ function planFor(scan: Inventory, sessions: SessionRecord[], references = upload
   return { logs, transcripts, uploadIds, files };
 }
 
-export function getStorageStats(manager: SessionManager): StorageStats {
+export function getStorageStats(manager: SessionManager, budgetBytes = DEFAULT_STORAGE_BUDGET_BYTES): StorageStats {
   const scan = inventory();
   const sessions = manager.list();
   const category = (): StorageCategory => ({ bytes: 0, files: 0, sessions: 0 });
@@ -101,6 +110,7 @@ export function getStorageStats(manager: SessionManager): StorageStats {
   const orphanFiles = plan.files.filter((file) => !plan.logs.includes(file));
   return {
     totalBytes: sum(scan.files), categories,
+    automatic: { budgetBytes, targetBytes: storageCleanupTarget(budgetBytes) },
     cleanable: {
       bytes: sum(plan.files), rotatedLogs: { bytes: sum(plan.logs), files: plan.logs.length },
       orphans: { bytes: sum(orphanFiles), files: orphanFiles.length, uploadDirs: plan.uploadIds.length },
@@ -111,13 +121,165 @@ export function getStorageStats(manager: SessionManager): StorageStats {
 
 // 并发清理串行执行，各请求采用自己的 includeEnded 和执行时的内存状态。
 let cleaning: Promise<unknown> = Promise.resolve();
-export function cleanStorage(manager: SessionManager, includeEnded: boolean): Promise<StorageCleanResult> {
-  const operation = cleaning.then(() => performClean(manager, includeEnded));
+function serializeCleanup<T>(run: () => Promise<T>): Promise<T> {
+  const operation = cleaning.then(run);
   cleaning = operation.catch(() => {});
   return operation;
 }
+export function cleanStorage(manager: SessionManager, includeEnded: boolean, budgetBytes = DEFAULT_STORAGE_BUDGET_BYTES): Promise<StorageCleanResult> {
+  return serializeCleanup(() => performClean(manager, includeEnded, budgetBytes));
+}
 
-async function performClean(manager: SessionManager, includeEnded: boolean): Promise<StorageCleanResult> {
+export function createStorageMaintenance(manager: SessionManager, options: {
+  budgetBytes: number;
+  targetBytes?: number;
+  activeDispatches(sessions: readonly SessionRecord[]): Promise<ReadonlyMap<string, number>>;
+  stopping?(): boolean;
+}): () => Promise<void> {
+  const presencePath = join(workbenchHome, "native-presence.json");
+  const missingLastTime = new Set<string>();
+  const incompressible = new Map<string, string>();
+  const checkedNative = new Map<string, string>();
+  let previous: Promise<void> | undefined;
+  async function maintain(): Promise<void> {
+    if (options.stopping?.()) return;
+    const budgetBytes = options.budgetBytes;
+    const targetBytes = options.targetBytes ?? storageCleanupTarget(budgetBytes);
+    const sessions = manager.list();
+    let stored: Record<string, string> = {};
+    let previousBytes = "";
+    try {
+      previousBytes = readFileSync(presencePath, "utf8");
+      const parsed: unknown = JSON.parse(previousBytes);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) stored = parsed as Record<string, string>;
+    } catch { /* A missing or corrupt observation file cannot authorize deletions. */ }
+    const observations: Record<string, string> = {};
+    const present = new Set<string>();
+    const candidates: SessionRecord[] = [];
+    const missing = new Set<string>();
+    for (const agent of AGENTS) {
+      const linked = sessions.filter(session => session.agent === agent && /^[\w-]{1,128}$/.test(session.nativeSessionId ?? ""));
+      if (!linked.length) continue;
+      const native = await scanNativePresence(agent, linked);
+      for (const session of linked) {
+        const id = session.nativeSessionId!;
+        const key = `${agent}:${id}`;
+        const seen = stored[key];
+        if (native?.ids.has(id)) {
+          observations[key] = native.store;
+          present.add(session.id);
+        }
+        else if (typeof seen === "string") {
+          observations[key] = seen;
+          if (native?.store === seen) {
+            missing.add(key);
+            if (missingLastTime.has(key)) candidates.push(session);
+          }
+        }
+      }
+    }
+    if (options.stopping?.()) return;
+    missingLastTime.clear();
+    for (const key of missing) missingLastTime.add(key);
+    const nextBytes = JSON.stringify(observations);
+    if (Object.keys(observations).length || previousBytes) {
+      if (nextBytes !== previousBytes) {
+        const temporary = `${presencePath}.tmp`;
+        writeFileSync(temporary, nextBytes, { mode: 0o600 });
+        renameSync(temporary, presencePath);
+      }
+    }
+
+    const scan = inventory();
+    let used = sum(scan.files);
+    const ownedStorage = new Map(scan.files.filter(file => file.regular && inDir(file, "transcripts")).map(file => [file.path, file]));
+    for (const path of incompressible.keys()) if (!ownedStorage.has(path)) incompressible.delete(path);
+    for (const path of checkedNative.keys()) if (!ownedStorage.has(path)) checkedNative.delete(path);
+    function eligible(session: SessionRecord): boolean {
+      return !options.stopping?.() && /^[\w-]{1,128}$/.test(session.id)
+        && resolve(session.transcriptPath) === resolve(transcriptPathFor(session.id))
+        && manager.canMaintainSessionStorage(session.id);
+    }
+    const removable = candidates.filter(eligible);
+    const packable = used > budgetBytes ? sessions.filter(session => {
+      const file = ownedStorage.get(resolve(session.transcriptPath));
+      return file && file.bytes >= 1024 && eligible(session) && (incompressible.get(file.path) !== file.version
+        || (present.has(session.id) && checkedNative.get(file.path) !== file.version));
+    }).reverse() : [];
+    if (!removable.length && !packable.length) return;
+    const dispatches = await options.activeDispatches([...new Set([...removable, ...packable])]);
+    let removed = 0;
+    for (const session of removable) {
+      if (!eligible(session) || dispatches.get(session.id)) continue;
+      if (manager.get(session.id)?.nativeSessionId !== session.nativeSessionId) continue;
+      if (await manager.removeMissingNativeSession(session.id)) removed++;
+    }
+    let archived = 0;
+    let reclaimed = 0;
+    let freedBytes = 0;
+    if (removed) {
+      const remaining = sum(inventory().files);
+      freedBytes = Math.max(0, used - remaining);
+      used = remaining;
+    }
+    if (used > targetBytes) for (const session of packable) {
+      if (used <= targetBytes || options.stopping?.()) break;
+      if (!present.has(session.id) || !eligible(session) || dispatches.get(session.id)) continue;
+      const path = session.transcriptPath;
+      const file = ownedStorage.get(resolve(path))!;
+      if (checkedNative.get(file.path) === file.version) continue;
+      const stillEligible = () => eligible(session) && manager.get(session.id)?.nativeSessionId === session.nativeSessionId;
+      try {
+        const freed = await reclaimNativePayloads(session, workbenchHome, stillEligible);
+        if (freed) {
+          const version = storageVersion(lstatSync(path));
+          reclaimed++;
+          used -= freed;
+          freedBytes += freed;
+          incompressible.set(file.path, version);
+          checkedNative.set(file.path, version);
+        } else if (stillEligible()) checkedNative.set(file.path, file.version);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      }
+    }
+    for (const session of packable) {
+      if (used <= targetBytes || options.stopping?.()) break;
+      if (!eligible(session) || dispatches.get(session.id)) continue;
+      const path = session.transcriptPath;
+      let stat;
+      try { stat = lstatSync(path); } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
+        throw error;
+      }
+      const signature = storageVersion(stat);
+      if (!stat.isFile() || incompressible.get(path) === signature) continue;
+      let freed: number;
+      try { freed = await archiveTranscript(path, () => eligible(session)); } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
+        throw error;
+      }
+      if (freed) {
+        archived++;
+        freedBytes += freed;
+        used -= freed;
+        if (eligible(session)) {
+          const version = storageVersion(lstatSync(path));
+          incompressible.set(path, version);
+          if (checkedNative.get(resolve(path)) === signature) checkedNative.set(resolve(path), version);
+        }
+      } else if (eligible(session)) incompressible.set(path, signature);
+    }
+    if (removed || archived || reclaimed) log("info", "session storage maintained", { removed, archived, reclaimed, freedBytes, budgetBytes, targetBytes });
+  }
+  return () => {
+    if (previous) return previous;
+    previous = serializeCleanup(maintain).finally(() => { previous = undefined; });
+    return previous;
+  };
+}
+
+async function performClean(manager: SessionManager, includeEnded: boolean, budgetBytes: number): Promise<StorageCleanResult> {
   const result = { freedBytes: 0, removed: { rotatedLogs: 0, orphanFiles: 0, orphanUploadDirs: 0, endedSessions: 0 } };
   function deleteFile(path: string): number | undefined {
     try {
@@ -183,5 +345,5 @@ async function performClean(manager: SessionManager, includeEnded: boolean): Pro
     // 删除结束会话后，它独占引用的附件也可能成为孤儿；继续采用相同保护规则。
     cleanOrphansAndLogs();
   }
-  return { ...result, storage: getStorageStats(manager) };
+  return { ...result, storage: getStorageStats(manager, budgetBytes) };
 }

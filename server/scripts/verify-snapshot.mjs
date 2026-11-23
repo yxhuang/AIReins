@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
-import { readFileSync } from "node:fs";
+import { readTranscriptText } from "../transcript-archive.ts";
+import { NativePayloadReplay } from "../native-payload-replay.ts";
 
 const args = process.argv.slice(2);
 const sessionId = args.find((arg) => !arg.startsWith("--"));
@@ -11,7 +12,7 @@ const option = (name) => {
 const probeMessage = option("--probe-message");
 
 if (!sessionId) {
-  console.error("用法：node server/scripts/verify-snapshot.mjs <sessionId> [--probe-message 文本]");
+  console.error("用法：node --import tsx server/scripts/verify-snapshot.mjs <sessionId> [--probe-message 文本]");
   process.exit(2);
 }
 
@@ -19,10 +20,14 @@ const response = await fetch(`http://127.0.0.1:8790/api/sessions/${encodeURIComp
 const envelope = await response.json();
 if (!response.ok || envelope.code !== 0) throw new Error(envelope.msg ?? "snapshot 请求失败");
 const { session, seq, events } = envelope.data;
-const diskEvents = readFileSync(session.transcriptPath, "utf8")
-  .split("\n")
-  .filter(Boolean)
-  .map((line) => JSON.parse(line));
+const replay = new NativePayloadReplay();
+let diskEvents;
+try {
+  diskEvents = readTranscriptText(session.transcriptPath)
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => replay.restore(JSON.parse(line)));
+} finally { replay.close(); }
 
 if (events.length !== diskEvents.length) throw new Error(`snapshot=${events.length}，NDJSON=${diskEvents.length}`);
 for (let index = 0; index < events.length; index += 1) {

@@ -81,6 +81,8 @@ export function WorkbenchStorage({ dialogOpen, onDialogOpenChange }: {
   const noCleanableItems = storage && storage.cleanable.bytes === 0
     && storage.cleanable.rotatedLogs.files === 0 && storage.cleanable.orphans.files === 0
     && storage.cleanable.orphans.uploadDirs === 0 && storage.cleanable.ended.sessions === 0;
+  const automatic = storage?.automatic;
+  const overBudget = automatic && storage.totalBytes > automatic.budgetBytes;
 
   return <>
     <div className="settings-item settings-storage">
@@ -89,6 +91,9 @@ export function WorkbenchStorage({ dialogOpen, onDialogOpenChange }: {
         {storage ? <>{t("ui.WorkbenchStorage.session_records")} {formatBytes(storage.categories.transcripts.bytes)} {t("ui.WorkbenchStorage.attachments")} {formatBytes(storage.categories.uploads.bytes)} {t("ui.WorkbenchStorage.logs")} {formatBytes(storage.categories.logs.bytes)} {t("ui.WorkbenchStorage.other")} {formatBytes(storage.categories.other.bytes)}</>
           : t("ui.WorkbenchStorage.session_records_attachments_logs_other")}
       </span>
+      {overBudget && <span className="settings-hint" role="status">
+        {t("ui.WorkbenchStorage.over_budget", { p0: formatBytes(automatic.budgetBytes), p1: formatBytes(automatic.targetBytes) })}
+      </span>}
       {error && !dialogOpen && <span className="new-error" role="alert">{error}</span>}
       {result && <span className="settings-hint" role="status">{result}</span>}
       <button type="button" className="settings-action" ref={cleanButton} aria-haspopup="dialog"

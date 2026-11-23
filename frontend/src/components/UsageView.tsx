@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { t } from "../i18n";
 import { store } from "../store";
-import type { UsageProvider, UsageProviderId, UsageResetCredits, UsageWindow } from "../types";
+import type { UsageProvider, UsageProviderId, UsageResetCredits, UsageSettingsPatch, UsageWindow } from "../types";
 import {
   barLevel,
   formatClockTime,
@@ -132,12 +132,14 @@ function UsageResetCreditsBlock({
 
 function UsageProviderCard({
   provider,
+  refreshing,
   now,
   kimiEnv,
   openCredits,
   onOpenKimiSettings,
 }: {
   provider: UsageProvider;
+  refreshing: boolean;
   now: number;
   kimiEnv: string;
   openCredits: Set<string>;
@@ -145,10 +147,10 @@ function UsageProviderCard({
 }) {
   const ago = formatUsageAgo(provider.fetched_at, now);
   const failed = provider.status === "error" || provider.status === "auth_expired";
-  const groups = groupUsageWindows(provider.windows);
+  const groups = groupUsageWindows(provider.windows, provider.id);
 
   return (
-    <section className="usage-card" data-provider={provider.id} aria-label={provider.name}>
+    <section className="usage-card" data-provider={provider.id} aria-label={provider.name} aria-busy={refreshing}>
       <div className="usage-card-head">
         <span className="usage-card-title">
           <AgentIcon agent={provider.id} label={provider.name} />
@@ -161,6 +163,15 @@ function UsageProviderCard({
         {failed && ago && (
           <span className="usage-card-stale">{t("ui.UsageView.last_attempt", { ago })}</span>
         )}
+        <button
+          type="button"
+          className="usage-refresh-btn usage-card-refresh"
+          disabled={refreshing}
+          aria-label={t(refreshing ? "ui.UsageView.refreshing_provider" : "ui.UsageView.refresh_provider", { provider: provider.name })}
+          onClick={() => void store.refreshAllUsage(provider.id)}
+        >
+          {t(refreshing ? "ui.UsageView.refreshing" : "ui.UsageView.refresh")}
+        </button>
       </div>
 
       {failed ? (
@@ -208,7 +219,8 @@ export function UsageView({ onCollapse }: { onCollapse?: () => void }) {
   const summary = useStore((v) => v.usageSummary);
   const settings = useStore((v) => v.usageSettings);
   const loading = useStore((v) => v.usageLoading);
-  const refreshing = useStore((v) => v.usageRefreshing);
+  const refreshingProviders = useStore((v) => v.usageRefreshing);
+  const refreshing = refreshingProviders.size > 0;
   const usageError = useStore((v) => v.usageError);
   const now = useStore((v) => v.now);
 
@@ -253,12 +265,12 @@ export function UsageView({ onCollapse }: { onCollapse?: () => void }) {
     });
   };
 
-  const toggleProvider = async (id: UsageProviderId, enabled: boolean) => {
+  const updateSettings = async (patch: UsageSettingsPatch) => {
     if (saving) return;
     setSaving(true);
     setSettingsError("");
     try {
-      await store.updateUsageSettings({ providers: { [id]: { enabled } } });
+      await store.updateUsageSettings(patch);
     } catch (err) {
       setSettingsError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -275,19 +287,6 @@ export function UsageView({ onCollapse }: { onCollapse?: () => void }) {
     try {
       await store.updateUsageSettings({ kimi: { apiKey: nextValue } });
       setKimiKeyDraft("");
-    } catch (err) {
-      setSettingsError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const toggleKimiProxy = async (useProxy: boolean) => {
-    if (saving) return;
-    setSaving(true);
-    setSettingsError("");
-    try {
-      await store.updateUsageSettings({ kimi: { useProxy } });
     } catch (err) {
       setSettingsError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -346,10 +345,10 @@ export function UsageView({ onCollapse }: { onCollapse?: () => void }) {
           <button
             type="button"
             className="usage-refresh-btn"
-            disabled={refreshing}
-            onClick={() => void store.refreshAllUsage("all")}
+            disabled={refreshing || allDisabled}
+            onClick={() => void store.refreshAllUsage()}
           >
-            {t(refreshing ? "ui.UsageView.refreshing" : "ui.UsageView.refresh")}
+            {t(refreshing ? "ui.UsageView.refreshing" : "ui.UsageView.refresh_all")}
           </button>
         </div>
       </header>
@@ -367,7 +366,7 @@ export function UsageView({ onCollapse }: { onCollapse?: () => void }) {
                       type="checkbox"
                       checked={enabled}
                       disabled={saving || !settings}
-                      onChange={(e) => void toggleProvider(id, e.currentTarget.checked)}
+                      onChange={(e) => void updateSettings({ providers: { [id]: { enabled: e.currentTarget.checked } } })}
                     />
                     <AgentIcon agent={id} label={PROVIDER_TITLES[id]} />
                     <span>{PROVIDER_TITLES[id]}</span>
@@ -376,6 +375,15 @@ export function UsageView({ onCollapse }: { onCollapse?: () => void }) {
               })}
             </div>
             <p className="usage-setting-note">{t("ui.UsageView.antigravity_on_demand_note")}</p>
+            <label className="usage-setting-row">
+              <input
+                type="checkbox"
+                checked={settings?.antigravity?.includeCredits === true}
+                disabled={saving || !settings?.antigravity}
+                onChange={(e) => void updateSettings({ antigravity: { includeCredits: e.currentTarget.checked } })}
+              />
+              <span>{t("ui.UsageView.antigravity_include_credits")}</span>
+            </label>
           </div>
 
           <div className="usage-settings-group">
@@ -427,7 +435,7 @@ export function UsageView({ onCollapse }: { onCollapse?: () => void }) {
                 type="checkbox"
                 checked={settings?.kimi.useProxy === true}
                 disabled={saving || !settings}
-                onChange={(e) => void toggleKimiProxy(e.currentTarget.checked)}
+                onChange={(e) => void updateSettings({ kimi: { useProxy: e.currentTarget.checked } })}
               />
               <span>{t("ui.UsageView.kimi_proxy")}</span>
             </label>
@@ -443,7 +451,7 @@ export function UsageView({ onCollapse }: { onCollapse?: () => void }) {
         </div>
       )}
 
-      <div className="usage-cards" aria-busy={loading || refreshing}>
+      <div className="usage-cards" aria-busy={providers.length === 0 && (loading || refreshing)}>
         {allDisabled ? (
           <p className="usage-empty">{t("ui.UsageView.all_disabled")}</p>
         ) : providers.length === 0 ? (
@@ -455,6 +463,7 @@ export function UsageView({ onCollapse }: { onCollapse?: () => void }) {
             <UsageProviderCard
               key={p.id}
               provider={p}
+              refreshing={refreshingProviders.has(p.id)}
               now={now}
               kimiEnv={kimiEnv}
               openCredits={openCreditsRef.current}

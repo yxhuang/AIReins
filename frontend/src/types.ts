@@ -12,6 +12,7 @@ export interface StorageCategory {
 
 export interface StorageStats {
   totalBytes: number;
+  automatic?: { budgetBytes: number; targetBytes: number };
   categories: Record<"transcripts" | "uploads" | "logs" | "other", StorageCategory>;
   cleanable: {
     /** 默认清理的日志副本和孤儿文件，不含可选的已结束会话。 */
@@ -88,6 +89,7 @@ export interface DriverConfigSchema {
 }
 
 export interface UnifiedEvent {
+  nativePayloadUnavailable?: true;
   /** user_message 携带服务端计算的会话标题。 */
   title?: string;
   /** 临时工具参数更新：seq 为当前值，不持久化、不推进游标。 */
@@ -388,6 +390,23 @@ export type HistoryMessage =
       status: "ok" | "error" | "unknown";
     } };
 
+export interface AntigravityRuntimeState {
+  agent: "antigravity";
+  sessionId: string;
+  nativeSessionId: string;
+  configuredModel: string | null;
+  activeModel: string | null;
+  activePhase: "planning" | "executing" | null;
+  plannerModel: string | null;
+  executorModel: string | null;
+  updatedAt: string | null;
+}
+
+export interface DispatchOverview {
+  dispatches: import("./dispatch-flow").DispatchRun[];
+  runtimeStates?: AntigravityRuntimeState[];
+}
+
 export type DispatchDetail = import("./dispatch-flow").DispatchRun & {
   cwd: string | null;
   prompt: string | null;
@@ -511,6 +530,7 @@ export interface UsageSettingsView {
   instance_id?: string;
   revision?: number;
   providers: Record<UsageProviderId, { enabled: boolean }>;
+  antigravity?: { includeCredits: boolean };
   kimi: {
     keyConfigured: boolean;
     keySource: "config" | "env" | "file" | "none";
@@ -525,6 +545,7 @@ export interface UsageSettingsView {
 
 export interface UsageSettingsPatch {
   providers?: Partial<Record<UsageProviderId, { enabled: boolean }>>;
+  antigravity?: { includeCredits: boolean };
   kimi?: {
     apiKey?: string | null;
     apiKeyFile?: string | null;

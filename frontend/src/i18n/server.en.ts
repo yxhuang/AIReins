@@ -1,4 +1,5 @@
 const messages: Record<string, string> = {
+  "server.nativePayloadUnavailableForPin": "Native history is temporarily unavailable. Restore it before pinning this session.",
   "server.projectOrder.moveTarget": "Provide exactly one of before or after",
   "server.projectOrder.path": "Working directory must be an absolute path of at most 4096 characters",
   "server.projectOrder.unknown": "Working directory is not in the order list",

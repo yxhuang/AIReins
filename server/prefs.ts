@@ -5,8 +5,10 @@ import { homedir } from "node:os";
 export interface WorkbenchPrefs {
   /** 空闲自动释放 worker 的分钟数；0 = 关闭 */
   idleReleaseMinutes: number;
-  /** 会话保留天数：最后活动早于此的会话在启动时清掉（对标 Claude 的 cleanupPeriodDays）；0 = 不清 */
+  /** 未关联原生存档的会话保留天数；0 = 不按时间清理。 */
   retentionDays: number;
+  /** 工作台存储自动整理阈值，默认 1 GiB。 */
+  storageBudgetBytes?: number;
   /** 本机配置：绝对路径；无参数排定 60 秒后关机，abort 取消。 */
   shutdownCommand?: string;
   /** Tibo 额度重置公开监控；省略等同关闭。 */
@@ -24,6 +26,8 @@ export interface WorkbenchPrefs {
 const MAX_IDLE_RELEASE_MINUTES = 1_440;
 const MAX_RETENTION_DAYS = 3_650;
 export const DEFAULT_PREFS: WorkbenchPrefs = { idleReleaseMinutes: 30, retentionDays: 30 };
+export const DEFAULT_STORAGE_BUDGET_BYTES = 1024 ** 3;
+export const storageCleanupTarget = (budgetBytes: number): number => Math.max(1, Math.floor(budgetBytes * (800 / 1024)));
 
 export function prefsPath(): string {
   return join(process.env.WORKBENCH_HOME || join(homedir(), ".workbench"), "prefs.json");
@@ -52,9 +56,11 @@ export function loadPrefs(): WorkbenchPrefs {
     const record = parsed as Record<string, unknown> | null;
     const idle = record?.idleReleaseMinutes;
     const retention = record?.retentionDays;
+    const budget = record?.storageBudgetBytes;
     return {
       idleReleaseMinutes: isValidIdleReleaseMinutes(idle) ? idle : DEFAULT_PREFS.idleReleaseMinutes,
       retentionDays: isValidRetentionDays(retention) ? retention : DEFAULT_PREFS.retentionDays,
+      ...(typeof budget === "number" && Number.isSafeInteger(budget) && budget > 0 ? { storageBudgetBytes: budget } : {}),
       ...(typeof record?.codexResetWatch === "boolean" ? { codexResetWatch: record.codexResetWatch } : {}),
       ...(validPath(record?.shutdownCommand) ? { shutdownCommand: record!.shutdownCommand as string } : {}),
       ...(record?.claudeCodeEntrypoint === "claude-vscode" ? { claudeCodeEntrypoint: "claude-vscode" as const } : {}),

@@ -1,7 +1,7 @@
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/assets/banner-zh-dark.png">
-    <img src="docs/assets/banner-zh-light.png" alt="AIReins：AI 跑得再快，缰绳在你手里。Claude Code、Antigravity、Codex、Kimi Code 三条线经 AR 汇到手机上的审批按钮" width="100%">
+    <img src="docs/assets/banner-zh-light.png" alt="AIReins：AI 跑得再快，缰绳在你手里。本地 AI 工作台汇聚到手机上的批准按钮" width="100%">
   </picture>
 </p>
 
@@ -37,17 +37,17 @@
 
 AIReins 是一个跑在你自己电脑上的 AI 工作台。它通过官方 CLI 驱动 Claude Code、Antigravity、Codex 和 Kimi Code，沿用你已有的登录；你在电脑或手机的浏览器里开会话、审批、看文件、开终端，经 [Tailscale](https://tailscale.com) 在任何地方连回这台电脑。
 
-官方的远程方案一般只给你一个会话的窗口。AIReins 给你的是整台电脑：任意目录（包括 `/mnt/c` 下的 Windows 盘符，不限于 git 仓库）、文件预览与编辑、终端、Taildrop 发送，以及三家 CLI 的原生历史。
+官方的远程方案一般只给你一个会话的窗口。AIReins 给你的是整台电脑：任意目录（包括 `/mnt/c` 下的 Windows 盘符，不限于 git 仓库）、文件预览与编辑、终端、Taildrop 发送，以及 Claude Code、Codex 与 Kimi Code 的原生历史（Antigravity 则保存工作台对话并通过官方 ACP 续接）。
 
 ## 特点
 
 - **不换掉你的 harness。** AIReins 本身不是 agent 框架，它驱动的就是你装好的 Claude Code、Antigravity、Codex、Kimi Code 官方 CLI。你的 `CLAUDE.md`、`AGENTS.md`、`GEMINI.md`、skills、hooks、MCP、插件和各家配置照常加载，不用迁移；AIReins 不会自己改写它们，只有你在界面里主动切换 Claude Remote Control 默认值或 Claude 插件开关时，才经官方 CLI 保存到对应配置。模型、推理档位和权限模式可以按会话另选，只对这个会话生效。
-- **一个工作台管四家会话。** 不用在几个 CLI 窗口之间来回切：四家会话并排在侧栏，审批、回答提问、打断都在同一处。
-- **Google Antigravity。** 默认新建 Antigravity，会话入口位于 Claude 后、Codex 前，使用 Gemini 星形和蓝紫配色；模型与推理档位从当前账号动态读取。先在终端安装并登录 `agy`。AIReins 保存自己创建的对话并通过官方 ACP 续接；外部 Antigravity 历史导入和原生会话彻底删除暂未开放。
-- **历史统一看，进出都自由。** 三家的原生历史在一处搜索、按目录筛选、续接。会话本来就写在各家自己的历史里，随时可以回到 CLI、VS Code 扩展、Codex App 接着用，Claude 会话开了 Remote Control 还能在 Claude App 里连上。（Claude 会话要出现在 CLI 和 VS Code 的历史列表里，需在 `prefs.json` 设 `claudeCodeEntrypoint`，见[配置](#配置)；不设也能用 `claude --resume <会话 ID>` 续接。）
-- **文件和终端就在旁边。** 右侧栏是文件窗口（浏览任意目录、预览、就地编辑、看 Git 状态）和多标签终端：Linux 与 macOS 打开你的默认 shell（`$SHELL`），WSL 下是 bash，还能开 Windows PowerShell。
-- **派单拓扑实时看。** 让一家 AI 当指挥、把活派给其他家时，派单流程图实时显示谁派给了谁、跑到哪一步、成没成；子代理同样按父子树展开。
-- **直达与内置 AI 用量。** 「直达」菜单放你自己的常用链接（网页、`vscode://`、`obsidian://` 等，改一个 JSON 文件即可）；侧栏内置 AI 用量面板，无需另装 Python 服务即可一页看清四家（Claude、Antigravity、Codex、Kimi）订阅额度；有固定时间窗口的额度条上还标着这个窗口的时间已过去多少，用得比时间快还是慢一眼就知道。设置里还能打开 Tibo 额度重置提醒（默认关闭）：每 10 分钟查询 [AIHOT](https://aihot.news/codex-reset) 收录的 Tibo 关于 Codex 额度重置的公告，所有打开的页面同步提醒，额度页底部列出详情。
+- **一个工作台管四家会话。** 不用在几个 CLI 窗口之间来回切：四家会话并排在侧栏，审批、回答提问、打断都在同一处。打开新建会话时默认选中 Antigravity。
+- **Google Antigravity。** Antigravity 的会话入口位于 Claude 后、Codex 前，使用 Gemini 星形和蓝紫配色；模型与推理档位从当前账号动态读取（切模型时同步更新档位选项）。先在终端安装并登录 `agy`。AIReins 保存自己创建的对话、支持并行请求和后台工具/子代理保活，并通过官方 ACP 续接（`agy --conversation <会话 ID>`）；外部 Antigravity 历史导入和原生会话彻底删除暂未开放。
+- **历史统一看，进出都自由。** Claude Code、Codex 与 Kimi Code 的原生历史在一处搜索、按目录筛选、续接。这些会话本来就写在各家自己的历史里，随时可以回到 CLI、VS Code 扩展、Codex App 接着用，Claude 会话开了 Remote Control 还能在 Claude App 里连上。（Claude 会话要出现在 CLI 和 VS Code 的历史列表里，需在 `prefs.json` 设 `claudeCodeEntrypoint`，见[配置](#配置)；不设也能用 `claude --resume <会话 ID>` 续接。）AIReins 创建的 Antigravity 会话也可用 `agy --conversation <会话 ID>` 在终端续接。
+- **文件和终端就在旁边。** 右侧栏是文件窗口（浏览任意目录、预览、就地编辑、看 Git 状态）和多标签终端：Linux 与 macOS 打开你的默认 shell（`$SHELL`），WSL 下是 bash，还能开 Windows PowerShell；远程终端可在「设置 → 主机」直接开关。
+- **派单拓扑实时看。** 让一家 AI 当指挥、把活派给其他家时，派单流程图实时显示谁派给了谁、跑到哪一步、成没成；各家原生子代理、Antigravity Orchestrator 内环阶段（实时显示规划/执行模型）和按模型家族着色的 Swarm 子代理同样展开在树里。
+- **内置 AI 用量、重置公告与直达。** 侧栏内置 AI 用量面板，无需另装 Python 服务即可一页看清四家（Claude、Antigravity、Codex、Kimi）订阅额度，支持单家刷新与并行「刷新全部」、可选 Antigravity AI credits 查询（默认关闭）；有固定时间窗口的额度条上还标着这个窗口的时间已过去多少，用得比时间快还是慢一眼就知道。在「设置 → 会话」打开额度重置公告（默认关闭）后，每 10 分钟查询 [AIHOT](https://aihot.news/codex-reset) 的 Codex、Antigravity、Claude、Grok Bot 公开公告，在额度页底部以可展开折叠条显示并跨端同步已读状态。「直达」菜单放你自己的常用链接（网页、`vscode://`、`obsidian://` 等，改一个 JSON 文件即可）。
 - **手机上也是整台电脑。** 经 Tailscale 连回，审批、看文件、开终端都能在手机上做。
 
 ## 看一眼
@@ -73,14 +73,14 @@ AI 越来越能干，能自己读代码、改文件、跑命令，一口气做�
 所以 AIReins 的设计都围着一件事：**AI 尽管往前跑，缰绳始终在你手里。**
 
 - **随时随地拍板。** 工具调用在手机上批准或拒绝，AI 的提问在手机上回答；所有会话里待你处理的事集中在一处，不用一个个翻。
-- **中途可以拉回来。** 一键打断；Claude Code 和 Codex 还能在运行中插话改方向、旁路追问（Kimi 运行中发的消息排到当前回合结束后），不必等它跑完再返工。
-- **看得见它在做什么。** 上下文用量、每一步工具调用都摆在眼前，派出去的子代理和委派任务按父子树展开。
+- **中途可以拉回来。** 一键打断；Claude Code 和 Codex 还能在运行中插话改方向、旁路追问，Antigravity 直接发送并行原生请求，Kimi 运行中的消息排到当前回合结束后，不必等它跑完再返工。
+- **看得见它在做什么。** 上下文用量、每回合实时耗时和每一步工具调用都摆在眼前，派出去的子代理和委派任务按父子树展开。
 - **四家 AI 一起用。** 让一家当指挥、把活派给另一家（需要外部委派工具，见[可选集成](#可选集成)），你在手机上看整棵派单树；哪家适合哪件事，由你决定，不被一家绑住。
-- **东西都在你自己手里。** 不经 AI 厂商中转，没有账号，没有遥测；会话就是三家 CLI 原生的历史，在命令行和 VS Code 里照样能续接。
+- **东西都在你自己手里。** 不经 AI 厂商中转，没有账号，没有遥测；Claude、Codex、Kimi 会话就是各家 CLI 原生历史，在命令行和 VS Code 里照样能续接，Antigravity 会话通过官方 ACP 续接。
 
 ## 说在前面
 
-- **这是一个人为自己做的工具。** 我每天在 Windows + WSL2 上用它，项目里很大一部分代码也是在它里面、和这三家 AI 一起写出来的。它不是精心打磨的通用产品，一定还有粗糙的地方。发现问题欢迎提 Issue，我不一定能很快回复，先说声抱歉。
+- **这是一个人为自己做的工具。** 我每天在 Windows + WSL2 上用它，项目里很大一部分代码也是在它里面、和这些 AI 一起写出来的。它不是精心打磨的通用产品，一定还有粗糙的地方。发现问题欢迎提 Issue，我不一定能很快回复，先说声抱歉。
 - **平台。** Windows + WSL2 是主力平台；原生 Linux 支持，Ubuntu CI 必过；macOS 是实验性支持，我没有 Mac，只靠 CI，欢迎 macOS 用户反馈。
 - **它给的是整台电脑的权限。** 能连上 AIReins 的人，就有你这个账户在这台电脑上的全部能力。所以它只听本机回环地址，远程只走 Tailscale，并且只放行你允许的登录。请先读[安全](#安全)。
 - **它不是 agent 农场。** 想在并行 worktree 里同时跑一队 agent，[Orca](https://github.com/stablyai/orca) 更合适；想在手机上用整台电脑、自己把方向，用 AIReins。AIReins 不建也不管理 worktree，但在 worktree 里开的会话会归到主仓库名下，并标出分支名。
@@ -103,15 +103,17 @@ AI 越来越能干，能自己读代码、改文件、跑命令，一口气做�
   <img src="docs/assets/how-zh-light.png" alt="六步：打开、私网、本机、官方 CLI、整台电脑、你来拍板" width="100%">
 </picture>
 
-本机浏览器直连 `127.0.0.1`；其他设备先加入你的 tailnet，再经 Tailscale Serve 转发到 AIReins 的远程入口，由它做 Host/Origin 检查并只放行白名单里的 Tailscale 登录。AIReins 是一个只监听回环地址的 Node 进程，用各家官方协议驱动三家 CLI：Claude Code 的 stream-json、Codex 的 `codex app-server`、Kimi Code 的 ACP。会话写进各家 CLI 自己的历史，AIReins 只是另一个入口。协议细节见 [spikes/PROTOCOL-NOTES.md](spikes/PROTOCOL-NOTES.md)。
+本机浏览器直连 `127.0.0.1`；其他设备先加入你的 tailnet，再经 Tailscale Serve 转发到 AIReins 的远程入口，由它做 Host/Origin 检查并只放行白名单里的 Tailscale 登录。AIReins 是一个只监听回环地址的 Node 进程，用各家官方协议驱动四家 CLI：Claude Code 的 `stream-json`、Antigravity 的 `agy acp`、Codex 的 `codex app-server`、Kimi Code 的 ACP。会话写进各家 CLI 自己的历史，AIReins 只是另一个入口。协议细节见 [spikes/PROTOCOL-NOTES.md](spikes/PROTOCOL-NOTES.md)。
 
-## 最新版本：0.5.0
+## 最新版本：0.6.0
 
-[发布说明](https://github.com/yxhuang/AIReins/releases/tag/v0.5.0) · [更新日志](CHANGELOG.md)
+[发布说明](https://github.com/yxhuang/AIReins/releases/tag/v0.6.0) · [更新日志](CHANGELOG.md)
 
-- 文件预览可逐张翻看同一目录的图片：左右按钮、「第几张 / 共几张」和滚轮切换，按文件名自然排序。
-- 会话里的文件夹链接在右侧文件面板打开该文件夹；网页无法预览的文件（Office、二进制、超过 32 MiB）在本机直接用默认程序打开（WSL 和 macOS），只放行文档、媒体和压缩包，可执行文件、安装包、快捷方式、脚本和带宏的 Office 文件不会因点击而运行。
-- 手动调整过顺序的会话，在空闲释放或 AIReins 重启后保持原位。
+- **接入 Google Antigravity（`agy acp`）**：动态读取账号模型与推理档位，支持并行请求与后台工具/子代理保活唤醒，并在派单树中展示 Orchestrator 内环阶段与 Swarm 子代理节点。
+- **内置四家 AI 用量面板**：在 Node 与 React 中原生展示 Claude、Antigravity、Codex、Kimi 订阅额度、时间进度刻度，支持单家刷新与并行「刷新全部」、可选 Antigravity AI credits 查询，不再依赖外部 Python/`uv` `ai-usage` 服务。
+- **四家额度重置公告**：AIHOT 公告支持扩展至 Codex、Antigravity、Claude 与 Grok Bot，在额度页底部以可展开折叠条展示并跨端同步已读状态。
+- **设置、输入历史与回合耗时**：在「设置 → 主机」直接切换远程终端并立即生效；新建页与会话输入框支持 `↑`/`↓` 调出最近 100 条已发送输入；每回合末行展示实时与完成用时。
+- **更稳妥的关机与更快的重启前检查**：关机前先释放空闲 worker 并刷盘，运行中的跨进程派单与子代理阻止过早释放与关机，大历史下打开设置检查会话不再扫描全部文件导致超时。
 
 更新后端后需择时运行 `aireins restart`，这会停止所有正在运行的会话；随后刷新已打开的页面。
 
@@ -119,13 +121,13 @@ AI 越来越能干，能自己读代码、改文件、跑命令，一口气做�
 
 | | |
 |---|---|
-| **四家会话** | Claude Code、Antigravity、Codex、Kimi Code 并排开、随时切换；每个会话单独设模型、推理档位和权限模式；斜杠命令、skills、`@` 文件提及带补全；标题自动生成，可置顶、按目录分组、重命名及调整会话顺序 |
+| **四家会话** | Claude Code、Antigravity、Codex、Kimi Code 并排开、随时切换；每个会话单独设模型、推理档位和权限模式；斜杠命令、skills、`@` 文件提及带补全；`↑`/`↓` 共用输入历史；每回合实时/完成耗时；标题自动生成，可置顶、按目录分组、重命名及调整会话顺序 |
 | **审批与提问** | 在任何设备上批准或拒绝工具调用、回答 AI 的提问；所有会话里待处理的事集中呈现 |
-| **中途掌控** | 上下文用量圆环，可请求原生压缩；打断；Claude Code 与 Codex 支持运行中插话改方向和旁路追问，Kimi 运行中的消息排到当前回合结束后发送 |
-| **原生历史** | 搜索、按目录筛选三家 CLI 的原生历史并续接；在 AIReins 开的会话，在 CLI 和 VS Code 扩展里也能续接（Claude 会话要出现在历史列表里需设 `claudeCodeEntrypoint`），反过来也一样（Codex 同一线程同一时间只能有一个客户端写入，转到别处续接前先在 AIReins 里释放） |
-| **派单树** | 子代理与委派任务按父子树展开，派单流程图实时显示状态，桌面和手机都能看 |
-| **AI 用量与直达** | 内置 Claude、Antigravity、Codex、Kimi 四家订阅额度面板，带时间进度刻度与重置卡明细；「直达」菜单合并仓库 `pages/links.json` 与本机 `~/.workbench/pages/links.json`，并支持自定义扩展页 |
-| **整台电脑** | 文件面板浏览任意可读目录，带 Git 状态与标签页；在家目录、Windows 盘符和会话目录里预览 Markdown、代码、图片、PDF，就地编辑 UTF-8 文本文件（超过 4 MiB 先确认再加载，上限 32 MiB）；文件与终端标签可排序、在主区和侧栏之间移动；多标签终端（远程入口默认关闭，需显式开启） |
+| **中途掌控** | 上下文用量圆环，可请求原生压缩；打断；Claude Code 与 Codex 支持运行中插话改方向和旁路追问，Antigravity 直接发送并行原生请求，Kimi 运行中的消息排到当前回合结束后发送 |
+| **原生历史** | 搜索、按目录筛选 Claude Code、Codex 与 Kimi Code 的原生历史并续接；在 AIReins 开的会话，在 CLI 和 VS Code 扩展里也能续接（Claude 会话要出现在历史列表里需设 `claudeCodeEntrypoint`；Antigravity 工作台会话可用 `agy --conversation <ID>` 原生续接），反过来也一样（Codex 同一线程同一时间只能有一个客户端写入，转到别处续接前先在 AIReins 里释放） |
+| **派单树** | 子代理、委派任务、Antigravity Orchestrator 内环与 Swarm 子代理按父子树展开，派单流程图实时显示状态，桌面和手机都能看 |
+| **AI 用量与直达** | 内置 Claude、Antigravity、Codex、Kimi 四家订阅额度面板，支持单家/并行刷新、时间进度刻度、可选 Antigravity AI credits 与四家 AIHOT 重置公告折叠条；「直达」菜单合并仓库 `pages/links.json` 与本机 `~/.workbench/pages/links.json`，并支持自定义扩展页 |
+| **整台电脑** | 文件面板浏览任意可读目录，带 Git 状态与标签页；在家目录、Windows 盘符和会话目录里预览 Markdown、代码、图片、PDF，就地编辑 UTF-8 文本文件（超过 4 MiB 先确认再加载，上限 32 MiB）；文件与终端标签可排序、在主区和侧栏之间移动；多标签终端（远程入口默认关闭，可在「设置 → 主机」切换） |
 | **手机与发送** | 手机布局可加到主屏当 App；Taildrop 把文件或文件夹（打包 zip）发到你在线的设备 |
 | **多台电脑** | 列出 tailnet 里的其他电脑，一键添加，在一个菜单里切换到它们的 AIReins |
 | **Windows 体验** | 托盘图标和开始菜单快捷方式，以独立应用窗口打开 |
@@ -136,13 +138,13 @@ AI 越来越能干，能自己读代码、改文件、跑命令，一口气做�
 | | AIReins | Orca | Claude Code Remote Control | Codex Remote |
 |---|---|---|---|---|
 | 远程控制的对象 | 整台电脑：会话、任意目录、文件、终端 | 工作区/worktree、代理会话、终端、git | Claude Code 会话（每个交互进程一个，server 模式可多个） | 已连接 Mac/Windows 主机上的项目与聊天；桌面应用也可接入 SSH 项目 |
-| 代理 | Claude Code、Codex、Kimi | 多种 CLI；支持的代理另有聊天界面 | Claude Code | Codex 和 ChatGPT |
+| 代理 | Claude Code、Antigravity、Codex、Kimi | 多种 CLI；支持的代理另有聊天界面 | Claude Code | Codex 和 ChatGPT |
 | 网络路径 | 仅你的 tailnet，无 AIReins 或 AI 厂商中转（Tailscale 直连不通时可能经其加密的 DERP 中继） | 默认走 Orca 中继（账号）；可选局域网或 Tailscale | Anthropic 中继 | OpenAI 中继 |
 | 手机客户端 | Web 应用 | iOS / Android 应用（beta） | Claude 应用或 claude.ai | ChatGPT 应用 |
 | 运行形态 | 一个 Node 进程 + 浏览器 | 桌面应用（必须保持打开） | 本机 `claude` 进程（必须保持运行） | 主机上的 ChatGPT 桌面应用（必须保持打开） |
 | 适合 | 一个人从任何地方用自己的一台电脑 | 在并行 worktree 中跑多个代理 | 在 Claude 应用里接着用 Claude Code 会话 | 在 ChatGPT 应用中的 Codex 用户 |
 
-对比于 2026-11-05 按官方 [Orca 手机指南](https://www.onorca.dev/docs/mobile)、[Claude Remote Control 指南](https://code.claude.com/docs/en/remote-control)及 [ChatGPT 远程连接指南](https://learn.chatgpt.com/docs/remote-connections)核对；具体可用性可能受服务商灰度开放和订阅方案影响。
+对比于 2026-11-22 按官方 [Orca 手机指南](https://www.onorca.dev/docs/mobile)、[Claude Remote Control 指南](https://code.claude.com/docs/en/remote-control)及 [ChatGPT 远程连接指南](https://learn.chatgpt.com/docs/remote-connections)核对；具体可用性可能受服务商灰度开放和订阅方案影响。
 
 <!-- 每次发布前重新核对以上对比来源。 -->
 
@@ -164,7 +166,7 @@ AI 越来越能干，能自己读代码、改文件、跑命令，一口气做�
 | Node.js ≥ 22.12（含 npm） | 在 WSL 里装 | 自己装 | 有 Homebrew 时安装器可代装 |
 | `rg`（ripgrep） | `sudo apt-get install -y ripgrep` | 同左 | 有 Homebrew 时安装器可代装 |
 | 端口检测 | `ss`（iproute2） | `ss`（iproute2） | 系统自带 `lsof` |
-| 至少一家 AI CLI | Claude Code、Codex 或 Kimi Code，已安装并登录 | 同左 | 同左 |
+| 至少一家 AI CLI | Claude Code、Antigravity（`agy`）、Codex 或 Kimi Code，已安装并登录 | 同左 | 同左 |
 | 远程访问（可选） | Windows 上的 Tailscale，已登录 | 本机 Tailscale，已登录 | 本机 Tailscale，已登录 |
 | 其他 | Windows 上的 Google Chrome（应用窗口用）；建议装 PowerShell 7（`winget install --id Microsoft.PowerShell --source winget`），选目录时弹出新式、清晰的 Windows 窗口，只有系统自带的 5.1 时是旧式树形窗口 | | |
 
@@ -212,7 +214,7 @@ AIReins 监听 `http://127.0.0.1:8790`（可用 `WORKBENCH_PORT` 修改）。Win
 
 ### 内置 AI 用量面板
 
-侧栏底部的「额度」按钮直接打开 AIReins 内置的订阅用量面板，覆盖 Claude、Antigravity、Codex 和 Kimi 四家，不再需要单独安装 Python/`uv` 的 `ai-usage` 服务。Claude 和 Codex 直接复用本机已登录的官方 CLI（以及活跃 Codex 会话的实时限额推送）；Antigravity 在打开面板或手动点刷新时通过官方 `agy` 命令按需读取额度桶与 AI credits；Kimi 可在面板左上角齿轮设置里粘贴 API key（以 `0600` 权限保存在本机 `~/.workbench/usage.json`，或直接读取环境变量 `KIMI_API_KEY`）。旧参数 `bash install.sh --with-ai-usage` 现输出迁移提示，保留已有检出目录与 manifest 不动。
+侧栏底部的「额度」按钮直接打开 AIReins 内置的订阅用量面板，覆盖 Claude、Antigravity、Codex 和 Kimi 四家，不再需要单独安装 Python/`uv` 的 `ai-usage` 服务。Claude 和 Codex 直接复用本机已登录的官方 CLI（以及活跃 Codex 会话的实时限额推送）；Antigravity 在打开面板或手动点刷新时通过官方 `agy` 命令按需读取额度桶（可选 AI credits 查询默认关闭）；Kimi 可在面板左上角齿轮设置里粘贴 API key（以 `0600` 权限保存在本机 `~/.workbench/usage.json`，或直接读取环境变量 `KIMI_API_KEY`）。每张卡片支持单独刷新，也可点「刷新全部」并行更新；面板底部可选展示来自 AIHOT 的四家额度重置公告折叠条。旧参数 `bash install.sh --with-ai-usage` 现输出迁移提示，保留已有检出目录与 manifest 不动。
 
 ## 手机远程
 
@@ -224,14 +226,14 @@ AIReins 监听 `http://127.0.0.1:8790`（可用 `WORKBENCH_PORT` 修改）。Win
 几点说明：
 
 - 只有 `remote.json` 里 `allowedLogins` 列出的 Tailscale 登录能进来。远程入口的 Host/Origin 和身份检查，三个平台完全一样。
-- 远程终端默认关闭；需要时在 `remote.json` 里设 `"terminal": true`，再 `aireins restart`。
+- 远程终端默认关闭；可在「设置 → 主机 → 远程终端」直接切换并立即生效（本机或白名单远程端均可操作），或在 `remote.json` 里设 `"terminal": true` 后 `aireins restart`。
 - 安装时 AIReins 已经在运行的话，要 `aireins restart` 一次，新的远程配置才生效。
 - 浏览器走系统代理的话，把 `*.ts.net` 加进绕过列表。
 - 细节与故障排查见 [deploy/windows/REMOTE.md](deploy/windows/REMOTE.md) 和 [docs/host-connections.md](docs/host-connections.md)。
 
 ## 配置
 
-AIReins 把数据保存在 `~/.workbench`。`WORKBENCH_HOME` 可以移动服务器数据目录和原生 POSIX 远程安装器的配置目录；WSL 安装、`aireins` 日志和快照保留原有路径。它不会自己改变三家 CLI 的设置；只有你在 AIReins 里主动切换 Claude Remote Control 默认值或 Claude 插件开关时，才会保存到对应的原生配置（插件经官方 `claude plugin enable/disable`）。
+AIReins 把数据保存在 `~/.workbench`。`WORKBENCH_HOME` 可以移动服务器数据目录和原生 POSIX 远程安装器的配置目录；WSL 安装、`aireins` 日志和快照保留原有路径。它不会自己改变四家 CLI 的设置；只有你在 AIReins 里主动切换 Claude Remote Control 默认值或 Claude 插件开关时，才会保存到对应的原生配置（插件经官方 `claude plugin enable/disable`）。
 
 环境变量：
 

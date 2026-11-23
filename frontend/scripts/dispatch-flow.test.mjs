@@ -14,6 +14,7 @@ globalThis.window = { location: { hash: '#/', href: 'http://127.0.0.1:8790/' }, 
 const { Store, store } = await import('../src/store.ts');
 const { App } = await import('../src/App.tsx');
 const { DispatchView, DispatchTree } = await import('../src/components/DispatchView.tsx');
+const { DispatchHistoryRow } = await import('../src/components/DispatchHistory.tsx');
 const { lastWindowsCwd, loadWindowsHistory } = await import('../src/components/DirectoryBrowser.tsx');
 let pass = 0;
 const t = async (name, fn) => { try { await fn(); pass++; } catch (e) { console.error(`❌ ${name}\n${e.stack}`); process.exitCode = 1; } };
@@ -24,6 +25,86 @@ const run = (over = {}) => ({ runId: '20261001-100000-codex-task-name', tool: 'c
 const child = (threadId, parentThreadId, depth = 1) => ({ threadId, parentThreadId, depth,
   nickname: threadId, role: 'sol', status: 'running', startedAt: iso(now - 1000), lastActivityAt: iso(now) });
 const treeFor = (runs, expanded = new Set()) => flow.buildDispatchTree(groupDispatches(runs, now), now, expanded);
+await t('Antigravity 内环在侧支显示真实模型与计划标题，执行层保留 Codex 和 Kimi', () => {
+  const inner = run({ tool: 'antigravity', native: true, agentType: 'inner-loop', effort: null,
+    name: '核对结果', model: 'gemini-flash-worker-agy', parent: { agent: 'antigravity', sessionId: 'native', entrypoint: null } });
+  assert.deepEqual(groupDispatches([], now).map(group => group.tool), ['codex', 'kimi', 'copilot']);
+  const tree = treeFor([inner]);
+  assert.equal(tree.sidebranches[0].tool, 'antigravity');
+  assert.equal(tree.executors.some(node => node.tool === 'antigravity'), false);
+  const html = renderToStaticMarkup(React.createElement(DispatchTree, { groups: groupDispatches([inner], now), title: '父会话', model: null, agent: 'antigravity', now }));
+  assert.match(html, /aria-label="Antigravity 内环执行"/);
+  assert.match(html, /class="dispatch-node dispatch-sidebranch"[^>]*data-status="running"/);
+  assert.match(html, /title="gemini-flash-worker-agy">Hydrogen<\/span>/);
+  assert.match(html, /dispatch-activity">核对结果/);
+  assert.equal((html.match(/class="dispatch-node dispatch-executor idle"/g) || []).length, 2);
+  const pending = renderToStaticMarkup(React.createElement(DispatchTree, { groups: groupDispatches([{ ...inner, model: null }], now), title: '父会话', model: null, agent: 'antigravity', now }));
+  assert.match(pending, /title="等待执行模型的首步回报">执行模型/);
+});
+
+await t('Antigravity Swarm 节点显示 Opus 5.5、模型档位与实时连线', () => {
+  const model = 'claude-opus-5-5-high';
+  const swarm = run({ tool: 'antigravity', native: true, agentType: 'swarm', model, effort: null,
+    name: 'reviewer', parent: { agent: 'antigravity', sessionId: 'native', entrypoint: null } });
+  const tree = treeFor([swarm]);
+  assert.equal(tree.sidebranches[0].run, swarm);
+  assert.equal(tree.edges.find(edge => edge.to === tree.sidebranches[0].id).state, 'flow');
+  const render = node => renderToStaticMarkup(React.createElement(DispatchTree, { groups: groupDispatches([node], now),
+    title: '父会话', model: 'Neon', agent: 'antigravity', now }));
+  assert.match(render(swarm), /title="claude-opus-5-5-high">Opus 5\.5 · High<\/span>/);
+  assert.match(render(swarm), /aria-label="Antigravity 内部派单"/);
+  assert.match(render({ ...swarm, status: 'stopped', endedAt: iso(now - 1000) }), /已停止/);
+});
+
+await t('Antigravity 内部派单的卡片与连线共用执行模型的颜色', () => {
+  const models = [['claude-opus-5-5-high', 'opus'], ['gemini-flash-worker-agy', 'hydrogen'],
+    ['gemini-4-hydrogen-xhigh', 'hydrogen'], ['claude-sonnet-5-5-medium', 'sonnet'],
+    ['gemini-4-neon-high', 'neon'], ['gemini-4-argon-low', 'argon'], ['gemini-4-carbon-high', 'carbon'],
+    ['gemini-3.8-flash-high', 'flash'], ['gemini-pro-orchestrator-g1-pro', 'g1-pro']];
+  const runs = models.map(([model], index) => run({ runId: `native-${index}`, tool: 'antigravity', native: true,
+    agentType: index === 1 ? 'inner-loop' : 'swarm', model, effort: null,
+    parent: { agent: 'antigravity', sessionId: 'native', entrypoint: null } }));
+  runs.push(run({ runId: 'external', tool: 'claude', model: 'claude-opus-5-5-high' }),
+    { ...runs[0], runId: 'unknown', model: 'unknown-antigravity-model' });
+  const html = renderToStaticMarkup(React.createElement(DispatchTree, { groups: groupDispatches(runs, now),
+    title: '父会话', model: 'Neon', agent: 'antigravity', now }));
+  for (const [, family] of models) {
+    assert.match(html, new RegExp(`<article[^>]*data-dispatch-model="${family}"`));
+    assert.match(html, new RegExp(`<path[^>]*data-dispatch-model="${family}"`));
+  }
+  assert.equal((html.match(/data-dispatch-model="opus"/g) ?? []).length, 2);
+  assert.doesNotMatch(html, /data-dispatch-model="unknown/);
+});
+
+await t('Antigravity 根节点显示当前阶段和原始模型 ID，单模型与待回报状态也可读', () => {
+  const groups = groupDispatches([], now);
+  const model = 'gemini-pro-orchestrator-neon';
+  const worker = 'gemini-flash-worker-agy';
+  for (const [id, expected] of [[model, 'Neon'], ['orchestrator-neon', 'Neon'], ['gemini-pro-orchestrator-carbon', 'Carbon'],
+    ['orchestrator-argon', 'Argon'], [worker, 'Hydrogen'], ['orchestrator-other', 'orchestrator-other']]) {
+    assert.equal(flow.dispatchModelName(id), expected);
+  }
+  const render = (activeModel, activePhase, running) => renderToStaticMarkup(React.createElement(DispatchTree, {
+    groups, title: '父会话', model: 'Neon', agent: 'antigravity', now, running,
+    runtime: { activeModel, activePhase, updatedAt: iso(now) },
+  }));
+  assert.match(render(model, 'planning', true), /dispatch-live-model"[^>]*title="gemini-pro-orchestrator-neon[^"]*2026[^"]*"[^>]*><span>当前：Neon · 规划/);
+  assert.match(render(worker, 'executing', true), /当前：Hydrogen · 执行/);
+  assert.match(render(null, 'executing', true), /当前：执行模型/);
+  assert.match(render('gemini-3.8-flash', null, false), /最近：gemini-3.8-flash/);
+});
+
+await t('近七天历史行显示执行端图标、模型短名和结果徽标', () => {
+  for (const [tool, status, visual] of [['antigravity', 'OK', 'finished'], ['copilot', 'TOOL_FAIL', 'failed']]) {
+    const html = renderToStaticMarkup(React.createElement(DispatchHistoryRow, { run: run({ tool, status,
+      model: 'gemini-flash-worker-agy', elapsedS: 61, endedAt: iso(now) }) }));
+    assert.match(html, /<svg class="agent-icon/);
+    assert.match(html, /title="gemini-flash-worker-agy">Hydrogen/);
+    assert.ok(html.includes(`data-status="${visual}"`));
+    assert.ok(html.includes(`class="dispatch-badge ${visual}">${status}`));
+    assert.ok(html.includes('01:01'));
+  }
+});
 await t('连线：底边按行序均分起点，独立平滑曲线无侧边折线或共享总线', () => {
   const from = { left: 10, right: 150, top: 20, bottom: 110 };
   for (const count of [2, 3, 5]) {

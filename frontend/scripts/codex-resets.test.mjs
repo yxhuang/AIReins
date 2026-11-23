@@ -59,11 +59,6 @@ const waitFor = (target, condition) => evaluate(target, `new Promise((resolve, r
   const check = () => { if (${condition}) resolve(true); else if (Date.now() > deadline) reject(new Error('UI readiness timed out: '+${JSON.stringify(condition)})); else requestAnimationFrame(check); }; check();
 })`);
 const click = async (target, selector) => { await evaluate(target, `document.querySelector(${JSON.stringify(selector)}).click()`); await settle(target); };
-const key = async (target, value, modifiers = 0) => {
-  await send(target, "Input.dispatchKeyEvent", { type: "keyDown", key: value, modifiers });
-  await send(target, "Input.dispatchKeyEvent", { type: "keyUp", key: value, modifiers });
-  await settle(target);
-};
 const shot = async (target, name) => {
   await settle(target);
   const result = await send(target, "Page.captureScreenshot");
@@ -77,8 +72,16 @@ const event = { id: "reset-upcoming", type: "direct_reset", status: "announced",
   createdAt: iso(-3600_000), updatedAt: iso(-60_000), url: "https://x.com/tibo/status/new", posts: [{ id: "new", text: "我们即将为 Codex 用户重置额度，感谢大家的耐心等待。", originalText: original, url: "https://x.com/tibo/status/new", publishedAt: iso(-60_000), context }] };
 const previous = { ...event, id: "reset-previous", type: "reset_credit", status: "confirmed", title: "Codex 重置卡已发放", schedule: null, estimate: null, confirmedAt: iso(-86400_000), updatedAt: iso(-86400_000), posts: [] };
 const alert = { ...event.posts[0], kind: "event_update", action: "announce", eventIds: [event.id], events: [event] };
-const olderAlert = { id: "older", kind: "event_update", action: "confirm", text: "重置卡已经发放。", url: "https://x.com/tibo/status/older", context: [], publishedAt: iso(-86400_000), eventIds: [previous.id], events: [previous] };
-const initial = { enabled: true, lastSuccessAt: iso(0), stale: false, monitor: { status: "healthy" }, pending: [event], recent: [event, previous], alerts: [alert, olderAlert] };
+const inactive = { enabled: true, lastSuccessAt: iso(0), stale: false, monitor: { status: "healthy" }, pending: [], recent: [], alerts: [] };
+const agEvent = { ...previous, id: "ag-event", confirmedAt: iso(-60_000), title: "Antigravity 额度重置已完成", url: "https://x.com/_mohansolo/status/1" };
+const agAlert = { ...alert, id: "ag-alert", action: "confirm", publishedAt: iso(-30_000), url: agEvent.url, events: [agEvent] };
+const initial = { ...inactive, sources: [
+  { provider: "antigravity", status: inactive },
+  { provider: "claude", status: inactive },
+  { provider: "grok-bot", status: inactive },
+] };
+const active = { ...initial, sources: initial.sources.map(source => source.provider === "antigravity"
+  ? { ...source, status: { ...inactive, recent: [agEvent, previous], alerts: [agAlert] } } : source) };
 const channel = `codex-resets-test-${process.pid}`;
 const fixtureScript = (locale) => `
   localStorage.setItem('workbench-language', ${JSON.stringify(locale)});
@@ -113,8 +116,11 @@ const fixtureScript = (locale) => `
       } else {
         window.__writes.push({path,method:init.method,body:init.body});
         if (path!=='/api/codex-resets/ack' || init.method!=='POST') throw new Error('Unexpected API write '+path);
-        const id = JSON.parse(init.body).id;
-        window.__publishStatus({...window.__resetStatus,alerts:window.__resetStatus.alerts.filter(item=>item.id!==id)});
+        const {id,provider} = JSON.parse(init.body);
+        const status = window.__resetStatus;
+        const clear = data => ({...data,alerts:data.alerts.filter(item=>item.id!==id)});
+        window.__publishStatus(!provider || provider==='codex' ? clear(status) : {...status,
+          sources:status.sources.map(source=>source.provider===provider?{...source,status:clear(source.status)}:source)});
       }
     }
     if (path==='/api/codex-resets') data=window.__resetStatus;
@@ -132,157 +138,96 @@ const createPage = async (locale = "zh-CN") => {
   await send(session, "Page.enable"); await send(session, "Runtime.enable");
   await send(session, "Emulation.setDeviceMetricsOverride", { width: 1280, height: 820, deviceScaleFactor: 1, mobile: false });
   await send(session, "Page.addScriptToEvaluateOnNewDocument", { source: fixtureScript(locale) });
-  await send(session, "Page.navigate", { url: base });
-  await waitFor(session, "document.querySelector('.codex-reset-dialog') && document.querySelector('.codex-reset-dot')");
+  await send(session, "Page.navigate", { url: base + "/#/usage" });
+  await waitFor(session, "document.querySelector('.codex-reset-toggle')");
   return session;
 };
 const publish = async (target, status) => { await evaluate(target, `window.__publishStatus(${JSON.stringify(status)})`); await settle(target); };
 const theme = async (target, value) => { await evaluate(target, `document.documentElement.setAttribute('data-theme',${JSON.stringify(value)})`); await settle(target); };
-const viewport = async (target, width) => {
-  await send(target, "Emulation.setDeviceMetricsOverride", { width, height: width <= 720 ? 844 : 820, deviceScaleFactor: 1, mobile: width <= 720 });
-  await send(target, "Emulation.setTouchEmulationEnabled", { enabled: width <= 720 }); await settle(target);
+const viewport = async (target, width, height) => {
+  await send(target, "Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor: 1, mobile: width <= 720 });
+  await send(target, "Emulation.setTouchEmulationEnabled", { enabled: width <= 720 });
+  await settle(target);
 };
-const geometry = (target) => evaluate(target, `(() => {
-  const rect=e=>{const r=e.getBoundingClientRect();return {x:r.x,y:r.y,w:r.width,h:r.height}};
-  return {foot:rect(document.querySelector('.sidebar-foot')),buttons:[...document.querySelectorAll('.sidebar-foot > *')].map(rect)};
-})()`);
 const checkBounds = async (target, selector) => {
   const data = await evaluate(target, `(() => {const e=document.querySelector(${JSON.stringify(selector)}),r=e.getBoundingClientRect();return {x:r.x,y:r.y,right:r.right,bottom:r.bottom,w:innerWidth,h:innerHeight,scroll:e.scrollWidth,client:e.clientWidth,pageOverflow:document.documentElement.scrollWidth-innerWidth}})()`);
   assert.ok(data.x >= -1 && data.y >= -1 && data.right <= data.w + 1 && data.bottom <= data.h + 1, `${selector} fits viewport: ${JSON.stringify(data)}`);
   assert.ok(data.scroll <= data.client + 1 && data.pageOverflow <= 0, `${selector} has no horizontal overflow`);
 };
-const checkActionAlignment = async (target) => {
-  const buttons = await evaluate(target, `([...document.querySelectorAll('.codex-reset-actions .btn')].map(element => {
-    const range = document.createRange(); range.selectNodeContents(element);
-    const text = range.getBoundingClientRect(), box = element.getBoundingClientRect();
-    return { tag: element.tagName, delta: (text.top + text.bottom - box.top - box.bottom) / 2 };
-  }))`);
-  assert.equal(buttons.length, 3);
-  for (const button of buttons) assert.ok(Math.abs(button.delta) <= 2, `${button.tag} text is vertically centered: ${button.delta}`);
-  assert.ok(Math.abs(buttons[0].delta - buttons[1].delta) <= 1, '原帖链接与额度页按钮文字居中一致');
-};
-let passed = 0;
-const check = async (name, task) => { await task(); passed++; console.log(`PASS ${name}`); };
-const watchdog = setTimeout(() => browser.kill(), 180000);
+const measuring = (target) => evaluate(target, `(() => {
+  const height = selector => document.querySelector(selector).getBoundingClientRect().height;
+  return { viewport: innerHeight, panel: height('.usage-view'), usage: height('.usage-scroll'), card: height('.codex-reset-card') };
+})()`);
+const expanded = (target) => evaluate(target, "document.querySelector('.codex-reset-toggle').getAttribute('aria-expanded')");
+const watchdog = setTimeout(() => browser.kill(), 60000);
 try {
   await send(null, "Browser.getVersion");
   const first = await createPage(), second = await createPage();
-  await check("全局弹窗内容、来源、原文和多条未读", async () => {
-    const contents = await evaluate(first, "document.querySelector('.codex-reset-dialog').textContent");
-    assert.match(contents, /适用：Codex/);
-    assert.match(contents, /预告/); assert.match(contents, /额度重置/); assert.match(contents, /还有 1 条/);
-    assert.match(contents, /我们即将为 Codex 用户重置额度/); assert.match(contents, /将在接下来 2 小时内落地/);
-    assert.equal(await evaluate(first, "document.querySelector('.codex-reset-dialog').getAttribute('aria-modal')"), "true");
-    assert.equal(await evaluate(first, "document.querySelector('.codex-reset-dialog').getAttribute('role')"), "dialog");
-    assert.ok(await evaluate(first, "document.querySelector('.codex-reset-dialog a[href=\"https://aihot.news/codex-reset\"]') !== null"));
-    await click(first, ".codex-reset-original summary");
-    assert.ok(await evaluate(first, "document.querySelector('.codex-reset-original').open"));
-    assert.match(await evaluate(first, "document.querySelector('.codex-reset-original').textContent"), /rolling out/i);
-    await click(first, ".codex-reset-original summary");
-  });
-  await check("明暗桌面与 390/320 手机弹窗不溢出", async () => {
-    for (const width of [1280, 390, 320]) for (const value of ["light", "dark"]) {
-      await viewport(first, width); await theme(first, value); await checkBounds(first, ".codex-reset-dialog");
-      await checkActionAlignment(first);
-      await shot(first, `modal-${value}-${width === 1280 ? "desktop" : width === 390 ? "mobile" : "mobile-320"}`);
-    }
-  });
-  await check("Tab 循环、Escape 不确认与下轮仍可提示", async () => {
-    assert.ok(await evaluate(first, "document.querySelector('.codex-reset-dialog').contains(document.activeElement)"), "打开后焦点在弹窗内");
-    for (let index = 0; index < 12; index++) { await key(first, "Tab"); assert.ok(await evaluate(first, "document.querySelector('.codex-reset-dialog').contains(document.activeElement)")); }
-    await key(first, "Tab", 8); assert.ok(await evaluate(first, "document.querySelector('.codex-reset-dialog').contains(document.activeElement)"));
-    await key(first, "Escape");
-    assert.equal(await evaluate(first, "document.querySelectorAll('.codex-reset-dialog').length"), 0);
-    assert.equal(await evaluate(first, "window.__writes.length"), 0, "Escape 不写 ack");
-    await publish(first, { ...initial, alerts: [{ ...alert, id: "later" }] });
-    await waitFor(first, "document.querySelector('.codex-reset-dialog')");
-  });
-  await check("知道了广播到另一个页面，逐条确认", async () => {
-    await click(first, ".codex-reset-ack");
-    await waitFor(second, "!document.querySelector('.codex-reset-dialog')");
-    assert.equal(await evaluate(first, "window.__resetStatus.alerts.length"), 0);
-    assert.equal(await evaluate(second, "window.__resetStatus.alerts.length"), 0);
-    await publish(first, { ...initial, alerts: [{ ...alert, id: "multi-new" }, { ...olderAlert, id: "multi-older" }] });
-    await waitFor(first, "document.querySelector('.codex-reset-dialog')");
-    await click(first, ".codex-reset-ack");
-    assert.match(await evaluate(first, "document.querySelector('.codex-reset-dialog').textContent"), /重置卡/);
-    await click(first, ".codex-reset-ack");
-    await waitFor(second, "!document.querySelector('.codex-reset-dialog')");
-    assert.equal(await evaluate(first, "window.__writes.every(write=>write.path==='/api/codex-resets/ack'&&write.method==='POST')"), true);
-  });
-  await check("底栏圆点不改变底栏高度（桌面 43px、手机 45px）或既有窄屏换行", async () => {
-    for (const target of [first, second]) for (const width of [1280, 390, 320]) {
-      await viewport(target, width); await publish(target, { ...initial, alerts: [] });
-      const withDot = await geometry(target);
-      assert.equal(await evaluate(target, "getComputedStyle(document.querySelector('.codex-reset-dot')).position"), "absolute");
-      await publish(target, { ...initial, alerts: [], pending: [] });
-      assert.equal(await evaluate(target, "document.querySelectorAll('.codex-reset-dot').length"), 0);
-      assert.deepEqual(await geometry(target), withDot, `圆点不影响 ${width}px 几何`);
-      if (width !== 320) assert.equal(withDot.foot.h, width > 720 ? 43 : 45, `${width}px 底栏高度`);
-    }
-  });
-  await check("额度页跳转只收起本地弹窗，不确认", async () => {
-    await viewport(first, 1280); await publish(first, { ...initial, alerts: [{ ...alert, id: "open-usage" }] });
-    await waitFor(first, "document.querySelector('.codex-reset-open-usage')");
-    const before = await evaluate(first, "window.__writes.length");
-    await click(first, ".codex-reset-open-usage");
-    await waitFor(first, "document.querySelector('.codex-reset-card') && !document.querySelector('.codex-reset-dialog')");
-    await waitFor(first, "document.querySelector('.usage-view') && document.querySelector('.usage-card[data-provider=\"codex\"]')");
-    assert.ok(await evaluate(first, "getComputedStyle(document.querySelector('.usage-scroll')).overflowY === 'auto'"), "AI 用量面板内容区独立滚动");
-    assert.equal(await evaluate(first, "document.querySelectorAll('.page-frame').length"), 0, "内置面板不再渲染 iframe");
-    assert.ok(await evaluate(first, "document.querySelector('.codex-reset-card').compareDocumentPosition(document.querySelector('.usage-scroll')) & Node.DOCUMENT_POSITION_PRECEDING"), "重置卡片位于用量列表下方");
-    assert.equal(await evaluate(first, "window.__writes.length"), before);
-    assert.ok(await evaluate(second, "!!document.querySelector('.codex-reset-dialog')"), "另一页面保留未读弹窗");
-  });
-  await check("额度卡 pending、历史、推算、最近和过期状态", async () => {
-    await publish(first, { ...initial, alerts: [] });
-    assert.match(await evaluate(first, "document.querySelector('.codex-reset-card').textContent"), /今天 18:00/);
-    for (const width of [1280, 390]) for (const value of ["light", "dark"]) {
-      await viewport(first, width); await theme(first, value); await checkBounds(first, ".codex-reset-card");
-      await shot(first, `usage-card-${value}-${width === 1280 ? "desktop" : "mobile"}`);
-    }
-    await click(first, ".codex-reset-history summary");
-    assert.ok(await evaluate(first, "document.querySelector('.codex-reset-history').open"));
-    assert.match(await evaluate(first, "document.querySelector('.codex-reset-history').textContent"), /重置卡/);
-    await shot(first, "usage-card-history-mobile");
-    const estimated = { ...event, schedule: null, estimate: { from:iso(30*60_000),through:iso(102*60_000),basis:"model",label:"预计 2 小时内" } };
-    await publish(first, { ...initial, alerts: [], pending:[estimated],recent:[estimated,previous] });
-    assert.match(await evaluate(first, "document.querySelector('.codex-reset-card').textContent"), /推算/);
-    const earlier = { ...event, id: "earlier", schedule: { from: iso(-120*60_000), label: "较早一次" }, estimate: null };
-    await publish(first, { ...initial, alerts: [], pending:[earlier,estimated],recent:[earlier,estimated,previous] });
-    assert.equal(await evaluate(first, "document.querySelectorAll('.codex-reset-card-event').length"), 1, "多条待生效只显示一条");
-    assert.match(await evaluate(first, "document.querySelector('.codex-reset-card-event').textContent"), /推算/, "取预计时间最晚的一条");
-    for (const schedule of [{}, { from: "invalid-date", through: "invalid-date" }]) {
-      const unknownTime = { ...event, schedule, estimate: null };
-      await publish(first, { ...initial, alerts: [], pending:[unknownTime],recent:[unknownTime,previous] });
-      assert.match(await evaluate(first, "document.querySelector('.codex-reset-card').textContent"), /时间待定/, "缺失或非法时间不使卡片崩溃");
-    }
-    await publish(first, { ...initial, alerts: [], pending:[],recent:[previous] });
-    assert.match(await evaluate(first, "document.querySelector('.codex-reset-card').textContent"), /最近一次/);
-    await publish(first, { ...initial, alerts: [], pending:[],recent:[previous],stale:true,monitor:{status:"degraded"} });
-    assert.match(await evaluate(first, "document.querySelector('.codex-reset-card').textContent"), /过期|延迟|异常|暂不可用/);
-    await shot(first, "usage-card-stale-mobile");
-    await publish(first, { ...initial, enabled: false, alerts: [] });
-    assert.equal(await evaluate(first, "document.querySelectorAll('.codex-reset-card,.codex-reset-dot,.codex-reset-dialog').length"), 0);
-  });
-  await check("英文 390/320 手机弹窗及圆点几何", async () => {
-    const english = await createPage("en");
-    for (const width of [390, 320]) {
-      await viewport(english, width); await checkBounds(english, ".codex-reset-dialog");
-      assert.match(await evaluate(english, "document.querySelector('.codex-reset-ack').textContent"), /got it|understood/i);
-      assert.match(await evaluate(english, "document.querySelector('.codex-reset-scope').textContent"), /Applies to: Codex/);
-      await checkActionAlignment(english);
-      await shot(english, `modal-english-${width}`);
-      await publish(english, { ...initial, alerts: [] });
-      const withDot = await geometry(english);
-      await publish(english, { ...initial, alerts: [], pending: [] });
-      assert.deepEqual(await geometry(english), withDot, `英文 ${width}px 原有换行不变`);
-      if (width === 390) assert.equal(withDot.foot.h, 45);
-      if (width === 390) await publish(english, { ...initial, alerts:[{...alert,id:"english-320"}] });
-    }
-  });
+  for (const [width, height] of [[1280, 660], [390, 700], [320, 560]]) {
+    await viewport(first, width, height);
+    await theme(first, width === 390 ? "dark" : "light");
+    await publish(first, initial);
+    assert.equal(await expanded(first), "false");
+    assert.equal(await evaluate(first, "document.querySelectorAll('.codex-reset-rail button svg').length"), 4);
+    await checkBounds(first, ".codex-reset-rail");
+    const idle = await measuring(first);
+    assert.equal(idle.card, 36, "常态只占一行");
+    assert.ok(idle.usage + idle.card <= idle.panel + 1);
+    await publish(first, active);
+    assert.equal(await expanded(first), "true");
+    assert.match(await evaluate(first, "document.querySelector('.codex-reset-toggle').textContent"), /已确认/);
+    assert.equal(await evaluate(first, "document.querySelector('.codex-reset-rail [aria-checked=true]').getAttribute('aria-label')"), "Antigravity");
+    assert.equal(await evaluate(first, "document.querySelectorAll('.codex-reset-rail button svg').length"), 4);
+    assert.ok(await evaluate(first, "!!document.querySelector('a[href=\"https://aihot.news/antigravity-reset\"]')"));
+    await checkBounds(first, ".codex-reset-card");
+    const open = await measuring(first);
+    assert.ok(open.card > idle.card && open.card <= Math.min(104, open.panel / 4) + 1, JSON.stringify(open));
+    assert.ok(open.usage >= idle.usage - 68, "展开最多增加 68px");
+    if (width !== 1280) await shot(first, `reset-panel-${width}`);
+    console.log(`PASS ${width}×${height} 重置区 ${idle.card}px → ${open.card}px`);
+  }
+  await publish(first, initial);
+  for (const [label, provider] of [["Codex", "codex"], ["Antigravity", "antigravity"], ["Claude", "claude"], ["Grok Bot", "grok-bot"]]) {
+    await click(first, `.codex-reset-rail [aria-label="${label}"]`);
+    assert.equal(await expanded(first), "true", `${label} 可以从收起状态直接展开`);
+    assert.equal(await evaluate(first, "document.querySelector('.codex-reset-details a[href^=\"https://aihot.news/\"]').href"), `https://aihot.news/${provider}-reset`);
+    await click(first, ".codex-reset-toggle");
+    assert.equal(await expanded(first), "false");
+  }
+  await publish(first, active);
+  await click(first, ".codex-reset-toggle");
+  assert.equal(await expanded(first), "false", "手动收起保留未读");
+  assert.equal(await expanded(second), "true", "另一端继续显示未读");
+  await click(first, '.codex-reset-rail [aria-label="Antigravity"]');
+  assert.equal(await expanded(first), "true", "收起后点当前高亮图标也可以展开");
+  const slider = () => evaluate(first, "document.querySelector('.codex-reset-rail .segmented-slider').style.transform");
+  const firstPosition = await slider();
+  const claude = '.codex-reset-rail [aria-label="Claude"]';
+  await click(first, claude);
+  assert.notEqual(await slider(), firstPosition, "点击切换时滑块移动到新图标");
+  assert.ok(await evaluate(first, "!!document.querySelector('a[href=\"https://aihot.news/claude-reset\"]')"));
+  await evaluate(first, `document.querySelector(${JSON.stringify(claude)}).dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }))`);
+  assert.equal(await evaluate(first, "document.querySelector('.codex-reset-rail [aria-checked=true]').getAttribute('aria-label')"), "Grok Bot");
+  await click(first, ".codex-reset-toggle");
+  const newAlert = { ...agAlert, id: "next-ag-alert" };
+  await publish(first, { ...active, sources: active.sources.map(source => source.provider === "antigravity"
+    ? { ...source, status: { ...source.status, alerts: [newAlert] } } : source) });
+  assert.equal(await expanded(first), "true", "新公告可以再次自动展开");
+  await click(first, ".codex-reset-ack");
+  await waitFor(second, "document.querySelector('.codex-reset-toggle').getAttribute('aria-expanded')==='false'");
+  assert.equal(await expanded(first), "false");
+  assert.deepEqual(await evaluate(first, "JSON.parse(window.__writes.at(-1).body)"), { id: "next-ag-alert", provider: "antigravity" });
+  await evaluate(first, "location.hash='#/'");
+  await waitFor(first, "!document.querySelector('.usage-view')");
+  await publish(first, active);
+  assert.ok(await evaluate(first, "document.querySelector('.codex-reset-dot') && !document.querySelector('.codex-reset-card,.codex-reset-dialog')"));
+  const english = await createPage("en");
+  await viewport(english, 320, 560);
+  await publish(english, { ...initial, pending: [event], recent: [event] });
+  assert.match(await evaluate(english, "document.querySelector('.codex-reset-toggle').textContent"), /Reset events.*Announced/);
+  await checkBounds(english, ".codex-reset-card");
   assert.deepEqual(errors, [], "没有未捕获的页面错误");
-  console.log(`✅ codex resets: ${passed} browser checks; screenshots: ${output}`);
+  console.log("✅ quota resets: compact layout, local collapse, shared ack, no global overlay");
 } catch (error) {
   console.error("Runtime errors:", errors.map(error => error.exception?.description ?? error.text));
   console.error(`Screenshots: ${output}`);

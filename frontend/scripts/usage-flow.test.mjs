@@ -208,7 +208,53 @@ const { UsageView } = await import("../src/components/UsageView.tsx");
   assert.equal(s.currentPageId, BUILTIN_USAGE_ID);
 }
 
-// 3. UsageView SSR rendering across all 4 providers (Claude, Antigravity, Codex, Kimi) in zh-CN & en.
+// 3. Manual refresh renders each HTTP result while other providers are still pending, even without WS.
+{
+  const s = new Store();
+  const requests = new Map();
+  const calls = [];
+  globalThis.fetch = (url, init) => {
+    assert.equal(init?.method, "POST");
+    const id = new URL(url, "http://localhost").searchParams.get("provider");
+    calls.push(id);
+    return new Promise((resolve) => { requests.set(id, resolve); });
+  };
+  const fetchedAt = "2026-11-18T08:00:00.000Z";
+  const finish = (id, revision, providerIds) => {
+    requests.get(id)({ json: async () => ({ code: 0, data: {
+      instance_id: "progressive",
+      revision,
+      updated_at: fetchedAt,
+      providers: providerIds.map((provider) => ({ id: provider, fetched_at: fetchedAt })),
+    } }) });
+  };
+
+  const pending = s.refreshAllUsage();
+  assert.deepEqual(calls, ["claude", "antigravity", "codex", "kimi"]);
+  void s.refreshAllUsage("antigravity");
+  assert.equal(calls.length, 4, "repeat clicks reuse the in-flight provider refresh");
+
+  finish("codex", 2, ["codex"]);
+  await new Promise(setImmediate);
+  assert.deepEqual(s.usageSummary?.providers.map((provider) => provider.id), ["codex"]);
+  assert.equal(s.usageRefreshing.has("codex"), false);
+  assert.equal(s.usageRefreshing.has("antigravity"), true);
+
+  finish("kimi", 3, ["codex", "kimi"]);
+  await new Promise(setImmediate);
+  assert.deepEqual(s.usageSummary?.providers.map((provider) => provider.id), ["codex", "kimi"]);
+  assert.equal(s.usageRefreshing.has("kimi"), false);
+
+  finish("claude", 1, ["claude"]);
+  await new Promise(setImmediate);
+  assert.equal(s.usageSummary?.revision, 3, "a late HTTP response keeps the newer snapshot");
+  finish("antigravity", 4, ["claude", "antigravity", "codex", "kimi"]);
+  await pending;
+  assert.equal(s.usageSummary?.revision, 4);
+  assert.equal(s.usageRefreshing.size, 0);
+}
+
+// 4. UsageView SSR rendering across all 4 providers (Claude, Antigravity, Codex, Kimi) in zh-CN & en.
 {
   const now = Date.parse("2026-11-18T08:00:00Z");
   appStore.now = now;
@@ -240,6 +286,7 @@ const { UsageView } = await import("../src/components/UsageView.tsx");
         credits_note: "420",
         on_demand: true,
         windows: [
+          { id: "gemini_week", label: "Gemini Models · Weekly", group: "Gemini Models", window_label: "Weekly", duration_ms: 604_800_000, used_pct: 71, resets_at: null, note: null },
           { id: "gemini_5h", label: "Gemini Models · 5h", group: "Gemini Models", window_label: "5h", duration_ms: 18_000_000, used_pct: 24, resets_at: "2026-11-18T11:00:00Z", note: null },
           { id: "claude_5h", label: "Claude and GPT Models · 5h", group: "Claude and GPT Models", window_label: "5h", duration_ms: 18_000_000, used_pct: 92, resets_at: "2026-11-18T11:00:00Z", note: "Remaining: 8", note_code: { code: "remaining_amount", amount: "8" } },
         ],
@@ -280,7 +327,13 @@ const { UsageView } = await import("../src/components/UsageView.tsx");
   for (const id of ["claude", "antigravity", "codex", "kimi"]) {
     assert.match(html, new RegExp(`data-provider="${id}"`), `${getLocale()} markup renders ${id} card`);
   }
+  appStore.usageRefreshing = new Set(["antigravity"]);
+  const refreshingHtml = renderToStaticMarkup(React.createElement(UsageView));
+  assert.match(refreshingHtml, /data-provider="antigravity"[^>]*aria-busy="true"/);
+  assert.match(refreshingHtml, /data-provider="codex"[^>]*aria-busy="false"/);
+  appStore.usageRefreshing = new Set();
   assert.match(html, /Google AI Ultra/);
+  assert.match(html, /Gemini Models[^]*?24%[^]*?71%[^]*?Claude and GPT Models/, "Antigravity renders the 5h bar above the weekly bar in its group");
   assert.match(html, /Gemini Models/);
   assert.match(html, /Claude and GPT Models/);
   assert.match(html, /usage-bar-fill warn/);

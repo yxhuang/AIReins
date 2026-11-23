@@ -26,14 +26,15 @@ interface NativeLine { text: string; startOffset: number }
 
 /** Only reads native CLI files. All searches and tail reads have fixed limits. */
 export class NativeConversationReader {
-  private readonly roots: Record<Exclude<AgentKind, "antigravity">, string>;
+  private readonly roots: Record<AgentKind, string>;
   private readonly located = new Map<string, string>();
 
   constructor(roots: Partial<Record<AgentKind, string>> = {}) {
     this.roots = {
-      claude: process.env.WORKBENCH_CLAUDE_HISTORY_DIR || join(homedir(), ".claude", "projects"),
-      codex: process.env.WORKBENCH_CODEX_HISTORY_DIR || join(homedir(), ".codex", "sessions"),
+      claude: process.env.WORKBENCH_CLAUDE_HISTORY_DIR || join(process.env.CLAUDE_CONFIG_DIR || join(homedir(), ".claude"), "projects"),
+      codex: process.env.WORKBENCH_CODEX_HISTORY_DIR || join(process.env.CODEX_HOME || join(homedir(), ".codex"), "sessions"),
       kimi: kimiHistoryRoot(),
+      antigravity: process.env.WORKBENCH_ANTIGRAVITY_BRAIN_DIR || join(homedir(), ".gemini", "antigravity-cli", "brain"),
       ...roots,
     };
   }
@@ -44,13 +45,31 @@ export class NativeConversationReader {
   }
 
   /** Metadata callers need the same validated ID/path lookup without reading conversation tails. */
-  transcriptPath(session: SessionRecord): string | undefined {
+  transcriptPath(session: ReplaySession): string | undefined {
     return this.pathFor(session);
   }
 
   /** Startup readiness only: bounded native headers, not a full archive integrity audit. */
   hasArchive(session: SessionRecord): boolean {
     try {
+      if (session.agent === "antigravity") {
+        const id = session.nativeSessionId;
+        if (!id || !/^[A-Za-z0-9_-]{1,128}$/.test(id)) return false;
+        const root = realpathSync(this.roots.antigravity);
+        const transcript = join(root, id, ".system_generated", "logs", "transcript.jsonl");
+        if (safeNativeFile(root, transcript) !== transcript) return false;
+        const { text, truncated } = nativeHeader(transcript);
+        const lines = text.split("\n");
+        if (truncated) lines.pop();
+        let resumable = false;
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          const record = JSON.parse(line) as Record<string, unknown>;
+          if (!record || typeof record !== "object" || Array.isArray(record)) return false;
+          if (record.type === "USER_INPUT" || record.type === "PLANNER_RESPONSE") resumable = true;
+        }
+        return resumable;
+      }
       const path = this.pathFor(session);
       const id = session.nativeSessionId;
       if (!path || !id || !nativePathMatches(session.agent, id, path)) return false;
@@ -168,7 +187,7 @@ export class NativeConversationReader {
     }
   }
 
-  private pathFor(session: SessionRecord): string | undefined {
+  private pathFor(session: ReplaySession): string | undefined {
     // Antigravity 的原生存储由官方 ACP 管理，不套用其他 CLI 的 JSONL 路径。
     if (session.agent === "antigravity") return undefined;
     const root = this.roots[session.agent];
@@ -225,6 +244,30 @@ export class NativeConversationReader {
     }
     return undefined;
   }
+}
+
+export type ReplaySession = Pick<SessionRecord, "agent" | "nativeSessionId" | "nativeTranscriptPath">;
+
+export function nativeReplayPath(reader: NativeConversationReader, session: ReplaySession): string | undefined {
+  const id = session.nativeSessionId;
+  if (!id || !/^[\w-]{1,128}$/.test(id)) return undefined;
+  if (session.agent === "antigravity") {
+    const root = process.env.WORKBENCH_ANTIGRAVITY_BRAIN_DIR || join(homedir(), ".gemini", "antigravity-cli", "brain");
+    try {
+      const realRoot = realpathSync(root);
+      const path = join(realRoot, id, ".system_generated", "logs", "transcript.jsonl");
+      return safeNativeFile(realRoot, path) === path ? path : undefined;
+    } catch { return undefined; }
+  }
+  const path = reader.transcriptPath(session);
+  if (path || session.agent !== "codex") return path;
+  const active = process.env.WORKBENCH_CODEX_HISTORY_DIR || join(process.env.CODEX_HOME || join(homedir(), ".codex"), "sessions");
+  const archived = join(dirname(active), "archived_sessions");
+  const name = session.nativeTranscriptPath && basename(session.nativeTranscriptPath);
+  const candidate = name && nativePathMatches("codex", id, name) && safeNativeFile(archived, join(archived, name));
+  if (candidate) return candidate;
+  const found = safeFiles(archived).find(file => nativePathMatches("codex", id, file));
+  return found ? safeNativeFile(archived, join(archived, found)) : undefined;
 }
 
 function within(root: string, path: string): boolean {

@@ -137,6 +137,7 @@ export interface SendUserMessageReceipt {
 export interface UnifiedEvent {
   /** user_message 携带服务端计算的会话标题。 */
   title?: string;
+  nativePayloadUnavailable?: true;
   /** 临时工具参数更新：seq 为当前值，不持久化、不推进游标。 */
   ephemeral?: true;
   type: EventType;

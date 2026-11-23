@@ -4,7 +4,8 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { renderSettled } from "./render-settled.mjs";
 // 先在纯 Node 环境导入，防止 store 或纯逻辑出现顶层 DOM 依赖。
 import { Store, store } from "../src/store.ts";
-import { insertFileMention, planFileMention, FilePanel } from "../src/components/FilePanel.tsx";
+import { insertFileMention, planFileMention, FilePanel, FileTabs } from "../src/components/FilePanel.tsx";
+import { SidebarActionMenu } from "../src/components/SidebarActionMenu.tsx";
 import { DirectoryBrowser, DirectoryContents } from "../src/components/DirectoryBrowser.tsx";
 import { directoryBreadcrumbs, directoryEntryDate, directoryEntrySize, normalizeDirectoryPath, recentDirectoryPaths, sortedDirectoryEntries } from "../src/directory-path.ts";
 import { DispatchPanel } from "../src/components/DispatchPanel.tsx";
@@ -457,10 +458,46 @@ console.log("✅ 空文件面板直接打开文件、关闭时中断读取与迟
     const beforeSavingRefresh = calls.length;
     refresh().props.onClick(); await settle();
     assert.equal(calls.length, beforeSavingRefresh, '保存期间也由 store 拒绝重读');
+
+    const folder = '/mnt/c/资料与讲义/本周 内容';
+    store.fileTabs = [
+      { id: 1, preview },
+      { id: 2, directory: { sessionId: null, path: '/project/current' }, preview: null },
+      { id: 3, directory: { sessionId: null, path: folder }, preview: null },
+    ];
+    store.meta = { platform: 'wsl', capabilities: { systemOpen: true } };
+    const folderPanel = mount(FilePanel, { tabId: 2, onClose() {} });
+    const browser = find(folderPanel.tree, node => node.type === DirectoryContents);
+    const tabs = mount(FileTabs, find(browser.props.afterLocation, node => node.type === FileTabs).props);
+    const tab = id => find(tabs.tree, node => node.props?.['data-tab-id'] === id);
+    assert.equal(tab(1).props.onContextMenu, undefined, '文件预览标签没有目录操作');
+    let prevented = false;
+    tab(3).props.onContextMenu({ clientX: 100, clientY: 120, preventDefault() { prevented = true; },
+      currentTarget: { getBoundingClientRect: () => ({ left: 0, bottom: 0 }), focus() {} } });
+    const menu = find(tabs.tree, node => node.type === SidebarActionMenu);
+    assert.ok(prevented);
+    assert.deepEqual(menu.props.items.map(item => item.label), ['在 Windows 资源管理器中打开']);
+    const requests = [];
+    globalThis.fetch = async (url, init) => {
+      requests.push({ url, method: init.method, body: JSON.parse(init.body) });
+      return { json: async () => ({ code: 0, data: { opened: true } }) };
+    };
+    menu.props.items[0].onSelect();
+    assert.equal(find(folderPanel.tree, node => node.props?.role === 'status'), undefined, '等待系统响应期间不插入提示行');
+    await settle();
+    assert.deepEqual(requests, [{ url: '/api/fs/open-system', method: 'POST', body: { path: folder, root: folder } }]);
+    assert.equal(store.fileTabId, 2, '右键打开的是未选中标签的目录，不切换标签');
+    assert.equal(find(folderPanel.tree, node => node.props?.role === 'status'), undefined, '系统接收打开请求后不插入提示行');
+    for (const [platform, systemOpen] of [['wsl', false], ['darwin', true]]) {
+      store.meta = { platform, capabilities: { systemOpen } };
+      tabs.render();
+      assert.equal(tab(3).props.onContextMenu, undefined, '仅有系统打开能力的本机 WSL 提供此操作');
+    }
   } finally { Object.assign(store, previous); internals.H = oldDispatcher; globalThis.fetch = oldFetch; globalThis.window = oldWindow; }
 }
 console.log("✅ 新建目录与文件栏：打开/刷新同步，独立浏览、最新地址及预览保留");
 console.log("✅ 文件刷新：草稿确认、错误重试、读取/保存保护与跨标签回包隔离");
+console.log("✅ 右键文件夹标签：本机 WSL 打开对应目录并保留当前标签");
 
 // 执行开关的真实处理器；浏览器 CSP/sandbox 的强制执行另做真实浏览器验证。
 {

@@ -180,13 +180,23 @@ export function formatUsageError(provider: UsageProvider, kimiEnv = "KIMI_API_KE
   }
 }
 
-export function groupUsageWindows(windows: UsageWindow[]): Array<{ group: string | null; items: UsageWindow[] }> {
+export function groupUsageWindows(windows: UsageWindow[], providerId?: UsageProviderId): Array<{ group: string | null; items: UsageWindow[] }> {
   const groups: Array<{ group: string | null; items: UsageWindow[] }> = [];
   for (const w of windows) {
     const g = w.group ?? null;
     const prev = groups.at(-1);
     if (prev && prev.group === g) prev.items.push(w);
     else groups.push({ group: g, items: [w] });
+  }
+  if (providerId === "antigravity") {
+    for (const { items } of groups) {
+      const short = items.findIndex(w => windowDurationMs(w) === 5 * HOUR_MS);
+      const week = items.findIndex(w => windowDurationMs(w) === 7 * DAY_MS);
+      if (week !== -1 && week < short) {
+        const [shortWindow] = items.splice(short, 1);
+        items.splice(week, 0, shortWindow!);
+      }
+    }
   }
   return groups;
 }

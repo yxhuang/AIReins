@@ -6,16 +6,17 @@ import { NativeConversationReader } from "./native-conversation.js";
 import type { AgentKind, SessionRecord } from "./types.js";
 
 const fixture = await mkdtemp(join(tmpdir(), "workbench-native-archive-recovery-"));
-const roots = { claude: join(fixture, "claude"), codex: join(fixture, "codex"), kimi: join(fixture, "kimi") };
+const roots = { claude: join(fixture, "claude"), codex: join(fixture, "codex"), kimi: join(fixture, "kimi"),
+  antigravity: join(fixture, "brain") };
 const reader = new NativeConversationReader(roots);
 const cwd = join(fixture, "project");
-const ids = { claude: "archive-claude", codex: "archive-codex", kimi: "archive-kimi" };
+const ids = { claude: "archive-claude", codex: "archive-codex", kimi: "archive-kimi", antigravity: "archive-antigravity" };
 const paths = {
   claude: join(roots.claude, "project", `${ids.claude}.jsonl`),
   codex: join(roots.codex, "2026", "10", "03", `rollout-fixture-${ids.codex}.jsonl`),
   kimi: join(roots.kimi, "workspace", ids.kimi, "agents", "main", "wire.jsonl"),
 };
-const session = (agent: Exclude<AgentKind, "antigravity">, overrides: Partial<SessionRecord> = {}) => ({
+const session = (agent: AgentKind, overrides: Partial<SessionRecord> = {}) => ({
   agent, cwd, nativeSessionId: ids[agent], ...overrides,
 }) as SessionRecord;
 async function lines(path: string, records: unknown[]): Promise<void> {
@@ -78,4 +79,40 @@ assert.equal(reader.hasArchive(session("claude", { nativeSessionId: "escape-clau
 // archive-bounded-head: a large archive still resumes using readiness evidence in its bounded head.
 await writeFile(paths.claude, `${JSON.stringify(claudeMessage)}\n${" ".repeat(4 * 1024 * 1024)}`);
 assert.equal(reader.hasArchive(session("claude")), true);
-console.log("✅ native archive recovery: Claude/Codex/Kimi readiness, identity, corruption, path safety and bounds");
+
+const antigravity = session("antigravity");
+const brainFile = (dir: string) => join(dir, ".system_generated", "logs", "transcript.jsonl");
+const archive = brainFile(join(roots.antigravity, ids.antigravity));
+const input = { type: "USER_INPUT", text: "fixture prompt" };
+const response = { type: "PLANNER_RESPONSE", text: "fixture reply" };
+assert.equal(reader.hasArchive(antigravity), false, "missing Antigravity archive");
+for (const record of [input, response]) {
+  await lines(archive, [record]);
+  assert.equal(reader.hasArchive(antigravity), true, record.type);
+}
+await writeFile(archive, JSON.stringify(response));
+assert.equal(reader.hasArchive(antigravity), true, "complete final record without newline");
+await writeFile(archive, `${JSON.stringify(input)}\n{"type":"GENERIC","text":"${"a".repeat(4 * 1024 * 1024)}"}\n`);
+assert.equal(reader.hasArchive(antigravity), true, "bounded head can end within a record");
+assert.equal(reader.transcriptPath(antigravity), undefined);
+assert.equal(await reader.capture(antigravity), undefined);
+for (const bad of ["", '{"type":"GENERIC"}\n', '{broken}\n', `${JSON.stringify(input)}\n{"type":`,
+  `${JSON.stringify(input)}\n[]\n`]) {
+  await writeFile(archive, bad);
+  assert.equal(reader.hasArchive(antigravity), false, `invalid archive: ${bad}`);
+}
+
+const outsideBrain = join(fixture, "escape");
+await lines(brainFile(outsideBrain), [input]);
+const hasBrainArchive = (nativeSessionId: string) => reader.hasArchive(session("antigravity", { nativeSessionId }));
+assert.equal(hasBrainArchive("../escape"), false);
+await symlink(outsideBrain, join(roots.antigravity, "escape-dir"));
+assert.equal(hasBrainArchive("escape-dir"), false);
+const link = brainFile(join(roots.antigravity, "escape-file"));
+await mkdir(dirname(link), { recursive: true });
+await symlink(brainFile(outsideBrain), link);
+assert.equal(hasBrainArchive("escape-file"), false);
+await lines(archive, [input]);
+await symlink(join(roots.antigravity, ids.antigravity), join(roots.antigravity, "other-session"));
+assert.equal(hasBrainArchive("other-session"), false, "a sibling archive belongs to another session");
+console.log("✅ native archive recovery: Claude/Codex/Kimi/Antigravity readiness, identity, corruption, path safety and bounds");

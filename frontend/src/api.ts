@@ -95,7 +95,7 @@ export function openWorkPathInSystem(target: import("./types").WorkFileTarget, a
   return call("/api/fs/open-system", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(auto ? { ...target, auto } : target) });
 }
 
-export function fetchDispatches(signal?: AbortSignal): Promise<{ dispatches: DispatchRun[] }> {
+export function fetchDispatches(signal?: AbortSignal): Promise<import("./types").DispatchOverview> {
   return call("/api/dispatches?limit=50", { signal });
 }
 
@@ -506,11 +506,11 @@ export function fetchHistoryMessages(
   );
 }
 
-export function fetchCodexResets(): Promise<import("../../server/codex-resets").CodexResetStatus> {
+export function fetchCodexResets(): Promise<import("../../server/codex-resets").QuotaResetStatus> {
   return call("/api/codex-resets");
 }
-export function ackCodexReset(id: string): Promise<unknown> {
-  return call("/api/codex-resets/ack", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id }) });
+export function ackCodexReset(id: string, provider?: import("../../shared/quota-reset-feeds").QuotaResetProvider): Promise<unknown> {
+  return call("/api/codex-resets/ack", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, provider }) });
 }
 
 export function fetchUsage(open = false): Promise<import("./types").UsageSummary> {

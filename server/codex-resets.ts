@@ -1,9 +1,8 @@
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
-import { dirname } from "node:path";
+import { dirname, join } from "node:path";
+import { quotaResetFeeds, quotaResetSource, type QuotaResetProvider } from "../shared/quota-reset-feeds.js";
 import { log } from "./logger.js";
 
-const ENDPOINT = "https://aihot.news/api/v1/codex-resets/recent";
-const SOURCE = "https://aihot.news/codex-reset";
 const INTERVAL = 10 * 60_000;
 const HOUR = 60 * 60_000;
 const MAX_IDS = 2000;
@@ -64,6 +63,9 @@ export interface CodexResetStatus {
   recent: CodexResetEvent[];
   alerts: CodexResetAlert[];
 }
+export interface QuotaResetStatus extends CodexResetStatus {
+  sources?: { provider: QuotaResetProvider; status: CodexResetStatus }[];
+}
 
 type RecordValue = Record<string, unknown>;
 const record = (value: unknown): RecordValue => value !== null && typeof value === "object" && !Array.isArray(value) ? value as RecordValue : {};
@@ -117,19 +119,20 @@ function alert(a: CodexResetActivity, events: CodexResetEvent[]): CodexResetAler
   return { ...a, action: a.action, text: chinese(...matching.map((p) => p.text), a.text), originalText: best?.originalText ?? a.originalText,
     context: best?.context.length ? best.context : a.context, url: best?.url ?? a.url, events: associated };
 }
-function notification(a: CodexResetAlert): string {
+function notification(a: CodexResetAlert, provider: QuotaResetProvider): string {
   const credit = a.events.some((e) => e.type === "reset_credit");
   const stage = a.action === "announce" ? `预告${credit ? "重置卡" : "额度重置"}` : credit ? "重置卡已发放" : "已确认重置";
   const timing = a.events.map((e) => e.schedule?.label ?? (e.estimate?.label ? `${e.estimate.label}（推算）` : undefined)).filter(Boolean).join("；");
   const body = a.text ?? a.events.map((e) => e.title).filter(Boolean).join("；");
-  return `[AIReins] Tibo ${stage}${timing ? `：${timing}` : ""}${body ? `。「${body}」` : ""}${a.url ? ` ${a.url}` : ""}\n数据来源 AIHOT ${SOURCE}`;
+  return `[AIReins] ${quotaResetFeeds[provider]} ${stage}${timing ? `：${timing}` : ""}${body ? `。「${body}」` : ""}${a.url ? ` ${a.url}` : ""}\n数据来源 AIHOT ${quotaResetSource(provider)}`;
 }
 
 /** 构造只读本地快照；start 后才轮询，测试必须显式注入 fetch 和隔离路径。 */
-export function createCodexResetWatch({ path, enabled = false, fetch: request = globalThis.fetch, now = Date.now, onChange = () => {}, send,
+export function createCodexResetWatch({ path, provider = "codex", enabled = false, fetch: request = globalThis.fetch, now = Date.now, onChange = () => {}, send,
   warn = (message: string) => log("warn", message),
 }: {
   path: string;
+  provider?: QuotaResetProvider;
   enabled?: boolean;
   fetch?: typeof fetch;
   now?: () => number;
@@ -137,6 +140,8 @@ export function createCodexResetWatch({ path, enabled = false, fetch: request = 
   send?: (text: string) => Promise<unknown>;
   warn?: (message: string) => void;
 }) {
+  const endpoint = `https://aihot.news/api/v1/${provider}-resets/recent`;
+  const report = (message: string) => warn(`${provider} resets ${message}`);
   let baseline = false, seen: string[] = [], acked: string[] = [], etag: string | undefined;
   let events: CodexResetEvent[] = [], activities: CodexResetActivity[] = [], alerts: CodexResetAlert[] = [];
   let lastSuccessAt: string | null = null, sourceMonitor: CodexResetMonitor | null = null, outage = false;
@@ -162,7 +167,7 @@ export function createCodexResetWatch({ path, enabled = false, fetch: request = 
       failureSince = typeof v.failureSince === "number" && Number.isFinite(v.failureSince) ? v.failureSince : undefined;
     }
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") warn("codex resets state could not be loaded");
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") report("state could not be loaded");
   }
   const persist = () => {
     try {
@@ -170,7 +175,7 @@ export function createCodexResetWatch({ path, enabled = false, fetch: request = 
       writeFileSync(`${path}.tmp`, `${JSON.stringify({ version: 1, baseline, seen, acked, etag, lastSuccessAt, events, activities, alerts, monitor: sourceMonitor, outage, failureSince })}\n`, { mode: 0o600 });
       renameSync(`${path}.tmp`, path);
       return true;
-    } catch { warn("codex resets state could not be saved"); return false; }
+    } catch { report("state could not be saved"); return false; }
   };
   const status = (): CodexResetStatus => ({
     enabled, lastSuccessAt, stale: sourceMonitor?.status !== "healthy" || outage || (failureSince !== undefined && now() - failureSince > HOUR),
@@ -178,7 +183,7 @@ export function createCodexResetWatch({ path, enabled = false, fetch: request = 
     pending: enabled ? events.filter((e) => e.status === "announced") : [],
     recent: events.slice(0, 5), alerts: enabled ? alerts.filter((a) => !acked.includes(a.id)) : [],
   });
-  const changed = () => { try { onChange(); } catch { warn("codex resets change callback failed"); } };
+  const changed = () => { try { onChange(); } catch { report("change callback failed"); } };
   const schedule = () => {
     clearTimeout(timer); timer = undefined;
     if (running && enabled) {
@@ -187,7 +192,7 @@ export function createCodexResetWatch({ path, enabled = false, fetch: request = 
     }
   };
   const fail = (message: string, retryAfter?: string | null) => {
-    warn(message); failureSince ??= now(); failures++;
+    report(message); failureSince ??= now(); failures++;
     const seconds = retryAfter && /^\d+(?:\.\d+)?$/.test(retryAfter.trim()) ? Number(retryAfter) * 1000 : NaN;
     const retry = Number.isFinite(seconds) ? seconds : retryAfter ? Date.parse(retryAfter) - now() : NaN;
     nextAt = now() + (Number.isFinite(retry) && retry > 0 ? Math.max(INTERVAL, retry) : Math.min(HOUR, INTERVAL * 2 ** Math.min(failures - 1, 3)));
@@ -205,7 +210,7 @@ export function createCodexResetWatch({ path, enabled = false, fetch: request = 
     inFlight = Promise.resolve().then(async () => {
       try {
         if (!enabled || requestGeneration !== generation) return status();
-        const response = await request(ENDPOINT, { headers: baseline && etag ? { "If-None-Match": etag } : {}, signal: abort.signal });
+        const response = await request(endpoint, { headers: baseline && etag ? { "If-None-Match": etag } : {}, signal: abort.signal });
         if (!enabled || requestGeneration !== generation) { await response.body?.cancel(); return status(); }
         if (response.status === 304 && baseline) {
           lastSuccessAt = new Date(now()).toISOString(); failureSince = undefined; failures = 0; nextAt = now() + INTERVAL;
@@ -213,12 +218,12 @@ export function createCodexResetWatch({ path, enabled = false, fetch: request = 
         }
         if (!response.ok) {
           await response.body?.cancel();
-          fail(`codex resets request failed (HTTP ${response.status})`, response.status === 429 || response.status >= 500 ? response.headers.get("retry-after") : undefined);
+          fail(`request failed (HTTP ${response.status})`, response.status === 429 || response.status >= 500 ? response.headers.get("retry-after") : undefined);
           return status();
         }
         const value = record(await response.json());
         if (!enabled || requestGeneration !== generation) return status();
-        if (value.schemaVersion !== 1) { fail("codex resets unsupported schemaVersion; skipped response"); return status(); }
+        if (value.schemaVersion !== 1) { fail("unsupported schemaVersion; skipped response"); return status(); }
         const freshEvents = recentFirst(list(value.events).slice(0, 100).map(event).filter((e): e is CodexResetEvent => !!e), (e) => e.updatedAt ?? e.confirmedAt ?? e.createdAt);
         const freshActivities = recentFirst(list(value.activities).slice(0, 1000).map(activity).filter((a): a is CodexResetActivity => !!a), (a) => a.publishedAt);
         const cutoff = now() - 24 * HOUR;
@@ -242,10 +247,10 @@ export function createCodexResetWatch({ path, enabled = false, fetch: request = 
         persist(); changed();
         for (const item of unique.values()) {
           if (!enabled || requestGeneration !== generation) break;
-          try { await send?.(notification(item)); } catch { warn("codex resets notification failed"); }
+          try { await send?.(notification(item, provider)); } catch { report("notification failed"); }
         }
       } catch {
-        if (enabled && requestGeneration === generation) fail("codex resets request or JSON parsing failed");
+        if (enabled && requestGeneration === generation) fail("request or JSON parsing failed");
       } finally {
         clearTimeout(timeout); controller = undefined; inFlight = undefined; schedule();
       }
@@ -265,11 +270,40 @@ export function createCodexResetWatch({ path, enabled = false, fetch: request = 
     },
     start() { if (running) return; running = true; if (enabled) void poll(); },
     stop() { running = false; generation++; clearTimeout(timer); timer = undefined; controller?.abort(); },
-    setEnabled(value: boolean) {
+    setEnabled(value: boolean, notify = true) {
       if (enabled === value) return;
       enabled = value; generation++; clearTimeout(timer); timer = undefined; controller?.abort();
-      nextAt = 0; changed();
+      nextAt = 0;
+      if (notify) changed();
       if (enabled && running) { if (inFlight) void inFlight.then(() => { if (enabled && running) void poll(); }); else void poll(); }
+    },
+  };
+}
+
+export function createQuotaResetWatch({ directory, onChange, ...options }:
+  Omit<Parameters<typeof createCodexResetWatch>[0], "path" | "provider"> & { directory: string }) {
+  const watch = (provider: QuotaResetProvider) => createCodexResetWatch({
+    ...options, onChange, provider, path: join(directory, `${provider}-resets.json`),
+  });
+  const codex = watch("codex");
+  const sources = {
+    antigravity: watch("antigravity"),
+    claude: watch("claude"),
+    "grok-bot": watch("grok-bot"),
+  };
+  const watches = { codex, ...sources };
+  const status = (): QuotaResetStatus => ({
+    ...codex.status(),
+    sources: Object.entries(sources).map(([provider, source]) => ({ provider: provider as keyof typeof sources, status: source.status() })),
+  });
+  return {
+    status,
+    ack(id: string, provider: QuotaResetProvider = "codex") { watches[provider].ack(id); return status(); },
+    start() { for (const source of Object.values(watches)) source.start(); },
+    stop() { for (const source of Object.values(watches)) source.stop(); },
+    setEnabled(enabled: boolean) {
+      for (const source of Object.values(sources)) source.setEnabled(enabled, false);
+      codex.setEnabled(enabled);
     },
   };
 }

@@ -1,8 +1,9 @@
-import { useLayoutEffect, useRef } from "react";
+import { useLayoutEffect, useRef, type ReactNode } from "react";
 
 interface SegmentedOption<Value extends string> {
   value: Value;
   label: string;
+  icon?: ReactNode;
   title?: string;
   disabled?: boolean;
 }
@@ -70,15 +71,16 @@ export function Segmented<Value extends string>({
         const selected = option.value === value;
         return (
           <button key={option.value} type="button"
-            title={option.title}
+            title={option.title ?? (option.icon ? option.label : undefined)}
             className={`segmented-option ${buttonClassName}${selected ? " active" : ""}`}
             role={role === "radiogroup" ? "radio" : undefined}
+            aria-label={option.icon ? option.label : undefined}
             aria-checked={role === "radiogroup" ? selected : undefined}
             aria-pressed={role === "group" ? selected : undefined}
             tabIndex={role === "radiogroup" && option.value !== tabValue ? -1 : 0}
             disabled={disabled || option.disabled}
             onClick={() => onChange(option.value)}>
-            {option.label}
+            {option.icon ? <span aria-hidden="true">{option.icon}</span> : option.label}
           </button>
         );
       })}

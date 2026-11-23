@@ -30,6 +30,12 @@ assert.equal(store.codexResets.alerts.length, 0);
 assert.equal(second.codexResets.alerts.length, 0, '全局 ack 帧同步第二端');
 assert.equal(requests[0][0], '/api/codex-resets/ack');
 
+globalThis.fetch = async (url, init) => {
+  if (url.endsWith('/ack')) assert.deepEqual(JSON.parse(init.body), { id: 'post-1', provider: 'antigravity' });
+  return envelope(baseline);
+};
+await store.ackCodexReset('post-1', 'antigravity');
+
 store.handleFrame({ type: 'codex_resets_updated', data: unread });
 globalThis.fetch = async () => { throw new Error('offline'); };
 await assert.rejects(store.ackCodexReset('post-1'), /offline/);
@@ -50,7 +56,7 @@ const React = await import('react');
 globalThis.React = React;
 const { renderToStaticMarkup } = await import('react-dom/server');
 const { store: appStore } = await import('../src/store.ts');
-const { CodexResetCard } = await import('../src/components/CodexResets.tsx');
+const { CodexResetCard, hasResetUpdate } = await import('../src/components/CodexResets.tsx');
 const announced = {
   id: 'old-window', type: 'direct_reset', status: 'announced', posts: [],
   schedule: { from: '2026-10-24T12:00:00+08:00', through: '2026-10-24T14:00:00+08:00', label: '10月24日 12:00–14:00' },
@@ -62,16 +68,15 @@ const renderCard = () => renderToStaticMarkup(React.createElement(CodexResetCard
 
 appStore.now = Date.parse('2026-10-25T08:00:00+08:00');
 let card = renderCard();
-assert.doesNotMatch(card, /has-pending|待生效：|10月24日 12:00–14:00|已到预计时间/, '过期预告不再显示为待生效，历史里也隐藏旧窗口');
-assert.match(card, /最近一次：重置/, '回退到已确认的最近重置');
-assert.match(card, /2小时前/, '最近一次使用确认时间');
+assert.match(card, /aria-expanded="false"/, '只剩历史时默认折叠');
+assert.match(card, /class="codex-reset-details" hidden=""/);
+assert.match(card, /2小时前/, '手动展开时以确认时间为准');
 
 appStore.now = Date.parse('2026-10-24T11:00:00+08:00');
-assert.match(renderCard(), /待生效：额度重置/, '未来窗口仍显示');
-appStore.now = Date.parse('2026-10-24T13:00:00+08:00');
-assert.match(renderCard(), /约 1 小时 0 分后/, '窗口开始后、结束前继续倒计时');
+assert.match(renderCard(), /aria-expanded="true"/, '有有效预告时自动展开');
+assert.match(renderCard(), /10月24日 12:00–14:00/);
 appStore.now = Date.parse(announced.schedule.through);
-assert.doesNotMatch(renderCard(), /has-pending|待生效：|10月24日 12:00–14:00/, '到窗口结束时自动消失，不依赖新快照');
+assert.match(renderCard(), /aria-expanded="false"/, '到窗口结束时自动折叠');
 
 const point = { ...announced, id: 'point', schedule: { from: '2026-10-25T10:00:00+08:00', label: '单点重置时间' } };
 const later = { ...point, id: 'later', schedule: { from: '2026-10-25T11:00:00+08:00', label: '下一次重置时间' } };
@@ -79,12 +84,30 @@ appStore.now = Date.parse('2026-10-25T09:00:00+08:00');
 appStore.codexResets = { ...state, pending: [announced, point, later] };
 card = renderCard();
 assert.match(card, /下一次重置时间/);
-assert.doesNotMatch(card, /单点重置时间/, '多条有效预告仍只显示最晚一次');
+assert.doesNotMatch(card, /单点重置时间/, '多条有效预告只展示最晚一次');
 
-appStore.codexResets = { ...state, pending: [point], recent: [point] };
+appStore.codexResets = { ...baseline, sources: [
+  { provider: 'antigravity', status: { ...state, pending: [later] } },
+  { provider: 'claude', status: baseline },
+  { provider: 'grok-bot', status: baseline },
+] };
 appStore.now = Date.parse(point.schedule.from);
-assert.doesNotMatch(renderCard(), /has-pending|待生效：|单点重置时间|最近一次：/, '单点时间到达即过期，未确认的预告不冒充最近一次');
-const estimate = { ...announced, schedule: null, estimate: announced.schedule };
-appStore.codexResets = { ...state, pending: [estimate], recent: [estimate] };
-assert.doesNotMatch(renderCard(), /has-pending|待生效：|10月24日 12:00–14:00/, '推算窗口同样过期');
-console.log('✅ codex reset card: expired windows, live clock, confirmed fallback, future selection');
+card = renderCard();
+assert.match(card, /aria-expanded="true"/);
+assert.match(card, /role="radio" aria-label="Antigravity" aria-checked="true"/);
+assert.match(card, /role="radio" aria-label="Grok Bot" aria-checked="false"/);
+assert.match(card, /class="agent-icon agent-grok-bot"/);
+assert.match(card, /https:\/\/aihot.news\/antigravity-reset/);
+assert.match(card, /下一次重置时间/);
+assert.ok(hasResetUpdate(appStore.codexResets, appStore.now));
+appStore.now = Date.parse(later.schedule.from);
+assert.ok(!hasResetUpdate(appStore.codexResets, appStore.now));
+card = renderCard();
+assert.match(card, /aria-expanded="false"/);
+assert.equal((card.match(/role="radio"/g) ?? []).length, 4, '公告收起时四个来源仍可选择');
+appStore.codexResets = { ...baseline, sources: [{ provider: 'antigravity', status: { ...baseline, alerts: [
+  { id: 'antigravity-confirmed', action: 'confirm', events: [confirmed], context: [] },
+] } }] };
+assert.match(renderCard(), /class="codex-reset-summary">已确认/);
+assert.ok(hasResetUpdate(appStore.codexResets, appStore.now));
+console.log('✅ quota reset panel: collapsed history, active announcements, clock cutoff and source selection');

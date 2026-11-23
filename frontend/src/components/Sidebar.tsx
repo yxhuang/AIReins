@@ -16,7 +16,7 @@ import { RecoverableLazy } from "./RecoverableLazy";
 import { PageView } from "./PageView";
 import { UsageView } from "./UsageView";
 import { BUILTIN_USAGE_ID } from "../usage";
-import { isUpcomingReset } from "./CodexResets";
+import { hasResetUpdate } from "./CodexResets";
 import { SidebarResize } from "./SidebarResize";
 import { shortSessionTitle, SidebarSessionTitle } from "./SessionTitle";
 import { PermanentDeleteConfirm } from "./PermanentDeleteConfirm";
@@ -473,7 +473,7 @@ export function PageIcon({ icon }: { icon: string }) {
 /** 内置「AI 用量」侧栏入口。 */
 function UsageNav({ collapsed, onPrepare, onClose }: PanelNavProps) {
   const open = useStore((value) => value.currentPageId === BUILTIN_USAGE_ID);
-  const resetPending = useStore((value) => !!value.codexResets?.enabled && value.codexResets.pending.some(event => isUpcomingReset(event, value.now)));
+  const resetPending = useStore((value) => hasResetUpdate(value.codexResets, value.now));
   const name = t("ui.SessionView.ai_usage");
   return (
     <SidebarPanel name={name} open={open} collapsed={collapsed} onClose={onClose} header={

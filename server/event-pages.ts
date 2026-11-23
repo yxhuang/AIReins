@@ -134,7 +134,7 @@ export class EventPageIndex {
   private usageTtl: number | null = null;
   readonly state: SessionSnapshotState = { latestUsage: undefined, commands: [], configSwitching: undefined, promptCacheTtlMs: null, promptCacheUsageAt: null };
 
-  append(event: UnifiedEvent): void {
+  append(event: UnifiedEvent, originalBytes?: number): void {
     const index = this.seqs.length;
     const user = event.type === "user_message" && event.payload.steer !== true;
     if (user && this.counts[index]! > 0 && this.active === 0) this.starts.push(index);
@@ -157,7 +157,7 @@ export class EventPageIndex {
     this.seqCeilings.push(Math.max(this.seqCeilings.at(-1) ?? -Infinity, event.seq));
     this.seqs.push(event.seq);
     if (this.retainEvents) this.events.push(event);
-    this.bytes.push(this.bytes[index]! + Buffer.byteLength(JSON.stringify(event)) + 1);
+    this.bytes.push(this.bytes[index]! + (originalBytes ?? Buffer.byteLength(JSON.stringify(event)) + 1));
     this.counts.push(this.counts[index]! + Number(user));
     if (event.type === "usage_updated") {
       this.state.latestUsage = event.payload;

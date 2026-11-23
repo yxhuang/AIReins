@@ -1,23 +1,24 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { createPowerOff } from "./power-off.js";
-import type { Driver, DriverConfigSchema, DriverOptions, SessionConfig, UserMessageInput } from "./types.js";
+import type { AgentKind, Driver, DriverConfigSchema, DriverOptions, SessionConfig, SessionRecord, UnifiedEvent, UserMessageInput } from "./types.js";
 
 const root = await mkdtemp(join(tmpdir(), "aireins-antigravity-lifecycle-"));
 process.env.WORKBENCH_HOME = join(root, "workbench");
+const brain = process.env.WORKBENCH_ANTIGRAVITY_BRAIN_DIR = join(root, "antigravity-brain");
 for (const agent of ["CLAUDE", "CODEX", "KIMI"]) process.env[`WORKBENCH_${agent}_HISTORY_DIR`] = join(root, agent);
 const { SessionManager } = await import("./session-manager.js");
+const { saveRegistry, transcriptPathFor } = await import("./persistence.js");
 const nativeSessionId = "aaaaaaaa-1111-4111-8111-111111111111";
 const instances: FakeDriver[] = [];
 class FakeDriver implements Driver {
-  readonly kind = "antigravity" as const;
   stopped = false;
   readonly sent: UserMessageInput[] = [];
-  constructor(readonly options: DriverOptions) {}
+  constructor(readonly kind: AgentKind, readonly options: DriverOptions, private readonly id: string) {}
   async start(): Promise<void> {
-    this.options.callbacks.metadata({ nativeSessionId: this.options.resumeSessionId ?? nativeSessionId,
+    this.options.callbacks.metadata({ nativeSessionId: this.options.resumeSessionId ?? this.id,
       config: { model: "gemini-3.8-flash", effort: "low", permissionMode: "default" } });
     this.options.callbacks.status("idle");
   }
@@ -37,11 +38,13 @@ class FakeDriver implements Driver {
   async interrupt(): Promise<void> {}
   async stop(): Promise<void> { this.stopped = true; }
 }
-function manager() {
+function manager(bootTime?: number) {
   return new SessionManager((agent, options) => {
-    assert.equal(agent, "antigravity");
-    const driver = new FakeDriver(options); instances.push(driver); return driver;
-  });
+    const driver = new FakeDriver(agent, options, instances.length ? `fixture-${instances.length}` : nativeSessionId);
+    instances.push(driver);
+    return driver;
+  }, () => ({ model: null, effort: null }), undefined, undefined, undefined,
+  bootTime === undefined ? undefined : () => bootTime);
 }
 const first = manager();
 const session = await first.create({ agent: "antigravity", cwd: root, snapshot: "skip" });
@@ -160,3 +163,94 @@ await timed.releaseIdleSessions(1, new Date(Date.now() + 10 * 60_000));
 assert.equal(timed.get(timedSession.id)!.released, true, "派单结束后可正常空闲释放");
 await timed.shutdown();
 console.log("PASS: Antigravity 跨 CLI 派单归属、运行态计数保活与每回合耗时记录");
+
+{
+  const live = manager();
+  const create = async (agent: AgentKind) => {
+    const record = await live.create({ agent, cwd: root, snapshot: "skip" });
+    return { id: record.id, driver: instances.at(-1)! };
+  };
+  const idle = await create("antigravity");
+  const next = await create("antigravity");
+  const running = await create("antigravity");
+  running.driver.options.callbacks.status("running");
+  const dispatch = await create("antigravity");
+  live.setActiveDispatchCounts(new Map([[dispatch.id, 1]]));
+  const gated = await create("antigravity");
+  gated.driver.options.callbacks.emit("permission_request", { requestId: "approval", gate: "fixture", toolName: "fixture" });
+  const unprompted = await create("claude");
+  const connected = await create("claude");
+  await live.sendUserMessage(connected.id, { text: "prompted Claude" });
+  await new Promise<void>(resolve => setImmediate(resolve));
+  connected.driver.options.callbacks.metadata({ remoteControl: { status: "connected" } });
+  assert.equal(live.get(connected.id)?.remoteControl?.status, "connected");
+
+  await live.releaseSessionsForPowerOff(() => idle.driver.stopped);
+  assert.equal(live.get(idle.id)?.released, true);
+  assert.equal(next.driver.stopped, false, "cancellation stops the loop before releasing the next worker");
+  assert.equal(connected.driver.stopped, false);
+
+  await live.releaseSessionsForPowerOff();
+  for (const { id, driver } of [idle, next, connected]) {
+    assert.equal(driver.stopped, true);
+    const record = live.get(id)!;
+    assert.equal(record.status, "idle");
+    assert.equal(record.released, true);
+    const lines = (await readFile(record.transcriptPath, "utf8")).trimEnd().split("\n");
+    const events = lines.map(line => JSON.parse(line) as UnifiedEvent).filter(event => event.type === "worker_released");
+    assert.deepEqual(events.map(event => event.payload.reason), ["shutdown"]);
+  }
+  assert.equal(live.get(connected.id)?.remoteControl?.status, "disconnected");
+  for (const { id, driver } of [running, dispatch, gated, unprompted]) {
+    assert.equal(driver.stopped, false, id);
+    assert.equal(live.get(id)?.released, undefined, id);
+  }
+  // Load the persisted state directly, without the normal shutdown path or a native brain archive.
+  const afterPowerOff = manager();
+  assert.equal(afterPowerOff.get(idle.id)?.status, "idle");
+  assert.equal(afterPowerOff.get(idle.id)?.released, true);
+  assert.ok(afterPowerOff.getSnapshot(idle.id)!.events.some(event =>
+    event.type === "worker_released" && event.payload.reason === "shutdown"));
+  await live.shutdown();
+}
+
+{
+  const timestamp = "2020-01-01T00:00:00.000Z";
+  const bootTime = Date.parse(timestamp) + 60_000;
+  const fixtures: Array<{ record: SessionRecord; valid: boolean }> = [];
+  for (const status of ["idle", "dead"] as const) {
+    for (const archive of ["valid", "missing", "corrupt"] as const) {
+      const id = `power-off-${status}-${archive}`;
+      const transcriptPath = transcriptPathFor(id);
+      const record: SessionRecord = {
+        id, agent: "antigravity", agentId: "main", cwd: root, config: {}, riskyMode: false,
+        status, nativeSessionId: id, seq: 1, transcriptPath, createdAt: timestamp, lastActivityAt: timestamp,
+        ...(status === "idle" ? { processId: process.pid,
+          processIdentity: { bootId: "00000000-0000-0000-0000-000000000000", startTime: "1" } } : {}),
+      };
+      const event: UnifiedEvent = {
+        type: "user_message", sessionId: id, agentId: "main", seq: 1, timestamp, payload: { text: "before power loss" },
+      };
+      await writeFile(transcriptPath, JSON.stringify(event) + "\n");
+      if (archive !== "missing") {
+        const native = join(brain, id, ".system_generated", "logs", "transcript.jsonl");
+        await mkdir(dirname(native), { recursive: true });
+        await writeFile(native, archive === "valid" ? '{"type":"USER_INPUT","text":"before power loss"}\n' : "{broken}\n");
+      }
+      fixtures.push({ record, valid: archive === "valid" });
+    }
+  }
+  saveRegistry(fixtures.map(({ record }) => record));
+  const recovered = manager(bootTime);
+  for (const { record, valid } of fixtures) {
+    assert.equal(recovered.get(record.id)?.status, valid ? "idle" : "dead", record.id);
+    assert.equal(recovered.get(record.id)?.released, valid ? true : undefined, record.id);
+    if (!valid) continue;
+    await recovered.sendUserMessage(record.id, { text: "resume after power loss" });
+    await new Promise<void>(resolve => setImmediate(resolve));
+    assert.equal(instances.at(-1)!.options.resumeSessionId, record.nativeSessionId);
+    assert.equal(instances.at(-1)!.sent[0]?.text, "resume after power loss");
+  }
+  await recovered.shutdown();
+}
+console.log("PASS: power-off worker release and Antigravity crash/reboot recovery");

@@ -26,7 +26,7 @@ export interface DispatchSubagent {
   startedAt: string | null; lastActivityAt: string; activity?: string;
 }
 
-const DISPATCH_TOOLS = ["codex", "kimi", "copilot", "claude"] as const;
+const DISPATCH_TOOLS = ["codex", "kimi", "copilot", "claude", "antigravity"] as const;
 export type DispatchTool = typeof DISPATCH_TOOLS[number];
 export type DispatchWireState = "flow" | "finish" | "idle";
 export const RECENT_DISPATCH_MS = 30 * 60 * 1000;
@@ -70,7 +70,7 @@ export function groupDispatches(runs: readonly DispatchRun[], now: number) {
       wireState: items.some((run) => run.status === "running") ? "flow"
         : items.some((run) => recentWireEnd(dispatchEnd(run), now)) ? "finish" : "idle",
     };
-  }).filter((group) => group.tool !== "claude" || group.runs.length > 0);
+  }).filter(({ tool, runs }) => runs.length || (tool !== "claude" && tool !== "antigravity"));
 }
 
 export interface DispatchTreeRow { id: string; run: DispatchRun }
@@ -81,6 +81,7 @@ export interface DispatchTreeNode {
   tool: DispatchTool;
   kind: "executor" | "run" | "subagent" | "sidebranch";
   mode?: "idle" | "single" | "group";
+  modelFamily?: string;
   run?: DispatchRun;
   runId?: string;
   subagent?: DispatchSubagent;
@@ -91,6 +92,7 @@ export interface DispatchTreeNode {
 export interface DispatchTreeEdge {
   from: string; to: string; tool: DispatchTool; state: DispatchWireState;
   kind: "executor" | "run" | "subagent" | "sidebranch";
+  modelFamily?: string;
   /** Group-mode run wires: ordered port on the executor card bottom (folded runs keep theirs). */
   port?: { index: number; count: number };
 }
@@ -114,8 +116,25 @@ export function dispatchWirePath(from: DispatchBounds, to: DispatchBounds, row?:
 
 /** Keep versioned/full model identifiers in titles; tree cards only need the family. */
 export function dispatchModelName(model: string): string {
+  const planner = /^(?:gemini-pro-)?orchestrator-(neon|carbon|argon)$/iu.exec(model)?.[1]?.toLowerCase();
+  if (planner) return planner[0]!.toUpperCase() + planner.slice(1);
+  if (model === "gemini-flash-worker-agy") return "Hydrogen";
+  const opus = /^claude-opus-(\d+)-(\d+)-(low|medium|high|xhigh|max)$/u.exec(model);
+  if (opus) return `Opus ${opus[1]}.${opus[2]} · ${opus[3]![0]!.toUpperCase()}${opus[3]!.slice(1)}`;
   const short = modelShortName(model);
   return short.match(/^gpt-\d+(?:\.\d+)*-(sol|luna|astra)(?:-|$)/i)?.[1] ?? short;
+}
+
+export function isAntigravityNativeDispatch(run: DispatchRun): boolean {
+  return run.tool === "antigravity" && run.native === true && run.parent?.agent === "antigravity";
+}
+
+function antigravityModelFamily(model: string): string | undefined {
+  if (model === "gemini-flash-worker-agy") return "hydrogen";
+  if (/^gemini-[\d.]+-flash(?:-|$)/u.test(model)) return "flash";
+  if (model === "gemini-pro-orchestrator-g1-pro") return "g1-pro";
+  return /^(?:gemini-4-|(?:gemini-pro-)?orchestrator-)(hydrogen|neon|carbon|argon)(?:-|$)/u.exec(model)?.[1]
+    ?? /^claude-(opus|sonnet)(?:-|$)/u.exec(model)?.[1];
 }
 
 /** Stable IDs are scoped to the dispatch: identical thread nicknames never merge runs. */
@@ -130,8 +149,10 @@ export function buildDispatchTree(groups: ReturnType<typeof groupDispatches>, no
     }
     return false;
   };
-  const nested = new Set(allRuns.filter((run) => dispatchParent(run, allRuns) && !hasCycle(run)));
-  const nativeSides = allRuns.filter(run => !nested.has(run) && run.tool === "claude" && run.native && run.parent?.agent === "claude");
+  const nested = new Set(allRuns.filter((run) => !(isAntigravityNativeDispatch(run) && run.agentType === "inner-loop")
+    && dispatchParent(run, allRuns) && !hasCycle(run)));
+  const nativeSides = allRuns.filter(run => !nested.has(run) && (isAntigravityNativeDispatch(run)
+    || (run.tool === "claude" && run.native && run.parent?.agent === "claude")));
   const rootGroups = groups.map((group) => {
     const runs = group.runs.filter((run) => !nested.has(run) && !nativeSides.includes(run));
     return { ...group, runs, visible: runs.slice(0, 3), more: Math.max(0, runs.length - 3) };
@@ -143,9 +164,11 @@ export function buildDispatchTree(groups: ReturnType<typeof groupDispatches>, no
   const anchors = new Map<string, { id: string; depth: number }>();
   const agentAnchors = new Map<string, { id: string; depth: number }>();
   const add = (node: DispatchTreeNode, state: DispatchWireState, port?: DispatchTreeEdge["port"]) => {
+    if (node.run?.model && isAntigravityNativeDispatch(node.run)) node.modelFamily = antigravityModelFamily(node.run.model);
     if (node.kind === "sidebranch") sidebranches.push(node);
     else (levels[node.depth - 2] ??= []).push(node);
-    edges.push({ from: node.parentId, to: node.id, tool: node.tool, state, kind: node.kind, ...(port && { port }) });
+    edges.push({ from: node.parentId, to: node.id, tool: node.tool, state, kind: node.kind,
+      ...(node.modelFamily && { modelFamily: node.modelFamily }), ...(port && { port }) });
   };
   const addSubagents = (run: DispatchRun, id: string, depth: number) => {
     const children = new Map<string, DispatchSubagent[]>();
@@ -172,10 +195,10 @@ export function buildDispatchTree(groups: ReturnType<typeof groupDispatches>, no
     }
   };
   const runState = (run: DispatchRun) => run.status === "running" ? "flow"
-    : recentWireEnd(dispatchEnd(run), now) ? "finish" : "idle";
+    : !(isAntigravityNativeDispatch(run) && run.status === "unknown") && recentWireEnd(dispatchEnd(run), now) ? "finish" : "idle";
   for (const run of nativeSides) {
     const node: DispatchTreeNode = { id: `run:${JSON.stringify([run.tool, run.runId])}`, parentId: "dispatcher",
-      depth: 2, tool: "claude", kind: "sidebranch", run, rows: [], more: 0 };
+      depth: 2, tool: run.tool === "antigravity" ? "antigravity" : "claude", kind: "sidebranch", run, rows: [], more: 0 };
     add(node, runState(run));
     anchors.set(run.runId, { id: node.id, depth: node.depth });
     addSubagents(run, node.id, node.depth);
@@ -248,6 +271,7 @@ export function dispatchTime(seconds: number | null): string {
 export function dispatchStatus(status: string): { label: string; className: string } {
   if (status === "running") return { label: t("core.021"), className: "" };
   if (status === "OK") return { label: t("core.022"), className: "finished" };
+  if (status === "stopped") return { label: t("ui.DispatchView.stopped"), className: "finished" };
   if (["TOOL_FAIL", "ACCEPT_FAIL", "TIMEOUT"].includes(status)) return { label: t("core.023"), className: "failed" };
   if (status === "lost") return { label: "lost", className: "failed" };
   return { label: t("core.024"), className: "unknown" };
@@ -295,14 +319,14 @@ export function dispatchForests(runs: readonly DispatchRun[], sessions: readonly
   });
 }
 
-export function dispatcherModel(runs: readonly DispatchRun[], sessions: readonly DispatchSessionTitle[]): string | null {
+export function dispatcherModel(runs: readonly DispatchRun[], sessions: readonly DispatchSessionTitle[], raw = false): string | null {
   const models = new Set<string>();
   for (const run of runs) {
     if (!run.parent) continue;
     const session = sessions.find((item) => (!item.agent || item.agent === run.parent!.agent)
       && (item.id === run.parent!.sessionId || item.nativeSessionId === run.parent!.sessionId));
     const model = session ? session.model : run.parent.model;
-    if (model) models.add(modelShortName(model));
+    if (model) models.add(raw ? model : run.parent.agent === "antigravity" ? dispatchModelName(model) : modelShortName(model));
   }
   return models.size ? [...models].join(" · ") : null;
 }

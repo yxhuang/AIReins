@@ -16,7 +16,8 @@ export async function probeAntigravityConfigSchema(cwd: string): Promise<DriverC
       protocolVersion: 1, clientCapabilities: {},
       clientInfo: { name: "aireins-meta", title: "AIReins metadata probe", version: "0.5.0" },
     });
-    const result = await probe.request("session/new", { cwd, mcpServers: [] });
+    // 后台探测需要等账号配置就绪，页面不必等待这一步。
+    const result = await probe.request("session/new", { cwd, mcpServers: [] }, 45_000);
     sessionId = typeof result?.sessionId === "string" ? result.sessionId : "";
     return acpConfigSchemaFromOptions(Array.isArray(result?.configOptions) ? result.configOptions : [], "antigravity");
   } finally {

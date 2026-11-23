@@ -1,11 +1,14 @@
 import { proxyEnvironment } from "./proxy-env.js";
 import { spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { homedir, hostname } from "node:os";
 import { dirname, join } from "node:path";
 import { DRIVER_CAPABILITIES, getDriverMetadata } from "./drivers/index.js";
+import type { DriverConfigSchema } from "./types.js";
 
 export const SERVER_VERSION = (JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as { version: string }).version;
+export const SERVER_INSTANCE_ID = randomUUID();
 
 export function getServerHostName(remoteOrigin?: string): string {
   try {
@@ -91,6 +94,10 @@ export function getMeta(): Promise<Record<string, unknown>> {
     probeVersion("kimi"),
     getDriverMetadata(process.cwd()),
   ]).then(([claude, antigravity, codex, kimi, drivers]) => {
+    const previous = (initial.drivers as { antigravity?: DriverConfigSchema } | undefined)?.antigravity;
+    if (drivers.antigravity.error && Array.isArray(previous?.options) && previous.options.length > 0) {
+      drivers.antigravity.options = previous.options;
+    }
     const probed = { cliVersions: { claude, antigravity, codex, kimi }, drivers };
     writeCache(probed);
     cached = Promise.resolve(withLive({ ...probed, metadataPending: false }));

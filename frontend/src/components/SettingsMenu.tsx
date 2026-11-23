@@ -523,6 +523,7 @@ export function SettingsMenu() {
               role="radiogroup"
               ariaLabelledby={`settings-item-${item.id}`}
             />
+            {item.id === "idle-release" && <span className="settings-hint">{t("ui.SettingsMenu.idle_release_hint")}</span>}
           </div>
         )
       ))}

@@ -1,4 +1,5 @@
 const messages: Record<string, string> = {
+  "server.nativePayloadUnavailableForPin": "原生历史暂不可读，恢复后再置顶。",
   "server.projectOrder.moveTarget": "before 与 after 必须且只能提供一个",
   "server.projectOrder.path": "工作目录必须是 4096 字符以内的绝对路径",
   "server.projectOrder.unknown": "工作目录不在顺序列表中",

@@ -23,6 +23,8 @@ import { EventPageIndex } from "./event-pages.js";
 import { normalizeProjectPath } from "../shared/project-path.js";
 import { sessionTitle } from "../shared/session-title.js";
 import { log } from "./logger.js";
+import { ARCHIVE_TEMP_PATTERN, openTranscriptInput, readTranscriptText, replaceTranscriptLines, transcriptLines, unpackTranscriptForAppend } from "./transcript-archive.js";
+import { NativePayloadReplay, type StoredTranscriptEvent } from "./native-payload-replay.js";
 import type { SessionRecord, UnifiedEvent } from "./types.js";
 
 export const workbenchHome = process.env.WORKBENCH_HOME || join(homedir(), ".workbench");
@@ -81,7 +83,7 @@ export function saveProjectOrder(paths: string[]): void {
 }
 
 /**
- * 启动时清理（对标 Claude 的 cleanupPeriodDays）：最后活动早于 retentionDays 天的会话移出登记表；
+ * 启动时清理：保留关联原生存档的会话，尚未关联的记录才沿用 retentionDays。
  * 不在登记表里的 transcript 与 uploads/<id>（含 UI 里移除过的会话）一并删除。只删 AIReins 自己的副本，
  * 不碰 CLI 的原生会话。retentionDays=0 只清残留、不过期。
  */
@@ -91,13 +93,14 @@ export function pruneStorage(retentionDays: number, now = Date.now()): { expired
   const cutoff = now - retentionDays * 86_400_000;
   // 时间戳解析不了的一律保留，宁可少删
   const kept = retentionDays > 0
-    ? sessions.filter((session) => session.pinned || (session as SessionRecord & { groupId?: string }).groupId || !(Date.parse(session.lastActivityAt) < cutoff))
+    ? sessions.filter((session) => session.nativeSessionId || session.pinned || (session as SessionRecord & { groupId?: string }).groupId || !(Date.parse(session.lastActivityAt) < cutoff))
     : sessions;
   if (kept.length !== sessions.length) saveRegistry(kept);
   const keep = new Set(kept.map((session) => session.id));
   let removedFiles = 0;
   for (const name of readdirSync(transcriptsDir)) {
-    if (!name.endsWith(".ndjson") || keep.has(name.slice(0, -".ndjson".length))) continue;
+    if (!ARCHIVE_TEMP_PATTERN.test(name)
+      && (!name.endsWith(".ndjson") || keep.has(name.slice(0, -".ndjson".length)))) continue;
     rmSync(join(transcriptsDir, name), { force: true });
     removedFiles += 1;
   }
@@ -127,7 +130,7 @@ export function uploadDirReferences(kept: SessionRecord[]): Map<string, Set<stri
     const cached = uploadReferenceCache.get(path);
     if (cached?.signature === signature && cached.idsKey === idsKey) return [session.id, cached.references];
     let text: string;
-    try { text = readFileSync(path, "utf8"); } catch (error) {
+    try { text = readTranscriptText(path); } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
       text = "";
     }
@@ -212,6 +215,7 @@ export function flushTranscripts(path?: string): void {
 
 function writeTranscriptBatch(path: string, lines: string[]): void {
   assertTranscriptWritable(path);
+  if (transcriptHealth.get(path)?.archived && unpackTranscriptForAppend(path)) assertTranscriptWritable(path);
   const health = transcriptHealth.get(path)!;
   const before = health.signature!;
   const repair = health.tail ? `\n${JSON.stringify({ _wbSkippedTail: health.tail })}\n` : "";
@@ -270,7 +274,7 @@ function writeTranscriptBatch(path: string, lines: string[]): void {
 export function appendTranscript(path: string, event: UnifiedEvent, onError?: (error: unknown) => void): void {
   if (!transcriptHealth.has(path)) {
     mkdirSync(dirname(path), { recursive: true });
-    readTranscriptState(path);
+    readTranscriptState(path, undefined, false);
   }
   assertTranscriptWritable(path);
   const line = `${JSON.stringify(event)}\n`;
@@ -306,7 +310,7 @@ export function assertTranscriptWritable(path: string): void {
   const signature = transcriptSignature(path);
   if (transcriptHealth.get(path)?.signature !== signature) {
     transcriptCache.delete(path);
-    readTranscriptState(path);
+    readTranscriptState(path, undefined, false);
     if (transcriptHealth.get(path)?.signature !== transcriptSignature(path)) throw new Error(`transcript 读取期间变化，禁止追加：${path}`);
   }
   const health = transcriptHealth.get(path)!;
@@ -340,8 +344,10 @@ function transcriptSignature(path: string): string {
   try { const stat = statSync(path); return `${stat.ino}:${stat.size}:${stat.mtimeMs}:${stat.ctimeMs}`; }
   catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return "missing"; transcriptHealth.set(path, { readOnly: true }); throw error; }
 }
-function indexTranscriptEvent(cache: CachedTranscript, event: UnifiedEvent, offset: number, length: number): void {
-  cache.index.append(event);
+function indexTranscriptEvent(cache: CachedTranscript, event: StoredTranscriptEvent, offset: number, length: number): void {
+  const sourceBytes = event._wbNativeReplay?.length;
+  if (event._wbNativeReplay) delete event._wbNativeReplay;
+  cache.index.append(event, sourceBytes);
   cache.offsets.push(offset);
   cache.lengths.push(length);
   if (!cache.hasFirstUser && event.type === "user_message") {
@@ -374,23 +380,24 @@ function transcriptPage(path: string, beforeSeq?: number) {
     const cached = cachedTranscript(path);
     const { start, limit } = cached.index.range(beforeSeq);
     const events: UnifiedEvent[] = [];
-    let fd: number | undefined;
+    let input: ReturnType<typeof openTranscriptInput> | undefined;
+    const replay = new NativePayloadReplay();
     try {
-      if (start < limit) fd = openSync(path, "r");
+      if (start < limit) input = openTranscriptInput(path);
       for (let i = start; i < limit; i++) {
         const bytes = Buffer.allocUnsafe(cached.lengths[i]!);
         let read = 0;
         while (read < bytes.length) {
-          const count = readSync(fd!, bytes, read, bytes.length - read, cached.offsets[i]! + read);
+          const count = input!.read(bytes, read, bytes.length - read, cached.offsets[i]! + read);
           if (!count) throw new Error("transcript 分页读取不完整");
           read += count;
         }
-        events.push(transcriptEvent(JSON.parse(bytes.toString("utf8"))));
+        events.push(replay.restore(transcriptEvent(JSON.parse(bytes.toString("utf8")))));
       }
       if (cached.signature === transcriptSignature(path)) return { cached, page: { events, hasMore: start > 0, firstSeq: events[0]?.seq ?? 0 } };
     } catch (error) {
       if (cached.signature === transcriptSignature(path)) throw error;
-    } finally { if (fd !== undefined) closeSync(fd); }
+    } finally { input?.close(); replay.close(); }
     transcriptCache.delete(path);
   }
   throw new Error(`transcript 分页读取期间变化：${path}`);
@@ -406,22 +413,22 @@ export function readTranscriptDerived(path: string) {
 }
 
 interface TailBoundary { offset: number; bytes: number; sha256: string }
-const transcriptHealth = new Map<string, { readOnly: boolean; tail?: TailBoundary; signature?: string }>();
+const transcriptHealth = new Map<string, { readOnly: boolean; tail?: TailBoundary; signature?: string; archived?: boolean; hasDetachedPayloads?: boolean }>();
 const tailMarkerPrefix = Buffer.from('{"_wbSkippedTail":');
 const tailBoundary = (bytes: Buffer, offset: number): TailBoundary => ({ offset, bytes: bytes.length,
   sha256: createHash("sha256").update(bytes).digest("hex") });
 
-function transcriptEvent(parsed: any): UnifiedEvent {
+function transcriptEvent(parsed: any): StoredTranscriptEvent {
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed) || typeof parsed.seq !== "number"
     || typeof parsed.type !== "string" || !parsed.payload || typeof parsed.payload !== "object") throw new Error("无效事件对象");
   return parsed as UnifiedEvent;
 }
 
-function scanTranscript(path: string, onEvent: (event: UnifiedEvent, offset: number, length: number) => void) {
+function scanTranscript(path: string, onEvent: (event: StoredTranscriptEvent, offset: number, length: number) => void) {
   const signature = transcriptSignature(path);
   if (transcriptCache.get(path)?.signature !== signature) transcriptCache.delete(path);
-  let fd: number;
-  try { fd = openSync(path, "r"); } catch (error) {
+  let input: ReturnType<typeof openTranscriptInput>;
+  try { input = openTranscriptInput(path); } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") { transcriptHealth.set(path, { readOnly: true, signature }); throw error; }
     const stable = signature === transcriptSignature(path);
     if (stable) transcriptHealth.set(path, { readOnly: transcriptWriteFailures.has(path), signature });
@@ -429,10 +436,11 @@ function scanTranscript(path: string, onEvent: (event: UnifiedEvent, offset: num
   }
   let lineNumber = 0;
   let damaged = transcriptWriteFailures.has(path);
+  let hasDetachedPayloads = false;
   let tail: TailBoundary | undefined;
   let previous: { bytes: Buffer; offset: number } | undefined;
   try {
-    const lines = transcriptLines(fd);
+    const lines = transcriptLines(input);
     let current = lines.next();
     while (!current.done) {
       lineNumber++;
@@ -460,7 +468,11 @@ function scanTranscript(path: string, onEvent: (event: UnifiedEvent, offset: num
           if (marker) {
             const boundary = previous && tailBoundary(previous.bytes, previous.offset);
             if (!boundary || marker.offset !== boundary.offset || marker.bytes !== boundary.bytes || marker.sha256 !== boundary.sha256) throw new Error("尾行隔离标记不匹配");
-          } else onEvent(transcriptEvent(parsed), raw.offset, raw.bytes.length);
+          } else {
+            const event = transcriptEvent(parsed);
+            hasDetachedPayloads ||= Boolean(event._wbNativeReplay);
+            onEvent(event, raw.offset, raw.bytes.length);
+          }
         }
       } catch (error) {
         damaged = true;
@@ -473,55 +485,55 @@ function scanTranscript(path: string, onEvent: (event: UnifiedEvent, offset: num
     transcriptHealth.set(path, { readOnly: true, signature });
     transcriptCache.delete(path);
     throw error;
-  } finally { closeSync(fd); }
+  } finally { input.close(); }
   const stable = signature === transcriptSignature(path);
-  if (stable) transcriptHealth.set(path, { readOnly: damaged, tail, signature });
+  if (stable) transcriptHealth.set(path, { readOnly: damaged, tail, signature, archived: input.archived, hasDetachedPayloads });
   else { transcriptHealth.delete(path); transcriptCache.delete(path); }
-  return { damaged, incompleteTail: Boolean(tail), signature, stable };
+  return { damaged, incompleteTail: Boolean(tail), signature, stable, archived: input.archived, hasDetachedPayloads };
 }
 
-export function readTranscriptState(path: string, legacySession?: Pick<SessionRecord, "id" | "agent">): { events: UnifiedEvent[]; damaged: boolean; incompleteTail: boolean } {
+export function readTranscriptState(path: string, legacySession?: Pick<SessionRecord, "id" | "agent">, hydrate = true):
+  { events: UnifiedEvent[]; damaged: boolean; incompleteTail: boolean; hasDetachedPayloads?: true } {
   flushTranscripts(path);
   // Full recovery reads remain transient; startup does not create paging caches.
   const events: UnifiedEvent[] = [];
   let legacy = false;
-  const { damaged, incompleteTail, stable } = scanTranscript(path, event => {
-    events.push(event);
-    if (legacySession?.agent === "claude" && isLegacyPartial(event)) legacy = true;
-  });
-  if (legacy && stable && !damaged && !incompleteTail && path === transcriptPathFor(legacySession!.id)) {
+  const replay = hydrate ? new NativePayloadReplay() : undefined;
+  let result;
+  try {
+    result = scanTranscript(path, event => {
+      if (legacySession?.agent === "claude" && isLegacyPartial(event)) legacy = true;
+      if (replay) events.push(replay.restore(event));
+      else {
+        delete event._wbNativeReplay;
+        events.push(event);
+      }
+    });
+  } finally { replay?.close(); }
+  const { damaged, incompleteTail, stable, archived, hasDetachedPayloads } = result;
+  if (legacy && !archived && stable && !damaged && !incompleteTail && path === transcriptPathFor(legacySession!.id)) {
     const compacted = compactClaudeTranscripts([legacySession!]);
     log("info", "legacy Claude transcript updates compacted", compacted);
-    if (compacted.rewrittenFiles) return readTranscriptState(path);
+    if (compacted.rewrittenFiles) return readTranscriptState(path, undefined, hydrate);
   }
-  return { events, damaged, incompleteTail };
+  return { events, damaged, incompleteTail, ...(hasDetachedPayloads ? { hasDetachedPayloads: true } : {}) };
 }
 
 export function readTranscript(path: string): UnifiedEvent[] { return readTranscriptState(path).events; }
 
-/** 有界分块读取，保留原始行字节（含换行），不把整个 transcript 留在内存中。 */
-function* transcriptLines(fd: number): Generator<{ bytes: Buffer; offset: number }> {
-  let parts: Buffer[] = [];
-  let position = 0;
-  let offset = 0;
-  for (;;) {
-    const chunk = Buffer.allocUnsafe(64 * 1024);
-    const size = readSync(fd, chunk, 0, chunk.length, position);
-    if (!size) break;
-    position += size;
-    const bytes = chunk.subarray(0, size);
-    let start = 0;
-    for (let end = bytes.indexOf(10); end !== -1; end = bytes.indexOf(10, start)) {
-      const segment = bytes.subarray(start, end + 1);
-      const line = parts.length ? Buffer.concat([...parts, segment]) : segment;
-      parts = [];
-      yield { bytes: line, offset };
-      offset += line.length;
-      start = end + 1;
-    }
-    if (start < bytes.length) parts.push(bytes.subarray(start));
+export function restoreNativePayloadsForPin(path: string): boolean {
+  flushTranscripts(path);
+  assertTranscriptWritable(path);
+  if (!transcriptHealth.get(path)?.hasDetachedPayloads) return true;
+  const signature = transcriptSignature(path);
+  const restored = readTranscriptState(path);
+  if (signature !== transcriptSignature(path) || restored.damaged || restored.incompleteTail
+    || restored.events.some(event => event.nativePayloadUnavailable)) {
+    return false;
   }
-  if (parts.length) yield { bytes: Buffer.concat(parts), offset };
+  const lines = function* () { for (const event of restored.events) yield `${JSON.stringify(event)}\n`; };
+  replaceTranscriptLines(path, lines());
+  return true;
 }
 
 function isLegacyPartial(event: UnifiedEvent): boolean {

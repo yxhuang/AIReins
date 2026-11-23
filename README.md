@@ -1,7 +1,7 @@
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/assets/banner-en-dark.png">
-    <img src="docs/assets/banner-en-light.png" alt="AIReins: Let the agents run. Keep the reins. Claude Code, Codex and Kimi Code converge through AR on an Approve button on your phone" width="100%">
+    <img src="docs/assets/banner-en-light.png" alt="AIReins: Let the agents run. Keep the reins. A local AI workbench converging on an Approve button on your phone" width="100%">
   </picture>
 </p>
 
@@ -37,17 +37,17 @@
 
 AIReins is an AI workbench that runs on your own computer. It drives Claude Code, Antigravity, Codex and Kimi Code through their official CLIs and your existing logins. You open sessions, approve tool calls, browse files and use a terminal from a browser on your desktop or phone, and reach the computer from anywhere over [Tailscale](https://tailscale.com).
 
-Official remote options usually give you a window into one session. AIReins gives you the whole computer: any folder (including Windows drives under `/mnt/c`, not just git repos), file preview and editing, a terminal, sending with Taildrop, and the native history of all three CLIs.
+Official remote options usually give you a window into one session. AIReins gives you the whole computer: any folder (including Windows drives under `/mnt/c`, not just git repos), file preview and editing, a terminal, sending with Taildrop, and the native history of Claude Code, Codex and Kimi Code (plus saved AIReins conversations for Antigravity).
 
 ## Highlights
 
 - **Keeps your harness.** AIReins is not another agent framework. It drives the official Claude Code, Antigravity, Codex and Kimi Code CLIs you already have, so your `CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, skills, hooks, MCP servers, plugins and CLI settings load as usual. Nothing to migrate, and AIReins never rewrites them on its own; only when you toggle the Claude Remote Control default or a Claude plugin in the UI is that saved to the matching native config. You can pick a model, reasoning effort and permission mode per session; the choice applies to that session only.
-- **One workbench for all four.** No more switching between CLI windows: sessions from all four agents sit side by side, and approvals, answers and interrupts all happen in one place.
-- **Google Antigravity.** New conversations default to Antigravity, between Claude and Codex, with Gemini colors and account-provided model and effort pickers. Install and sign in to `agy` first. AIReins saves its own conversations and resumes them through the official ACP interface; external Antigravity history import and permanent native-session deletion are not yet available.
-- **One history, free to come and go.** Search, filter by folder and resume the native history of all three CLIs in one place. Sessions live in each CLI's own history, so you can pick them up again in the CLI, the VS Code extension or the Codex app, and reach a Claude session from the Claude app once Remote Control is on. (For Claude sessions to appear in the CLI and VS Code history lists, set `claudeCodeEntrypoint` in `prefs.json`, see [Configuration](#configuration); without it, `claude --resume <session ID>` still works.)
-- **Files and terminal at hand.** The right-hand panel holds a file window (browse any folder, preview, edit in place, see Git status) and a multi-tab terminal: your default shell (`$SHELL`) on Linux and macOS, bash plus Windows PowerShell under WSL.
-- **A live dispatch map.** When one agent leads and hands work to the others, the dispatch flow chart shows who sent what to whom, how far each run has got and whether it passed; sub-agents unfold as a parent/child tree too.
-- **Quick links and built-in AI usage.** The Quick links menu holds your own links (web pages, `vscode://`, `obsidian://` and more, from one JSON file). A built-in AI usage panel in the sidebar shows the subscription quota of all four providers (Claude, Antigravity, Codex and Kimi) on one page without installing Python or an extra service; bars with a fixed time window also mark how much of that window has elapsed, so you can see at a glance whether you are spending faster than time. Turn on Tibo reset alerts in Settings (off by default) and AIReins checks [AIHOT](https://aihot.news/codex-reset) every 10 minutes for Tibo's Codex quota-reset announcements, alerting every open page and listing them at the bottom of the quota page.
+- **One workbench for all four.** No more switching between CLI windows: sessions from all four agents sit side by side, and approvals, answers and interrupts all happen in one place. The new conversation form opens with Antigravity selected.
+- **Google Antigravity.** Antigravity appears between Claude and Codex, with Gemini colors and account-provided model and effort pickers (options update dynamically when switching models). Install and sign in to `agy` first. AIReins saves its own conversations, supports concurrent prompts and background tool/subagent keepalive, and resumes them through the official ACP interface (`agy --conversation <session ID>`); external Antigravity history import and permanent native-session deletion are not yet available.
+- **One history, free to come and go.** Search, filter by folder and resume the native history of Claude Code, Codex and Kimi Code in one place. Those sessions live in each CLI's own history, so you can pick them up again in the CLI, the VS Code extension or the Codex app, and reach a Claude session from the Claude app once Remote Control is on. (For Claude sessions to appear in the CLI and VS Code history lists, set `claudeCodeEntrypoint` in `prefs.json`, see [Configuration](#configuration); without it, `claude --resume <session ID>` still works.) AIReins Antigravity sessions resume from the terminal via `agy --conversation <session ID>`.
+- **Files and terminal at hand.** The right-hand panel holds a file window (browse any folder, preview, edit in place, see Git status) and a multi-tab terminal: your default shell (`$SHELL`) on Linux and macOS, bash plus Windows PowerShell under WSL, with remote terminal access toggleable directly in Settings → Host.
+- **A live dispatch map.** When one agent leads and hands work to the others, the dispatch flow chart shows who sent what to whom, how far each run has got and whether it passed; native sub-agents, Antigravity Orchestrator inner-loop phases (showing live planner and executor models) and Swarm workers with model-family colors unfold in the tree too.
+- **Built-in AI usage, reset alerts and quick links.** A built-in AI usage panel in the sidebar shows the subscription quota of all four providers (Claude, Antigravity, Codex and Kimi) on one page without installing Python or an extra service, with per-provider and parallel Refresh all actions, optional Antigravity AI credits (off by default), and elapsed-time pace marks on fixed-window bars so you can see at a glance whether you are spending faster than time. Turn on quota reset announcements in Settings → Sessions (off by default) and AIReins checks [AIHOT](https://aihot.news/codex-reset) every 10 minutes for Codex, Antigravity, Claude and Grok Bot announcements in a compact expandable strip at the bottom of the Usage panel with cross-tab sync. The Quick links menu holds your own links (web pages, `vscode://`, `obsidian://` and more, from one JSON file).
 - **The whole computer on your phone.** Connect back over Tailscale to approve, read files and open a terminal from your phone.
 
 ## A look
@@ -71,14 +71,14 @@ Agents keep getting more capable. They read code, edit files, run commands and w
 So everything in AIReins serves one idea: **let the agents run, and keep the reins in your hand.**
 
 - **Decide from anywhere.** Approve or deny tool calls and answer the agents' questions from your phone. Everything waiting on you, across all sessions, is collected in one place.
-- **Pull them back mid-run.** Interrupt with one tap; with Claude Code and Codex you can also steer a running turn or ask a side question (Kimi queues messages until the current turn ends), instead of waiting for the run to finish and redoing it.
-- **See what they are doing.** Context usage and every tool call in plain view, with sub-agents and delegated runs laid out as a parent/child tree.
+- **Pull them back mid-run.** Interrupt with one tap; with Claude Code and Codex you can also steer a running turn or ask a side question, Antigravity sends concurrent native prompts directly, and Kimi queues messages until the current turn ends—instead of waiting for the run to finish and redoing it.
+- **See what they are doing.** Context usage, per-turn durations and every tool call in plain view, with sub-agents and delegated runs laid out as a parent/child tree.
 - **Use all four together.** Let one agent lead and hand work to another (with an external delegation tool, see [Optional integrations](#optional-integrations)) and follow the whole dispatch tree on your phone. You decide which agent suits which job; no single vendor locks you in.
-- **Keep everything yours.** No vendor relay, no account, no telemetry. Sessions are the CLIs' own native history, so you can resume them from the command line or VS Code as usual.
+- **Keep everything yours.** No vendor relay, no account, no telemetry. Claude, Codex and Kimi sessions live in each CLI's own native history so you can resume them from the command line or VS Code as usual, and AIReins Antigravity sessions resume natively through ACP.
 
 ## Before you start
 
-- **I built this for myself.** I use it every day on Windows + WSL2, and much of its code was written inside it, together with these three agents. It is not a polished general-purpose product and it has rough edges. Issues are welcome; I may be slow to reply, and I apologise in advance.
+- **I built this for myself.** I use it every day on Windows + WSL2, and much of its code was written inside it, together with these agents. It is not a polished general-purpose product and it has rough edges. Issues are welcome; I may be slow to reply, and I apologise in advance.
 - **Platforms.** Windows + WSL2 is the main platform. Native Linux is supported with required Ubuntu CI checks. macOS is experimental: I have no Mac, so it is tested only in CI. macOS reports are very welcome.
 - **It grants access to the whole computer.** Anyone who can reach AIReins has the power of your user account on that machine. It therefore listens on loopback only, remote access goes only through Tailscale, and only the logins you allow get in. Please read [Security](#security) first.
 - **It is not an agent farm.** To run a team of agents in parallel worktrees, [Orca](https://github.com/stablyai/orca) is a better fit. To use your whole computer from your phone and steer the agents yourself, use AIReins. AIReins does not create or manage worktrees, but sessions started in one are listed under the main repository with their branch name.
@@ -101,15 +101,17 @@ My daily setup is one agent leading and several executing:
   <img src="docs/assets/how-en-light.png" alt="Six steps: open, your tailnet, one process, official CLIs, whole computer, your call" width="100%">
 </picture>
 
-A browser on the same computer connects to `127.0.0.1` directly. Other devices join your tailnet first, then Tailscale Serve forwards them to AIReins' remote entry, which checks Host/Origin and admits only allowlisted Tailscale logins. AIReins is a single Node process listening on loopback only. It drives the three CLIs through their official protocols: Claude Code's stream-json, Codex's `codex app-server` and Kimi Code's ACP. Sessions are written to each CLI's own history; AIReins is just another way in. Protocol details are in [spikes/PROTOCOL-NOTES.md](spikes/PROTOCOL-NOTES.md).
+A browser on the same computer connects to `127.0.0.1` directly. Other devices join your tailnet first, then Tailscale Serve forwards them to AIReins' remote entry, which checks Host/Origin and admits only allowlisted Tailscale logins. AIReins is a single Node process listening on loopback only. It drives the four CLIs through their official protocols: Claude Code's `stream-json`, Antigravity's `agy acp`, Codex's `codex app-server` and Kimi Code's ACP. Sessions are written to each CLI's own history; AIReins is just another way in. Protocol details are in [spikes/PROTOCOL-NOTES.md](spikes/PROTOCOL-NOTES.md).
 
-## Latest release: 0.5.0
+## Latest release: 0.6.0
 
-[Release notes](https://github.com/yxhuang/AIReins/releases/tag/v0.5.0) · [Changelog](CHANGELOG.md)
+[Release notes](https://github.com/yxhuang/AIReins/releases/tag/v0.6.0) · [Changelog](CHANGELOG.md)
 
-- Page through the images in a folder from the file preview: previous/next buttons, a position counter and the mouse wheel, in natural name order.
-- Folder links in a conversation open that folder in the side file panel. Files the page cannot preview (Office, binary, over 32 MiB) open in their default app on the local machine (WSL and macOS); only documents, media and archives open this way, so executables, installers, shortcuts, scripts and macro-enabled Office files are never run by a click.
-- Manually ordered conversations keep their position when they are released after being idle or when AIReins restarts.
+- **Google Antigravity (`agy acp`)** joins as the fourth official agent with account-provided models and effort levels, concurrent prompts, background tool/subagent keepalive with reactive wakeup, plus Orchestrator inner-loop phases and Swarm worker nodes in the dispatch tree.
+- **Built-in four-provider AI usage panel** displays Claude, Antigravity, Codex and Kimi subscription quotas natively in Node and React with elapsed-window pace marks, per-provider and parallel Refresh all, and opt-in Antigravity AI credits — removing the external Python/`uv` `ai-usage` service requirement.
+- **Multi-provider quota reset announcements**: opt-in AIHOT alerts now cover Codex, Antigravity, Claude and Grok Bot in a compact expandable strip at the bottom of the Usage panel with synchronized read state.
+- **Settings, composer & timing**: toggle the remote terminal directly in Settings → Host with immediate effect, cycle submitted prompts with `↑`/`↓` in the shared composer input history, and view live/completed per-turn durations.
+- **Safer power-off & faster Settings check**: power-off releases idle workers and flushes transcripts before scheduling shutdown, active dispatches guard against premature release/restart, and large histories no longer stall the pre-restart session check.
 
 Updating backend code requires `aireins restart`, which stops all running sessions; choose the time, then refresh open pages.
 
@@ -117,13 +119,13 @@ Updating backend code requires `aireins restart`, which stops all running sessio
 
 | | |
 |---|---|
-| **Four agents** | Claude Code, Antigravity, Codex and Kimi Code side by side; per-session model, reasoning effort and permission mode; slash commands, skills and `@` file mentions with completion; automatic titles, pinning, directory grouping, renaming and conversation ordering |
+| **Four agents** | Claude Code, Antigravity, Codex and Kimi Code side by side; per-session model, reasoning effort and permission mode; slash commands, skills and `@` file mentions with completion; shared `↑`/`↓` composer input history; live per-turn durations; automatic titles, pinning, directory grouping, renaming and conversation ordering |
 | **Approvals and questions** | Approve or deny tool calls and answer agent questions from any device; everything pending across sessions in one place |
-| **Control mid-run** | Context-usage ring with native compaction; interrupt; Claude Code and Codex also let you steer a running turn and ask side questions, while Kimi queues messages until the current turn ends |
-| **Native history** | Search and filter the three CLIs' native history by folder and resume sessions; sessions started in AIReins resume in the CLIs and the VS Code extension (Claude sessions appear in the history lists only with `claudeCodeEntrypoint` set), and the other way round (a Codex thread allows one writer at a time, so release it in AIReins before resuming elsewhere) |
-| **Dispatch tree** | Sub-agents and delegated runs as a parent/child tree, with a live dispatch flow chart, on desktop and phone |
-| **AI usage and quick links** | Built-in subscription quota panel for Claude, Antigravity, Codex and Kimi with elapsed-window pace marks and reset-credit tracking; Quick links merges repository `pages/links.json` with `~/.workbench/pages/links.json`, plus custom extension pages |
-| **The whole computer** | File panel for any readable folder, with Git status and tabs; inside your home folder, Windows drives and the session folder, preview Markdown, code, images and PDF and edit UTF-8 text in place (files over 4 MiB load after a confirmation, up to 32 MiB); file and terminal tabs that can be reordered and moved between the main and side panes; multi-tab terminal (off on the remote entry until you enable it) |
+| **Control mid-run** | Context-usage ring with native compaction; interrupt; Claude Code and Codex also let you steer a running turn and ask side questions, Antigravity sends concurrent native prompts, and Kimi queues messages until the current turn ends |
+| **Native history** | Search and filter Claude Code, Codex and Kimi Code native history by folder and resume sessions; sessions started in AIReins resume in the CLIs and the VS Code extension (Claude sessions appear in the history lists only with `claudeCodeEntrypoint` set; Antigravity sessions created in AIReins resume natively via `agy --conversation <id>`), and the other way round (a Codex thread allows one writer at a time, so release it in AIReins before resuming elsewhere) |
+| **Dispatch tree** | Sub-agents, delegated runs, Antigravity Orchestrator inner-loop phases and Swarm worker nodes in a live parent/child dispatch flow chart, on desktop and phone |
+| **AI usage and quick links** | Built-in subscription quota panel for Claude, Antigravity, Codex and Kimi with per-provider/parallel refresh, elapsed-window pace marks, opt-in Antigravity AI credits and four-provider AIHOT reset announcements; Quick links merges repository `pages/links.json` with `~/.workbench/pages/links.json`, plus custom extension pages |
+| **The whole computer** | File panel for any readable folder, with Git status and tabs; inside your home folder, Windows drives and the session folder, preview Markdown, code, images and PDF and edit UTF-8 text in place (files over 4 MiB load after a confirmation, up to 32 MiB); file and terminal tabs that can be reordered and moved between the main and side panes; multi-tab terminal (off on the remote entry by default; toggle in Settings → Host) |
 | **Phone and Taildrop** | Phone layout installable as a home-screen app; send files or folders (zipped) to your online Taildrop devices |
 | **Several computers** | Lists the other computers on your tailnet; add one with a click and switch between their AIReins instances from one menu |
 | **On Windows** | Tray icon and Start-menu shortcut that open AIReins in its own app window |
@@ -140,7 +142,7 @@ Updating backend code requires `aireins restart`, which stops all running sessio
 | Runs as | One Node process + browser | Desktop app (must stay open) | A local `claude` process (must keep running) | ChatGPT desktop app on the host (must stay open) |
 | Best for | One person using one computer from anywhere | Running many agents in parallel worktrees | Continuing Claude Code sessions from the Claude app | Codex users in the ChatGPT app |
 
-Comparison checked 2026-11-05 against the official [Orca mobile guide](https://www.onorca.dev/docs/mobile), [Claude Remote Control guide](https://code.claude.com/docs/en/remote-control) and [ChatGPT remote connections guide](https://learn.chatgpt.com/docs/remote-connections). Availability may depend on the provider's rollout and plan.
+Comparison checked 2026-11-22 against the official [Orca mobile guide](https://www.onorca.dev/docs/mobile), [Claude Remote Control guide](https://code.claude.com/docs/en/remote-control) and [ChatGPT remote connections guide](https://learn.chatgpt.com/docs/remote-connections). Availability may depend on the provider's rollout and plan.
 
 <!-- Re-check the linked comparison sources before each release. -->
 
@@ -210,7 +212,7 @@ AIReins listens on `http://127.0.0.1:8790` (change it with `WORKBENCH_PORT`). On
 
 ### Built-in AI usage panel
 
-The sidebar's **Usage** button opens AIReins's built-in subscription quota panel for Claude, Antigravity, Codex and Kimi — no separate Python/`uv` companion service is needed. Claude and Codex reuse the local CLIs you have already signed in to (plus live Codex rate-limit updates from active sessions); Antigravity is queried on demand via official `agy` commands when you open the panel or click Refresh; Kimi subscription usage can be enabled by pasting a Kimi API key in the panel's gear settings (stored locally in `~/.workbench/usage.json` with `0600` permissions, or read from `KIMI_API_KEY`). Legacy `bash install.sh --with-ai-usage` prints a migration notice and leaves existing checkouts and manifests untouched.
+The sidebar's **Usage** button opens AIReins's built-in subscription quota panel for Claude, Antigravity, Codex and Kimi — no separate Python/`uv` companion service is needed. Claude and Codex reuse the local CLIs you have already signed in to (plus live Codex rate-limit updates from active sessions); Antigravity is queried on demand via official `agy` commands when you open the panel or click Refresh (with optional AI credits disabled by default); Kimi subscription usage can be enabled by pasting a Kimi API key in the panel's gear settings (stored locally in `~/.workbench/usage.json` with `0600` permissions, or read from `KIMI_API_KEY`). Each card supports individual refresh alongside parallel **Refresh all**, and the bottom strip optionally surfaces four-provider reset announcements from AIHOT. Legacy `bash install.sh --with-ai-usage` prints a migration notice and leaves existing checkouts and manifests untouched.
 
 ## Remote access from your phone
 
@@ -222,14 +224,14 @@ Once the installer reports that the remote entry is set up and AIReins is runnin
 Notes:
 
 - Only the Tailscale logins listed in `allowedLogins` in `remote.json` get in. The Host/Origin and identity checks on the remote entry are identical on all three platforms.
-- The remote terminal is off by default; to enable it, set `"terminal": true` in `remote.json` and run `aireins restart`.
+- The remote terminal is off by default; toggle **Remote terminal** under **Settings → Host** for immediate effect (from either the local or an allowlisted remote browser), or set `"terminal": true` in `remote.json` and run `aireins restart`.
 - If AIReins was already running when you installed, run `aireins restart` once so the new remote configuration takes effect.
 - If your browser uses a system proxy, add `*.ts.net` to its bypass list.
 - Details and troubleshooting: [deploy/windows/REMOTE.md](deploy/windows/REMOTE.md) and [docs/host-connections.md](docs/host-connections.md).
 
 ## Configuration
 
-AIReins keeps its data in `~/.workbench`. `WORKBENCH_HOME` moves the server's data directory and the native POSIX remote installer's config directory. WSL installation, `aireins` logs and snapshots retain their existing paths. It never changes the three CLIs' settings on its own; only when you toggle the Claude Remote Control default or a Claude plugin in AIReins is that saved to the matching native config (plugins through the official `claude plugin enable/disable`).
+AIReins keeps its data in `~/.workbench`. `WORKBENCH_HOME` moves the server's data directory and the native POSIX remote installer's config directory. WSL installation, `aireins` logs and snapshots retain their existing paths. It never changes the four CLIs' settings on its own; only when you toggle the Claude Remote Control default or a Claude plugin in AIReins is that saved to the matching native config (plugins through the official `claude plugin enable/disable`).
 
 Environment variables:
 

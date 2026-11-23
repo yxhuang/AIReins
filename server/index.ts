@@ -11,7 +11,7 @@ import { fileURLToPath } from "node:url";
 import { acceptsGzip, compressResponse } from "./response-compression.js";
 import { WebSocket, WebSocketServer } from "ws";
 import { checkAccess, loadRemoteConfig, localPolicy, remotePolicy, saveRemoteTerminal, type AccessPolicy, type RemoteConfig } from "./access.js";
-import { countActiveDispatchesBySession, DispatchQueryError, getDispatch, getDispatchLog, getDispatchMessages, listDispatches, listDispatchHistory, listParentDispatches } from "./dispatches.js";
+import { countActiveDispatchesBySession, DispatchQueryError, getDispatch, getDispatchLog, getDispatchMessages, listDispatchOverview, listDispatchHistory, listParentDispatches } from "./dispatches.js";
 import { log } from "./logger.js";
 import { DirListError, listDirectories } from "./dir-list.js";
 import { pickWindowsDirectory, pickWindowsFile, WindowsPickerError, windowsPickerEnabled } from "./windows-directory-picker.js";
@@ -20,10 +20,11 @@ import { normalizeFileQuery, searchFiles } from "./file-search.js";
 import { getWorkFile, getWorkContent, openWorkSendSource, saveWorkFile, WorkFileError, FILE_LIMIT } from "./work-files.js";
 import { HistoryIndex, HistoryQueryError } from "./history.js";
 import { NativeDeleteError } from "./native-session-delete.js";
-import { getMeta, getServerHostName, SERVER_VERSION, whenMetaReady } from "./meta.js";
+import { getMeta, getServerHostName, SERVER_INSTANCE_ID, SERVER_VERSION, whenMetaReady } from "./meta.js";
 import { appWindowEnabled, findWindowsChrome, openAppWindow, AppWindowError } from "./app-window.js";
 import { getTaildropTargets, getTailscalePeers, sendTaildrop, TaildropError } from "./tailscale-peers.js";
-import { createCodexResetWatch } from "./codex-resets.js";
+import { isQuotaResetProvider } from "../shared/quota-reset-feeds.js";
+import { createQuotaResetWatch } from "./codex-resets.js";
 import { onCodexRateLimits } from "./drivers/codex.js";
 import { createUsageService, UsageInputError } from "./usage.js";
 import { busySessionCount, createPowerOff, powerOffEnabled } from "./power-off.js";
@@ -31,10 +32,10 @@ import { applyUpdate, SelfUpdateError, updateStatus } from "./self-update.js";
 import { feishuSender, GateNotifier, larkCliSender, loadNotifyConfig, type NotifyConfig } from "./notify.js";
 import { checkPageHealth, proxyPage, readLauncherLinks, scanPages } from "./pages.js";
 import { pruneStorage, workbenchHome } from "./persistence.js";
-import { isValidIdleReleaseMinutes, loadPrefs, savePrefs, type WorkbenchPrefs } from "./prefs.js";
+import { DEFAULT_STORAGE_BUDGET_BYTES, isValidIdleReleaseMinutes, loadPrefs, savePrefs, type WorkbenchPrefs } from "./prefs.js";
 import { readClaudeDefaultSettings, readClaudeStartupSettings, writeClaudeStartupSettings } from "./claude-settings.js";
 import { SessionBusyError, SessionManager } from "./session-manager.js";
-import { cleanStorage, getStorageStats, StorageInputError, validateStorageCleanInput } from "./storage.js";
+import { cleanStorage, createStorageMaintenance, getStorageStats, StorageInputError, validateStorageCleanInput } from "./storage.js";
 import { parseMcpAction, parseSideQuestion, parseTaskId } from "./session-menu.js";
 import { preflightSnapshot, SnapshotCwdError } from "./snapshot.js";
 import { InvalidEventPageCursor } from "./event-pages.js";
@@ -109,13 +110,23 @@ try {
   log("warn", "storage prune failed", { message: error instanceof Error ? error.message : String(error) });
 }
 const manager = new SessionManager();
-// 关机命令仅由本机 prefs 配置；无参数排定关机，abort 取消。
+const maintainStorage = createStorageMaintenance(manager, {
+  get budgetBytes() { return prefs.storageBudgetBytes ?? DEFAULT_STORAGE_BUDGET_BYTES; },
+  activeDispatches: (sessions) => countActiveDispatchesBySession(sessions, undefined, { fresh: true }),
+  stopping: () => shuttingDown,
+});
+function runStorageMaintenance() {
+  void maintainStorage().catch(error => log("warn", "session storage maintenance failed", { message: String(error) }));
+}
+const storageSweep = setInterval(runStorageMaintenance, 60_000);
+storageSweep.unref();
 const powerOff = createPowerOff({
   busy: () => busySessionCount(manager.list()),
   checkBusy: async () => {
     await syncActiveDispatches({ fresh: true, throwOnError: true });
     return busySessionCount(manager.list());
   },
+  prepare: (isCancelled) => manager.releaseSessionsForPowerOff(isCancelled),
   run: async (args) => {
     try {
       if (!powerOffEnabled(prefs.shutdownCommand)) throw new Error("未配置可执行的关机命令");
@@ -227,11 +238,11 @@ manager.onEvent((event) => {
 manager.onOrganizationUpdated((frame) => sendOrganizationUpdate(clients, frame));
 
 // 独立于会话订阅的全局控制帧；通知沿用 notify.json 中现有发送器。
-const codexResets = createCodexResetWatch({
-  path: join(workbenchHome, "codex-resets.json"),
+const quotaResets = createQuotaResetWatch({
+  directory: workbenchHome,
   enabled: prefs.codexResetWatch === true,
   onChange: () => {
-    const frame = { type: "codex_resets_updated", data: codexResets.status() };
+    const frame = { type: "codex_resets_updated", data: quotaResets.status() };
     for (const client of clients) sendWs(client, frame);
   },
   send: async (text) => {
@@ -239,7 +250,7 @@ const codexResets = createCodexResetWatch({
     if (config) await (config.feishuWebhook ? feishuSender(config.feishuWebhook) : larkCliSender(config.larkUserId!))(text);
   },
 });
-codexResets.start();
+quotaResets.start();
 
 const aiUsage = createUsageService({
   configPath: join(workbenchHome, "usage.json"),
@@ -329,7 +340,7 @@ wss.on("connection", (socket, request) => {
     try { replaySession(manager, client, sessionId, afterSeq); }
     catch (error) { sendWs(client, { type: "error", code: 40401, msg: error instanceof Error ? error.message : String(error) }); }
   }
-  sendWs(client, { type: "ready", serverVersion: SERVER_VERSION, sessionId, afterSeq });
+  sendWs(client, { type: "ready", serverVersion: SERVER_VERSION, serverInstanceId: SERVER_INSTANCE_ID, sessionId, afterSeq });
   // 新建连/重连时立刻下发一次全量活跃派单映射（含空映射），让断线期间结束的派单即时清零。
   sendWs(client, { type: "session_dispatches_updated", counts: manager.getActiveDispatchCounts() });
   void syncActiveDispatches();
@@ -412,6 +423,7 @@ function sendTerminalWs(socket: WebSocket, value: unknown): void {
 
 server.listen(PORT, HOST, () => {
   log("info", "workbench server started", { host: HOST, port: PORT, staticRoot: STATIC_ROOT });
+  runStorageMaintenance();
 });
 
 server.on("error", (error) => {
@@ -447,8 +459,9 @@ async function shutdown(signal: string): Promise<void> {
   log("info", "workbench server stopping", { signal });
   clearInterval(heartbeat);
   clearInterval(idleReleaseSweep);
+  clearInterval(storageSweep);
   clearInterval(dispatchActivitySweep);
-  codexResets.stop();
+  quotaResets.stop();
   stopCodexRateLimits();
   await aiUsage.stop();
   try {
@@ -553,7 +566,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
         throw error;
       }
     } else if (method === "GET" && url.pathname === "/api/storage") {
-      await respond(response, 200, 0, "success", getStorageStats(manager), requestId);
+      await respond(response, 200, 0, "success", getStorageStats(manager, prefs.storageBudgetBytes), requestId);
     } else if (method === "POST" && url.pathname === "/api/storage/clean") {
       const input = await readJson(request);
       let includeEnded: boolean;
@@ -561,7 +574,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
         if (error instanceof StorageInputError) throw new ApiError(400, 40080, error.message);
         throw error;
       }
-      await respond(response, 200, 0, "success", await cleanStorage(manager, includeEnded), requestId);
+      await respond(response, 200, 0, "success", await cleanStorage(manager, includeEnded, prefs.storageBudgetBytes), requestId);
     } else if (method === "POST" && url.pathname === "/api/restart") {
       if (!restartPending) {
         restartPending = true;
@@ -738,11 +751,11 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
         const parent = url.searchParams.get("parent");
         const agent = url.searchParams.get("agent");
         if (agent !== null && !AGENTS.includes(agent as AgentKind)) throw new DispatchQueryError("agent 必须是 claude、antigravity、codex 或 kimi");
-        const sessions = () => manager.list().map(({ id, agent, cwd, nativeSessionId, config, createdAt }) =>
-          ({ id, agent, cwd, nativeSessionId, model: config.model, createdAt }));
-        await respond(response, 200, 0, "success", { dispatches: parent !== null
-          ? await listParentDispatches(parent, undefined, agent === null ? undefined : agent as AgentKind, sessions)
-          : await listDispatches(url.searchParams.get("limit"), undefined, sessions) }, requestId);
+        const sessions = () => manager.list().map(({ id, agent, cwd, nativeSessionId, config, createdAt, status, title }) =>
+          ({ id, agent, cwd, nativeSessionId, model: config.model, createdAt, status, title }));
+        await respond(response, 200, 0, "success", parent !== null
+          ? { dispatches: await listParentDispatches(parent, undefined, agent === null ? undefined : agent as AgentKind, sessions) }
+          : await listDispatchOverview(url.searchParams.get("limit"), undefined, sessions), requestId);
       } catch (error) {
         if (error instanceof DispatchQueryError) throw new ApiError(400, 40000, error.message);
         throw error;
@@ -798,12 +811,13 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
     } else if (method === "GET" && url.pathname === "/api/links") {
       await respond(response, 200, 0, "success", { links: readLauncherLinks() }, requestId);
     } else if (url.pathname === "/api/codex-resets" && method === "GET") {
-      await respond(response, 200, 0, "success", codexResets.status(), requestId);
+      await respond(response, 200, 0, "success", quotaResets.status(), requestId);
     } else if (url.pathname === "/api/codex-resets/ack" && method === "POST") {
       const input = await readJson(request);
-      const id = (input as Record<string, unknown> | null)?.id;
+      const { id, provider } = (input as Record<string, unknown> | null) ?? {};
       if (typeof id !== "string" || !id || id.length > 256) throw new ApiError(400, 40065, "id 必须是非空字符串（最多 256 字符）");
-      await respond(response, 200, 0, "success", codexResets.ack(id), requestId);
+      if (provider !== undefined && !isQuotaResetProvider(provider)) throw new ApiError(400, 40065, "Invalid quota reset provider");
+      await respond(response, 200, 0, "success", quotaResets.ack(id, provider), requestId);
     } else if (url.pathname === "/api/prefs" && method === "GET") {
       await respond(response, 200, 0, "success", { ...prefs }, requestId);
     } else if (url.pathname === "/api/prefs" && method === "PUT") {
@@ -818,7 +832,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       const nextPrefs = { ...loadPrefs(), idleReleaseMinutes, ...(watch !== undefined ? { codexResetWatch: watch } : {}) };
       savePrefs(nextPrefs);
       prefs = nextPrefs;
-      codexResets.setEnabled(prefs.codexResetWatch === true);
+      quotaResets.setEnabled(prefs.codexResetWatch === true);
       await respond(response, 200, 0, "success", { ...prefs }, requestId);
     } else if (url.pathname === "/api/claude/settings" && (method === "GET" || method === "PUT")) {
       let enabled: boolean | undefined;

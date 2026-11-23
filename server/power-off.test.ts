@@ -109,4 +109,111 @@ assert.equal(busySessionCount([
   assert.deepEqual(await again, { state: "idle", busy: 0, error: "late" });
 }
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>(done => { resolve = done; });
+  return { promise, resolve };
+}
+
+for (const initialBusy of [0, 1]) {
+  let busy = initialBusy;
+  const calls: string[] = [];
+  const scheduled = deferred<void>();
+  const power = createPowerOff({
+    busy: () => busy,
+    prepare: async () => { calls.push("prepare"); },
+    run: async (args) => { assert.deepEqual(args, []); calls.push("run"); scheduled.resolve(); },
+    pollMs: 5,
+  });
+  try {
+    assert.equal((await power.request()).state, initialBusy ? "waiting" : "scheduled");
+    if (initialBusy) assert.deepEqual(calls, []);
+    busy = 0;
+    await Promise.race([scheduled.promise, sleep(1000, undefined, { ref: false }).then(() => assert.fail("shutdown was not scheduled"))]);
+    assert.deepEqual(calls, ["prepare", "run"]);
+  } finally {
+    if (power.status().state === "waiting") await power.cancel();
+  }
+}
+
+{
+  const entered = deferred<() => boolean>();
+  const finish = deferred<void>();
+  const calls: string[][] = [];
+  const power = createPowerOff({
+    busy: () => 0,
+    prepare: async (isCancelled) => { entered.resolve(isCancelled); await finish.promise; },
+    run: async (args) => { calls.push(args); },
+  });
+  const requested = power.request();
+  const isCancelled = await entered.promise;
+  assert.equal(isCancelled(), false);
+  const cancelled = power.cancel();
+  assert.equal(isCancelled(), true);
+  finish.resolve();
+  assert.equal((await requested).state, "idle");
+  assert.equal((await cancelled).state, "idle");
+  assert.deepEqual(calls, []);
+  assert.equal((await power.request()).state, "scheduled");
+  assert.deepEqual(calls, [[]]);
+}
+
+{
+  const rechecking = deferred<void>();
+  const busyResult = deferred<number>();
+  let checks = 0;
+  const calls: string[][] = [];
+  const power = createPowerOff({
+    busy: () => 0,
+    checkBusy: async () => {
+      if (++checks === 1) return 0;
+      rechecking.resolve();
+      return busyResult.promise;
+    },
+    prepare: async () => {},
+    run: async (args) => { calls.push(args); },
+  });
+  const requested = power.request();
+  await rechecking.promise;
+  const cancelled = power.cancel();
+  busyResult.resolve(1);
+  assert.equal((await cancelled).state, "idle");
+  assert.equal((await requested).state, "idle", "cancellation wins over a busy recheck");
+  assert.deepEqual(calls, []);
+}
+
+{
+  let busy = 0;
+  let preparations = 0;
+  const calls: string[][] = [];
+  const scheduled = deferred<void>();
+  const power = createPowerOff({
+    busy: () => busy,
+    prepare: async () => { if (++preparations === 1) busy = 1; },
+    run: async (args) => { calls.push(args); scheduled.resolve(); },
+    pollMs: 5,
+  });
+  try {
+    assert.deepEqual(await power.request(), { state: "waiting", busy: 1 });
+    assert.deepEqual(calls, []);
+    busy = 0;
+    await Promise.race([scheduled.promise, sleep(1000, undefined, { ref: false }).then(() => assert.fail("shutdown was not scheduled"))]);
+    assert.equal(preparations, 2);
+    assert.deepEqual(calls, [[]]);
+  } finally {
+    if (power.status().state === "waiting") await power.cancel();
+  }
+}
+
+{
+  const calls: string[] = [];
+  const power = createPowerOff({
+    busy: () => 0,
+    prepare: async () => { calls.push("prepare"); throw new Error("fixture failure"); },
+    run: async (args) => { assert.deepEqual(args, []); calls.push("run"); },
+  });
+  assert.equal((await power.request()).state, "scheduled");
+  assert.deepEqual(calls, ["prepare", "run"]);
+}
+
 console.log("power-off ok");

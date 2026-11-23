@@ -591,24 +591,27 @@ async function withNewForm({ saved = "", cwd, sessions = [], meta = { defaultCwd
 }
 const finishNewCreate = () => new Promise(resolve => setImmediate(resolve));
 
-await t("新建页：默认 Antigravity、四家顺序、动态配置与显式选择保留", async () => {
-  const metadata = { drivers: { antigravity: { options: [{ id: "model", values: [{ value: "runtime-model", label: "Runtime model" }], default: "runtime-model", mutable: true }], mentions: true } }, capabilities: {} };
+await t("新建页：默认 Antigravity、四家顺序、切换目录保留显式选择", async () => {
+  const metadata = { drivers: { claude: { options: [{ id: "model", values: [{ value: "opus", label: "Opus" }], default: null, mutable: true }] } }, claudeDefaults: { model: "opus" }, capabilities: {} };
   await withNewForm({ cwd: "/project", meta: metadata }, async f => {
     const tree = f.update();
     assert.deepEqual(treeButtons(tree).filter(node => node.props.className?.startsWith("new-agent ")).map(node => node.props.className.match(/agent-(\w+)/)[1]), ["claude", "antigravity", "codex", "kimi"]);
     assert.equal(f.agent("antigravity").props["aria-pressed"], true);
-    const pills = treeFind(tree, node => node.type?.name === "NewConfigPills");
-    assert.equal(pills.props.agent, "antigravity");
-    assert.deepEqual(pills.props.selected, {}, "default follows runtime config without an invented model or permission");
     f.update().props.onSubmit({ preventDefault() {} });
     await finishNewCreate();
     assert.equal(f.calls[0].agent, "antigravity");
-    assert.equal(f.calls[0].config, undefined);
   });
   await withNewForm({ cwd: "/project", meta: metadata }, async f => {
     f.agent("claude").props.onClick();
     store.newSessionCwd = "/other"; store.newSessionRequest++;
     assert.equal(f.agent("claude").props["aria-pressed"], true);
+    const pills = treeFind(f.update(), node => node.type?.name === "NewConfigPills");
+    assert.equal(pills.props.agent, "claude");
+    assert.deepEqual(pills.props.selected, {});
+    f.update().props.onSubmit({ preventDefault() {} });
+    await finishNewCreate();
+    assert.equal(f.calls[0].agent, "claude");
+    assert.equal(f.calls[0].config, undefined);
   });
 });
 

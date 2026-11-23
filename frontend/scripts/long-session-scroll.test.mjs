@@ -45,6 +45,6 @@ try {
   assert.equal(top, 400, 'reading an earlier message must preserve scroll position');
   assert.equal(latest, true, 'button state must reflect the committed height');
   const view = readFileSync(new URL('../src/components/SessionView.tsx', import.meta.url), 'utf8');
-  assert.match(view, /MarkdownCommitContext value={onMarkdownCommit}/);
+  assert.match(view, /MarkdownCommitContext value={syncViewport}/);
 } finally { internals.H = previousDispatcher; globalThis.setTimeout = set; globalThis.clearTimeout = clear; }
 console.log('PASS review 4: throttled commit, sticky bottom and nonsticky viewport');

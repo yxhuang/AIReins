@@ -162,6 +162,7 @@ export async function runNewSessionBrowserChecks({ send, evaluate, settle, waitF
     await check(`阶段 B ${variant}：主页输入、目录选择、组与历史预选、提交及手机路由`,async()=>{
       const target=await open(width,locale,theme);
       assert.equal(await cwd(),'/saved/project','上次成功目录优先');
+      assert.ok(await evaluate("document.querySelector('.new-agent.agent-antigravity[aria-pressed=\"true\"]')"),'新建页默认选中 Antigravity');
       assert.equal(await evaluate("document.activeElement===document.querySelector('.new-form textarea')"),width!==390,'桌面新建聚焦输入框，手机不弹输入法');
       assert.equal(await evaluate("document.querySelector('.new-project-row').getAttribute('aria-label')"),locale==='en'?'Project':'项目');
       assert.ok(await evaluate("!document.querySelector('.sidebar .new-form') && !!document.querySelector('.main .new-form')"));
@@ -186,14 +187,15 @@ export async function runNewSessionBrowserChecks({ send, evaluate, settle, waitF
         await screenshot(variant+'-model-'+kind);
       }
       await click('.new-agent.agent-claude');
-      assert.ok(await evaluate("document.querySelector('.new-slash').disabled"),'无已加载表时命令入口禁用');
+      assert.ok(await evaluate("!document.querySelector('.new-slash').disabled"),'Claude 冷启动提供管理命令');
       await evaluate(`import('/src/store.ts').then(({store})=>{store.commands.set('recent',[
         {name:'write',description:'Write a draft',argHint:'Topic',source:'claude'},
         {name:'compact',description:'Existing session action',source:'claude'},
         {name:'btw',description:'Side question',source:'claude'}]);store.notify();})`);
       await waitFor("!document.querySelector('.new-slash').disabled");
       await click('.new-slash'); await waitFor("document.querySelector('.new-command-panel')");
-      assert.equal(await evaluate("document.querySelectorAll('.new-command-panel .cmd-item').length"),1,'仅提供新会话可插入命令');
+      const commands=await evaluate("[...document.querySelectorAll('.new-command-panel .cmd-name')].map(node=>node.textContent)");
+      assert.ok(commands.includes('/write') && commands.includes('/mcp') && !commands.includes('/compact') && !commands.includes('/btw'),'新建页提供首条消息命令和管理入口');
       if(width===390) assert.ok((await rect('.new-command-panel .cmd-item')).height>=44,'命令候选触控44px');
       await screenshot(variant+'-slash-menu');
       await input('/wr');

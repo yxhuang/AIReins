@@ -1,24 +1,31 @@
-import { useEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
-import type { CodexResetEvent, CodexResetStatus, CodexResetTime } from "../../../server/codex-resets";
+import { useId, useMemo, useState } from "react";
+import type { CodexResetEvent, CodexResetStatus, QuotaResetStatus } from "../../../server/codex-resets";
+import { quotaResetFeeds, quotaResetSource, type QuotaResetProvider } from "../../../shared/quota-reset-feeds";
 import { formatDate, formatRelativeTime, t } from "../i18n";
 import { store } from "../store";
-import { BUILTIN_USAGE_ID } from "../usage";
 import { useStore } from "../useStore";
-import { modalKeyDown } from "./useAnchoredMenu";
+import { AgentIcon } from "./AgentIcon";
+import { Segmented } from "./Segmented";
 
-const sourceUrl = "https://aihot.news/codex-reset";
 const typeLabel = (event?: CodexResetEvent) => t(event?.type === "reset_credit" ? "ui.CodexResets.credit" : "ui.CodexResets.reset");
-const eventUrl = (event: CodexResetEvent) => event.posts.find(post => post.url)?.url ?? event.url;
-const resetTiming = (event: CodexResetEvent): CodexResetTime | null => event.schedule?.label ? event.schedule : event.estimate ?? event.schedule;
-const resetDeadline = (timing: CodexResetTime | null): number => {
-  const through = Date.parse(timing?.through ?? "");
-  return Number.isFinite(through) ? through : Date.parse(timing?.from ?? "");
-};
+const eventUrl = (event?: CodexResetEvent) => event?.posts.find(post => post.url)?.url ?? event?.url;
+const eventDate = (event?: CodexResetEvent) => event?.confirmedAt ?? event?.updatedAt ?? event?.createdAt ?? event?.posts[0]?.publishedAt;
+const resetTiming = (event: CodexResetEvent) => event.schedule?.label ? event.schedule : event.estimate ?? event.schedule;
 
-export function isUpcomingReset(event: CodexResetEvent, now: number): boolean {
-  const deadline = resetDeadline(resetTiming(event));
-  return event.status === "announced" && (!Number.isFinite(deadline) || deadline > now);
+function upcomingReset(event: CodexResetEvent, now: number): boolean {
+  if (event.status !== "announced") return false;
+  const timing = resetTiming(event);
+  const through = Date.parse(timing?.through ?? "");
+  const deadline = Number.isFinite(through) ? through : Date.parse(timing?.from ?? "");
+  return !Number.isFinite(deadline) || deadline > now;
+}
+
+function resetSources(state: QuotaResetStatus | null) {
+  return state?.enabled ? [{ provider: "codex" as const, status: state }, ...(state.sources ?? [])] : [];
+}
+
+export function hasResetUpdate(state: QuotaResetStatus | null, now: number): boolean {
+  return resetSources(state).some(({ status }) => status.alerts.length || status.pending.some(event => upcomingReset(event, now)));
 }
 
 function relative(value: string | undefined, now: number): string {
@@ -30,26 +37,15 @@ function relative(value: string | undefined, now: number): string {
   return formatRelativeTime(Math.round(minutes / 1440), "day");
 }
 
-function ResetTime({ event, now }: { event: CodexResetEvent; now: number }) {
+function resetTime(event: CodexResetEvent, now: number): string {
+  if (event.status !== "announced") return relative(eventDate(event), now);
+  if (!upcomingReset(event, now)) return "";
   const timing = resetTiming(event);
-  if (!timing || resetDeadline(timing) <= now) return null;
-  const estimate = timing === event.estimate;
-  const from = Date.parse(timing.from ?? ""), through = Date.parse(timing.through ?? "");
-  const deadline = from > now ? from : Number.isFinite(through) ? through : from;
-  const label = timing.label ?? (Number.isFinite(deadline) ? formatDate(deadline) : t("ui.CodexResets.time_unknown"));
-  const minutes = Math.ceil((deadline - now) / 60_000);
-  const hours = Math.floor(minutes / 60), remainder = minutes % 60;
-  const countdown = Number.isFinite(minutes) && minutes > 0
-    ? hours ? t("ui.CodexResets.countdown_hours", { hours, minutes: remainder }) : t("ui.CodexResets.countdown_minutes", { minutes })
-    : Number.isFinite(deadline) && event.status === "announced" ? t("ui.CodexResets.awaiting_confirmation") : null;
-  return <div className="codex-reset-time">
-    <span>{estimate ? t("ui.CodexResets.estimate") : t("ui.CodexResets.scheduled")}</span>
-    <strong>{label}</strong>
-    {event.status === "announced" && countdown && <span>{countdown}</span>}
-  </div>;
+  const time = [timing?.from, timing?.through].find(value => value && Number.isFinite(Date.parse(value)));
+  const label = timing?.label ?? (time ? formatDate(time) : t("ui.CodexResets.time_unknown"));
+  return timing && timing === event.estimate ? t("ui.CodexResets.estimated_time", { time: label }) : label;
 }
 
-// 本机失败优先；AIHOT 自身状态非 healthy 时说明是来源的问题；剩下的是 outage。
 export function staleText(state: CodexResetStatus, now: number): string {
   const success = Date.parse(state.lastSuccessAt ?? "");
   if (!Number.isFinite(success) || now - success > 60 * 60_000) return t("ui.CodexResets.stale_local");
@@ -61,116 +57,90 @@ export function staleText(state: CodexResetStatus, now: number): string {
   return t("ui.CodexResets.stale");
 }
 
-function Source() {
-  return <a className="codex-reset-source" href={sourceUrl} target="_blank" rel="noopener noreferrer">{t("ui.CodexResets.source")}</a>;
-}
-
-/** 全局公告；关闭仅收起本端，只有「知道了」才写共享 ack。 */
-export function CodexResetDialog() {
-  const state = useStore(value => value.codexResets);
+export function CodexResetCard() {
+  const snapshot = useStore(value => value.codexResets);
   const now = useStore(value => value.now);
-  const [hidden, setHidden] = useState<string | null>(null);
+  const detailsId = useId();
+  const [dismissed, setDismissed] = useState<string | null>(null);
+  const [manualOpen, setManualOpen] = useState(false);
+  const [selection, setSelection] = useState<{ provider: QuotaResetProvider; eventKey: string | null } | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
-  const pending = useRef(false);
-  const dialog = useRef<HTMLDivElement>(null);
-  const ack = useRef<HTMLButtonElement>(null);
-  const alert = state?.enabled ? state.alerts[0] : undefined;
-  const visibleId = alert && alert.id !== hidden ? alert.id : null;
-  useEffect(() => {
-    setError("");
-    if (!visibleId) return;
-    const previous = document.activeElement as HTMLElement | null;
-    const app = document.querySelector<HTMLElement>(".app");
-    const wasInert = app?.inert ?? false;
-    if (app) app.inert = true;
-    ack.current?.focus();
-    return () => {
-      if (app) app.inert = wasInert;
-      if (previous?.isConnected) previous.focus();
-    };
-  }, [visibleId]);
-  if (!alert || !visibleId) return null;
+  const providerOptions = useMemo(() => resetSources(snapshot).map(({ provider }) => {
+    const label = quotaResetFeeds[provider];
+    return { value: provider, label, icon: <AgentIcon agent={provider} label={label} /> };
+  }), [snapshot]);
+
+  const scheduledAt = (event: CodexResetEvent) => Date.parse(resetTiming(event)?.from ?? "") || 0;
+  const sources = resetSources(snapshot).map(source => ({
+    ...source,
+    alert: source.status.alerts[0],
+    pending: source.status.pending.filter(event => upcomingReset(event, now)).sort((a, b) => scheduledAt(b) - scheduledAt(a))[0],
+    confirmed: source.status.recent.find(event => event.status === "confirmed"),
+  }));
+  const active = sources.filter(source => source.alert)
+    .sort((a, b) => (Date.parse(b.alert?.publishedAt ?? "") || 0) - (Date.parse(a.alert?.publishedAt ?? "") || 0))[0]
+    ?? sources.find(source => source.pending);
+  const eventKey = active ? `${active.provider}:${active.alert ? "post:" + active.alert.id : "event:" + active.pending?.id}` : null;
+  const confirmedAt = (source: (typeof sources)[number]) => Date.parse(eventDate(source.confirmed) ?? "") || 0;
+  const feed = (selection?.eventKey === eventKey && sources.find(source => source.provider === selection.provider))
+    || active
+    || sources.reduce<(typeof sources)[number] | undefined>((best, source) => !best || confirmedAt(source) > confirmedAt(best) ? source : best, undefined);
+  if (!feed) return null;
+
+  const { provider, status, alert } = feed;
+  const open = manualOpen || (eventKey !== null && eventKey !== dismissed);
+  const summary = open ? (feed.alert || feed.pending ? feed : undefined) : active;
+  const event = alert?.events[0] ?? feed.pending ?? feed.confirmed;
+  const timestamp = event ? resetTime(event, now) : alert ? relative(alert.publishedAt, now) : "";
+  const url = alert?.url ?? eventUrl(event);
+  const stage = (action?: string) => t(action === "confirm" ? "ui.CodexResets.confirmed" : "ui.CodexResets.announced");
   const acknowledge = async () => {
-    if (pending.current) return;
-    pending.current = true;
+    if (!alert || saving) return;
     setSaving(true);
     setError("");
-    try { await store.ackCodexReset(alert.id); }
+    try { await store.ackCodexReset(alert.id, provider === "codex" ? undefined : provider); }
     catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); }
-    finally { pending.current = false; setSaving(false); }
+    finally { setSaving(false); }
   };
-  const close = () => setHidden(alert.id);
-  return createPortal(<div className="dir-overlay codex-reset-overlay" onKeyDown={event => modalKeyDown(event, dialog.current, close)}>
-    <div ref={dialog} className="dir-dialog codex-reset-dialog" tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="codex-reset-title">
-      <div className="codex-reset-heading">
-        <span className={`codex-reset-stage${alert.action === "confirm" ? " confirmed" : ""}`}>{t(alert.action === "confirm" ? "ui.CodexResets.confirmed" : "ui.CodexResets.announced")}</span>
-        <span>{[...new Set(alert.events.map(typeLabel))].join(" · ") || typeLabel()}</span>
-        {state && state.alerts.length > 1 && <span className="codex-reset-more">{t("ui.CodexResets.more", { count: state.alerts.length - 1 })}</span>}
-      </div>
-      <h2 id="codex-reset-title">{alert.events.map(event => event.title || typeLabel(event)).join(" / ") || t("ui.CodexResets.title")}</h2>
-      {alert.events.map(event => <div key={event.id}>
-        <ResetTime event={event} now={now} />
-        {event.presentation?.scopeLabel && <p className="codex-reset-scope">{t("ui.CodexResets.applies_to", { scope: event.presentation.scopeLabel })}</p>}
-      </div>)}
-      {alert.text && <p className="codex-reset-body">{alert.text}</p>}
-      {alert.text && alert.context.filter(context => context.text).map((context, index) => <blockquote key={context.id ?? index}>
-        <p>{context.text}</p>
-        {context.url && <a href={context.url} target="_blank" rel="noopener noreferrer">{t("ui.CodexResets.context")}</a>}
-      </blockquote>)}
-      {alert.text && alert.originalText && <details className="codex-reset-original" key={alert.id}>
-        <summary>{t("ui.CodexResets.original")}</summary>
-        <p>{alert.originalText}</p>
-        {alert.context.filter(context => context.originalText).map((context, index) => <blockquote key={context.id ?? index}>{context.originalText}</blockquote>)}
-      </details>}
-      {state?.stale && <p className="codex-reset-stale">{staleText(state, now)}</p>}
-      {error && <p className="new-error" role="alert">{error}</p>}
-      <div className="codex-reset-actions">
-        {alert.url && <a className="btn" href={alert.url} target="_blank" rel="noopener noreferrer">{t("ui.CodexResets.post")}</a>}
-        <button type="button" className="btn codex-reset-open-usage" onClick={() => { store.navigatePage(BUILTIN_USAGE_ID); close(); }}>{t("ui.CodexResets.open_usage")}</button>
-        <button ref={ack} type="button" className="btn btn-primary codex-reset-ack" disabled={saving} onClick={() => void acknowledge()}>{t(saving ? "ui.common.saving" : "ui.CodexResets.ack")}</button>
-      </div>
-      <div className="codex-reset-footer"><Source /><span>{t("ui.CodexResets.synced")}</span></div>
-    </div>
-  </div>, document.body);
-}
 
-export function CodexResetCard() {
-  const state = useStore(value => value.codexResets);
-  const now = useStore(value => value.now);
-  if (!state?.enabled) return null;
-  // 只显示一条：待生效取预计时间最晚的那次（较早的多半已被它取代），其余在「最近事件」里。
-  const expected = (event: CodexResetEvent) => Date.parse(resetTiming(event)?.from ?? "") || 0;
-  const latest = state.pending.filter(event => isUpcomingReset(event, now)).reduce<CodexResetEvent | undefined>((best, event) => !best || expected(event) > expected(best) ? event : best, undefined);
-  const events = latest ? [latest] : state.recent.filter(event => event.status === "confirmed").slice(0, 1);
-  return <section className={`codex-reset-card${latest ? " has-pending" : ""}`} aria-label={t("ui.CodexResets.title")}>
-    {events.length ? events.map(event => {
-      const when = relative(event.confirmedAt ?? event.updatedAt ?? event.createdAt ?? event.posts[0]?.publishedAt, now);
-      return <div className="codex-reset-card-event" key={event.id}>
-        {latest ? <>
-          <div className="codex-reset-card-heading">
-            <strong>{t("ui.CodexResets.upcoming", { type: typeLabel(event) })}</strong>
-            {eventUrl(event) && <a href={eventUrl(event)} target="_blank" rel="noopener noreferrer">{t("ui.CodexResets.post")}</a>}
-          </div>
-          <ResetTime event={event} now={now} />
-        </> : <div className="codex-reset-card-heading">
-          <strong>{t("ui.CodexResets.latest", { type: t(event.type === "reset_credit" ? "ui.CodexResets.credit" : "ui.CodexResets.reset_short") })}</strong>
-          {eventUrl(event) ? <a className="codex-reset-relative" href={eventUrl(event)} target="_blank" rel="noopener noreferrer" title={t("ui.CodexResets.post")}>{when}</a> : <span className="codex-reset-relative">{when}</span>}
-        </div>}
-      </div>;
-    }) : <p>{t(state.lastSuccessAt ? "ui.CodexResets.empty" : "ui.CodexResets.waiting")}</p>}
-    {state.stale && <p className="codex-reset-stale">{staleText(state, now)}</p>}
-    <div className="codex-reset-card-foot">
-    <details className="codex-reset-history">
-      <summary>{t("ui.CodexResets.history")}</summary>
-      <ol>{state.recent.map(event => <li key={event.id}>
-        <span>{typeLabel(event)} · {t(event.status === "confirmed" ? "ui.CodexResets.confirmed" : "ui.CodexResets.announced")}</span>
-        <p>{event.title}</p>
-        <ResetTime event={event} now={now} />
-        {eventUrl(event) && <a href={eventUrl(event)} target="_blank" rel="noopener noreferrer">{t("ui.CodexResets.post")}</a>}
-      </li>)}</ol>
-    </details>
-    <Source />
+  return <section className="codex-reset-card" aria-label={t("ui.CodexResets.title")}>
+    <div className="codex-reset-header">
+      <button type="button" className="codex-reset-toggle" aria-expanded={open} aria-controls={detailsId} onClick={() => {
+        setManualOpen(!open);
+        if (open) setDismissed(eventKey);
+      }}>
+        <span>{t("ui.CodexResets.events")}</span>
+        {summary && <span className="codex-reset-summary">{!open && providerOptions.length === 1 && `${quotaResetFeeds[summary.provider]} · `}{stage(summary.alert?.action)}</span>}
+        <span className="codex-reset-chevron" aria-hidden="true" />
+      </button>
+      {providerOptions.length > 1 && <Segmented className="codex-reset-rail" role="radiogroup"
+        ariaLabel={t("ui.CodexResets.provider")} options={providerOptions} value={open ? provider : active?.provider ?? null} onChange={next => {
+          setSelection({ provider: next, eventKey });
+          if (!open) setManualOpen(true);
+          setError("");
+        }} />}
+    </div>
+    <div id={detailsId} className="codex-reset-details" hidden={!open}>
+      <div className="codex-reset-line">
+        <span className="codex-reset-event">
+          {alert || event ? <>{typeLabel(event)}{timestamp && <> · {timestamp}</>}</>
+            : t(status.lastSuccessAt ? "ui.CodexResets.empty" : "ui.CodexResets.waiting")}
+        </span>
+        <div className="codex-reset-links">
+          {url && <a href={url} target="_blank" rel="noopener noreferrer">{t("ui.CodexResets.post")}</a>}
+          <a href={quotaResetSource(provider)} aria-label={t("ui.CodexResets.source")} target="_blank" rel="noopener noreferrer">AIHOT</a>
+          {alert && <button type="button" className="btn codex-reset-ack" disabled={saving} onClick={() => void acknowledge()}>{t(saving ? "ui.common.saving" : "ui.CodexResets.ack")}</button>}
+        </div>
+      </div>
+      {status.stale && status.lastSuccessAt && <p className="codex-reset-stale">{staleText(status, now)}</p>}
+      {error && <p className="new-error" role="alert">{error}</p>}
+      {!alert && status.recent.length > 1 && <details className="codex-reset-history" key={provider}>
+        <summary>{t("ui.CodexResets.history")}</summary>
+        <ul>{status.recent.map(item => <li key={item.id}>
+          {eventUrl(item) ? <a href={eventUrl(item)} target="_blank" rel="noopener noreferrer">{item.title || typeLabel(item)}</a> : item.title || typeLabel(item)}
+        </li>)}</ul>
+      </details>}
     </div>
   </section>;
 }

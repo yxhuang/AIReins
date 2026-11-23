@@ -10,6 +10,9 @@ import {
   createUsageService,
   extractKeyFromShellFile,
   httpsGetDirectOrProxy,
+  isCompleteAntigravityCreditsOutput,
+  isCompleteAntigravityUsageOutput,
+  loadUsageConfig,
   parseAntigravityUsagePayload,
   parseClaudeUsagePayload,
   parseCodexRateLimits,
@@ -19,6 +22,7 @@ import {
   queryCodexAppServerRateLimits,
   readLatestCodexSessionUsage,
   resolveKimiKey,
+  runJsonCliCommand,
   UsageInputError,
   type UsageProvider,
   type UsageProviderId,
@@ -208,6 +212,156 @@ createInterface({ input: process.stdin }).on("line", (line) => {
     assert.equal(zeroAndEmpty.error_code, "antigravity_no_limits");
     assert.equal(zeroAndEmpty.credits_note, "0");
     assert.equal(zeroAndEmpty.plan, "Pro");
+  }
+
+  // 3b. runJsonCliCommand early JSON resolution, bounded graceful exit, abort cleanup, and error envelope guarding.
+  {
+    const waitForPidExit = async (pid: number, maxWaitMs = 2_500): Promise<boolean> => {
+      const deadline = Date.now() + maxWaitMs;
+      while (Date.now() < deadline) {
+        try {
+          process.kill(pid, 0);
+        } catch (err) {
+          if ((err as NodeJS.ErrnoException).code === "ESRCH") return true;
+        }
+        await new Promise((r) => setTimeout(r, 25));
+      }
+      return false;
+    };
+
+    // (1) Early resolve on complete usage JSON while letting child finish graceful shutdown.
+    const earlyExitScript = join(root, "agy-early-graceful.mjs");
+    const earlyMarker = join(root, "agy-early-graceful.done");
+    writeFileSync(earlyExitScript, `#!/usr/bin/env node
+import { writeFileSync } from "node:fs";
+process.stdout.write(JSON.stringify({
+  status: "SUCCESS",
+  command: { name: "usage", data: { groups: [{ name: "Gemini", buckets: [{ name: "5h", remaining_fraction: 0.8 }] }] } },
+}) + "\\n");
+setTimeout(() => {
+  writeFileSync(${JSON.stringify(earlyMarker)}, "done");
+  process.exit(0);
+}, 600);
+`, { mode: 0o755 });
+    chmodSync(earlyExitScript, 0o755);
+
+    const t0 = Date.now();
+    const earlyOut = await runJsonCliCommand(earlyExitScript, [], 5_000, process.env, undefined, {
+      acceptEarly: isCompleteAntigravityUsageOutput,
+      postResolveGraceMs: 5_000,
+    });
+    const earlyElapsed = Date.now() - t0;
+    assert.ok(earlyElapsed < 450, `expected early resolve before 600ms graceful exit, got ${earlyElapsed}ms`);
+    assert.equal(Math.round(parseAntigravityUsagePayload(earlyOut).windows[0]!.used_pct), 20);
+    await new Promise((r) => setTimeout(r, 800));
+    assert.equal(readFileSync(earlyMarker, "utf8"), "done", "gracefully exiting child must not be SIGTERMed early");
+
+    // (2) Chunked stdout JSON resolves as soon as the final chunk completes valid JSON.
+    const chunkedScript = join(root, "agy-chunked.mjs");
+    writeFileSync(chunkedScript, `#!/usr/bin/env node
+const full = JSON.stringify({
+  status: "SUCCESS",
+  command: { name: "usage", data: { groups: [{ name: "Gemini", buckets: [{ name: "5h", remaining_fraction: 0.4 }] }] } },
+});
+const mid = Math.floor(full.length / 2);
+process.stdout.write(full.slice(0, mid));
+setTimeout(() => {
+  process.stdout.write(full.slice(mid) + "\\n");
+  setTimeout(() => process.exit(0), 600);
+}, 50);
+`, { mode: 0o755 });
+    chmodSync(chunkedScript, 0o755);
+
+    const tc0 = Date.now();
+    const chunkedOut = await runJsonCliCommand(chunkedScript, [], 5_000, process.env, undefined, {
+      acceptEarly: isCompleteAntigravityUsageOutput,
+      postResolveGraceMs: 5_000,
+    });
+    const chunkedElapsed = Date.now() - tc0;
+    assert.ok(chunkedElapsed < 450, `expected chunked early resolve before 600ms tail, got ${chunkedElapsed}ms`);
+    assert.equal(Math.round(parseAntigravityUsagePayload(chunkedOut).windows[0]!.used_pct), 60);
+
+    // (3) Error JSON envelope must NOT resolve early; must wait for exit and classify properly.
+    const authErrorScript = join(root, "agy-auth-error.mjs");
+    writeFileSync(authErrorScript, `#!/usr/bin/env node
+process.stdout.write(JSON.stringify({ status: "ERROR", error: "You are not logged into Antigravity." }) + "\\n");
+setTimeout(() => process.exit(1), 80);
+`, { mode: 0o755 });
+    chmodSync(authErrorScript, 0o755);
+
+    await assert.rejects(
+      runJsonCliCommand(authErrorScript, [], 5_000, process.env, undefined, {
+        acceptEarly: isCompleteAntigravityUsageOutput,
+      }),
+      /exited 1.*not logged into Antigravity/,
+    );
+    const agyErrRunners = createDefaultUsageRunners({
+      cwd: root,
+      getConfig: () => ({ version: 1 }),
+      runCli: (_cmd, args, timeoutMs, env, signal, opts) =>
+        runJsonCliCommand(authErrorScript, args, timeoutMs, env, signal, opts),
+    });
+    const agyErrUsage = await agyErrRunners.antigravity.fetch();
+    assert.equal(agyErrUsage.status, "auth_expired");
+    assert.equal(agyErrUsage.error_code, "antigravity_auth_expired");
+
+    // (4) Hung child after early resolve is terminated once postResolveGraceMs expires.
+    const hungScript = join(root, "agy-hung.mjs");
+    const hungPidFile = join(root, "agy-hung.pid");
+    writeFileSync(hungScript, `#!/usr/bin/env node
+import { writeFileSync } from "node:fs";
+writeFileSync(${JSON.stringify(hungPidFile)}, String(process.pid));
+process.stdout.write(JSON.stringify({
+  status: "SUCCESS",
+  command: { name: "usage", data: { groups: [{ name: "Gemini", buckets: [{ name: "5h", remaining_fraction: 0.9 }] }] } },
+}) + "\\n");
+setInterval(() => {}, 10_000);
+`, { mode: 0o755 });
+    chmodSync(hungScript, 0o755);
+
+    await runJsonCliCommand(hungScript, [], 5_000, process.env, undefined, {
+      acceptEarly: isCompleteAntigravityUsageOutput,
+      postResolveGraceMs: 120,
+    });
+    const hungPid = Number(readFileSync(hungPidFile, "utf8"));
+    assert.equal(await waitForPidExit(hungPid, 2_500), true, "hung child must be terminated after postResolveGraceMs");
+
+    // (5) External AbortSignal after early resolve terminates the lingering child immediately.
+    const abortHungPidFile = join(root, "agy-abort-hung.pid");
+    const abortHungScript = join(root, "agy-abort-hung.mjs");
+    writeFileSync(abortHungScript, `#!/usr/bin/env node
+import { writeFileSync } from "node:fs";
+writeFileSync(${JSON.stringify(abortHungPidFile)}, String(process.pid));
+process.stdout.write(JSON.stringify({
+  status: "SUCCESS",
+  command: { name: "usage", data: { groups: [{ name: "Gemini", buckets: [{ name: "5h", remaining_fraction: 0.9 }] }] } },
+}) + "\\n");
+setInterval(() => {}, 10_000);
+`, { mode: 0o755 });
+    chmodSync(abortHungScript, 0o755);
+
+    const ac = new AbortController();
+    await runJsonCliCommand(abortHungScript, [], 5_000, process.env, ac.signal, {
+      acceptEarly: isCompleteAntigravityUsageOutput,
+      postResolveGraceMs: 10_000,
+    });
+    const abortHungPid = Number(readFileSync(abortHungPidFile, "utf8"));
+    ac.abort();
+    assert.equal(await waitForPidExit(abortHungPid, 2_500), true, "aborted post-resolve child must terminate promptly");
+
+    // (6) Default runJsonCliCommand without acceptEarly still checks exit code + credits predicate cases.
+    const nonzeroScript = join(root, "agy-nonzero.mjs");
+    writeFileSync(nonzeroScript, `#!/usr/bin/env node
+process.stdout.write('{"ok":true}\\n');
+process.exit(1);
+`, { mode: 0o755 });
+    chmodSync(nonzeroScript, 0o755);
+    await assert.rejects(runJsonCliCommand(nonzeroScript, [], 5_000, process.env), /exited 1/);
+
+    assert.equal(isCompleteAntigravityCreditsOutput({ status: "SUCCESS", command: { name: "credits", data: { remaining_credits: 42 } } }), true);
+    assert.equal(isCompleteAntigravityCreditsOutput({ status: "SUCCESS", command: { name: "credits", data: { remaining_credits: 0 } } }), true);
+    assert.equal(isCompleteAntigravityCreditsOutput({ status: "ERROR", error: "failed", command: { name: "credits", data: { remaining_credits: 0 } } }), false);
+    assert.equal(isCompleteAntigravityCreditsOutput({ status: "SUCCESS", command: { name: "credits", data: { plan_name: "Free" } } }), false);
   }
 
   // 4. Codex rate limits, reset credit detail preservation, local session rollout fallback, and app-server JSON-RPC.
@@ -414,6 +568,62 @@ export KIMI_API_KEY="sk-from-file-123"
     assert.equal(kimiRes.status, "auth_expired");
     assert.equal(kimiRes.error_code, "kimi_auth_expired");
     assert.ok(!JSON.stringify(kimiRes).includes("sk-top-secret-value"), "error payload must never echo Kimi secret");
+  }
+
+  // Credits default off, can be enabled on demand, and disappear immediately on opt-out.
+  {
+    let resolveCredits!: (value: unknown) => void;
+    const calls: string[] = [];
+    const configPath = join(root, "antigravity-progress", "usage.json");
+    const cachePath = join(root, "antigravity-progress", "usage-cache.json");
+    mkdirSync(join(root, "antigravity-progress"));
+    writeFileSync(cachePath, JSON.stringify({ antigravity: parseAntigravityUsagePayload(
+      { groups: [{ name: "Gemini", buckets: [{ name: "5h", remaining_percentage: 80 }] }] },
+      { remaining_credits: 50 },
+    ) }), { mode: 0o600 });
+    const snapshots: UsageProvider[] = [];
+    const service = createUsageService({
+      configPath,
+      cachePath,
+      runCli: async (_command: string, args: string[]) => {
+        calls.push(args[1]!);
+        return args[1] === "/credits" ? new Promise((resolve) => { resolveCredits = resolve; }) : {
+          groups: [{ name: "Gemini", buckets: [{ name: "5h", remaining_percentage: 70 }] }],
+        };
+      },
+      onChange: () => { snapshots.push(service.summary().providers[0]!); },
+    });
+
+    assert.equal(service.settings().antigravity.includeCredits, false);
+    assert.equal(service.summary().providers[0]!.credits_note, undefined, "hide the balance cached by an older version");
+    await service.refresh("antigravity");
+    assert.deepEqual(calls, ["/usage"]);
+
+    const { settings } = await service.updateSettings({ antigravity: { includeCredits: true } });
+    assert.equal(settings.antigravity.includeCredits, true);
+    assert.equal(loadUsageConfig(configPath).antigravity?.includeCredits, true);
+    const pending = service.refresh("antigravity");
+    await new Promise(setImmediate);
+    assert.deepEqual(calls, ["/usage", "/usage", "/credits"]);
+    const partial = snapshots.at(-1)!;
+    assert.equal(partial.windows[0]!.used_pct, 30);
+    assert.equal(partial.credits_note, undefined);
+    resolveCredits({ plan_name: "Pro", remaining_credits: 42 });
+    const result = await pending;
+    assert.equal(result.providers[0]!.credits_note, "42");
+    assert.equal(result.providers[0]!.fetched_at, partial.fetched_at);
+
+    const inFlight = service.refresh("antigravity");
+    const disabled = await service.updateSettings({ antigravity: { includeCredits: false } });
+    assert.equal(disabled.settings.antigravity.includeCredits, false);
+    assert.equal(disabled.summary.providers[0]!.credits_note, undefined);
+    resolveCredits({ remaining_credits: 41 });
+    assert.equal((await inFlight).providers[0]!.credits_note, undefined, "an older credits response cannot restore the balance");
+    await service.refresh("antigravity");
+    assert.deepEqual(calls.slice(-3), ["/usage", "/credits", "/usage"]);
+    assert.equal(loadUsageConfig(configPath).antigravity?.includeCredits, false);
+    assert.throws(() => applyUsageSettingsPatch({ version: 1 }, { antigravity: { includeCredits: "true" } }), UsageInputError);
+    await service.stop();
   }
 
   // 7. createUsageService: Antigravity on-demand compliance (NEVER background-polled), freshness cache,

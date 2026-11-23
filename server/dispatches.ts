@@ -6,7 +6,7 @@ import { StringDecoder } from "node:string_decoder";
 import { createHash } from "node:crypto";
 import { HistoryIndex, mergeHistoryMessages, parseHistoryMessages, type HistoryMessage } from "./history.js";
 import { boundExternalMessages, NativeConversationReader } from "./native-conversation.js";
-import type { AgentKind, SessionRecord } from "./types.js";
+import type { AgentKind, SessionRecord, SessionStatus } from "./types.js";
 
 const RUN_ID = /^(\d{8})-(\d{6})-(codex|kimi|copilot|claude)-(.*)$/u;
 const CHUNK_SIZE = 64 * 1024;
@@ -287,8 +287,297 @@ export interface DispatchParentSession extends ClaudeParentSession {
   agent?: AgentKind;
   model?: string | null;
   createdAt?: string;
+  status?: SessionStatus;
+  title?: string | null;
 }
 export type DispatchSessionProvider = () => readonly DispatchParentSession[] | Promise<readonly DispatchParentSession[]>;
+
+interface AntigravityRuntimeState {
+  agent: "antigravity";
+  sessionId: string;
+  nativeSessionId: string;
+  configuredModel: string | null;
+  activeModel: string | null;
+  activePhase: "planning" | "executing" | null;
+  plannerModel: string | null;
+  executorModel: string | null;
+  updatedAt: string | null;
+}
+
+interface AntigravitySegment {
+  key: string;
+  name: string | null;
+  plannerModel: string | null;
+  model: string | null;
+  startedAt: string;
+  lastActivityAt: string;
+  handedBackAt: string | null;
+  terminal: boolean;
+  runningSteps: Set<string>;
+  activity: string | null;
+}
+
+interface AntigravitySwarmTiming {
+  id: string;
+  startedAt: string;
+  endedAt: string | null;
+}
+
+const ORCHESTRATOR_MODEL = /^(?:gemini-pro-)?orchestrator(?:-|$)/iu;
+const ANTIGRAVITY_TAIL_BYTES = 512 * 1024;
+
+function transcriptPlanModeSignal(type: unknown, content: unknown): "on" | "off" | null {
+  const text = stringValue(content)?.trim();
+  if (!text) return null;
+  if (type === "GENERIC") {
+    const lastLine = text.split(/\r?\n/u).at(-1)?.trim() ?? "";
+    if (/^Plan mode is off\.$/u.test(lastLine)) return "off";
+    if (/^Plan mode is on\.$/u.test(lastLine)) return "on";
+    return null;
+  }
+  if (type === "SYSTEM_MESSAGE") {
+    const match = /^<SYSTEM_MESSAGE>\s*\r?\n([^\r\n]*)/mu.exec(text);
+    const firstLine = (match ? match[1] : text.split(/\r?\n/u)[0] ?? "").trim();
+    if (/^Plan mode is off[.:]/u.test(firstLine)) return "off";
+    if (/^(?:\[plan review\]\s*)?Plan mode is on[.:]/u.test(firstLine)) return "on";
+  }
+  return null;
+}
+
+function unwrapTranscriptPlan(value: unknown): string | null {
+  const raw = stringValue(value);
+  if (!raw) return null;
+  if (raw.startsWith("\"")) {
+    try {
+      const parsed = JSON.parse(raw);
+      if (typeof parsed === "string") return parsed;
+    } catch {
+      return raw.slice(1).replace(/\\r\\n|\\n/gu, "\n").replace(/\\"/gu, "\"").replace(/<truncated \d+ bytes>[\s\S]*$/u, "");
+    }
+  }
+  return raw;
+}
+
+function recordAntigravitySwarmTiming(content: unknown, timings: Map<string, AntigravitySwarmTiming>) {
+  if (typeof content !== "string" || !content.startsWith("Created At: ")) return;
+  const lines = content.trimEnd().split(/\r?\n/u);
+  const payload = lines.at(-1);
+  if (!payload?.startsWith("{")) return;
+  const completed = lines.find(line => line.startsWith("Completed At: "));
+  const time = Date.parse(completed?.slice("Completed At: ".length) ?? "");
+  if (!Number.isFinite(time)) return;
+  let result;
+  try { result = JSON.parse(payload); } catch { return; }
+  const name = stringValue(result?.name);
+  if (!name) return;
+  const at = new Date(time).toISOString();
+  const id = stringValue(result.conversation_id);
+  if (result.status === "added" && id && NATIVE_ID.test(id)) {
+    timings.set(name, { id, startedAt: at, endedAt: null });
+  } else if (result.status === "killed") {
+    const worker = timings.get(name);
+    if (worker && time >= Date.parse(worker.startedAt)) worker.endedAt = at;
+  }
+}
+
+function parseAntigravityTranscript(tail: Buffer, offset: number) {
+  const lines = tail.toString("utf8").split("\n");
+  if (offset) lines.shift();
+  lines.pop(); // Only newline-terminated rows are committed by the appending writer.
+  const segments: AntigravitySegment[] = [];
+  const swarmTimings = new Map<string, AntigravitySwarmTiming>();
+  let segment: AntigravitySegment | null = null;
+  let activePhase: AntigravityRuntimeState["activePhase"] = null;
+  let activeModel: string | null = null;
+  let plannerModel: string | null = null;
+  let executorModel: string | null = null;
+  let updatedAt: string | null = null;
+  let seenUser = false;
+  for (const line of lines) {
+    let row;
+    try { row = JSON.parse(line); } catch { continue; }
+    const at = stringValue(row?.created_at);
+    if (!at || !Number.isFinite(Date.parse(at))) continue;
+    updatedAt = at;
+    if (row.type === "GENERIC" && row.source === "MODEL" && row.status === "DONE") {
+      recordAntigravitySwarmTiming(row.content, swarmTimings);
+    }
+    const key = Number.isSafeInteger(row.step_index) && row.step_index >= 0 ? String(row.step_index) : String(Date.parse(at));
+    const response = row.type === "PLANNER_RESPONSE";
+    const model = response ? stringValue(row.model)?.trim() || null : null;
+    const tools: { name?: unknown; args?: { plan?: unknown } }[] = Array.isArray(row.tool_calls) ? row.tool_calls : [];
+    const exitPlan = tools.find(call => call?.name === "exit_plan_mode");
+    const modeSignal = transcriptPlanModeSignal(row.type, row.content);
+    const user = row.source === "USER_EXPLICIT" || row.type === "USER_INPUT";
+    const planOn = tools.some(call => call?.name === "enter_plan_mode") || modeSignal === "on";
+    const planOff = Boolean(exitPlan) || modeSignal === "off";
+
+    if (user || planOn) {
+      if (planOn && model) executorModel = model;
+      if (segment) {
+        if (model) segment.model = model;
+        segment.handedBackAt = at;
+        segment = null;
+      }
+      if (user) seenUser = true;
+      if (planOn || activePhase) {
+        activePhase = "planning";
+        activeModel = plannerModel;
+      }
+      continue;
+    }
+    if (planOff) {
+      const name = unwrapTranscriptPlan(exitPlan?.args?.plan)?.split(/\r?\n/u)
+        .map(line => line.replace(/^\s*(?:(?:#+|[-*+]|\d+[.)])\s+)+/u, "").trim()).find(Boolean);
+      const title = name ? Array.from(name).slice(0, 80).join("") : null;
+      if (!segment) {
+        plannerModel = model ?? plannerModel ?? (activePhase !== "executing" ? activeModel : null);
+        segment = { key, name: title, plannerModel, model: null, startedAt: at, lastActivityAt: at,
+          handedBackAt: null, terminal: false, runningSteps: new Set(), activity: null };
+        segments.push(segment);
+        activePhase = "executing";
+        activeModel = executorModel = null;
+      } else {
+        segment.name ??= title;
+        segment.lastActivityAt = at;
+      }
+      continue;
+    }
+    if (model) {
+      activeModel = model;
+      if (segment || model === "gemini-flash-worker-agy") {
+        activePhase = "executing";
+        executorModel = model;
+      } else if (ORCHESTRATOR_MODEL.test(model)) {
+        activePhase = "planning";
+        plannerModel = model;
+      } else {
+        activePhase = null;
+      }
+    }
+    if (!segment) continue;
+    segment.lastActivityAt = at;
+    if (model) segment.model = model;
+    if (row.status === "RUNNING") segment.runningSteps.add(key);
+    else if (row.status) segment.runningSteps.delete(key);
+    if (response || row.status === "RUNNING") segment.terminal = response && row.status === "DONE" && tools.length === 0;
+    const activity = tools.map(call => stringValue(call?.name)).filter(Boolean).join(", ");
+    if (activity) segment.activity = activity.slice(0, 160);
+  }
+  return { segments, activePhase, activeModel, plannerModel, executorModel, updatedAt, seenUser, swarmTimings };
+}
+
+async function readAntigravitySwarm(root: string, id: string, session: DispatchParentSession, now: number,
+  timings?: ReadonlyMap<string, AntigravitySwarmTiming>): Promise<Dispatch[]> {
+  const board = await readJson(join(root, id, ".system_generated", "swarm"), "members.json").catch(() => null);
+  const members = board?.members;
+  if (!members || typeof members !== "object" || Array.isArray(members)) return [];
+  const runs: Dispatch[] = [];
+  for (const [name, member] of Object.entries(members)) {
+    if (member?.role !== "worker") continue;
+    const childId = stringValue(member.conversation_id);
+    if (!childId || childId === id || !NATIVE_ID.test(childId)) continue;
+    const timing = timings?.get(name);
+    const startedAt = timing?.id === childId ? timing.startedAt : null;
+    const stopped = member.killed === true || member.phase === "KILLED";
+    const endedAt = stopped && timing?.id === childId ? timing.endedAt : null;
+    const status = stopped ? "stopped" : member.phase === "RUNNING" && session.status !== "dead" && session.status !== "error"
+      ? "running" : "unknown";
+    const reference = Date.parse((stopped ? endedAt : startedAt) ?? "");
+    if (status !== "running" && !(now - reference >= 0 && now - reference <= 30 * 60_000)) continue;
+    runs.push({ runId: `antigravity-swarm-${childId}`, tool: "antigravity", native: true, agentType: "swarm",
+      name: Array.from(name.trim()).slice(0, 80).join("") || "Antigravity", cwd: session.cwd,
+      model: stringValue(member.applied_model) || stringValue(member.model), effort: null,
+      status, startedAt, endedAt, elapsedS: startedAt && endedAt ? (Date.parse(endedAt) - Date.parse(startedAt)) / 1000
+        : status === "unknown" ? 0 : null,
+      exit: null, files: null, session: childId, promptHead: null,
+      parent: { agent: "antigravity", sessionId: id, entrypoint: null, model: session.model ?? null, title: session.title ?? null } });
+  }
+  return runs;
+}
+
+/** Only known session IDs. Cache parsed facts, then evaluate lifecycle against the current parent status/time. */
+function createAntigravityOrchestratorReader() {
+  const cache = new Map<string, { fingerprint: string; data: ReturnType<typeof parseAntigravityTranscript> }>();
+  return async (runs: readonly Dispatch[], sessions: readonly DispatchParentSession[], now: number) => {
+    const result = { dispatches: [] as Dispatch[], runtimeStates: [] as AntigravityRuntimeState[] };
+    const aliases = new Map<string, DispatchParentSession>();
+    const candidates = new Map<string, DispatchParentSession>();
+    for (const session of sessions) {
+      if (session.agent !== "antigravity") continue;
+      if (session.id) aliases.set(session.id, session);
+      const id = session.nativeSessionId;
+      if (id && NATIVE_ID.test(id) && (candidates.get(id)?.status !== "running")) candidates.set(id, session);
+    }
+    for (const { parent } of runs) {
+      if (parent?.agent !== "antigravity" || !parent.sessionId) continue;
+      const alias = aliases.get(parent.sessionId);
+      const id = alias ? alias.nativeSessionId : parent.sessionId;
+      if (id && NATIVE_ID.test(id) && !candidates.has(id)) {
+        candidates.set(id, { cwd: null, model: parent.model, title: parent.title });
+      }
+    }
+    if (!candidates.size) return result;
+    const root = await realpath(process.env.WORKBENCH_ANTIGRAVITY_BRAIN_DIR
+      || join(homedir(), ".gemini", "antigravity-cli", "brain")).catch(() => null);
+    if (!root) return result;
+    // Open each candidate sequentially so a large registry doesn't exhaust file descriptors.
+    for (const [id, session] of candidates) {
+      const directory = join(root, id, ".system_generated", "logs");
+      let data;
+      try {
+        const file = await openFile(directory, "transcript.jsonl");
+        if (file) try {
+          const { mtimeMs, size, ino, ctimeMs } = await file.stat();
+          const fingerprint = `${mtimeMs}:${size}:${ino}:${ctimeMs}`;
+          const cached = cache.get(directory);
+          if (cached?.fingerprint === fingerprint) data = cached.data;
+          else {
+            const offset = Math.max(0, size - ANTIGRAVITY_TAIL_BYTES);
+            const bytes = await readBytes(file, offset, size - offset);
+            data = parseAntigravityTranscript(bytes, offset);
+            if (bytes.length === size - offset) {
+              cache.delete(directory);
+              if (cache.size >= 256) cache.delete(cache.keys().next().value!);
+              cache.set(directory, { fingerprint, data });
+            }
+          }
+        } finally { await file.close(); }
+      } catch { /* A swarm snapshot can be observed independently of the transcript. */ }
+      result.dispatches.push(...await readAntigravitySwarm(root, id, session, now, data?.swarmTimings));
+      if (!data?.updatedAt) continue;
+      const configuredModel = session.model ?? null;
+      const activePhase = data.activePhase ?? (data.seenUser && !data.activeModel
+        && configuredModel && ORCHESTRATOR_MODEL.test(configuredModel) ? "planning" : null);
+      result.runtimeStates.push({ agent: "antigravity", sessionId: session.id ?? id, nativeSessionId: id,
+        configuredModel, activePhase, activeModel: data.activeModel, plannerModel: data.plannerModel,
+        executorModel: data.executorModel, updatedAt: data.updatedAt });
+      for (const segment of data.segments) {
+        const last = Date.parse(segment.lastActivityAt);
+        const age = now - last;
+        const running = !segment.handedBackAt && (session.status === "running"
+          || (!session.status && age <= 5 * 60_000 && (!segment.terminal || segment.runningSteps.size > 0)));
+        const settledParent = session.status === "idle" || session.status === "dead" || session.status === "error";
+        const endedAt = segment.handedBackAt ?? (settledParent && (segment.terminal || !segment.runningSteps.size)
+          ? segment.lastActivityAt : null);
+        const end = endedAt ? Date.parse(endedAt) : last;
+        if (!running && (now - end < 0 || now - end > 30 * 60_000)) continue;
+        result.dispatches.push({
+          runId: `antigravity-inner-${id}-${segment.key}`, tool: "antigravity", native: true, agentType: "inner-loop",
+          name: segment.name ?? "Antigravity", model: segment.model, cwd: session.cwd, effort: null,
+          status: endedAt ? "OK" : running ? "running" : "unknown", startedAt: segment.startedAt, endedAt,
+          elapsedS: Math.max(0, (end - Date.parse(segment.startedAt)) / 1000), exit: null, files: null,
+          session: `${id}--inner-${segment.key}`, promptHead: segment.activity,
+          parent: { agent: "antigravity", sessionId: id, entrypoint: null,
+            model: segment.plannerModel ?? configuredModel, title: session.title ?? null },
+        });
+      }
+    }
+    return result;
+  };
+}
+
+const readAntigravityOrchestrator = createAntigravityOrchestratorReader();
 
 /** Only registered/delegate parent IDs; snapshots cache JSONL/meta path/mtime/size. */
 export function createClaudeSubagentReader(read = readClaudeSubagent,
@@ -739,6 +1028,11 @@ async function readDispatch(runId: string, directory: string, includePrompt = tr
 
 export async function listDispatches(limit: string | number | null = null, root = rootDirectory(),
   listSessions: DispatchSessionProvider = () => []): Promise<Dispatch[]> {
+  return (await listDispatchOverview(limit, root, listSessions)).dispatches;
+}
+
+export async function listDispatchOverview(limit: string | number | null = null, root = rootDirectory(),
+  listSessions: DispatchSessionProvider = () => [], now = Date.now()) {
   const raw = limit === null ? 50 : Number(limit);
   const count = Number.isFinite(raw) && raw >= 1 ? Math.min(200, Math.floor(raw)) : 50;
   const nativeRuns = await allDispatches(root);
@@ -749,13 +1043,16 @@ export async function listDispatches(limit: string | number | null = null, root 
     catch { if (run.status !== "running") run.status = "unknown"; }
   }));
   const sessions = await listSessions();
-  const native = await allNativeSubagents(root, sessions);
-  // Preserve delegate's existing run-ID ordering; insert native Claude records by time.
-  for (const agent of native.sort((a, b) => Date.parse(b.startedAt ?? "") - Date.parse(a.startedAt ?? ""))) {
+  const [native, orchestrator] = await Promise.all([
+    allNativeSubagents(root, sessions),
+    readAntigravityOrchestrator(dispatches, sessions, now),
+  ]);
+  // Preserve delegate's existing run-ID ordering; insert observational records by time.
+  for (const agent of [...native, ...orchestrator.dispatches].sort((a, b) => Date.parse(b.startedAt ?? "") - Date.parse(a.startedAt ?? ""))) {
     const index = dispatches.findIndex((run) => Date.parse(run.startedAt ?? "") < Date.parse(agent.startedAt ?? ""));
     dispatches.splice(index < 0 ? dispatches.length : index, 0, agent);
   }
-  return dispatches.slice(0, count);
+  return { dispatches: dispatches.slice(0, count), runtimeStates: orchestrator.runtimeStates };
 }
 
 export async function getDispatch(runId: string, root = rootDirectory()): Promise<DispatchDetail | null> {
@@ -976,7 +1273,8 @@ const nativeScans = new Map<string, { fingerprint: string; list: ReturnType<type
 async function allNativeSubagents(root: string, sessions: readonly DispatchParentSession[], bypassCache = false): Promise<Dispatch[]> {
   const codexRoot = process.env.WORKBENCH_CODEX_HISTORY_DIR || join(homedir(), ".codex", "sessions");
   const kimiRoot = process.env.WORKBENCH_KIMI_HISTORY_DIR || join(homedir(), ".kimi-code", "sessions");
-  const fingerprint = JSON.stringify([codexRoot, kimiRoot, sessions]);
+  const fingerprint = JSON.stringify([codexRoot, kimiRoot, sessions.map(({ id, agent, cwd, nativeCwd, nativeSessionId, model, createdAt }) =>
+    ({ id, agent, cwd, nativeCwd, nativeSessionId, model, createdAt }))]);
   let entry = nativeScans.get(root);
   if (!entry || entry.fingerprint !== fingerprint) {
     entry = { fingerprint, list: createDispatchScanCache(async (_dir, bypass) => {

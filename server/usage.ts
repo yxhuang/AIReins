@@ -116,6 +116,7 @@ export interface UsageManualResetCreditInput {
 export interface UsageStoredConfig {
   version: 1;
   providers?: Partial<Record<UsageProviderId, { enabled?: boolean }>>;
+  antigravity?: { includeCredits: boolean };
   claude?: {
     resetCredits?: UsageManualResetCreditInput[];
   };
@@ -131,6 +132,7 @@ export interface UsageSettingsView {
   instance_id?: string;
   revision?: number;
   providers: Record<UsageProviderId, { enabled: boolean }>;
+  antigravity: { includeCredits: boolean };
   kimi: {
     keyConfigured: boolean;
     keySource: "config" | "env" | "file" | "none";
@@ -145,6 +147,7 @@ export interface UsageSettingsView {
 
 export interface UsageSettingsPatch {
   providers?: Partial<Record<UsageProviderId, { enabled?: boolean }>>;
+  antigravity?: { includeCredits: boolean };
   kimi?: {
     apiKey?: string | null;
     apiKeyEnv?: string;
@@ -159,7 +162,7 @@ export interface UsageSettingsPatch {
 export interface UsageProviderRunner {
   id: UsageProviderId;
   onDemand?: boolean;
-  fetch(signal?: AbortSignal): Promise<UsageProvider>;
+  fetch(signal?: AbortSignal, publish?: (usage: UsageProvider) => void): Promise<UsageProvider>;
   resetBackoff?(): void;
 }
 
@@ -575,13 +578,8 @@ export function parseAntigravityUsagePayload(
   nowMs = Date.now(),
 ): UsageProvider {
   const usage = unwrapJsonPayload(usageRaw);
-  const credits = creditsRaw !== undefined && creditsRaw !== null ? unwrapJsonPayload(creditsRaw) : null;
-  const rawPlan = credits?.plan_name ?? usage.plan_name ?? usage.plan_tier ?? usage.tier ?? usage.plan;
+  const rawPlan = usage.plan_name ?? usage.plan_tier ?? usage.tier ?? usage.plan;
   const plan = typeof rawPlan === "string" && rawPlan.trim() ? rawPlan.trim() : null;
-  const remainingCredits = typeof credits?.remaining_credits === "number" && Number.isFinite(credits.remaining_credits)
-    ? credits.remaining_credits
-    : null;
-  const creditsNote = remainingCredits !== null && remainingCredits >= 0 ? `${remainingCredits}` : null;
 
   const groups = usage.groups;
   if (!Array.isArray(groups)) {
@@ -632,7 +630,7 @@ export function parseAntigravityUsagePayload(
   }
 
   if (windows.length === 0) {
-    return {
+    return addAntigravityCredits({
       ...errorUsage(
         "antigravity",
         "error",
@@ -642,11 +640,10 @@ export function parseAntigravityUsagePayload(
         true,
       ),
       plan,
-      ...(creditsNote ? { credits_note: creditsNote } : {}),
-    };
+    }, creditsRaw);
   }
 
-  return {
+  return addAntigravityCredits({
     id: "antigravity",
     name: "Antigravity",
     plan,
@@ -656,9 +653,20 @@ export function parseAntigravityUsagePayload(
     error_code: null,
     fetched_at: new Date(nowMs).toISOString(),
     reset_credits: null,
-    ...(creditsNote ? { credits_note: creditsNote } : {}),
     on_demand: true,
-  };
+  }, creditsRaw);
+}
+
+function addAntigravityCredits(usage: UsageProvider, raw: unknown): UsageProvider {
+  if (!asRecord(raw)) return usage;
+  const credits = unwrapJsonPayload(raw);
+  const rawPlan = credits.plan_name ?? usage.plan;
+  const plan = typeof rawPlan === "string" && rawPlan.trim() ? rawPlan.trim() : null;
+  const remaining = credits.remaining_credits;
+  const creditsNote = typeof remaining === "number" && Number.isFinite(remaining) && remaining >= 0
+    ? `${remaining}` : undefined;
+  if (plan === usage.plan && creditsNote === undefined) return usage;
+  return { ...usage, plan, ...(creditsNote !== undefined ? { credits_note: creditsNote } : {}) };
 }
 
 const activeProbeChildren = new Set<ChildProcess>();
@@ -706,18 +714,73 @@ async function drainActiveChildProbes(graceMs = 500): Promise<void> {
   }
 }
 
+export interface RunJsonCliOptions {
+  acceptEarly?: (value: unknown) => boolean;
+  postResolveGraceMs?: number;
+}
+
+function parseJsonStdout(raw: string): { ok: true; value: unknown } | { ok: false } {
+  const trimmed = raw.trim();
+  if (!trimmed) return { ok: false };
+  try {
+    return { ok: true, value: JSON.parse(trimmed) };
+  } catch {
+    const lines = trimmed.split(/\r?\n/).filter((line) => line.trim());
+    if (lines.length <= 1) return { ok: false };
+    // Support either single JSON document or final JSON line.
+    try {
+      return { ok: true, value: JSON.parse(lines.at(-1)!) };
+    } catch {
+      return { ok: false };
+    }
+  }
+}
+
+function isSuccessfulCliEnvelope(raw: unknown): boolean {
+  const top = asRecord(raw);
+  if (!top) return false;
+  if (typeof top.status === "string" && top.status.trim().toUpperCase() !== "SUCCESS") {
+    return false;
+  }
+  if (top.error !== undefined && top.error !== null && top.error !== "") {
+    return false;
+  }
+  return true;
+}
+
+export function isCompleteAntigravityUsageOutput(raw: unknown): boolean {
+  if (!isSuccessfulCliEnvelope(raw)) return false;
+  try {
+    return Array.isArray(unwrapJsonPayload(raw).groups);
+  } catch {
+    return false;
+  }
+}
+
+export function isCompleteAntigravityCreditsOutput(raw: unknown): boolean {
+  if (!isSuccessfulCliEnvelope(raw)) return false;
+  try {
+    const remaining = unwrapJsonPayload(raw).remaining_credits;
+    return typeof remaining === "number" && Number.isFinite(remaining);
+  } catch {
+    return false;
+  }
+}
+
 export function runJsonCliCommand(
   command: string,
   args: string[],
   timeoutMs = 20_000,
   env: NodeJS.ProcessEnv = proxyEnvironment(),
   signal?: AbortSignal,
+  options?: RunJsonCliOptions,
 ): Promise<unknown> {
   return new Promise((resolvePromise, reject) => {
     if (signal?.aborted) {
       reject(new Error("aborted"));
       return;
     }
+    const postResolveGraceMs = Math.max(0, options?.postResolveGraceMs ?? 10_000);
     const child = spawn(command, args, {
       env,
       stdio: ["ignore", "pipe", "pipe"],
@@ -727,45 +790,83 @@ export function runJsonCliCommand(
     child.stderr.on("error", () => { /* ignore */ });
     let stdout = "";
     let stderr = "";
-    child.stdout.on("data", (chunk: Buffer) => {
-      if (stdout.length < 1_048_576) stdout += chunk.toString("utf8");
-    });
-    child.stderr.on("data", (chunk: Buffer) => {
-      if (stderr.length < 4096) stderr += chunk.toString("utf8");
-    });
     let settled = false;
-    const onAbort = () => finish(new Error(`${command} aborted`));
-    signal?.addEventListener("abort", onAbort, { once: true });
+    let cleanupTimer: NodeJS.Timeout | undefined;
+    const clearCleanup = () => {
+      if (cleanupTimer !== undefined) {
+        clearTimeout(cleanupTimer);
+        cleanupTimer = undefined;
+      }
+      signal?.removeEventListener("abort", onAbort);
+    };
     const finish = (err?: Error, value?: unknown) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      signal?.removeEventListener("abort", onAbort);
+      clearCleanup();
       terminateChildProbe(child);
       if (err) reject(err);
       else resolvePromise(value);
     };
+    const finishEarly = (value: unknown) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      stdout = "";
+      stderr = "";
+      if (child.exitCode === null && child.signalCode === null) {
+        cleanupTimer = setTimeout(() => {
+          cleanupTimer = undefined;
+          terminateChildProbe(child);
+        }, postResolveGraceMs);
+        cleanupTimer.unref();
+      } else {
+        clearCleanup();
+      }
+      resolvePromise(value);
+    };
+    const onAbort = () => {
+      if (!settled) {
+        finish(new Error(`${command} aborted`));
+        return;
+      }
+      clearCleanup();
+      terminateChildProbe(child);
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
     const timer = setTimeout(() => finish(new Error(`${command} timeout`)), timeoutMs);
     timer.unref();
-    child.on("error", (err) => finish(err));
+    child.stdout.on("data", (chunk: Buffer) => {
+      if (settled) return;
+      if (stdout.length < 1_048_576) stdout += chunk.toString("utf8");
+      if (options?.acceptEarly && (chunk.includes(0x0a) || stdout.trimEnd().endsWith("}"))) {
+        const parsed = parseJsonStdout(stdout);
+        if (parsed.ok && options.acceptEarly(parsed.value)) {
+          finishEarly(parsed.value);
+        }
+      }
+    });
+    child.stderr.on("data", (chunk: Buffer) => {
+      if (settled) return;
+      if (stderr.length < 4096) stderr += chunk.toString("utf8");
+    });
+    child.on("error", (err) => {
+      if (settled) {
+        clearCleanup();
+        return;
+      }
+      finish(err);
+    });
     child.on("close", (code) => {
+      clearCleanup();
       if (settled) return;
       if (code !== 0) {
         finish(new Error(`${command} exited ${code}: ${(stderr || stdout).slice(0, 240)}`));
         return;
       }
-      try {
-        const trimmed = stdout.trim();
-        const lines = trimmed.split(/\r?\n/).filter((l) => l.trim());
-        // Support either single JSON document or final JSON line.
-        try {
-          finish(undefined, JSON.parse(trimmed));
-        } catch {
-          finish(undefined, JSON.parse(lines.at(-1) ?? ""));
-        }
-      } catch (err) {
-        finish(err instanceof Error ? err : new Error(String(err)));
-      }
+      const parsed = parseJsonStdout(stdout);
+      if (parsed.ok) finish(undefined, parsed.value);
+      else finish(new Error(`${command} returned invalid JSON`));
     });
   });
 }
@@ -1413,9 +1514,11 @@ export function loadUsageConfig(configPath: string): UsageStoredConfig {
       log("warn", "ignoring stored Kimi apiKey because usage.json permissions could not be restricted to 0600");
     }
     const claudeRaw = asRecord(parsed.claude);
+    const includeAntigravityCredits = asRecord(parsed.antigravity)?.includeCredits;
     return {
       version: 1,
       providers,
+      ...(typeof includeAntigravityCredits === "boolean" ? { antigravity: { includeCredits: includeAntigravityCredits } } : {}),
       ...(kimiRaw ? {
         kimi: {
           ...(allowStoredSecret && typeof kimiRaw.apiKey === "string" && isValidKimiApiKey(kimiRaw.apiKey.trim()) ? { apiKey: kimiRaw.apiKey.trim() } : {}),
@@ -1460,6 +1563,7 @@ export function buildUsageSettingsView(
   return {
     ...(meta ? { instance_id: meta.instanceId, revision: meta.revision } : {}),
     providers,
+    antigravity: { includeCredits: config.antigravity?.includeCredits === true },
     kimi: {
       keyConfigured: resolved.key !== null,
       keySource: resolved.source,
@@ -1479,6 +1583,7 @@ export function applyUsageSettingsPatch(current: UsageStoredConfig, input: unkno
   const next: UsageStoredConfig = {
     version: 1,
     providers: { ...current.providers },
+    ...(current.antigravity ? { antigravity: { ...current.antigravity } } : {}),
     ...(current.kimi ? { kimi: { ...current.kimi } } : {}),
     ...(current.claude ? { claude: { ...current.claude } } : {}),
   };
@@ -1496,6 +1601,12 @@ export function applyUsageSettingsPatch(current: UsageStoredConfig, input: unkno
       }
       next.providers![key as UsageProviderId] = { enabled: entry.enabled };
     }
+  }
+
+  if (body.antigravity !== undefined) {
+    const includeCredits = asRecord(body.antigravity)?.includeCredits;
+    if (typeof includeCredits !== "boolean") throw new UsageInputError("antigravity.includeCredits must be a boolean");
+    next.antigravity = { includeCredits };
   }
 
   if (body.kimi !== undefined) {
@@ -1644,12 +1755,14 @@ export function createDefaultUsageRunners(options: {
   now?: () => number;
   liveClaudeUsage?: () => Promise<Rec | null>;
   httpGet?: typeof httpsGetDirectOrProxy;
+  runCli?: typeof runJsonCliCommand;
   codexSessionsRoot?: () => string;
   env?: NodeJS.ProcessEnv;
 }): Record<UsageProviderId, UsageProviderRunner> {
   const cwd = resolve(options.cwd ?? process.cwd());
   const now = options.now ?? Date.now;
   const httpGet = options.httpGet ?? httpsGetDirectOrProxy;
+  const runCli = options.runCli ?? runJsonCliCommand;
   const sessionsRoot = options.codexSessionsRoot ?? codexSessionsDir;
 
   let codexFailures = 0;
@@ -1681,14 +1794,25 @@ export function createDefaultUsageRunners(options: {
   const antigravityRunner: UsageProviderRunner = {
     id: "antigravity",
     onDemand: true,
-    async fetch(signal?: AbortSignal): Promise<UsageProvider> {
+    async fetch(signal, publish): Promise<UsageProvider> {
       try {
         const env = proxyEnvironment();
-        const [usageOut, creditsOut] = await Promise.all([
-          runJsonCliCommand("agy", ["-p", "/usage", "--output-format", "json"], 20_000, env, signal),
-          runJsonCliCommand("agy", ["-p", "/credits", "--output-format", "json"], 15_000, env, signal).catch(() => null),
-        ]);
-        return parseAntigravityUsagePayload(usageOut, creditsOut, now());
+        const quota = runCli("agy", ["-p", "/usage", "--output-format", "json"], 20_000, env, signal, {
+          acceptEarly: isCompleteAntigravityUsageOutput,
+        });
+        if (options.getConfig().antigravity?.includeCredits !== true) {
+          return parseAntigravityUsagePayload(await quota, null, now());
+        }
+        let creditsPending = true;
+        const credits = runCli("agy", ["-p", "/credits", "--output-format", "json"], 15_000, env, signal, {
+          acceptEarly: isCompleteAntigravityCreditsOutput,
+        })
+          .catch(() => null)
+          .finally(() => { creditsPending = false; });
+        const usage = parseAntigravityUsagePayload(await quota, null, now());
+        if (creditsPending && usage.status === "ok") publish?.(usage);
+        const creditsOut = await credits;
+        return options.getConfig().antigravity?.includeCredits === true ? addAntigravityCredits(usage, creditsOut) : usage;
       } catch (err) {
         const reason = err instanceof Error ? err.message : String(err);
         log("warn", "antigravity usage fetch failed", { reason: err instanceof Error ? err.name : "Error" });
@@ -1811,6 +1935,7 @@ export function createUsageService(options: {
   runners?: Partial<Record<UsageProviderId, UsageProviderRunner>>;
   liveClaudeUsage?: () => Promise<Rec | null>;
   httpGet?: typeof httpsGetDirectOrProxy;
+  runCli?: typeof runJsonCliCommand;
   codexSessionsRoot?: () => string;
   env?: NodeJS.ProcessEnv;
   onChange?: () => void;
@@ -1830,6 +1955,7 @@ export function createUsageService(options: {
     now,
     liveClaudeUsage: options.liveClaudeUsage,
     httpGet: options.httpGet,
+    runCli: options.runCli,
     codexSessionsRoot: options.codexSessionsRoot,
     env: options.env,
   });
@@ -1863,7 +1989,10 @@ export function createUsageService(options: {
       if (parsed) {
         for (const id of USAGE_PROVIDER_ORDER) {
           const item = sanitizeCachedProvider(parsed[id]);
-          if (item) cache.set(id, item);
+          if (item) {
+            if (id === "antigravity" && config.antigravity?.includeCredits !== true) delete item.credits_note;
+            cache.set(id, item);
+          }
         }
       }
     }
@@ -1906,21 +2035,26 @@ export function createUsageService(options: {
     }
     const startGen = providerGen.get(id) ?? 0;
     const signal = serviceAbort.signal;
-    const promise = (async () => {
-      let usage: UsageProvider;
-      try {
-        usage = await runner.fetch(signal);
-      } catch {
-        log("error", "usage provider threw unexpected error", { provider: id });
-        usage = errorUsage(id, "error", "internal_error", "Internal error", now(), Boolean(runner.onDemand));
-      }
-      if (signal.aborted || (providerGen.get(id) ?? 0) !== startGen) {
-        return cache.get(id) ?? usage;
-      }
+    const isCurrent = () => !signal.aborted && (providerGen.get(id) ?? 0) === startGen;
+    let published: UsageProvider | undefined;
+    const publish = (usage: UsageProvider) => {
+      if (!isCurrent() || published === usage) return;
+      published = usage;
       cache.set(id, usage);
       revision++;
       persistCache();
       emitChange();
+    };
+    const promise = (async () => {
+      let usage: UsageProvider;
+      try {
+        usage = await runner.fetch(signal, publish);
+      } catch {
+        log("error", "usage provider threw unexpected error", { provider: id });
+        usage = errorUsage(id, "error", "internal_error", "Internal error", now(), Boolean(runner.onDemand));
+      }
+      if (!isCurrent()) return cache.get(id) ?? usage;
+      publish(usage);
       return usage;
     })().finally(() => {
       if (inFlight.get(id) === promise) inFlight.delete(id);
@@ -2050,6 +2184,20 @@ export function createUsageService(options: {
         persistCache();
         if (isEnabled("kimi") && !toRefresh.includes("kimi")) {
           toRefresh.push("kimi");
+        }
+      }
+      const includeAntigravityCredits = next.antigravity?.includeCredits === true;
+      if ((prevConfig.antigravity?.includeCredits === true) !== includeAntigravityCredits) {
+        if (includeAntigravityCredits && isEnabled("antigravity")) {
+          bumpProviderGen("antigravity");
+          void fetchOne("antigravity");
+        } else if (!includeAntigravityCredits) {
+          const cached = cache.get("antigravity");
+          if (cached?.credits_note !== undefined) {
+            const { credits_note: _credits, ...quota } = cached;
+            cache.set("antigravity", quota);
+            persistCache();
+          }
         }
       }
       for (const id of toRefresh) {

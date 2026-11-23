@@ -421,6 +421,62 @@ for (const wakeOffset of [499, 501]) {
   }
 }
 
+for (const wakeOrder of ["after new batch", "between batches", "retention expired", "new prompt during settle"]) {
+  const bg = harness();
+  const internal = bg.driver as any;
+  internal.reactiveSubagentGraceMs = 50;
+  internal.reactiveSettleMs = 5;
+  await bg.driver.start();
+  const started = now();
+  let clock = started;
+  Date.now = () => clock;
+  try {
+    const startSubagent = async (id: string) => {
+      await bg.driver.sendUserMessage({ text: `start ${id}` });
+      const promptId = bg.frames.at(-1).id;
+      bg.update({ sessionUpdate: "tool_call", toolCallId: id, title: "invoke_subagent", status: "in_progress" });
+      bg.update({ sessionUpdate: "tool_call_update", toolCallId: id, status: "completed" });
+      bg.receive({ id: promptId, result: { stopReason: "end_turn" } });
+      assert.equal(bg.metadata.at(-1).backgroundTasks[0]?.id, "antigravity:subagent");
+    };
+    const startWake = (text: string) => {
+      bg.update({ sessionUpdate: "agent_message_chunk", content: { type: "text", text } });
+      bg.update({ sessionUpdate: "usage_update", used: 1, size: 100 });
+    };
+    const wake = async (text: string) => {
+      startWake(text);
+      await new Promise(resolve => setTimeout(resolve, 20));
+    };
+    await startSubagent("expired");
+    clock = started + 51;
+    await new Promise(resolve => setTimeout(resolve, 75));
+    assert.deepEqual(bg.metadata.at(-1).backgroundTasks, []);
+    assert.equal(internal.pendingNativeSubagents.size, 0);
+    if (wakeOrder === "between batches") {
+      await wake("Expired subagent returned before the new batch");
+      assert.deepEqual(bg.metadata.at(-1).backgroundTasks, []);
+    }
+    if (wakeOrder === "retention expired") clock = started + 100;
+    if (wakeOrder === "new prompt during settle") {
+      startWake("Expired subagent returned just before the new prompt");
+      assert.equal(internal.reactivePhase, "awake");
+      assert.equal(internal.settlingExpiredSubagentDeadline, started + 100);
+    }
+    await startSubagent("new");
+    if (wakeOrder === "after new batch") {
+      await wake("Expired subagent returned during the new batch");
+      assert.deepEqual([...internal.pendingNativeSubagents.keys()], ["new"]);
+      assert.equal(bg.metadata.at(-1).backgroundTasks[0]?.id, "antigravity:subagent");
+    }
+    await wake("New subagent returned");
+    assert.equal(internal.pendingNativeSubagents.size, 0, wakeOrder);
+    assert.deepEqual(bg.metadata.at(-1).backgroundTasks, []);
+  } finally {
+    Date.now = now;
+    await bg.driver.stop();
+  }
+}
+
 for (const failed of [false, true]) {
   const bg = harness();
   const internal = bg.driver as any;

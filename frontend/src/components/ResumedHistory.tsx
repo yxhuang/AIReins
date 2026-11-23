@@ -14,12 +14,12 @@ import {
 type Phase = "loading" | "ready" | "error";
 
 /** Imported history and preview share the same latest-first reader.
- * 历史区异步加载、插在实时流上方，载入后同样滚到底，进会话停在最新消息。 */
+ * 历史区异步加载、插在实时流上方，由会话视图按当前阅读位置决定是否贴底。 */
 export const ResumedHistory = memo(function ResumedHistory({ session, streamRef }: { session: SessionRecord; streamRef: RefObject<HTMLDivElement | null> }) {
   if (!session.resumedFrom) return null;
   return <PagedHistory key={`${session.resumedFrom.agent}:${session.resumedFrom.nativeSessionId}`}
     agent={session.resumedFrom.agent} nativeSessionId={session.resumedFrom.nativeSessionId}
-    cwd={session.cwd} sessionId={session.id} streamRef={streamRef} imported startAtEnd initialCursor={session.resumedFrom.historyCursor} />;
+    cwd={session.cwd} sessionId={session.id} streamRef={streamRef} imported initialCursor={session.resumedFrom.historyCursor} />;
 }, (previous, next) => previous.streamRef === next.streamRef && previous.session.cwd === next.session.cwd
   && previous.session.resumedFrom?.agent === next.session.resumedFrom?.agent
   && previous.session.resumedFrom?.nativeSessionId === next.session.resumedFrom?.nativeSessionId

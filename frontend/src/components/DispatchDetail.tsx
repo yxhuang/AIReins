@@ -1,10 +1,9 @@
 import { t, formatNumber } from "../i18n";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { fetchDispatchDetail, fetchDispatchLog, fetchDispatchMessages } from "../api";
-import { dispatchName, dispatchSeconds, dispatchTime, dispatcherTitle } from "../dispatch-flow";
+import { dispatchName, dispatchModelName, dispatchSeconds, dispatchStatus, dispatchTime, dispatcherLabel, dispatcherTitle } from "../dispatch-flow";
 import type { DispatchSessionTitle } from "../dispatch-flow";
 import type { AgentKind, DispatchDetail as Detail, HistoryMessage } from "../types";
-import { modelShortName } from "../config-view";
 import { store } from "../store";
 import { HistoryTimeline } from "./HistoryTimeline";
 import { PanelBackButton } from "./SidePanelResize";
@@ -121,11 +120,11 @@ export function DispatchDetail({ runId, sessions, terminalOpen }: { runId: strin
     {error && <p className="dispatch-error" role="alert">{error}</p>}
     {!detail ? <p className="dispatch-empty">{t("ui.common.loading_dispatch")}</p> : <>
       <header className="dispatch-detail-head" data-tool={detail.tool}>
-        <p className="dispatch-detail-source">{dispatcher} → {detail.tool === "codex" ? "Codex" : detail.tool === "kimi" ? "Kimi" : detail.tool === "claude" ? "Claude Code" : "Copilot"}</p>
+        <p className="dispatch-detail-source">{dispatcher} → {dispatcherLabel(detail.tool)}</p>
         <h1>{dispatchName(detail)}</h1>
-        <div className="dispatch-detail-meta"><span className="mono">{detail.model ? modelShortName(detail.model) : t("ui.common.model_unknown")} / {detail.effort || t("ui.DispatchDetail.inherit")}</span>
+        <div className="dispatch-detail-meta"><span className="mono" title={detail.model ?? undefined}>{detail.model ? dispatchModelName(detail.model) : t("ui.common.model_unknown")} / {detail.effort || t("ui.DispatchDetail.inherit")}</span>
           <span className="mono" aria-label={t("ui.DispatchDetail.elapsed_time")}>{dispatchTime(dispatchSeconds(detail, now))}</span>
-          <span className={`dispatch-badge ${["TOOL_FAIL", "ACCEPT_FAIL", "TIMEOUT", "lost"].includes(detail.status) ? "failed" : ""}`}>{t("ui.DispatchDetail.status_value", { status: detail.status === "running" ? t("ui.common.running") : detail.status })}</span>
+          <span className={`dispatch-badge ${detail.status === "running" ? "running" : dispatchStatus(detail.status).className}`}>{t("ui.DispatchDetail.status_value", { status: detail.status === "running" ? t("ui.common.running") : detail.status })}</span>
           {detail.status !== "running" && <span title={detail.acceptResult || undefined} className={`dispatch-badge ${detail.status === "ACCEPT_FAIL" ? "failed" : ""}`}>{t("ui.DispatchDetail.acceptance_value", { result: detail.acceptResult?.split("←")[0]?.trim() || t("ui.common.unknown") })}</span>}
           {detail.credits !== null && <span className="dispatch-badge">{t("ui.DispatchDetail.credits_value", { credits: formatNumber(detail.credits, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) })}</span>}
         </div>

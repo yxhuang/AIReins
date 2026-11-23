@@ -1,20 +1,30 @@
 # Changelog
 
-## Unreleased
+## 0.6.0 (2026-11-22)
 
 ### Added
 
-- Google Antigravity joins Claude Code, Codex and Kimi through its official `agy acp` interface, with account-provided models and effort levels, streamed replies, tool approvals, attachments, context usage, slash commands and native session resume. Sessions created in AIReins retain their history; importing external Antigravity history and permanently deleting its native sessions are not supported yet.
-- A built-in AI usage panel natively displays subscription quotas, reset windows, elapsed-time pace marks and reset credits for all four providers (Claude, Antigravity, Codex and Kimi) in Node and React, with inline provider toggles and masked Kimi key configuration. Antigravity quota and AI credits are queried on demand via official `agy` commands when opening the panel or clicking Refresh.
+- Google Antigravity joins Claude Code, Codex and Kimi Code through its official `agy acp` interface, with account-provided models and effort levels (including dynamic option updates when switching models), streamed replies, tool approvals, attachments, context usage, slash commands, concurrent prompts, background tool/subagent keepalive with reactive wakeup, and native session resume (`agy --conversation <id>`). Sessions created in AIReins retain their history and verify local brain transcripts on crash/restart recovery; importing external Antigravity history and permanently deleting its native sessions are not supported yet.
+- A built-in four-provider AI usage panel natively displays subscription quotas, reset windows, elapsed-time pace marks and reset notices for Claude, Antigravity, Codex and Kimi in Node and React, with per-provider and parallel "Refresh all" actions, inline provider toggles, optional Antigravity AI credits lookup (off by default; queries `/usage` and `/credits` on demand without background polling), and masked Kimi API key (`0600`) and proxy settings.
+- Multi-provider quota reset announcements replace the Codex-only Tibo modal with an opt-in four-provider AIHOT feed (Codex, Antigravity, Claude and Grok Bot) rendered in a compact expandable strip at the bottom of the Usage panel with provider icons, unread dot badge and cross-tab synchronized acknowledgement.
+- Antigravity Orchestrator inner-loop planning/execution phases (showing observed planner/executor models such as `Neon · Planning` and `Hydrogen · Executing`) and Swarm worker nodes with model-family colors appear alongside native sub-agents and `delegate` runs in the dispatch tree.
+- Per-turn duration tracking displays elapsed time on the last visible item of each turn (live while running, with hover details for start/end timestamps and Claude API duration), paired accurately across concurrent Antigravity prompts and queued Kimi turns.
+- Settings → Host adds a Remote terminal toggle that updates `remote.json` immediately from local or allowlisted remote sessions without restarting; turning it off disconnects remote terminal WebSockets while keeping local connections and PTYs running.
+- New-session and conversation composers share an input history. Press `↑` / `↓` on the first line to cycle through up to 100 deduplicated submissions and return to your draft. The history survives page refreshes and resets when AIReins exits or restarts.
 
 ### Changed
 
-- New conversations default to Antigravity; its Gemini-style blue-purple star sits between Claude and Codex.
+- The new conversation form opens with Antigravity selected. Antigravity’s Gemini-style blue-purple star sits between Claude and Codex.
 - AIReins no longer requires the external Python/`uv` `ai-usage` companion service or an extension-page iframe for subscription usage; legacy `pages/ai-usage` manifests are skipped automatically while existing files are preserved, and `install.sh --with-ai-usage` now prints a migration notice.
+- New Claude sessions resolve their default reasoning effort from the selected model's `modelSettings`.
+- Dispatch topology, history rows and detail views share the warm-paper / dark-gray token system and agent identity colors, with status dots on narrow panels and status pills on wide panels.
+- Graceful power-off releases idle workers and flushes transcripts and the session registry before scheduling shutdown, and active cross-process dispatches and sub-agents block premature idle release and count toward shutdown, restart and Windows tray exit busy checks.
 
 ### Fixed
 
-- Opening Settings with a large conversation history no longer scans every transcript once per attachment directory, which could block the pre-restart session check past its request timeout. A failed pre-restart check now says that no restart request was sent.
+- Opening Settings with a large conversation history no longer scans every transcript once per attachment directory, which could block the pre-restart session check past its request timeout; a failed pre-restart check now says that no restart request was sent.
+- Antigravity background metadata probes wait up to 45 seconds for `session/new` and retain the last successful options if a later probe fails; Antigravity usage parsing supports `command.data` responses.
+- Completed, failed or cancelled Antigravity tool IDs filter late updates for 10 minutes, and expired native sub-agent entries retain a 15-minute attribution window without keeping the session stuck in running state.
 
 ## 0.5.0 (2026-11-09)
 

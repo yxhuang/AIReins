@@ -8,10 +8,10 @@
 
 - 模型、推理和审批选项分别映射 `model` → `model`、`thought_level` → `effort`、`mode` → `permissionMode`。新建推理档位缺省用 `high`、审批档位缺省用 `auto`，应用模型后若候选缺少对应档位（如 `Orchestrator` 无 `high`）则沿用 CLI 当前档位。续接未传推理或审批档位时，保留 CLI 返回的当前值。配置修改仅发送 `session/set_config_option`。模型变化后按 CLI 返回的新 options 更新推理档位；会话的 `configSchema` 随 `config_updated`、列表和快照同步到界面，候选变化即使当前值相同也广播。旧会话缺少该字段时才回落启动探测缓存。
 - 支持文本/思考流、工具调用与更新、标准 ACP 审批和可表达的提问表单、文件和图片附件、命令清单、原生标题与 `usage_update` 上下文用量（`{used,size}`）。不把上下文用量当作订阅额度。
-- 会话释放与正常关闭使用 `session/close`；再次发送或新建续接使用原生 `session/resume`，保留 AIReins 自有 transcript。复制到终端的续接命令为 `agy --conversation <nativeId>`。运行中再次发送的消息立即交给原生 `session/prompt`，由 CLI 决定处理时机；每个请求按入站帧顺序同步结算并记录各自 `durationMs`，所有在途请求结束后才回到 idle，不把首个应答当作全部结束。若 `session/prompt` 返回 `end_turn` 时仍有未完成的 `tool_call`（如后台运行的 `delegate codex` 命令），或本轮启动了原生子代理（`invoke_subagent` / `swarm add`）尚未唤醒回报，driver 先通过 `backgroundTasks` 上报在途工具或子代理保活态（因 ACP 协议仅提供启动信号，原生子代理保活上限 15 分钟）再落回 `idle`；工具完成后进入「等待唤醒」宽限期（35 秒，不被前序 `usage_update` 截断），收到真实唤醒输出（思考/文本/工具）进入「已唤醒」态，在无在途工具与待回复子代理且收到 `usage_update` 经 2.5 秒确认无后续工具调用后清空。每条原生子代理启动调用分别计时，子代理开始唤醒时锁定最早仍待回报的条目，收尾只结算该条目。同批有未到期子代理时，未回报的过期条目优先吸收无法归属的迟到唤醒。独立后台工具唤醒保留待回报子代理。后台工具的唤醒宽限跨 prompt 保留原截止时刻，最后一条 prompt 结束或失败后按剩余宽限继续等待。中断先为未结束的工具补写取消终态，再清空后台态。已完成、失败或取消的工具 ID 在 10 分钟内继续过滤迟到更新和重复终态。退出或释放立即清空。
+- 会话释放与正常关闭使用 `session/close`；再次发送或新建续接使用原生 `session/resume`，保留 AIReins 自有 transcript。复制到终端的续接命令为 `agy --conversation <nativeId>`。运行中再次发送的消息立即交给原生 `session/prompt`，由 CLI 决定处理时机；每个请求按入站帧顺序同步结算并记录各自 `durationMs`，所有在途请求结束后才回到 idle，不把首个应答当作全部结束。若 `session/prompt` 返回 `end_turn` 时仍有未完成的 `tool_call`（如后台运行的 `delegate codex` 命令），或本轮启动了原生子代理（`invoke_subagent` / `swarm add`）尚未唤醒回报，driver 先通过 `backgroundTasks` 上报在途工具或子代理保活态（因 ACP 协议仅提供启动信号，原生子代理保活上限 15 分钟）再落回 `idle`；工具完成后进入「等待唤醒」宽限期（35 秒，不被前序 `usage_update` 截断），收到真实唤醒输出（思考/文本/工具）进入「已唤醒」态，在无在途工具与待回复子代理且收到 `usage_update` 经 2.5 秒确认无后续工具调用后清空。每条原生子代理启动调用分别计时，子代理开始唤醒时锁定最早仍待回报的条目，收尾只结算该条目。未回报的子代理到期后保留 15 分钟的归属记录，即使待回报集合暂时为空。记录优先接收无法归属的迟到唤醒，本身不维持会话运行态。独立后台工具唤醒保留待回报子代理。后台工具的唤醒宽限跨 prompt 保留原截止时刻，最后一条 prompt 结束或失败后按剩余宽限继续等待。中断先为未结束的工具补写取消终态，再清空后台态。已完成、失败或取消的工具 ID 在 10 分钟内继续过滤迟到更新和重复终态。退出或释放立即清空。
 - 运行中跨进程派单与原生子代理（`dispatches.ts` 的 `countActiveDispatchesBySession`）在有在线客户端、活 worker 或关机等待时每 3 秒复用 2 秒扫描缓存统计，并在空闲自动释放、手动释放与排定关机前串行执行绕过缓存的扫描。保护性扫描会报告候选目录解析失败和 `run.json` 读取失败，候选已消失时继续。可选日志无法读取时保留已确认的运行状态。扫描报错时，本次释放跳过或失败，关机继续等待。普通派单列表仍可将损坏记录显示为未知，严格扫描只在成功后刷新两者的共享缓存。计数作为纯运行时字段 `activeDispatchCount` 附带在列表/详情/快照中（不写入 `sessions.json` 或 transcript），WS 在 `ready` 后下发全量 `session_dispatches_updated {counts}`（允许空映射），计数变化时再次广播；非零时阻止手动/自动释放，并计入关机、重启与 Windows 托盘退出繁忙会话数。
 - 回合用时不消耗额外模型 token：Claude `turn_completed` 透传原生 `duration_ms` / `duration_api_ms` 为 `durationMs` / `apiDurationMs`；Antigravity 与 Kimi 从各自 `session/prompt` 实际执行时刻计时，通过 `user_message` 和 `turn_completed` 中的 `promptId` 配对各条 `durationMs`，单请求失败的 `session_error` 也带该 ID；Codex 及缺失原生字段的回合由 `SessionManager` 按非 steer `user_message` 到 `turn_completed` 的服务端时间戳差自动补写 `durationMs` 并随 transcript 持久化。
-- 外部 Antigravity 原生历史格式尚未接入文件索引，因此 `/api/history?agent=antigravity` 返回空列表；在 AIReins 创建的会话仍由自己的注册表和 transcript 正常保存、展示与续接。不对该 CLI 做原生 JSONL 路径猜测、外部续聊指纹检查或自动崩溃恢复；不提供彻底删除原生会话。
+- 外部 Antigravity 原生历史格式尚未接入文件索引，因此 `/api/history?agent=antigravity` 返回空列表；在 AIReins 创建的会话仍由自己的注册表和 transcript 正常保存、展示与续接。启动阶段仅在崩溃/重启恢复时按原生会话 id 校验 `~/.gemini/antigravity-cli/brain/<id>/.system_generated/logs/transcript.jsonl`（可用 `WORKBENCH_ANTIGRAVITY_BRAIN_DIR` 覆盖，校验该路径解析后仍指向同一会话目录，并在最多 4 MiB 的文件头中验证完整 JSONL 记录和 `USER_INPUT` / `PLANNER_RESPONSE`）；仍保留 `transcriptPath` 返回空值，不做外部续聊指纹同步，也不提供彻底删除原生会话。
 - 元数据后台探测会创建并关闭一个无提示的空 ACP 会话；未核实删除接口，保留该原生记录。缺少 CLI 或认证时 options 为空并返回探测错误，不影响其他 CLI。旧版 metadata 缓存也立即补上 Antigravity 基础能力。
 
 官方说明：[ACP](https://antigravity.google/docs/cli/acp/)、[模型](https://antigravity.google/docs/models)、[全局规则](https://antigravity.google/docs/rules/)。AIReins 不管理用户的全局规则或便携偏好，它们可由独立的环境仓库管理。
@@ -141,9 +141,9 @@ webhook 地址就是密钥：文件权限设为 600，也不要写进日志或�
 
 `GET /api/meta` 的 `data.platform` 返回上述值，`data.capabilities` 逐项声明当前入口的能力。缺字段时前端不显示对应入口；平台支持不代表可选命令已安装。
 
-`/api/meta` 和 WebSocket `ready` 的 `serverVersion` 在进程启动时读取仓库 `package.json.version`。CLI 协议握手中的客户端版本独立保留。
+`/api/meta` 和 WebSocket `ready` 的 `serverVersion` 在进程启动时读取仓库 `package.json.version`。CLI 协议握手中的客户端版本独立保留。`ready` 还带有本次进程启动时生成的 `serverInstanceId`，供浏览器隔离上一次运行的输入历史缓存。
 
-CLI 版本与配置选项在后台探测，不阻塞 `/api/meta`：优先返回 `~/.workbench/meta-cache.json` 的最近结果，无缓存时返回四家基础能力及空 `options`，`metadataPending:true`。探测完成（包括不可用/超时）后更新内存与磁盘缓存，返回 `metadataPending:false`，并向已连接的 WebSocket 广播 `{type:"meta_updated"}` 提示重新取元数据；连接建立时仍为 pending 的前端也补取一次，覆盖建连前或断线期间漏掉的通知。能力授权始终按当前请求入口计算，不从磁盘缓存恢复。
+CLI 版本与配置选项在后台探测，不阻塞 `/api/meta`：优先返回 `~/.workbench/meta-cache.json` 的最近结果，无缓存时返回四家基础能力及空 `options`，`metadataPending:true`。探测完成（包括不可用/超时）后更新内存与磁盘缓存，返回 `metadataPending:false`，并向已连接的 WebSocket 广播 `{type:"meta_updated"}` 提示重新取元数据；连接建立时仍为 pending 的前端也补取一次，覆盖建连前或断线期间漏掉的通知。Antigravity 的 `session/new` 后台探测最多等待 45 秒；探测失败时记录错误，内存与磁盘继续提供上次成功取得的选项。能力授权始终按当前请求入口计算，不从磁盘缓存恢复。
 
 | 能力字段 | WSL2 | 原生 Linux | macOS 实验性 |
 |---|---|---|---|
@@ -242,7 +242,7 @@ AIReins 新建的 Codex 会话在首个 `item/completed.userMessage` 后、没�
 - `GET /api/tailscale/file-targets`：文件面板「发送到设备」的 Taildrop 目标。调用 `tailscale file cp --targets`（查找顺序与超时同上），成功信封 `data:{targets:[{name,ip,online,self}],reason?}`；`self` 仅远程入口按 Tailscale Serve 覆盖写入的 `X-Forwarded-For` 标出来访设备，本机入口恒为 false。排序为本机、在线、名称。CLI 不存在、未运行、超时都返回 `code:0`、空列表加 `reason`。
 - `POST /api/tailscale/send`：JSON `{path,root,sessionId?,target}`，`target` 为上一接口返回的 IP。`path/root/sessionId` 沿用工作文件的授权根与 realpath 检查；普通文件以 fd 流式读取，文件夹先在临时目录 `zip -r -y` 打包为 `<名称>.zip`（符号链接存为链接，10 分钟超时，发送后删除临时目录）。发送前重新取 `--targets`，只接受列表内在线 IP，再不经 shell 执行 `tailscale file cp --name=<名称> - <ip>:` 由 stdin 喂内容，30 分钟超时；请求持续到发送结束。成功 `data:{sent:true,name}`。路径错误同文件接口（`status*100+90`，空文件夹 400/`40090`，打包失败 500/`50090`）；目标不在列表或取 `--targets` 失败 400/`40091`（消息为原因），离线 409/`40991`，CLI 启动失败或非零退出 502/`50291`（附 stderr 末行），读取待发送内容出错 500/`50091`。文件夹以 `O_DIRECTORY|O_NOFOLLOW` fd 锚定并复核 realpath，zip 在 `/proc/<pid>/fd/<fd>` 内打包 `.`，条目不带顶层目录。前端请求超时 45 分钟；客户端断开不会取消服务端已开始的发送。Taildrop CLI 本身不收目录（`directories not supported`），因此由服务端打包。
 - `POST /api/restart`：无请求体，返回 HTTP 202，信封 `{code:0,msg:"accepted",data:{restarting:true},request_id}`；表示已接受，不表示重启已完成。沿用两个入口的 Host / Origin 校验，远程入口还须 Tailscale 身份白名单；不新增豁免。同一进程内重复请求仍回 202，只启动一次重启。
-- `GET|POST|DELETE /api/power-off`：关机。信封 `data:{state:"idle"|"waiting"|"scheduled",busy,remainingMs?,error?}`，`busy` 为 running、starting 或带后台任务的会话数（比重启多算 starting）。POST 时无忙会话立即执行 `prefs.json` 中的 `shutdownCommand`（无参数排定 60 秒后关机），否则进入 `waiting`，每 5 秒检查一次，全部空闲后自动执行、不再确认；重复 POST 不重复执行。`scheduled` 且命令已落地时带 `remainingMs`（距关机的剩余毫秒，前端据此倒计时）；过了关机时刻 60 秒仍在运行，回到 `idle` 并带 `error`。DELETE 取消等待；已排定时以 `abort` 参数执行同一命令，Windows 报 1116（没有正在进行的关机）按取消成功处理。失败回到 `idle` 并带 `error`。等待状态只在内存，AIReins 重启即丢失。远程入口可用，沿用同样的 Host/Origin 与 Tailscale 身份白名单。
+- `GET|POST|DELETE /api/power-off`：关机。信封 `data:{state:"idle"|"waiting"|"scheduled",busy,remainingMs?,error?}`，`busy` 为 running、starting 或带后台任务的会话数（比重启多算 starting）。POST 时先等现有忙会话归零再准备关机（立即空闲或 `waiting` 每 5 秒轮询到空闲）；正式排定前先为可释放的空闲会话释放 worker（`reason:"shutdown"`）并刷盘 transcript 与注册表。释放或写盘失败会记录日志，随后仍复查繁忙状态。准备期间收到 `DELETE` 则回到 `idle`，复查发现忙会话则继续 `waiting`。确认空闲后执行 `prefs.json` 中的 `shutdownCommand`（无参数排定 60 秒后关机）；重复 POST 不重复执行。`scheduled` 且命令已落地时带 `remainingMs`（距关机的剩余毫秒，前端据此倒计时）；过了关机时刻 60 秒仍在运行，回到 `idle` 并带 `error`。DELETE 取消等待或准备，已经释放的会话会在下次发送时续接。已排定时以 `abort` 参数执行同一命令，Windows 报 1116（没有正在进行的关机）按取消成功处理。失败回到 `idle` 并带 `error`。等待状态只在内存，AIReins 重启即丢失。远程入口可用，沿用同样的 Host/Origin 与 Tailscale 身份白名单。
 - `GET|POST /api/update`：设置里的「更新 AIReins」（`server/self-update.ts`）。GET 默认先 `git fetch` 当前分支上游，返回 `data:{branch,upstream,head,upstreamHead,ahead,behind,aheadLog,behindLog,changes,defaultMessage,action,install,restart,trayRestart}`。日志各最多 20 条，`changes` 为 `git status --porcelain -uall`。`action` 为 `pull`（只落后）、`push`（只领先或有本地改动）、`install`（上次安装未完成）、`build`（上次普通构建未完成）、`diverged`（分叉交终端）或 `none`。当前仓库、分支及 HEAD 有待安装/待构建任务时优先处理，不 fetch，离线也可重试；HEAD 不匹配的旧待办不消费，也不阻止正常 fetch。分离 HEAD 或无上游回 409。
   - POST `{action,branch,upstream,head,upstreamHead,changes,message?,lang?}` 重新核对 action、分支、上游、两个提交号和改动列表，一项变化即 409；安装决策由服务端重新计算，不信任客户端的 install 字段，同时只允许一个更新。`pull` 关闭 Git 钩子并只快进到确认时的上游提交。
   - 改动涉及 `install.sh`、`bin/`、依赖、Git 钩子或 `deploy/` 的运行文件（不含文档、tests）时，执行 `bash install.sh --update`，不重复 after-pull 的安装/构建；其他改动沿用 `scripts/git-hooks/after-pull.sh`。两者均继承本机代理，最多 15 分钟，按 lang 输出中英文。普通 git pull 钩子仍只处理依赖与构建。
@@ -377,9 +377,13 @@ Claude 额外固定返回四个字段；未显式覆盖时的初始形状如下�
 `WB_DELEGATE_DIR` 覆盖。约定每项工单置于 `YYYYMMDD-HHMMSS-<执行端>-<名称>/`，包含 `run.json`（兼容旧 `meta.json`）及可选日志；目录缺失时仍独立显示已注册会话的原生子代理，不报错。两秒共享扫描缓存，不启动或控制派单进程，不写入数据源。
 三个接口均走现有 `/api` 访问控制和 `{code,msg,data,request_id}` 信封：
 
-- `GET /api/dispatches?limit=50` → `data: {dispatches: Dispatch[]}`。有效目录名按字符串倒序；
+- `GET /api/dispatches?limit=50` → `data: {dispatches: Dispatch[], runtimeStates?: AntigravityRuntimeState[]}`。有效目录名按字符串倒序；
   默认 50 条，上限 200，正数小数向下取整，非法值或小于 1 回退到 50。delegate 根目录不存在或不可读取时不返回工单；已注册会话的原生子代理独立读取。
   除 delegate 记录外，还返回 Claude Code 原生子代理记录（`tool=claude`）：候选父会话 = 注册表里的 Claude 会话（cwd + nativeSessionId）∪ delegate 记录里 `parent.agent=claude` 的 sessionId，只读这些父会话目录下的 `subagents/agent-<id>.jsonl` 与同名 `.meta.json`，不枚举无关项目。默认根目录 `~/.claude/projects`，可用 `WORKBENCH_CLAUDE_PROJECTS_DIR` 覆盖。实际模型取自 assistant `message.model`，类型/任务名取自 meta，生命周期按最终回复与写入新鲜度判定；路径/mtime/size 指纹加两秒共享扫描缓存，头尾读取各限 1 MiB。三家原生子代理进入流程图和父会话徽标，标记 `native:true`，只读展示，不打开 delegate 历史、详情或日志。独立 Codex 会话也按注册表原生 ID 发现子线程（包括 Luna），沿真实 `parentThreadId` 递归并防环。Kimi 只枚举工作空间根目录名，再读指定注册会话的 `state.json` 与其中列出的 `agents/<id>/wire.jsonl`；头尾各限 64 KiB，拒绝符号链接，按文件指纹缓存并重新判断新鲜度。未关联的记录不猜测父会话。
+  Antigravity 只观测注册表及当前 delegate 列表里已关联的会话。按原生会话 ID 读取 `~/.gemini/antigravity-cli/brain/<id>/.system_generated/logs/transcript.jsonl`，测试可用 `WORKBENCH_ANTIGRAVITY_BRAIN_DIR` 覆盖根目录。校验 ID 与真实路径，拒绝符号链接逃逸，只读尾部最多 512 KiB 的完整行，按文件指纹缓存解析结果。坏行和异常文件独立跳过。
+  `exit_plan_mode` 或切出规划的系统消息开始一段 `native:true, tool:"antigravity", agentType:"inner-loop"` 记录，`enter_plan_mode`、切回规划的系统消息或新用户输入结束该段。运行中与近 30 分钟的段进入拓扑列表。没有显式交回时，使用父会话状态及执行步骤判断，独立会话未完成且 5 分钟无记录时显示未知。内环仅用于观察，外部派单计数、parent 查询和 7 天历史仍沿用原有范围。
+  同一批已关联会话还读取 `.system_generated/swarm/members.json` 中的 worker，文件限 64 KiB 并沿用路径校验。Swarm 节点为 `native:true, tool:"antigravity", agentType:"swarm"`，用子会话 ID 关联派单，优先显示成员的 `applied_model`，并从 transcript 的 `added` / `killed` 工具结果补充时间。运行状态由成员快照确定，父会话空闲时仍可显示运行中的 worker。确认停止的节点显示 30 分钟，其余外部派单接口与内环一致。
+  `runtimeStates` 按会话返回 `agent`、`sessionId`（优先工作台 ID）、`nativeSessionId`、`configuredModel`、`activeModel`、`activePhase`（`planning`、`executing` 或 `null`）、`plannerModel`、`executorModel` 和 `updatedAt`。模型来自 `PLANNER_RESPONSE.model`。已切入执行但首步未落盘时，执行模型和当前模型均为 `null`。该快照反映本地 transcript 已落盘的内容。
 - `GET /api/dispatches/<runId>` → `data: DispatchDetail`。
 - `GET /api/dispatches/<runId>/log?stream=stdout&offset=0` → `data: DispatchLog`。
   `stream` 缺省为 `stdout`，仅允许 `stdout` / `stderr`；`offset` 为非负安全整数，单位为字节。
@@ -690,7 +694,7 @@ AI 用量面板已由 Node 原生实现（`server/usage.ts`），覆盖 `claude`
 - 全局 WebSocket 控制帧：任一 provider 数据或设置变化时广播 `{type: "ai_usage_updated", data: UsageSummary, settings: UsageSettingsView}`（带单调递增 `revision`，与单会话 token 事件 `usage_updated` 区分）。
 - 四家数据源与合规边界：
   - **Claude**：优先复用当前已运行且未在重启中的 Claude 会话（`manager.queryLiveClaudeUsage()` 调 `get_usage`，绝不唤醒已释放会话）；无活跃会话时才用一次性 `--no-session-persistence` 的 `claude -p --input-format stream-json --output-format stream-json` 发送 `control_request {subtype: "get_usage"}` 探测（剥除 `CLAUDE_CODE_ENTRYPOINT` 避免污染历史列表）。
-  - **Antigravity**：严格遵循按需查询（`onDemand: true`），仅在用户打开面板（5 分钟新鲜期缓存、失败至少冷却 60 秒）或手动点刷新时调用官方只读命令 `agy -p "/usage" --output-format json` 与 `agy -p "/credits" --output-format json`，兼容 CLI 的 `command.data` 输出。免费账户的模型组额度来自 `/usage`，积分查询无数据时仍显示模型额度。
+  - **Antigravity**：打开面板（5 分钟新鲜期缓存、失败至少冷却 60 秒）或手动刷新时按需调用 `agy -p "/usage" --output-format json`，兼容 CLI 的 `command.data` 输出；`/usage`（及启用时的 `/credits`）在 stdout 收到完整成功 JSON 后即刻返回结果，不等待 `agy` 内嵌 Language Server 与 MCP 子进程的退出收尾，同时保留有界优雅退出窗口（默认 10 秒兜底回收）与服务停机清理。设置 `antigravity.includeCredits` 默认为 `false`，关闭时省略 `/credits` 调用并从响应中隐藏缓存的积分。启用时立即查询已启用的 Antigravity 卡片，`agy -p "/credits" --output-format json` 与 `/usage` 并行，模型额度先到即广播，积分随后补入。积分查询无数据时仍显示模型额度。
   - **Codex**：后台通过短生命周期 `codex app-server --stdio` 调用 `account/rateLimits/read`，同时实时接入活跃 Codex 会话推送的 `account/rateLimits/updated` 通知（`onCodexRateLimits`）；app-server 不可达时回退读取本机最新 `rollout-*.jsonl` 中的 `rate_limits` 快照并标为 `stale`（`codex_local_fallback`）。
   - **Kimi**：请求 `https://api.kimi.com/coding/v1/usages`，密钥优先级为 `usage.json` > 环境变量 `KIMI_API_KEY`（或自定义 `apiKeyEnv`）> `apiKeyFile` 正则提取（不执行 shell）；勾选 `useProxy` 时复用 `prefs.json` 的 `proxyUrl`（回退 `codexProxyUrl`）经原生 `node:http` + `node:tls` 建 HTTP `CONNECT` 隧道，不引入额外运行时依赖。
 - 后台调度与缓存：`claude`、`codex`、`kimi` 默认每 5 分钟轮询一次，失败按 `60s → 120s → … → 30m` 指数退避；缓存原子保存在 `${workbenchHome}/usage-cache.json`（`0600`），`ok` 快照超过 15 分钟未更新时在 `summary()` 中标为 `stale`。
@@ -946,13 +950,13 @@ node server/scripts/ws-demo.mjs '<sessionId>' \
 校验 snapshot、落盘 NDJSON 与 seq 完全一致：
 
 ```bash
-node server/scripts/verify-snapshot.mjs '<sessionId>'
+node --import tsx server/scripts/verify-snapshot.mjs '<sessionId>'
 ```
 
 再发一轮只读消息，验证 WS 从快照 seq 之后续传：
 
 ```bash
-node server/scripts/verify-snapshot.mjs '<sessionId>' --probe-message "只回复 SNAPSHOT_INCREMENTAL_OK"
+node --import tsx server/scripts/verify-snapshot.mjs '<sessionId>' --probe-message "只回复 SNAPSHOT_INCREMENTAL_OK"
 ```
 
 ## 验收自查
@@ -992,8 +996,8 @@ node server/scripts/verify-snapshot.mjs '<sessionId>' --probe-message "只回复
   每页 20 条，按结束时间倒序（同时间以 runId 倒序）；覆盖结束时间在请求时刻前 7 天内的非 running 单。
   旧目录缺 `endedAt` 时，用 `startedAt + elapsedS` 推导；没有可确认结束时间的单不列入历史。
   扫描不受普通列表的 200 条上限影响；非负整数 offset 无效时返回 400 / `40000`。
-- `GET /api/dispatches?parent=<会话ID>&agent=claude|codex|kimi` → `{dispatches:Dispatch[]}`。
-  按执行端和工作台/原生会话 ID 精确匹配，返回该父会话直接或间接派出的 running 工单和原生子代理，不受普通列表条数上限限制；省略 agent 时兼容三家，非法 agent 返回 400。
+- `GET /api/dispatches?parent=<会话ID>&agent=claude|antigravity|codex|kimi` → `{dispatches:Dispatch[]}`。
+  按执行端和工作台/原生会话 ID 精确匹配，返回该父会话直接或间接派出的 running 工单和原生子代理，不受普通列表条数上限限制；省略 agent 时匹配各家，非法 agent 返回 400。
   parent 仅接受 1–128 位字母、数字、下划线或连字符；无效返回 400 / `40000`。
 - `GET /api/dispatches/<runId>/messages?cursor=<上次cursor>` →
   `{source:"native"|"stdout",agent?:"codex"|"kimi",messages:HistoryMessage[],replaceFrom:number,cursor:string|null,truncated:boolean}`。
@@ -1092,6 +1096,12 @@ Codex 输入框 `$` 在光标 token 处打开名称+描述面板，支持过滤�
 
 ## AIReins 存储统计与清理接口
 
+工作台启动后及运行期间每分钟检查存储。按设置面板口径计算 `WORKBENCH_HOME` 的文件总量，默认超过 1 GiB 时触发，目标为 800 MiB。本机可在 `prefs.json` 通过正整数 `storageBudgetBytes` 调整触发线，目标按相同比例调整。
+
+超过触发线时，先从最久未活动的合格会话回收能逐字从原生存档读回的大段工具输出和文本，再无损压缩其余合格记录，直到达到目标或用完候选。工作台保留会话入口、事件序号、审批和工具元数据、独有内容及附件引用。只有与原生记录中完整 JSON 字符串完全一致的内容才替换为引用。首次回收仅扫描 128 MiB 以内的原生文件。打开历史时按需回读并校验引用内容，原生记录临时缺失时仍展示工作台独有内容并标明缺失。Codex 归档迁移仍可回读，较小的原生文件偏移变化时按内容重新定位。首次置顶前将已回收的内容写回工作台，原生档案缺失时可以恢复后重试。工作台记录仍在原路径，下次追加时可从压缩记录恢复写入。置顶、旧分组、运行中、有 worker、待审批、异常或有正在运行的派单的会话受保护。受保护记录、在用附件等可以使占用维持在预算以上，设置面板显示提示。
+
+Claude、Codex、Kimi 和 Antigravity 的已关联会话，以本机原生存档为准。工作台只在曾观察到该原生 ID、随后在同一存档目录连续两轮完整检查均缺失时，移除合格记录及工作台副本。Codex 检查活动及归档目录。扫描失败、目录切换或从未找到原生存档时保留工作台记录。观察结果存于 `native-presence.json`。这项清理也在预算内运行，且只操作 `WORKBENCH_HOME`。`retentionDays`（默认 30）在启动时应用于尚无原生 ID 的会话，`0` 关闭按年龄过期。
+
 两个接口使用现有 `{code,msg,data,request_id}` 信封和统一 access 策略；统计不读取磁盘会话登记表，而以 `SessionManager` 当前内存记录判断归属。
 
 附件引用检查对每份 transcript 先搜索附件根路径，再在命中处比较目录名，避免按附件目录数重复扫描大记录、阻塞重启前检查等请求。签名缓存、保守前缀匹配及读取失败时放弃删除的规则不变。
@@ -1101,6 +1111,7 @@ Codex 输入框 `$` 在光标 token 处打开名称+描述面板，支持过滤�
 ```ts
 {
   totalBytes: number;
+  automatic: { budgetBytes: number; targetBytes: number };
   categories: {
     transcripts: { bytes: number; files: number; sessions: number };
     uploads: { bytes: number; files: number; sessions: number };
@@ -1128,7 +1139,7 @@ Codex 输入框 `$` 在光标 token 处打开名称+描述面板，支持过滤�
 
 成功返回 HTTP 200，`data` 为 `{ freedBytes, removed: { rotatedLogs, orphanFiles, orphanUploadDirs, endedSessions }, storage }`。计数为实际删除的日志文件、孤儿文件、孤儿附件目录及结束会话数；`freedBytes` 累加本次删除文件的逻辑长度，不把登记表重写或其他文件增长算作释放量；`storage` 是清理后的最新 GET 结构。并发清理串行执行；预估和执行之间状态可能变化，以实际结果为准。IO 错误沿用 HTTP 500 / code `50000`，已完成的删除不回滚。前端成功后调用现有会话列表刷新；已移除会话的 CLI 原生记录仍可从「所有来源会话」续接。
 
-覆盖测试：`server/storage.test.ts`，由 `npm test` 的 `server/*.test.ts` 测试入口自动执行；所有 fixture 使用临时 `WORKBENCH_HOME`。
+覆盖测试：`server/storage.test.ts` 和 `server/storage-maintenance.test.ts`，由 `npm test` 的 `server/*.test.ts` 测试入口自动执行；所有 fixture 使用临时 `WORKBENCH_HOME`。
 
 ### 三家独立会话的派单关系（2026-10-03）
 
@@ -1153,20 +1164,20 @@ Codex 输入框 `$` 在光标 token 处打开名称+描述面板，支持过滤�
 
 真实CLI隔离测试不涉及用户历史。
 
-## Tibo / Codex 重置提醒
+## 额度重置公告
 
-本机 `prefs.json` 的 `codexResetWatch` 为布尔值，默认 `false`；可在设置菜单开启。关闭时不请求外部服务、不显示未读提醒，不修改三家 CLI 的全局配置。开启后仅轮询 AIHOT 的公开近 7 天接口 `https://aihot.news/api/v1/codex-resets/recent`，固定每 10 分钟一次，超时 15 秒，使用 ETag / `If-None-Match`；304 保留现有快照并刷新最后成功时间。不访问受完整历史限流的 `/api/v1/codex-resets`。429 / 5xx 优先采用 `Retry-After`（秒数或 HTTP 日期，至少间隔 10 分钟），缺失/无效时指数退避，最长 1 小时；其他失败也退避。请求、JSON、持久化和通知失败只记不含响应正文的 warn，不阻断服务。`schemaVersion !== 1` 时跳过该响应。
+本机 `prefs.json` 的 `codexResetWatch` 为布尔值，默认 `false`；可在设置菜单开启。开启后分别轮询 Codex、Antigravity、Claude、Grok Bot 的 AIHOT 公开近 7 天接口 `https://aihot.news/api/v1/{codex,antigravity,claude,grok-bot}-resets/recent`。各来源每 10 分钟查询一次，超时 15 秒，独立使用 ETag / `If-None-Match` 和退避；304 保留该来源的快照并刷新最后成功时间。关闭开关会停止四路查询，并收起所有未读提醒。429 / 5xx 优先采用 `Retry-After`（秒数或 HTTP 日期，至少间隔 10 分钟），缺失/无效时指数退避，最长 1 小时；其他失败也退避。请求、JSON、持久化和通知失败只记不含响应正文的 warn，不阻断服务。`schemaVersion !== 1` 时跳过该响应。
 
-首次成功只建立基线。后续仅 `kind=event_update` 且 `action=announce|confirm` 的帖子触发提醒，按 activity id 去重，同帖关联多个事件仍只提醒一次；`related`、`amend` 不提醒。已被本轮全部关联事件的确认取代的 announce，以及超过 24 小时或发布时间缺失/非法的活动，只记 seen，不弹窗、不推送。中文正文优先取关联事件同 id 的 post，再取 activity 的 `text` / `fullText`；无中文时仅使用事件标题和原帖链接，不自动翻译。已配置 `notify.json` 时复用现有飞书或 lark-cli 发送器，文字保持 `[AIReins]` 前缀，附原帖及 AIHOT 来源链接；不使用审批通知的延迟/冷却规则。
+每个来源首次成功只建立基线。后续仅 `kind=event_update` 且 `action=announce|confirm` 的帖子触发提醒，按 activity id 去重，同帖关联多个事件仍只提醒一次；`related`、`amend` 不提醒。已被本轮全部关联事件的确认取代的 announce，以及超过 24 小时或发布时间缺失/非法的活动，只记 seen，不标未读、不推送。中文正文优先取关联事件同 id 的 post，再取 activity 的 `text` / `fullText`；无中文时仅使用事件标题和原帖链接，不自动翻译。已配置 `notify.json` 时复用现有飞书或 lark-cli 发送器，文字包含 `[AIReins]` 前缀和厂商名，附原帖及对应的 AIHOT 来源链接；不使用审批通知的延迟/冷却规则。
 
-本机 `~/.workbench/codex-resets.json`（随 `WORKBENCH_HOME`）用 `.tmp` + rename 原子写、权限 `0600`，保存基线、seen/ack、ETag、最后成功时间、故障起点及精简快照。seen/ack 各最多 2000 个 id、事件最多 100 条、活动最多 1000 条、未读最多 100 条；恢复时再次容错校验。重启保留卡片、未读和去重状态，关闭功能也保留本地数据。
+本机在 `~/.workbench/{codex,antigravity,claude,grok-bot}-resets.json`（随 `WORKBENCH_HOME`）分别用 `.tmp` + rename 原子写、权限 `0600`，保存基线、seen/ack、ETag、最后成功时间、故障起点及精简快照。seen/ack 各最多 2000 个 id、事件最多 100 条、活动最多 1000 条、未读最多 100 条；恢复时再次容错校验。重启保留卡片、未读和去重状态，关闭功能也保留本地数据。
 
 同现有 `/api/*` 的访问控制：
 
-- `GET /api/codex-resets`：`{enabled,lastSuccessAt,stale,monitor,pending,recent,alerts}`。`pending` 是 `status=announced` 的事件，`recent` 按更新时间取最近 5 条；`alerts` 最新优先，包含活动及关联 `events`。`stale` 表示 AIHOT monitor 非 healthy、outage 非空或本机连续失败超过 1 小时。AIHOT monitor 的 `status` 取值见其页面：`healthy` 监控正常、`delayed` 检查有延迟、`attention` 监控需要处理、`unknown` 未知；`lastCollectedAt` 是上次读到帖子，`lastVerifiedAt` 是上次完整检查。`attention` 时新帖可能仍在采集，但完整检查停滞，提醒可能不全，因此仍算 stale，由前端按原因显示文案。关闭时 `pending` / `alerts` 为空。
-- `POST /api/codex-resets/ack {id}`：幂等标记已读。新的快照/提醒、ack 或开关变化通过全局 WS 控制帧 `{type:"codex_resets_updated",data:状态快照}` 同步所有页面；前端连接/重连也拉取一次。任一端 ack 后其他端同步关闭该提醒。
+- `GET /api/codex-resets`：顶层 `{enabled,lastSuccessAt,stale,monitor,pending,recent,alerts}` 仍为 Codex 快照，`sources` 包含其余三个来源的 `{provider,status}`，`status` 使用相同的快照字段。`pending` 是 `status=announced` 的事件，`recent` 按更新时间取最近 5 条；`alerts` 最新优先，包含活动及关联 `events`。`stale` 表示 AIHOT monitor 非 healthy、outage 非空或本机连续失败超过 1 小时。AIHOT monitor 的 `status` 取值见其页面：`healthy` 监控正常、`delayed` 检查有延迟、`attention` 监控需要处理、`unknown` 未知；`lastCollectedAt` 是上次读到帖子，`lastVerifiedAt` 是上次完整检查。`attention` 时新帖可能仍在采集，但完整检查停滞，提醒可能不全，因此仍算 stale，由前端按原因显示文案。关闭时 `pending` / `alerts` 为空。
+- `POST /api/codex-resets/ack {id,provider?}`：按来源幂等标记已读，省略 `provider` 时为 Codex。新的快照/提醒、ack 或开关变化通过全局 WS 控制帧 `{type:"codex_resets_updated",data:状态快照}` 同步所有页面；前端连接/重连也拉取一次。任一端 ack 后各端同步更新未读列表。
 
-UI 在额度页 iframe 下方（降级面板时在面板下方）显示 AIReins 自己的重置信息卡；数据仅供提醒，额度数值仍由原有 AI-Usage 提供。每个展示位置保留「数据来源 AIHOT」链接到 <https://aihot.news/codex-reset>。此公开 API 限个人非商业使用，须保留来源信息。
+内置额度页底部显示公告，可切换来源。个人账户额度来自内置额度面板。每条公告保留指向对应厂商监控页的「数据来源 AIHOT」链接。公开 API 限个人非商业使用，须保留来源信息。
 
 ### 消息提交确认
 

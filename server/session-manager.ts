@@ -35,6 +35,7 @@ import {
   PROJECT_ORDER_LIMIT,
   readTranscript,
   readTranscriptState,
+  restoreNativePayloadsForPin,
   saveRegistry,
   saveProjectOrder,
   transcriptPathFor,
@@ -153,7 +154,7 @@ export class SessionManager {
     for (const stored of loaded) {
       let recovered: ReturnType<typeof readTranscriptState>;
       setTranscriptCacheIdle(stored.transcriptPath, stored.released === true || stored.status === "idle");
-      try { recovered = readTranscriptState(stored.transcriptPath, stored); } catch (error) {
+      try { recovered = readTranscriptState(stored.transcriptPath, stored, false); } catch (error) {
         log("error", "transcript recovery failed", { sessionId: stored.id, file: stored.transcriptPath, message: String(error) });
         recovered = { events: [], damaged: true, incompleteTail: false };
       }
@@ -196,7 +197,7 @@ export class SessionManager {
         permissionMode: config.permissionMode,
         riskyMode: isRiskyConfig(stored.agent, config),
       });
-      if (this.sessions.get(stored.id)!.status === "idle") {
+      if (this.sessions.get(stored.id)!.status === "idle" && !recovered.hasDetachedPayloads) {
         for (const event of events.slice(-RING_SIZE)) this.appendEventRing(stored.id, event);
       }
       // 还没有首条消息的会话不设标题，否则首条 user_message 到来时 titles.has 已为真、标题卡在「新会话」
@@ -277,6 +278,9 @@ export class SessionManager {
     const session = this.sessions.get(id);
     if (!session) throw new SessionOrganizationError(`会话不存在：${id}`, 404, 40401);
     const patch = parseOrganizationPatch(value);
+    if (patch.pinned && !session.pinned && !restoreNativePayloadsForPin(session.transcriptPath)) {
+      throw new SessionOrganizationError("原生历史暂不可读，恢复后再置顶。", 409, 40911);
+    }
     if (patch.pinned !== undefined) session.pinned = patch.pinned;
     if (patch.customTitle !== undefined) {
       if (patch.customTitle) session.customTitle = patch.customTitle;
@@ -380,6 +384,26 @@ export class SessionManager {
     return this.sessions.get(id)?.status === "dead"
       && !this.pendingGates.get(id)?.size
       && !this.checkingSessions.has(id) && !this.restartingSessions.has(id);
+  }
+
+  canMaintainSessionStorage(id: string): boolean {
+    const record = this.sessions.get(id);
+    return !!record && !this.stopping && !record.pinned && !(record as SessionRecord & { groupId?: string }).groupId
+      && (record.status === "dead" || (record.status === "idle" && record.released === true))
+      && !this.workers.has(id) && !this.nativeBusy(record) && !this.startups.has(id)
+      && !this.movingSessions.has(id) && !this.deletingSessions.has(id) && !this.damagedTranscripts.has(id)
+      && !this.thinkingUpdates.has(id) && !this.sideQuestions.has(id) && !this.pendingGates.get(id)?.size
+      && !record.backgroundTasks?.length && !this.activeDispatchCounts.get(id)
+      && !(record.nativeSessionId && this.nativeHeldElsewhere(record, record.nativeSessionId));
+  }
+
+  async removeMissingNativeSession(id: string): Promise<boolean> {
+    if (!this.canMaintainSessionStorage(id)) return false;
+    try {
+      return !!await this.remove(id);
+    } finally {
+      if (!this.sessions.has(id)) this.organizationUpdated();
+    }
   }
 
   getCommands(id: string): UnifiedCommand[] | undefined {
@@ -1005,7 +1029,7 @@ export class SessionManager {
    */
   async release(
     id: string,
-    reason: "manual" | "idle",
+    reason: "manual" | "idle" | "shutdown",
     context: { idleMinutes?: number } = {},
   ): Promise<{ session: SessionRecord; resumeCommand: string; vscodeUri: string | null }> {
     if (this.stopping) throw new Error("AIReins 正在退出");
@@ -1854,6 +1878,41 @@ export class SessionManager {
       }
     }
     return null;
+  }
+
+  /**
+   * 排定系统关机前释放所有可释放的空闲 worker 并刷盘，避免系统强制断电后重启将正常完成的会话标成 dead。
+   * 跳过 running/starting、有待处理闸门、后台任务/活跃派单、未首轮落盘的 Claude 会话；
+   * 与空闲释放不同，不看空闲时长，也不为 Remote Control 保活（整机即将关机）。
+   */
+  async releaseSessionsForPowerOff(shouldStop: () => boolean = () => false): Promise<void> {
+    if (this.stopping || shouldStop()) return;
+    await Promise.allSettled(this.pendingMarkReads.values());
+    await Promise.allSettled(this.releases.values());
+    for (const record of [...this.sessions.values()]) {
+      if (this.stopping || shouldStop()) break;
+      if (record.released) continue;
+      if (this.releaseBlocker(record.id, record)) continue;
+      if (record.agent === "claude" && !record.resumedFrom && !this.promptedSessions.has(record.id)) continue;
+      try {
+        await this.release(record.id, "shutdown");
+      } catch (error) {
+        log("warn", "power-off release failed", {
+          sessionId: record.id,
+          errorMessage: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+    try { flushTranscripts(); } catch (error) {
+      log("warn", "power-off transcript flush failed", {
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+    try { this.persistRegistry(); } catch (error) {
+      log("warn", "power-off registry save failed", {
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
   }
 }
 

@@ -1,19 +1,18 @@
 import { t } from "../i18n";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { fetchDispatchDetail, fetchDispatches } from "../api";
-import { dispatchName, dispatcherSessions, dispatcherModel, dispatcherLabel, dispatchForests, dispatchParent, dispatchModelName, dispatchWirePath, dispatchSeconds, dispatchStatus, dispatchTime, groupDispatches, buildDispatchTree, type DispatchTreeNode, type DispatchTool, type DispatchRun } from "../dispatch-flow";
+import { dispatchName, dispatcherSessions, dispatcherModel, dispatcherLabel, dispatchForests, dispatchParent, dispatchModelName, dispatchWirePath, dispatchSeconds, dispatchStatus, dispatchTime, groupDispatches, buildDispatchTree, isAntigravityNativeDispatch, type DispatchTreeNode, type DispatchTool, type DispatchRun } from "../dispatch-flow";
 import { effectiveFor } from "../config-view";
 import { startDispatchPolling } from "../dispatch-polling";
 import { sessionTitle } from "../format";
 import { useStore } from "../useStore";
-import { AgentIcon } from "./AgentIcon";
 import { store } from "../store";
+import type { AntigravityRuntimeState, DispatchOverview } from "../types";
 import { DispatchDetail } from "./DispatchDetail";
-import { DispatchHistory } from "./DispatchHistory";
+import { DispatchHistory, DispatchToolIcon } from "./DispatchHistory";
 
-const LABELS = { codex: "Codex", kimi: "Kimi", copilot: "Copilot", claude: "Claude Code" };
 const selectTitles = (value: import("../store").Store) => value.sessions.map((session) => ({
-  id: session.id, agent: session.agent, nativeSessionId: session.nativeSessionId,
+  id: session.id, agent: session.agent, nativeSessionId: session.nativeSessionId, status: session.status,
   model: session.config?.model || effectiveFor(session, "model")?.value || null,
   title: sessionTitle(session, value.data.get(session.id)?.events),
 }));
@@ -23,43 +22,46 @@ export function DispatchView({ terminalOpen = false }: { terminalOpen?: boolean 
   const selected = route.match(/^#\/dispatches\/([^?]+)/)?.[1];
   const selectedId = selected ? decodeURIComponent(selected) : null;
   const highlighted = new Set(new URLSearchParams(route.split("?")[1]).get("runs")?.split(",").filter(Boolean) ?? []);
-  const [runs, setRuns] = useState<DispatchRun[]>([]);
+  const [overview, setOverview] = useState<DispatchOverview | null>(null);
   const [now, setNow] = useState(Date.now);
   const [error, setError] = useState("");
-  const [loaded, setLoaded] = useState(false);
   const sessions = useStore(selectTitles, (a, b) => JSON.stringify(a) === JSON.stringify(b));
   const currentId = useStore(state => state.currentId);
-  useEffect(() => startDispatchPolling({
-    visible: () => !selectedId && document.visibilityState !== "hidden"
-      && !(terminalOpen && window.matchMedia("(max-width: 720px)").matches),
-    now: Date.now,
-    every: (callback, ms) => window.setInterval(callback, ms),
-    cancel: (timer) => window.clearInterval(timer as number),
-    onVisibility: (callback) => {
-      const mobile = window.matchMedia("(max-width: 720px)");
-      document.addEventListener("visibilitychange", callback);
-      mobile.addEventListener("change", callback);
-      return () => {
-        document.removeEventListener("visibilitychange", callback);
-        mobile.removeEventListener("change", callback);
-      };
-    },
-  }, async (signal) => {
-    const data = await fetchDispatches(signal);
-    const missing = [...highlighted].filter((id) => !data.dispatches.some((run) => run.runId === id));
-    const extra = await Promise.allSettled(missing.map((id) => fetchDispatchDetail(id, signal)));
-    for (const result of extra) if (result.status === "fulfilled") data.dispatches.push(result.value);
-    return data;
-  }, (items) => {
-    setRuns(items);
-    setLoaded(true);
-  }, setError, setNow), [terminalOpen, route]);
+  useEffect(() => {
+    let runtimeStates: DispatchOverview["runtimeStates"];
+    return startDispatchPolling({
+      visible: () => !selectedId && document.visibilityState !== "hidden"
+        && !(terminalOpen && window.matchMedia("(max-width: 720px)").matches),
+      now: Date.now,
+      every: (callback, ms) => window.setInterval(callback, ms),
+      cancel: (timer) => window.clearInterval(timer as number),
+      onVisibility: (callback) => {
+        const mobile = window.matchMedia("(max-width: 720px)");
+        document.addEventListener("visibilitychange", callback);
+        mobile.addEventListener("change", callback);
+        return () => {
+          document.removeEventListener("visibilitychange", callback);
+          mobile.removeEventListener("change", callback);
+        };
+      },
+    }, async (signal) => {
+      const data = await fetchDispatches(signal);
+      const missing = [...highlighted].filter((id) => !data.dispatches.some((run) => run.runId === id));
+      const extra = await Promise.allSettled(missing.map((id) => fetchDispatchDetail(id, signal)));
+      signal.throwIfAborted();
+      for (const result of extra) if (result.status === "fulfilled") data.dispatches.push(result.value);
+      runtimeStates = data.runtimeStates;
+      return data;
+    }, (dispatches) => setOverview({ dispatches, runtimeStates }), setError, setNow);
+  }, [terminalOpen, route]);
 
+  const runs = overview?.dispatches ?? [];
   const groups = groupDispatches(runs, now);
   const visibleRuns = groups.flatMap((group) => group.runs);
   const forests = dispatchForests(visibleRuns, sessions, runs, currentId);
   const dispatchTreeCount = forests.filter(forest => forest.runs.length > 0).length;
   const running = forests.flatMap(forest => forest.runs).filter(run => run.status === "running").length;
+  const currentAntigravity = sessions.find(session => session.id === currentId && session.agent === "antigravity");
 
   if (selectedId) return <DispatchDetail key={selectedId} runId={selectedId} sessions={sessions} terminalOpen={terminalOpen} />;
 
@@ -67,16 +69,33 @@ export function DispatchView({ terminalOpen = false }: { terminalOpen?: boolean 
     <section className="dispatch-view" aria-label={t("ui.DispatchView.dispatch_flow")}>
       {error && <p className="dispatch-error" role="alert">{t("ui.DispatchView.failed_to_load_dispatches_will_retry_automatically_sentence", { p0: (error) })}</p>}
       <section className="dispatch-panel" aria-label={t("ui.DispatchView.dispatch_topology")}>
-        <div className="dispatch-panel-head"><strong>{t("ui.DispatchView.active_dispatches")}</strong><span>{!loaded ? t("ui.common.loading") : running ? t("ui.DispatchView.dispatches_running_trees", { p0: (running), p1: (dispatchTreeCount) }) : dispatchTreeCount ? t("ui.DispatchView.trees_recently_ended", { p0: (dispatchTreeCount) }) : t("ui.DispatchView.0_dispatches")}</span></div>
+        <div className="dispatch-panel-head"><strong>{t("ui.DispatchView.active_dispatches")}</strong>
+          <span className="dispatch-panel-stat" data-status={running ? "running" : undefined}>{!overview ? t("ui.common.loading") : running ? t("ui.DispatchView.dispatches_running_trees", { p0: (running), p1: (dispatchTreeCount) }) : dispatchTreeCount ? t("ui.DispatchView.trees_recently_ended", { p0: (dispatchTreeCount) }) : t("ui.DispatchView.0_dispatches")}</span>
+        </div>
         {forests.map((forest) => {
           const roots = forest.runs.filter((run) => !dispatchParent(run, runs) && run.parent?.agent === forest.agent);
           const idle = forest.idleSession;
+          const dispatchers = dispatcherSessions(roots, sessions);
+          const candidates = forest.agent === "antigravity" ? (overview?.runtimeStates ?? []).filter(state => currentAntigravity
+            ? state.sessionId === currentAntigravity.id || state.nativeSessionId === currentAntigravity.nativeSessionId
+            : dispatchers.some(source => source.id === state.sessionId || source.id === state.nativeSessionId)) : [];
+          const observations = candidates.map(state => {
+            const session = sessions.find(item => item.agent === state.agent && item.id === state.sessionId);
+            return { state, title: session?.title ?? dispatchers.find(source => source.id === state.nativeSessionId)?.title,
+              running: session ? session.status === "running" : roots.some(run =>
+                isAntigravityNativeDispatch(run) && run.agentType === "inner-loop"
+                && run.parent?.sessionId === state.nativeSessionId && run.status === "running") };
+          }).sort((a, b) => Number(b.running) - Number(a.running)
+            || (b.state.updatedAt ?? "").localeCompare(a.state.updatedAt ?? ""));
+          const observation = observations[0];
           return <DispatchTree key={forest.id} agent={forest.agent} groups={groupDispatches(forest.runs, now)}
-            title={idle?.title ?? forest.title} dispatchers={dispatcherSessions(roots, sessions)}
+            title={idle?.title ?? forest.title} dispatchers={dispatchers}
             model={idle?.model ? dispatchModelName(idle.model) : dispatcherModel(roots, sessions)}
+            modelTitle={idle?.model ?? dispatcherModel(roots, sessions, true)}
+            runtime={observation?.state} runtimeTitle={observation?.title} running={observation?.running}
             highlighted={highlighted} now={now} />;
         })}
-        {loaded && !error && !forests.length && <p className="dispatch-empty">{t("ui.DispatchView.no_dispatches_right_now")}</p>}
+        {overview && !error && !forests.length && <p className="dispatch-empty">{t("ui.DispatchView.no_dispatches_right_now")}</p>}
       </section>
       {highlighted.size > 0 && <p className="dispatch-note dispatch-highlight-note">{t("ui.DispatchView.highlighted_dispatches_linked_from_the_session_sentence", { p0: (highlighted.size) })}</p>}
       <DispatchHistory />
@@ -86,16 +105,19 @@ export function DispatchView({ terminalOpen = false }: { terminalOpen?: boolean 
 
 
 /** Polling and fixture rendering share the same pure tree, including row anchors. */
-export function DispatchTree({ groups, title, dispatchers = [], agent, model, highlighted = new Set<string>(), now = Date.now() }: {
+export function DispatchTree({ groups, title, dispatchers = [], agent, model, modelTitle, runtime, runtimeTitle, running,
+  highlighted = new Set<string>(), now = Date.now() }: {
   groups: ReturnType<typeof groupDispatches>; title: string; dispatchers?: ReturnType<typeof dispatcherSessions>;
-  agent?: string; model: string | null; highlighted?: ReadonlySet<string>; now?: number;
+  agent?: string; model: string | null; modelTitle?: string | null; highlighted?: ReadonlySet<string>; now?: number;
+  runtime?: Pick<AntigravityRuntimeState, "activeModel" | "activePhase" | "updatedAt">; runtimeTitle?: string; running?: boolean;
 }) {
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set());
   const shownTools = new Set(expanded);
   for (const group of groups) if (group.runs.slice(3).some(run => highlighted.has(run.runId))) shownTools.add(group.tool);
   const topology = buildDispatchTree(groups.filter(group => agent !== "antigravity" || group.tool !== "copilot" || group.runs.length > 0), now, shownTools);
   // Geometry changes only with topology/content/size; the elapsed clock does not redraw it.
-  const layoutKey = JSON.stringify({ title, model, dispatchers, nodes: [...topology.sidebranches, ...topology.levels.flat()].map(node =>
+  const layoutKey = JSON.stringify({ title, model, dispatchers, activeModel: runtime?.activeModel, activePhase: runtime?.activePhase,
+    nodes: [...topology.sidebranches, ...topology.levels.flat()].map(node =>
     [node.id, node.parentId, node.mode, node.rows.map(row => row.id), node.more, node.expanded,
       node.run?.model, node.run?.effort, node.run?.agentType, node.run && dispatchName(node.run),
       node.subagent?.nickname, node.subagent?.role, node.subagent?.activity]) });
@@ -141,21 +163,33 @@ export function DispatchTree({ groups, title, dispatchers = [], agent, model, hi
   const sessionSummary = dispatchers.length > 1
     ? dispatchers.map(source => t("ui.DispatchView.message", { p0: (source.title), p1: (source.running ? t("ui.DispatchView.dispatches_running_detail", { p0: (source.running) }) : "") })).join(" · ")
     : sessionTitles;
-  const sourceTitle = [title, sessionTitles, model].filter(Boolean).join("\n");
+  const sourceTitle = [title, sessionTitles, modelTitle ?? model].filter(Boolean).join("\n");
   const sourceAgent = agent ?? (dispatchers.length && dispatchers.every((source) => source.agent === dispatchers[0]!.agent) ? dispatchers[0]!.agent : "unknown");
+  const phase = runtime?.activePhase === "planning" ? t("ui.DispatchView.planning")
+    : runtime?.activePhase === "executing" ? t("ui.DispatchView.execution_phase") : null;
+  const liveModel = runtime?.activeModel ? dispatchModelName(runtime.activeModel) : null;
+  const liveLabel = liveModel ? [liveModel, running ? phase : null].filter(Boolean).join(" · ")
+    : runtime?.activePhase === "executing" ? t("ui.DispatchView.execution_model") : phase;
+  const liveTitle = [runtime?.activeModel ?? (runtime?.activePhase === "executing" ? t("ui.DispatchView.waiting_for_executor") : phase),
+    runtime?.updatedAt && t("ui.DispatchView.model_observed_at", { p0: runtime.updatedAt }), runtimeTitle].filter(Boolean).join("\n");
+  const branchLabel = topology.sidebranches.some(node => node.run?.agentType === "swarm") ? t("ui.DispatchView.antigravity_native_dispatches")
+    : t(sourceAgent === "antigravity" ? "ui.DispatchView.antigravity_inner_execution" : "ui.DispatchView.claude_code_subagent_branch");
   return <div className="dispatch-tree" ref={tree}>
     <svg className="dispatch-wires" viewBox={`0 0 ${geometry.width} ${geometry.height}`} preserveAspectRatio="none" aria-hidden="true">
       {topology.edges.map(edge => <path key={edge.to} className={`dispatch-wire${edge.kind === "subagent" ? " dispatch-subagent-wire" : edge.kind === "sidebranch" ? " dispatch-sidebranch-wire" : ""} ${edge.state}`}
-        data-from={edge.from} data-to={edge.to} d={geometry.paths[edge.to]} vectorEffect="non-scaling-stroke"
+        data-from={edge.from} data-to={edge.to} data-dispatch-model={edge.modelFamily} d={geometry.paths[edge.to]} vectorEffect="non-scaling-stroke"
         style={{ "--wire-color": `var(--agent-${edge.tool})` } as CSSProperties} />)}
     </svg>
     <div className={`dispatch-root-row${topology.sidebranches.length ? " has-sidebranches" : ""}`}>
-    <article className="dispatch-node dispatch-source" data-dispatch-anchor="dispatcher" data-source-agent={sourceAgent} title={sourceTitle}>
-      <div className="dispatch-source-head">{["claude", "antigravity", "codex", "kimi"].includes(sourceAgent) && <AgentIcon agent={sourceAgent as "claude" | "antigravity" | "codex" | "kimi"} label={dispatcherLabel(sourceAgent)} />}<span>{dispatcherLabel(sourceAgent)}</span><span className="dispatch-role">{t("ui.DispatchView.dispatcher")}</span></div>
+    <article className="dispatch-node dispatch-source" data-dispatch-anchor="dispatcher" data-source-agent={sourceAgent} data-status={running ? "running" : undefined} title={sourceTitle}>
+      <div className="dispatch-source-head"><DispatchToolIcon tool={sourceAgent} /><span>{dispatcherLabel(sourceAgent)}</span><span className="dispatch-role">{t("ui.DispatchView.dispatcher")}</span></div>
       <p className="dispatch-session-title" title={sessionTitles}>{sessionSummary}</p>
-      {model && <p className="dispatch-model" title={model}>{model}</p>}
+      {model && model !== liveModel && <p className="dispatch-model" title={modelTitle ?? model}>{model}</p>}
+      {liveLabel && <div className="dispatch-live-model" data-status={running ? "running" : undefined} title={liveTitle}>
+        <span>{t(running ? "ui.DispatchView.current_model" : "ui.DispatchView.last_model", { p0: liveLabel })}</span>
+      </div>}
     </article>
-    {topology.sidebranches.length > 0 && <div className="dispatch-sidebranches" aria-label={t("ui.DispatchView.claude_code_subagent_branch")}>
+    {topology.sidebranches.length > 0 && <div className="dispatch-sidebranches" aria-label={branchLabel}>
       {topology.sidebranches.map(node => <DispatchNode key={node.id} node={node} now={now} highlighted={highlighted} onToggle={toggleGroup} />)}
     </div>}
     </div>
@@ -165,22 +199,20 @@ export function DispatchTree({ groups, title, dispatchers = [], agent, model, hi
   </div>;
 }
 
-function ExecutorIcon({ tool }: { tool: DispatchTool }) {
-  return tool === "copilot"
-    ? <svg className="agent-icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M8 3h8l2 4h2a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2h-2l-2 3H8l-2-3H4a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2h2z" /><rect x="5" y="8" width="6" height="6" rx="2" /><rect x="13" y="8" width="6" height="6" rx="2" /></svg>
-    : <AgentIcon agent={tool} label={LABELS[tool]} />;
-}
-
 function runTitle(run: DispatchRun, now: number): string {
-  return t("ui.DispatchView.started_ended", { p0: (dispatchName(run)), p1: (run.model || "—"), p2: (run.effort ? ` / ${run.effort}` : ""), p3: (run.agentType ? ` · ${run.agentType}` : ""), p4: (dispatchStatus(run.status).label), p5: (dispatchTime(dispatchSeconds(run, now))), p6: (run.startedAt || t("ui.DispatchView.unknown_detail")), p7: (run.endedAt || "—"), p8: (run.promptHead ? `\n${run.promptHead}` : "") });
+  const nativeAntigravity = isAntigravityNativeDispatch(run);
+  return t("ui.DispatchView.started_ended", { p0: (dispatchName(run)), p1: (run.model || (nativeAntigravity && run.agentType === "inner-loop" ? t("ui.DispatchView.waiting_for_executor") : "—")), p2: (run.effort ? ` / ${run.effort}` : ""), p3: (run.agentType && !nativeAntigravity ? ` · ${run.agentType}` : ""), p4: (dispatchStatus(run.status).label), p5: (dispatchTime(dispatchSeconds(run, now))), p6: (run.startedAt || t("ui.DispatchView.unknown_detail")), p7: (run.endedAt || "—"), p8: (run.promptHead ? `\n${run.promptHead}` : "") });
 }
 
 function RunLines({ run, now, tool }: { run: DispatchRun; now: number; tool: DispatchTool }) {
   const status = dispatchStatus(run.status);
+  const nativeAntigravity = isAntigravityNativeDispatch(run);
+  const inner = nativeAntigravity && run.agentType === "inner-loop";
+  const modelTitle = nativeAntigravity ? run.model ?? (inner ? t("ui.DispatchView.waiting_for_executor") : undefined) : undefined;
   return <>
-    <div className={`dispatch-node-head${run.effort ? " dispatch-model-head" : ""}`}><ExecutorIcon tool={tool} /><span className="dispatch-model"><span className="dispatch-model-name">{run.model ? dispatchModelName(run.model) : LABELS[tool]}</span>{run.effort && <span className="dispatch-model-effort"> · {run.effort}</span>}</span></div>
+    <div className={`dispatch-node-head${run.effort ? " dispatch-model-head" : ""}`}><DispatchToolIcon tool={tool} /><span className="dispatch-model"><span className="dispatch-model-name" title={modelTitle}>{run.model ? dispatchModelName(run.model) : inner ? t("ui.DispatchView.execution_model") : dispatcherLabel(tool)}</span>{run.effort && <span className="dispatch-model-effort"> · {run.effort}</span>}</span></div>
     <div className="dispatch-job-meta"><span className={`dispatch-status ${status.className}${run.status === "running" ? " running" : ""}`}>{status.label}</span><span className="dispatch-elapsed">{dispatchTime(dispatchSeconds(run, now))}</span></div>
-    {run.agentType && <strong className="dispatch-subagent-name">{run.agentType}</strong>}
+    {run.agentType && !nativeAntigravity && <strong className="dispatch-subagent-name">{run.agentType}</strong>}
     <p className="dispatch-activity">{dispatchName(run)}</p>
   </>;
 }
@@ -189,7 +221,11 @@ function DispatchNode({ node, now, highlighted, onToggle }: {
   node: DispatchTreeNode; now: number; highlighted: ReadonlySet<string>; onToggle: (tool: string, open: boolean) => void;
 }) {
   const className = `dispatch-node ${node.kind === "executor" ? "dispatch-executor" : node.kind === "subagent" ? "dispatch-subagent" : node.kind === "sidebranch" ? "dispatch-sidebranch" : "dispatch-run"}${node.mode === "idle" ? " idle" : ""}${node.run && highlighted.has(node.run.runId) ? " highlighted" : ""}`;
-  const attrs = { className, "data-tool": node.tool, "data-dispatch-anchor": node.id, "data-depth": node.depth };
+  const rowStates = node.rows.map(({ run }) => run.status === "running" ? "running" : dispatchStatus(run.status).className);
+  const status = node.run ? node.run.status === "running" ? "running" : dispatchStatus(node.run.status).className
+    : node.subagent?.status ?? ["running", "failed", "finished", "unknown"].find(state => rowStates.includes(state));
+  const attrs = { className, "data-tool": node.tool, "data-dispatch-anchor": node.id, "data-depth": node.depth, "data-status": status,
+    "data-dispatch-model": node.modelFamily };
   if (node.run) {
     const contents = <RunLines run={node.run} tool={node.tool} now={now} />;
     return node.run.native ? <article {...attrs} title={runTitle(node.run, now)}>{contents}</article>
@@ -208,13 +244,13 @@ function DispatchNode({ node, now, highlighted, onToggle }: {
     </article>;
   }
   return <article {...attrs}>
-    <div className="dispatch-node-head"><ExecutorIcon tool={node.tool} /><h2 title={LABELS[node.tool]}>{LABELS[node.tool]}</h2>{node.mode === "idle" && <span className="dispatch-idle-label">{t("ui.common.idle")}</span>}</div>
+    <div className="dispatch-node-head"><DispatchToolIcon tool={node.tool} /><h2 title={dispatcherLabel(node.tool)}>{dispatcherLabel(node.tool)}</h2>{node.mode === "idle" && <span className="dispatch-idle-label">{t("ui.common.idle")}</span>}</div>
     {node.mode === "group" && <>
       {node.rows.map((row, index) => {
         const status = dispatchStatus(row.run.status);
         const contents = <><span className={`dispatch-state-dot ${row.run.status === "running" ? "running" : status.className}`} /><span className="dispatch-row-name">{dispatchName(row.run)}</span><span className="dispatch-elapsed">{dispatchTime(dispatchSeconds(row.run, now))}</span></>;
         const rowAttrs = { className: `dispatch-summary-row${highlighted.has(row.run.runId) ? " highlighted" : ""}`, title: runTitle(row.run, now),
-          "data-dispatch-anchor": row.id, "data-row-index": index, "aria-label": runTitle(row.run, now) };
+          "data-dispatch-anchor": row.id, "data-row-index": index, "data-status": rowStates[index], "aria-label": runTitle(row.run, now) };
         return row.run.native ? <div key={row.id} {...rowAttrs}>{contents}</div>
           : <button key={row.id} type="button" {...rowAttrs} onClick={() => store.navigateDispatches([row.run.runId])}>{contents}</button>;
       })}

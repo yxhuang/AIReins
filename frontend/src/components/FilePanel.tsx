@@ -104,7 +104,9 @@ export function WorkspaceDropTarget({ area }: { area: "main" | "right" }) {
 }
 
 /** 右侧文件页与终端页各显示本类标签（用户 10-25）；混排只在主区，跨页靠移到主区/右侧。 */
-export function FileTabs({ area, page = "files", trailing }: { area: "main" | "right"; page?: "files" | "terminal"; trailing?: ReactNode }) {
+export function FileTabs({ area, page = "files", trailing, onOpenFolder }: {
+  area: "main" | "right"; page?: "files" | "terminal"; trailing?: ReactNode; onOpenFolder?: (target: WorkFileTarget) => void;
+}) {
   const tabs = useStore(value => value.fileTabs.filter(tab => (tab.area ?? "right") === area), shallowEqual);
   const selected = useStore(value => area === "main" ? value.mainFileTabId : value.fileTabId);
   const terminals = useStore(value => value.terminals);
@@ -114,7 +116,11 @@ export function FileTabs({ area, page = "files", trailing }: { area: "main" | "r
   const order = useStore(value => value.workspaceTabKeys(area).join("\n"));
   const unread = useStore(value => value.mainSessionUnread);
   const pending = useStore(value => value.currentId ? value.pendingCount(value.currentId) : 0);
-  const [menu, setMenu] = useState<{ id: number; x: number; y: number } | null>(null);
+  const sessionId = useStore(value => value.currentId);
+  const defaultDirectory = useStore(value => value.currentId ? value.session(value.currentId)?.cwd : value.newSessionCwd);
+  const windowsExplorer = useStore(value => value.meta?.platform === "wsl" && value.meta.capabilities.systemOpen === true);
+  const [menu, setMenu] = useState<{ id: number; x: number; y: number; trigger: HTMLButtonElement; folderTarget?: WorkFileTarget } | null>(null);
+  const folderTarget = menu?.folderTarget;
   const terminalTabs = buildTermTabs(terminals, terminalSelected).filter(tab => (terminalAreas[tab.id] ?? "right") === area);
   const dragProps = (key: string) => ({
     draggable: !(key.startsWith("terminal:") && terminalBusy),
@@ -175,19 +181,31 @@ export function FileTabs({ area, page = "files", trailing }: { area: "main" | "r
         }
         const tab = tabs.find(item => item.id === Number(key.slice(5)));
         if (!tab) return null;
-        const path = tab.preview?.target.path ?? (tab.directory?.sessionId === store.currentId ? tab.directory?.path : undefined) ?? (store.currentId ? store.session(store.currentId)?.cwd : store.newSessionCwd) ?? "/";
+        const directory = (tab.directory?.sessionId === sessionId ? tab.directory.path : undefined) ?? defaultDirectory;
+        const path = tab.preview?.target.path ?? directory ?? "/";
         const folder = !tab.preview;
+        const canOpenFolder = area === "right" && folder && windowsExplorer && onOpenFolder && directory;
         const name = path.split("/").filter(Boolean).pop() ?? "/";
         const active = tab.id === selected && !terminalSelected;
         return <div key={key} {...dragProps(key)} className={`term-tab${active ? " active" : ""}`}>
           <button type="button" role="tab" data-tab-id={tab.id} aria-selected={active} tabIndex={active ? 0 : -1} className="term-tab-select" title={path}
+            aria-haspopup={canOpenFolder ? "menu" : undefined} aria-expanded={canOpenFolder ? menu?.id === tab.id : undefined}
+            onContextMenu={canOpenFolder ? event => {
+              event.preventDefault();
+              const trigger = event.currentTarget;
+              const rect = trigger.getBoundingClientRect();
+              const keyboard = event.clientX === 0 && event.clientY === 0;
+              // 目录自身作 root，后端会验证它仍是目录。
+              setMenu({ id: tab.id, x: keyboard ? rect.left : event.clientX, y: keyboard ? rect.bottom : event.clientY, trigger,
+                folderTarget: { path: directory, root: directory, sessionId: sessionId ?? undefined } });
+            } : undefined}
             onClick={() => { if (area === "right" && !store.filesOpen) store.setFilesOpen(true); store.switchFileTab(tab.id); }}>
             <svg className={`term-tab-icon${folder ? " file-tab-folder" : ""}`} width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={folder ? "M3 7V5h6l2 2h10v13H3Z" : "M14 3H5v18h14V8ZM14 3v5h5"} /></svg>
             <span className="term-tab-label">{name}</span>
           </button>
           {!folder && <button type="button" className="term-tab-close file-tab-menu" aria-label={t("ui.FilePanel.tab_actions", { name })} title={t("ui.FilePanel.tab_actions", { name })}
             aria-haspopup="menu" aria-expanded={menu?.id === tab.id} onClick={event => {
-              const rect = event.currentTarget.getBoundingClientRect(); setMenu({ id: tab.id, x: rect.left, y: rect.bottom + 4 });
+              const rect = event.currentTarget.getBoundingClientRect(); setMenu({ id: tab.id, x: rect.left, y: rect.bottom + 4, trigger: event.currentTarget });
             }}>⋯</button>}
           <button type="button" className="term-tab-close" aria-label={t("ui.FilePanel.close", { p0: name })} title={t("ui.FilePanel.close_tab")} onClick={() => store.closeFileTab(tab.id)}>×</button>
         </div>;
@@ -196,7 +214,16 @@ export function FileTabs({ area, page = "files", trailing }: { area: "main" | "r
     {trailing ?? (area === "right" && <button type="button" className="term-tab-new" aria-label={t("ui.FilePanel.new_tab")} title={t("ui.FilePanel.new_tab_in_the_session_directory")} onClick={() => store.openFileTab()}>
       <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="M12 4v16M4 12h16" /></svg>
     </button>)}
-    {menu && <SidebarActionMenu position={menu} label={t("ui.FilePanel.file_tabs")} onClose={() => setMenu(null)} items={[
+    {menu && <SidebarActionMenu position={menu} label={t("ui.FilePanel.file_tabs")} onClose={returnFocus => {
+      setMenu(null);
+      if (returnFocus) menu.trigger.focus();
+    }} items={folderTarget ? [
+      { id: "open-system", icon: "folder", label: t("ui.FilePanel.open_in_windows_explorer"), onSelect: () => {
+        setMenu(null);
+        menu.trigger.focus();
+        onOpenFolder?.(folderTarget);
+      } },
+    ] : [
       { id: "move-file", icon: "open", label: t(area === "main" ? "ui.FilePanel.move_to_right" : "ui.FilePanel.move_to_main"), onSelect: () => { store.moveFileTab(menu.id, area === "main" ? "right" : "main"); setMenu(null); } },
     ]} />}
   </div>;
@@ -249,6 +276,14 @@ export function FilePanel({ onClose: closeRight, tabId: ownTabId }: { onClose: (
   const dirty = preview?.file?.editable && preview.draft !== preview.file.text;
   const confirmDownload = (event: MouseEvent<HTMLAnchorElement>) => {
     if (!window.confirm(t("ui.FilePanel.download_this_file_cancel_to_stay_in"))) event.preventDefault();
+  };
+
+  const openInSystem = (target: WorkFileTarget) => {
+    const id = ++copyId.current;
+    setNotice(null);
+    void openWorkPathInSystem(target).catch((error: Error) => {
+      if (id === copyId.current) setNotice({ path: target.path, copied: null, reason: error.message });
+    });
   };
 
   const referenceFile = (path: string) => {
@@ -305,15 +340,11 @@ export function FilePanel({ onClose: closeRight, tabId: ownTabId }: { onClose: (
     } });
     if (systemOpen) menuItems.push({ id: "open-system", icon: menu.folder ? "folder" : "open", label: t(menu.folder ? "ui.FilePanel.open_in_file_manager" : "ui.FilePanel.open_with_default"), onSelect: () => {
       setSendMenu(null);
-      const id = ++copyId.current;
-      setNotice({ path: menu.target.path, copied: null, reason: t("ui.FilePanel.opening_in_system") });
-      openWorkPathInSystem(menu.target).then(
-        () => { if (id === copyId.current) setNotice({ path: menu.target.path, copied: null, reason: t("ui.FilePanel.opened_in_system") }); },
-        (error: Error) => { if (id === copyId.current) setNotice({ path: menu.target.path, copied: null, reason: error.message }); });
+      openInSystem(menu.target);
     } });
   }
 
-  const tabRow = <><FileTabs area={area} />{hasTab && !preview && <button type="button" className="term-tab-toggle file-hidden-toggle" aria-pressed={showHidden} onClick={toggleHidden}
+  const tabRow = <><FileTabs area={area} onOpenFolder={openInSystem} />{hasTab && !preview && <button type="button" className="term-tab-toggle file-hidden-toggle" aria-pressed={showHidden} onClick={toggleHidden}
     title={showHidden ? t("ui.FilePanel.hidden_files_shown") : t("ui.FilePanel.hidden_files_not_shown")}>{t("ui.FilePanel.hidden_files")}</button>}</>;
 
   return <>

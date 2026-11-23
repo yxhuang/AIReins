@@ -29,10 +29,12 @@ export function busySessionCount(sessions: Pick<SessionRecord, "status" | "backg
  * 过了生效时刻 graceMs 还活着，说明关机没发生（如在 Windows 侧被取消），回到 idle 并带错误。
  * ponytail: 等待状态只在内存，AIReins 重启即丢失；需要跨重启再落盘。
  */
-export function createPowerOff({ busy, checkBusy, run, pollMs = 5000, delayMs = 60_000, graceMs = 60_000, now = Date.now }: {
+export function createPowerOff({ busy, checkBusy, prepare, run, pollMs = 5000, delayMs = 60_000, graceMs = 60_000, now = Date.now }: {
   busy: () => number;
   /** 实际排定关机前的新鲜异步检查（可绕过缓存）；失败时保守按繁忙处理不放行。 */
   checkBusy?: () => Promise<number>;
+  /** 排定系统关机前的异步准备（如释放空闲 worker 并刷盘）；失败不阻断关机，期间取消或新忙会话会中止本次排定。 */
+  prepare?: (isCancelled: () => boolean) => Promise<void>;
   run: (args: string[]) => Promise<unknown>;
   pollMs?: number;
   delayMs?: number;
@@ -44,6 +46,7 @@ export function createPowerOff({ busy, checkBusy, run, pollMs = 5000, delayMs = 
   let deadline: number | undefined;
   let timer: NodeJS.Timeout | undefined;
   let polling = false;
+  let preparation: AbortController | undefined;
   // 所有操作排队串行：取消一定等前一个排定命令落地再 abort，并发的取消/重新请求看到的都是落定后的状态。
   let queue: Promise<unknown> = Promise.resolve();
   const serial = <T>(op: () => Promise<T>): Promise<T> => {
@@ -66,8 +69,35 @@ export function createPowerOff({ busy, checkBusy, run, pollMs = 5000, delayMs = 
     const remainingMs = state === "scheduled" && deadline !== undefined ? Math.max(0, deadline - now()) : undefined;
     return { state, busy: busy(), ...(remainingMs !== undefined ? { remainingMs } : {}), ...(error ? { error } : {}) };
   };
+  const startWaiting = () => {
+    state = "waiting";
+    if (timer) return;
+    timer = setInterval(() => {
+      if (polling) return;
+      polling = true;
+      void serial(async () => {
+        try {
+          if (state === "waiting" && await liveBusy() === 0) await fire();
+        } finally { polling = false; }
+      });
+    }, pollMs);
+  };
   const fire = async () => {
     stopWaiting();
+    if (prepare) {
+      state = "waiting";
+      preparation = new AbortController();
+      const { signal } = preparation;
+      try {
+        try { await prepare(() => signal.aborted); } catch { /* Preparation is best effort. */ }
+        if (signal.aborted) { state = "idle"; return; }
+        const busyAfterPrepare = await liveBusy();
+        if (signal.aborted) { state = "idle"; return; }
+        if (busyAfterPrepare > 0 || busy() > 0) { startWaiting(); return; }
+      } finally {
+        preparation = undefined;
+      }
+    }
     state = "scheduled";
     deadline = undefined;
     try {
@@ -84,30 +114,22 @@ export function createPowerOff({ busy, checkBusy, run, pollMs = 5000, delayMs = 
       if (state !== "idle") return status();
       error = undefined;
       if (await liveBusy() === 0) await fire();
-      else {
-        state = "waiting";
-        timer = setInterval(() => {
-          if (polling) return;
-          polling = true;
-          void serial(async () => {
-            try {
-              if (state === "waiting" && await liveBusy() === 0) await fire();
-            } finally { polling = false; }
-          });
-        }, pollMs);
-      }
+      else startWaiting();
       return status();
     }),
-    cancel: () => serial(async (): Promise<PowerOffStatus> => {
-      stopWaiting();
-      const wasScheduled = state === "scheduled";
-      state = "idle";
-      deadline = undefined;
-      error = undefined;
-      if (wasScheduled) {
-        try { await run(["abort"]); } catch (reason) { error = reason instanceof Error ? reason.message : String(reason); }
-      }
-      return status();
-    }),
+    cancel: () => {
+      preparation?.abort();
+      return serial(async (): Promise<PowerOffStatus> => {
+        stopWaiting();
+        const wasScheduled = state === "scheduled";
+        state = "idle";
+        deadline = undefined;
+        error = undefined;
+        if (wasScheduled) {
+          try { await run(["abort"]); } catch (reason) { error = reason instanceof Error ? reason.message : String(reason); }
+        }
+        return status();
+      });
+    },
   };
 }

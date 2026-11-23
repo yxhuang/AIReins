@@ -15,10 +15,12 @@ import { filterCommands, noteCommandUsed } from "../commands";
 import { newSessionCommands, newSessionInfoKind } from "../new-session-input";
 import { appendRefineCommand, refineCommandFor } from "../session-ui";
 import { insertFileMention, planFileMention } from "./FilePanel";
+import { rememberComposerInput, useComposerHistory } from "../composer-history";
 
 type NewAttachment = Attachment & { file?: File };
 
 const CWD_STORAGE_KEY = "workbench-last-cwd";
+const DEFAULT_NEW_SESSION_AGENT = "antigravity";
 // 模块级计数：附件随草稿跨挂载保留，组件内计数会从 0 重来撞 id。
 let attachmentSequence = 0;
 
@@ -50,9 +52,10 @@ export function NewSessionForm({ children }: { children?: ReactNode }) {
   const cwdRequest = useStore(value => value.newSessionRequest);
   const fileMentionRequest = useStore(value => value.fileMentionRequest);
   const [cwd, setCwd] = useState(() => initialCwd ?? pickInitialCwd());
-  const [agent, setAgent] = useState<AgentKind>("antigravity");
+  const [agent, setAgent] = useState<AgentKind>(DEFAULT_NEW_SESSION_AGENT);
   // 首条消息和附件离开新建页时保留，回来接着写（用户 10-25）。
   const [message, setMessage] = useState(() => store.getDraft(NEW_SESSION_DRAFT_ID));
+  const history = useComposerHistory(message, setMessage);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // 外部换到另一个目录（回填、组「+」）时换 key 重新挂载地址栏；地址栏内导航只改 cwd。
@@ -61,7 +64,7 @@ export function NewSessionForm({ children }: { children?: ReactNode }) {
   const pendingMentionCursor = useRef<number | null>(null);
   const cwdTouched = useRef(false);
   const lastCwdRequest = useRef(cwdRequest);
-  const [configSel, setConfigSel] = useState<Partial<Record<ConfigOptionId, string>>>(() => newSessionConfig("antigravity"));
+  const [configSel, setConfigSel] = useState<Partial<Record<ConfigOptionId, string>>>(() => newSessionConfig(DEFAULT_NEW_SESSION_AGENT));
   const [attachments, setAttachments] = useState<NewAttachment[]>(() => store.newSessionAttachments);
   const [slashMenuOpen, setSlashMenuOpen] = useState(false);
   const [dismissed, setDismissed] = useState(false);
@@ -177,7 +180,7 @@ export function NewSessionForm({ children }: { children?: ReactNode }) {
   };
   const insertCommand = (name: string, fillOnly = false) => {
     const info = newSessionInfoKind(agent, `/${name}`);
-    if (info && !fillOnly) { void submit(info, slashQuery !== null); return; }
+    if (info && !fillOnly) { void submit(info, slashQuery !== null, `/${name}`); return; }
     setMessage(`${slashQuery !== null || !message ? "" : `${message}\n`}/${name} `); setSlashMenuOpen(false); setDismissed(true);
     textareaRef.current?.focus();
   };
@@ -187,7 +190,7 @@ export function NewSessionForm({ children }: { children?: ReactNode }) {
     setMessage(appendRefineCommand(textareaRef.current?.value ?? message, refineCommand)); setSlashMenuOpen(false); setDismissed(true);
     textareaRef.current?.focus();
   };
-  const submit = async (requestedInfo?: SessionInfoKind, consumeCommand = false) => {
+  const submit = async (requestedInfo?: SessionInfoKind, consumeCommand = false, panelCommand?: string) => {
     if (!cwd.trim() || submitting.current) return;
     const text = message.trim();
     const typedInfo = newSessionInfoKind(agent, text);
@@ -226,6 +229,7 @@ export function NewSessionForm({ children }: { children?: ReactNode }) {
       const mentions = uploaded.flatMap(attachment => { const mention = attachmentMention(attachment); return mention ? [mention] : []; });
       if (info) {
         store.restoreComposerSend(session.id, consumeCommand || typedInfo ? "" : message, mentions);
+        rememberComposerInput(panelCommand ?? text);
       } else if (text || mentions.length) {
         // 启动期间命令表可能尚未到达；复用本次选命令的表，服务端仍负责校验。
         if (!store.commands.get(session.id)?.length && commands.length) store.commands.set(session.id, commands);
@@ -275,7 +279,7 @@ export function NewSessionForm({ children }: { children?: ReactNode }) {
         {attachments.length > 20 && <span className="mention-missing">{t("ui.SessionView.attachments_and_references_total_over_extra_items_sentence", { p0: 20 })}</span>}
       </div>}
       <div className="composer-input">
-        <textarea ref={textareaRef} value={message} onChange={event => { setMessage(event.target.value); setDismissed(false); }} rows={3}
+        <textarea ref={textareaRef} value={message} onChange={event => { history.reset(); setMessage(event.target.value); setDismissed(false); }} rows={3}
           aria-label={t("ui.Sidebar.first_message_optional")} placeholder={t("ui.Sidebar.first_message_optional")}
           disabled={busy} onCompositionStart={() => setComposing(true)} onCompositionEnd={() => setComposing(false)}
           onPaste={event => {
@@ -290,6 +294,7 @@ export function NewSessionForm({ children }: { children?: ReactNode }) {
               }
               if ((event.key === "Enter" || event.key === "Tab") && activeCommand) { event.preventDefault(); insertCommand(activeCommand.name, event.key === "Tab"); return; }
             }
+            if (history.onKeyDown(event) !== null) { setSlashMenuOpen(false); setDismissed(true); return; }
             if (event.key !== "Enter" || event.shiftKey) return;
             // 与会话输入框一致：触屏回车换行，Ctrl/⌘+Enter 或发送按钮才提交。
             if (window.matchMedia?.("(pointer: coarse)").matches && !event.ctrlKey && !event.metaKey) return;

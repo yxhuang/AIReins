@@ -304,9 +304,10 @@ export class AcpDriver extends BaseDriver {
   private readonly completedToolCallIds = new Map<string, number>();
   /** 待回报的原生子代理：starter toolCallId -> 有界保活截止时间戳，彼此独立计数。 */
   private readonly pendingNativeSubagents = new Map<string, number>();
+  /** 过期条目继续参与唤醒归属，但不计入后台保活。 */
+  private unclaimedExpiredSubagentDeadlines: number[] = [];
   private settlingSubagentId: string | null = null;
-  private unclaimedExpiredSubagents = 0;
-  private settlingExpiredSubagent = false;
+  private settlingExpiredSubagentDeadline: number | null = null;
   /** 并发 prompt 期间若先结束了某个后台工具，记录唤醒宽限截止时刻，留给最后一条 prompt 结束时接续。 */
   private readonly backgroundToolCallIds = new Set<string>();
   private pendingWakeDeadlineMs = 0;
@@ -429,10 +430,14 @@ export class AcpDriver extends BaseDriver {
       if (this.reactivePhase === "waiting_wake" && this.wakeSource === "tool" && this.wakeGraceEndsAtMs > startedAt) {
         this.pendingWakeDeadlineMs = Math.max(this.pendingWakeDeadlineMs, this.wakeGraceEndsAtMs);
       }
+      if (this.settlingExpiredSubagentDeadline !== null) {
+        this.pruneExpiredSubagents(startedAt);
+        if (this.unclaimedExpiredSubagentDeadlines[0] === this.settlingExpiredSubagentDeadline) this.unclaimedExpiredSubagentDeadlines.shift();
+      }
       this.clearReactiveTimer();
       this.wakeGraceEndsAtMs = 0;
       this.settlingSubagentId = null;
-      this.settlingExpiredSubagent = false;
+      this.settlingExpiredSubagentDeadline = null;
       this.reactivePhase = "idle";
       this.wakeSource = "none";
       this.syncAntigravityBackgroundTasks();
@@ -992,12 +997,13 @@ export class AcpDriver extends BaseDriver {
   }
 
   private pruneExpiredSubagents(now = Date.now()): void {
+    this.unclaimedExpiredSubagentDeadlines = this.unclaimedExpiredSubagentDeadlines.filter(deadline => deadline > now);
     for (const [id, expiresAt] of this.pendingNativeSubagents) {
       if (expiresAt > now) continue;
       this.pendingNativeSubagents.delete(id);
-      if (id !== this.settlingSubagentId) this.unclaimedExpiredSubagents++;
+      const deadline = expiresAt + this.reactiveSubagentGraceMs;
+      if (id !== this.settlingSubagentId && deadline > now) this.unclaimedExpiredSubagentDeadlines.push(deadline);
     }
-    if (this.pendingNativeSubagents.size === 0) this.unclaimedExpiredSubagents = 0;
   }
 
   private nextSubagentGraceMs(now = Date.now()): number {
@@ -1032,11 +1038,17 @@ export class AcpDriver extends BaseDriver {
       const now = Date.now();
       this.pruneExpiredSubagents(now);
       if (consumeOneSubagent) {
-        if (this.settlingExpiredSubagent) this.unclaimedExpiredSubagents = Math.max(0, this.unclaimedExpiredSubagents - 1);
-        else if (this.settlingSubagentId !== null) this.pendingNativeSubagents.delete(this.settlingSubagentId);
+        if (this.settlingExpiredSubagentDeadline !== null) {
+          // 收尾期间归属记录也可能到期，不能误消费下一条记录。
+          if (this.unclaimedExpiredSubagentDeadlines[0] === this.settlingExpiredSubagentDeadline) {
+            this.unclaimedExpiredSubagentDeadlines.shift();
+          }
+        } else if (this.settlingSubagentId !== null) {
+          this.pendingNativeSubagents.delete(this.settlingSubagentId);
+        }
       }
       this.settlingSubagentId = null;
-      this.settlingExpiredSubagent = false;
+      this.settlingExpiredSubagentDeadline = null;
       const remainingSubagentMs = this.nextSubagentGraceMs(now);
       if (remainingSubagentMs > 0) {
         this.waitForAntigravityWake("subagent", now + remainingSubagentMs);
@@ -1055,7 +1067,7 @@ export class AcpDriver extends BaseDriver {
     this.wakeSource = source;
     this.wakeGraceEndsAtMs = deadlineMs;
     this.settlingSubagentId = null;
-    this.settlingExpiredSubagent = false;
+    this.settlingExpiredSubagentDeadline = null;
     if (this.inFlightTools.size === 0) this.scheduleReactiveClear(Math.max(0, deadlineMs - Date.now()));
     else this.clearReactiveTimer();
     this.syncAntigravityBackgroundTasks();
@@ -1142,10 +1154,7 @@ export class AcpDriver extends BaseDriver {
       this.pruneExpiredSubagents(now);
       this.pendingNativeSubagents.set(id, now + this.reactiveSubagentGraceMs);
     }
-    if (wasKillAll && succeeded) {
-      this.pendingNativeSubagents.clear();
-      this.unclaimedExpiredSubagents = 0;
-    }
+    if (wasKillAll && succeeded) this.pendingNativeSubagents.clear();
     if (this.activePrompts > 0) {
       // 仅对已跨过前序 prompt 结束边界的后台工具保留唤醒宽限，普通同步工具不触发。
       if (hadInFlight && wasBackgroundTool && !wasSubagentStarter) {
@@ -1174,11 +1183,14 @@ export class AcpDriver extends BaseDriver {
     if (this.kind !== "antigravity" || !this.hasPrompted || this.activePrompts > 0 || this.interruptedUntilNextPrompt) return;
     if (this.reactivePhase !== "awake") {
       this.pruneExpiredSubagents();
-      if (this.wakeSource === "none") this.wakeSource = this.pendingNativeSubagents.size > 0 ? "subagent" : "tool";
+      const expiredDeadline = this.unclaimedExpiredSubagentDeadlines[0] ?? null;
+      if (this.wakeSource === "none") {
+        this.wakeSource = expiredDeadline !== null || this.pendingNativeSubagents.size > 0 ? "subagent" : "tool";
+      }
       // ACP 唤醒没有子代理 ID，优先吸收可能来自刚到期条目的迟到回报。
-      if (this.wakeSource === "subagent" && this.settlingSubagentId === null) {
-        if (this.unclaimedExpiredSubagents > 0) this.settlingExpiredSubagent = true;
-        else this.settlingSubagentId = this.pendingNativeSubagents.keys().next().value ?? null;
+      if (this.wakeSource === "subagent") {
+        this.settlingExpiredSubagentDeadline = expiredDeadline;
+        this.settlingSubagentId = expiredDeadline === null ? this.pendingNativeSubagents.keys().next().value ?? null : null;
       }
     }
     this.reactivePhase = "awake";
@@ -1235,9 +1247,9 @@ export class AcpDriver extends BaseDriver {
     this.subagentStarterCalls.clear();
     this.subagentKillAllCalls.clear();
     this.pendingNativeSubagents.clear();
+    this.unclaimedExpiredSubagentDeadlines.length = 0;
     this.settlingSubagentId = null;
-    this.settlingExpiredSubagent = false;
-    this.unclaimedExpiredSubagents = 0;
+    this.settlingExpiredSubagentDeadline = null;
     this.pendingWakeDeadlineMs = 0;
     this.wakeGraceEndsAtMs = 0;
     this.wakeSource = "none";
