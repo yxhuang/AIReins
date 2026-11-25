@@ -1,15 +1,16 @@
 import { t } from "../i18n";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
-import { fetchDispatchDetail, fetchDispatches } from "../api";
+import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { fetchDispatchDetail } from "../api";
 import { dispatchName, dispatcherSessions, dispatcherModel, dispatcherLabel, dispatchForests, dispatchParent, dispatchModelName, dispatchWirePath, dispatchSeconds, dispatchStatus, dispatchTime, groupDispatches, buildDispatchTree, isAntigravityNativeDispatch, type DispatchTreeNode, type DispatchTool, type DispatchRun } from "../dispatch-flow";
 import { effectiveFor } from "../config-view";
 import { startDispatchPolling } from "../dispatch-polling";
 import { sessionTitle } from "../format";
 import { useStore } from "../useStore";
 import { store } from "../store";
-import type { AntigravityRuntimeState, DispatchOverview } from "../types";
+import type { AntigravityRuntimeState } from "../types";
 import { DispatchDetail } from "./DispatchDetail";
 import { DispatchHistory, DispatchToolIcon } from "./DispatchHistory";
+import { DispatchOverviewContext } from "./DispatchOverview";
 
 const selectTitles = (value: import("../store").Store) => value.sessions.map((session) => ({
   id: session.id, agent: session.agent, nativeSessionId: session.nativeSessionId, status: session.status,
@@ -21,22 +22,43 @@ export function DispatchView({ terminalOpen = false }: { terminalOpen?: boolean 
   const route = useStore(() => window.location.hash);
   const selected = route.match(/^#\/dispatches\/([^?]+)/)?.[1];
   const selectedId = selected ? decodeURIComponent(selected) : null;
-  const highlighted = new Set(new URLSearchParams(route.split("?")[1]).get("runs")?.split(",").filter(Boolean) ?? []);
-  const [overview, setOverview] = useState<DispatchOverview | null>(null);
+  const highlighted = useMemo(() => new Set(new URLSearchParams(route.split("?")[1]).get("runs")?.split(",").filter(Boolean) ?? []), [route]);
+  const { overview, error } = useContext(DispatchOverviewContext);
+  const [extra, setExtra] = useState<{ highlighted: Set<string>; runs: DispatchRun[] } | null>(null);
+  const overviewRuns = overview?.dispatches ?? [];
+  const missingIds = overview && !selectedId
+    ? [...highlighted].filter(id => !overviewRuns.some(run => run.runId === id)).join(",") : "";
   const [now, setNow] = useState(Date.now);
-  const [error, setError] = useState("");
   const sessions = useStore(selectTitles, (a, b) => JSON.stringify(a) === JSON.stringify(b));
   const currentId = useStore(state => state.currentId);
   useEffect(() => {
-    let runtimeStates: DispatchOverview["runtimeStates"];
+    if (selectedId) return;
+    const mobile = window.matchMedia("(max-width: 720px)");
+    let timer: number | undefined;
+    const sync = () => {
+      window.clearInterval(timer);
+      if (document.visibilityState === "hidden" || (terminalOpen && mobile.matches)) return;
+      setNow(Date.now());
+      timer = window.setInterval(() => setNow(Date.now()), 1000);
+    };
+    sync();
+    document.addEventListener("visibilitychange", sync);
+    mobile.addEventListener("change", sync);
+    return () => {
+      document.removeEventListener("visibilitychange", sync);
+      mobile.removeEventListener("change", sync);
+      window.clearInterval(timer);
+    };
+  }, [selectedId, terminalOpen]);
+  useEffect(() => {
+    if (!missingIds) return;
+    const missing = missingIds.split(",");
+    const mobile = window.matchMedia("(max-width: 720px)");
     return startDispatchPolling({
-      visible: () => !selectedId && document.visibilityState !== "hidden"
-        && !(terminalOpen && window.matchMedia("(max-width: 720px)").matches),
-      now: Date.now,
+      visible: () => document.visibilityState !== "hidden" && !(terminalOpen && mobile.matches),
       every: (callback, ms) => window.setInterval(callback, ms),
-      cancel: (timer) => window.clearInterval(timer as number),
-      onVisibility: (callback) => {
-        const mobile = window.matchMedia("(max-width: 720px)");
+      cancel: timer => window.clearInterval(timer as number),
+      onVisibility: callback => {
         document.addEventListener("visibilitychange", callback);
         mobile.addEventListener("change", callback);
         return () => {
@@ -44,18 +66,15 @@ export function DispatchView({ terminalOpen = false }: { terminalOpen?: boolean 
           mobile.removeEventListener("change", callback);
         };
       },
-    }, async (signal) => {
-      const data = await fetchDispatches(signal);
-      const missing = [...highlighted].filter((id) => !data.dispatches.some((run) => run.runId === id));
-      const extra = await Promise.allSettled(missing.map((id) => fetchDispatchDetail(id, signal)));
+    }, async signal => {
+      const results = await Promise.allSettled(missing.map(id => fetchDispatchDetail(id, signal)));
       signal.throwIfAborted();
-      for (const result of extra) if (result.status === "fulfilled") data.dispatches.push(result.value);
-      runtimeStates = data.runtimeStates;
-      return data;
-    }, (dispatches) => setOverview({ dispatches, runtimeStates }), setError, setNow);
-  }, [terminalOpen, route]);
+      return { dispatches: results.flatMap(result => result.status === "fulfilled" ? [result.value] : []) };
+    }, ({ dispatches }) => setExtra({ highlighted, runs: dispatches }), () => {});
+  }, [missingIds, highlighted, terminalOpen]);
 
-  const runs = overview?.dispatches ?? [];
+  const runs = extra?.highlighted === highlighted ? [...overviewRuns, ...extra.runs.filter(run =>
+    !overviewRuns.some(item => item.runId === run.runId))] : overviewRuns;
   const groups = groupDispatches(runs, now);
   const visibleRuns = groups.flatMap((group) => group.runs);
   const forests = dispatchForests(visibleRuns, sessions, runs, currentId);

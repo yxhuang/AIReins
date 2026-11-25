@@ -3,7 +3,7 @@ import { spawn } from "node:child_process";
 import { appendFile, chmod, mkdir, mkdtemp, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { DispatchQueryError, dispatchSessionMap, getDispatch, getDispatchLog, listDispatches, readClaudeTranscriptModel, readClaudeParentModel } from "./dispatches.js";
+import { DispatchQueryError, dispatchSessionMap, getDispatch, getDispatchLog, listDispatches, listDispatchOverview, readClaudeTranscriptModel, readClaudeParentModel } from "./dispatches.js";
 
 const realNow = Date.now;
 let cacheNow = realNow();
@@ -207,7 +207,13 @@ try {
   for (let index = 0; index < 205; index++) {
     await mkdir(join(limitRoot, `20261001-130000-kimi-${index.toString().padStart(3, "0")}`));
   }
+  const olderRunningId = "20261001-125959-kimi-older-running";
+  await mkdir(join(limitRoot, olderRunningId));
+  await writeFile(join(limitRoot, olderRunningId, "run.json"), JSON.stringify({ schema: 1, status: "running", pid: process.pid }));
   assert.equal((await listDispatches(null, limitRoot)).length, 50);
+  const withRunning = await listDispatchOverview(null, limitRoot, undefined, undefined, true);
+  assert.equal(withRunning.dispatches.length, 51);
+  assert.equal(withRunning.dispatches.find(run => run.runId === olderRunningId)?.status, "running");
   assert.equal((await listDispatches("999999", limitRoot)).length, 200, "limit 上限 200");
   assert.equal((await listDispatches("invalid", limitRoot)).length, 50);
   assert.equal((await listDispatches(0, limitRoot)).length, 50);

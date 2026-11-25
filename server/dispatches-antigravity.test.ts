@@ -192,6 +192,14 @@ assert.deepEqual(swarmActive.dispatches.map(run => [run.tool, run.native, run.ag
 assert.equal(swarmActive.runtimeStates[0]?.activeModel, planner);
 assert.deepEqual((await listParentDispatches(swarmId, delegate, undefined, () => [swarmParent])).map(run => run.model), [opus]);
 assert.deepEqual(await listParentDispatches("native", delegate, "antigravity", () => [session, { ...swarmParent, id: "other" }]), []);
+const releasedSwarmParent = { ...swarmParent, released: true };
+assert.deepEqual((await listDispatchOverview(null, delegate, () => [releasedSwarmParent], now)).dispatches
+  .map(run => [run.status, run.endedAt]), [["unknown", null]], "父会话已释放时旧成员快照不算运行，也不猜结束时间");
+assert.deepEqual((await listDispatchOverview(null, delegate, () => [releasedSwarmParent], now + 30 * 60_000)).dispatches, []);
+assert.deepEqual(await listParentDispatches(swarmId, delegate, "antigravity", () => [releasedSwarmParent]), []);
+assert.equal((await listDispatchOverview(null, delegate, () => [
+  swarmParent, { ...releasedSwarmParent, id: "released-alias" },
+], now)).dispatches[0]?.status, "running", "旧工作台记录不能覆盖同一原生会话当前有效的父会话");
 await writeFile(swarmFile, JSON.stringify({ members: { coordinator, reviewer: { ...reviewer, phase: "KILLED", killed: true } } }));
 await appendFile(log(swarmId), jsonl(row(3, 35_000, response(planner, "swarm", { action: '"kill"', name: '"reviewer"' })),
   row(4, 34_000, swarmResult(30_000, { status: "killed", name: "reviewer" }))));
@@ -203,6 +211,9 @@ assert.deepEqual((await listDispatchOverview(null, delegate, () => [], now)).dis
 await writeFile(join(home, "sessions.json"), JSON.stringify([{ ...session, agentId: "main", status: "idle", released: true,
   createdAt: stamp(65_000), lastActivityAt: stamp(31_000), seq: 0, config: { model: session.model },
   transcriptPath: join(home, "workbench.jsonl") }]));
+const releasedBoard = join(brain, "native", ".system_generated/swarm/members.json");
+await mkdir(dirname(releasedBoard), { recursive: true });
+await writeFile(releasedBoard, JSON.stringify({ members: { monitor: reviewer } }));
 const listener = createServer();
 await new Promise<void>(resolve => listener.listen(0, "127.0.0.1", resolve));
 const address = listener.address();
@@ -236,6 +247,7 @@ try {
   };
   const data = await request("?limit=50");
   assert(data.dispatches.some((run: { runId: string }) => run.runId === "antigravity-inner-native-3"));
+  assert(!data.dispatches.some((run: { runId: string }) => run.runId === "antigravity-swarm-opus-child"));
   assert.equal(data.runtimeStates.find((state: { sessionId: string }) => state.sessionId === "workbench")?.activeModel, planner);
   assert.deepEqual(await request("?parent=workbench&agent=antigravity"), { dispatches: [] });
 } finally {

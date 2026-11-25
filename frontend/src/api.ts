@@ -96,7 +96,7 @@ export function openWorkPathInSystem(target: import("./types").WorkFileTarget, a
 }
 
 export function fetchDispatches(signal?: AbortSignal): Promise<import("./types").DispatchOverview> {
-  return call("/api/dispatches?limit=50", { signal });
+  return call("/api/dispatches?limit=50&includeRunning=1", { signal });
 }
 
 export function fetchParentDispatches(parent: string, signal?: AbortSignal, agent?: string): Promise<{ dispatches: DispatchRun[] }> {

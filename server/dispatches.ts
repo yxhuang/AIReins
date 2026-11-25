@@ -288,6 +288,7 @@ export interface DispatchParentSession extends ClaudeParentSession {
   model?: string | null;
   createdAt?: string;
   status?: SessionStatus;
+  released?: boolean;
   title?: string | null;
 }
 export type DispatchSessionProvider = () => readonly DispatchParentSession[] | Promise<readonly DispatchParentSession[]>;
@@ -481,7 +482,7 @@ async function readAntigravitySwarm(root: string, id: string, session: DispatchP
     const startedAt = timing?.id === childId ? timing.startedAt : null;
     const stopped = member.killed === true || member.phase === "KILLED";
     const endedAt = stopped && timing?.id === childId ? timing.endedAt : null;
-    const status = stopped ? "stopped" : member.phase === "RUNNING" && session.status !== "dead" && session.status !== "error"
+    const status = stopped ? "stopped" : member.phase === "RUNNING" && !session.released && session.status !== "dead" && session.status !== "error"
       ? "running" : "unknown";
     const reference = Date.parse((stopped ? endedAt : startedAt) ?? "");
     if (status !== "running" && !(now - reference >= 0 && now - reference <= 30 * 60_000)) continue;
@@ -507,7 +508,10 @@ function createAntigravityOrchestratorReader() {
       if (session.agent !== "antigravity") continue;
       if (session.id) aliases.set(session.id, session);
       const id = session.nativeSessionId;
-      if (id && NATIVE_ID.test(id) && (candidates.get(id)?.status !== "running")) candidates.set(id, session);
+      if (!id || !NATIVE_ID.test(id)) continue;
+      const candidate = candidates.get(id);
+      if (candidate?.status === "running" || (session.released && candidate && !candidate.released)) continue;
+      candidates.set(id, session);
     }
     for (const { parent } of runs) {
       if (parent?.agent !== "antigravity" || !parent.sessionId) continue;
@@ -1032,11 +1036,12 @@ export async function listDispatches(limit: string | number | null = null, root 
 }
 
 export async function listDispatchOverview(limit: string | number | null = null, root = rootDirectory(),
-  listSessions: DispatchSessionProvider = () => [], now = Date.now()) {
+  listSessions: DispatchSessionProvider = () => [], now = Date.now(), includeRunning = false) {
   const raw = limit === null ? 50 : Number(limit);
   const count = Number.isFinite(raw) && raw >= 1 ? Math.min(200, Math.floor(raw)) : 50;
   const nativeRuns = await allDispatches(root);
-  const dispatches = nativeRuns.sort((a, b) => a.runId < b.runId ? 1 : a.runId > b.runId ? -1 : 0).slice(0, count);
+  const withinOverview = (run: Dispatch, index: number) => index < count || (includeRunning && run.status === "running");
+  const dispatches = nativeRuns.sort((a, b) => a.runId < b.runId ? 1 : a.runId > b.runId ? -1 : 0).filter(withinOverview);
   await Promise.all(dispatches.map(async (run) => {
     const directory = await resolveRun(run.runId, root);
     try { if (directory) run.promptHead = await promptHead(directory); }
@@ -1052,7 +1057,7 @@ export async function listDispatchOverview(limit: string | number | null = null,
     const index = dispatches.findIndex((run) => Date.parse(run.startedAt ?? "") < Date.parse(agent.startedAt ?? ""));
     dispatches.splice(index < 0 ? dispatches.length : index, 0, agent);
   }
-  return { dispatches: dispatches.slice(0, count), runtimeStates: orchestrator.runtimeStates };
+  return { dispatches: dispatches.filter(withinOverview), runtimeStates: orchestrator.runtimeStates };
 }
 
 export async function getDispatch(runId: string, root = rootDirectory()): Promise<DispatchDetail | null> {

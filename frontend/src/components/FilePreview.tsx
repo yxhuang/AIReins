@@ -6,7 +6,7 @@ import { fetchDirectories, workFileContentUrl } from "../api";
 import { imageNeighbors, isolatedHtml, parseDelimited, resolveLocalFileLink } from "../file-preview";
 import { FileLinkContext, MessageLink } from "./MarkdownMessage";
 import { store } from "../store";
-import type { DirectoryEntry, FilePreviewState } from "../types";
+import type { DirectoryEntry, FilePreviewState, MarkdownReadingTheme } from "../types";
 
 // 预览按路径重挂载，切图时沿用上一张的同目录列表，避免左右按钮闪烁。
 let imageDirectory: { path: string; files: DirectoryEntry[]; at: number } | null = null;
@@ -14,7 +14,9 @@ let imageDirectory: { path: string; files: DirectoryEntry[]; at: number } | null
 const WHEEL_GAP_MS = 200;
 let lastWheelAt = 0;
 
-export function FilePreview({ preview, source = false, tabId }: { preview: FilePreviewState; source?: boolean; tabId?: number }) {
+export function FilePreview({ preview, source = false, tabId, readingTheme }: {
+  preview: FilePreviewState; source?: boolean; tabId?: number; readingTheme?: MarkdownReadingTheme | null;
+}) {
   const { file, target, draft, loading, saving, error } = preview;
   const cwd = target.path.slice(0, target.path.lastIndexOf("/")) || "/";
   const isImage = file?.kind === "image";
@@ -51,7 +53,7 @@ export function FilePreview({ preview, source = false, tabId }: { preview: FileP
       {file.large && file.text === undefined ? <div className="file-large">
         <p className="new-hint">{t("ui.FilePreview.large_file_sentence", { p0: (file.size / 1024 / 1024).toFixed(1) })}</p>
         <button type="button" className="btn" onClick={() => void store.openFilePreview({ ...target, large: true }, tabId)}>{t("ui.FilePreview.load_anyway")}</button>
-      </div> : <div className="file-preview-body">
+      </div> : <div className="file-preview-body" data-markdown-reading={file.kind === "markdown" ? readingTheme ?? "auto" : undefined}>
         {file.text !== undefined && (source || !rich) ?
           <textarea className="file-source mono" aria-label={t("ui.FilePreview.file_source")} value={draft} readOnly={!file.editable || saving} spellCheck={false} wrap="soft"
             onChange={event => store.updateFileDraft(event.target.value, tabId)} onKeyDown={event => {

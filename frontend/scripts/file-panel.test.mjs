@@ -135,7 +135,7 @@ s.navigate("one");
 assert.equal(s.fileMentionRequest, null, "离开新建页不遗留引用请求");
 
 const storage = new Map([["workbench-term-width", "600"]]);
-globalThis.localStorage = { getItem: (key) => storage.get(key) ?? null };
+globalThis.localStorage = { getItem: key => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, value) };
 store.currentId = null;
 let fileHtml = renderToStaticMarkup(React.createElement(FilePanel, { onClose() {} }));
 assert.ok(fileHtml.includes('width:340px'));
@@ -182,6 +182,7 @@ console.log("✅ file panel：相对路径、边界插入、复制降级判定�
 
 const navigatorDescriptor = Object.getOwnPropertyDescriptor(globalThis, "navigator");
 const previousPreview = store.filePreview;
+const previousReadingTheme = store.markdownReadingTheme;
 const pdfPreview = { target: { path: "/a/b/中文.pdf", root: "/a/b" }, loadId: 1, draft: "", loading: false, saving: false, error: null,
   file: { path: "/a/b/中文.pdf", name: "中文.pdf", kind: "pdf", size: 120, editable: false, mimeType: "application/pdf" } };
 try {
@@ -190,6 +191,7 @@ try {
   const pdfHtml = await renderSettled(React.createElement(FilePanel, { onClose() {} }));
   assert.ok(pdfHtml.includes('title="PDF 文件预览"') && pdfHtml.includes("<iframe"), "支持 PDF 时通过 iframe 导航到原生查看器");
   assert.ok(pdfHtml.includes('role="toolbar"') && pdfHtml.indexOf("外部打开") < pdfHtml.indexOf("<iframe"), "文件操作集中在顶栏");
+  assert.doesNotMatch(pdfHtml, /file-reading-toggle|data-markdown-reading/);
   const labels = ['aria-label="返回"', 'aria-label="刷新文件"', 'aria-label="引用"', 'aria-label="复制路径"', 'aria-label="外部打开"'];
   assert.ok(labels.every((label, i) => pdfHtml.indexOf(label) >= 0 && (i === 0 || pdfHtml.indexOf(labels[i - 1]) < pdfHtml.indexOf(label))), "顶栏操作顺序符合要求");
   assert.ok(!pdfHtml.includes('file-action-label'), "文件操作统一使用纯图标，名称保留在提示与无障碍标签中");
@@ -198,6 +200,21 @@ try {
   const markdownHtml = await renderSettled(React.createElement(FilePanel, { onClose() {} }));
   assert.ok(markdownHtml.includes('aria-label="文件显示方式"') && markdownHtml.includes("segmented-slider"), "文本预览使用终端同款滑动切换");
   assert.ok(markdownHtml.includes('aria-label="下载"') && !markdownHtml.includes('aria-label="外部打开"'), "普通文本只保留一个下载入口");
+  assert.match(markdownHtml, /aria-label="文件显示方式".*role="radiogroup" aria-label="Markdown 阅读主题"/s);
+  assert.match(markdownHtml, /data-markdown-reading="auto"/);
+  store.setMarkdownReadingTheme("dark");
+  assert.equal(new Store().markdownReadingTheme, "dark", "同一浏览器下次打开仍记住阅读主题");
+  const darkHtml = await renderSettled(React.createElement(FilePanel, { onClose() {} }));
+  assert.match(darkHtml, /aria-label="深色" aria-checked="true"/);
+  assert.match(darkHtml, /data-markdown-reading="dark"/);
+  store.setMarkdownReadingTheme("light");
+  const warmHtml = await renderSettled(React.createElement(FilePanel, { onClose() {} }));
+  assert.match(warmHtml, /aria-label="暖浅色" aria-checked="true"/);
+  assert.match(warmHtml, /data-markdown-reading="light"/);
+  const sourceHtml = renderToStaticMarkup(React.createElement(FilePreview, { preview: store.filePreview, source: true, readingTheme: "light" }));
+  assert.match(sourceHtml, /data-markdown-reading="light"><textarea class="file-source/);
+  const plainText = { ...store.filePreview, file: { ...store.filePreview.file, kind: "text" } };
+  assert.doesNotMatch(renderToStaticMarkup(React.createElement(FilePreview, { preview: plainText, readingTheme: "light" })), /data-markdown-reading/);
   store.filePreview = pdfPreview;
   Object.defineProperty(globalThis, "navigator", { configurable: true, value: { language: "zh-CN", pdfViewerEnabled: false } });
   const fallbackHtml = await renderSettled(React.createElement(FilePanel, { onClose() {} }));
@@ -205,6 +222,8 @@ try {
   assert.ok(fallbackHtml.includes("未启用内嵌 PDF") && fallbackHtml.includes("外部打开"));
 } finally {
   store.filePreview = previousPreview;
+  store.markdownReadingTheme = previousReadingTheme;
+  storage.delete("workbench-markdown-reading-theme");
   if (navigatorDescriptor) Object.defineProperty(globalThis, "navigator", navigatorDescriptor);
   else delete globalThis.navigator;
 }

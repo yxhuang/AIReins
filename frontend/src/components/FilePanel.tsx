@@ -1,10 +1,10 @@
 import { t } from "../i18n";
-import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent, type DragEvent, type ReactNode } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type MouseEvent, type DragEvent, type ReactNode } from "react";
 import { openWorkPathInSystem, sendTaildrop, workFileContentUrl } from "../api";
 import { mentionQueryAt } from "../mentions";
 import { store } from "../store";
 import { buildTermTabs } from "../terminal";
-import type { SessionRecord, WorkFileTarget } from "../types";
+import type { MarkdownReadingTheme, SessionRecord, WorkFileTarget } from "../types";
 import { shallowEqual, useStore } from "../useStore";
 import { DirectoryContents } from "./DirectoryBrowser";
 import { FILE_WIDTH_OPTIONS, PanelBackButton, PanelRightIcon, SidePanelResize, useSidePanelWidth } from "./SidePanelResize";
@@ -17,6 +17,34 @@ const loadFilePreview = () => import("./FilePreview").then(module => ({ default:
 
 const PREVIEW_OPTIONS = [{ value: "preview", label: t("ui.FilePanel.preview"), title: t("ui.FilePanel.view_the_rendered_document") }, { value: "source", label: t("ui.FilePanel.source"), title: t("ui.FilePanel.view_or_edit_the_document_source") }] as const;
 const TABLE_OPTIONS = [{ value: "preview", label: t("ui.FilePanel.table"), title: t("ui.FilePanel.view_data_as_a_table") }, { value: "source", label: t("ui.FilePanel.source"), title: t("ui.FilePanel.view_or_edit_raw_data") }] as const;
+const READING_THEME_OPTIONS = [
+  { value: "dark", label: t("ui.FilePanel.reading_dark"), icon: <svg viewBox="0 0 24 24"><path d="M20.8 15.2A8.8 8.8 0 0 1 8.8 3.2a9 9 0 1 0 12 12Z" /></svg> },
+  { value: "light", label: t("ui.FilePanel.reading_warm"), icon: <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="4" /><path d="M12 2v2m0 16v2M2 12h2m16 0h2M5 5l1.5 1.5m11 11L19 19M5 19l1.5-1.5m11-11L19 5" /></svg> },
+] as const;
+
+function subscribeReadingThemeDefault(onChange: () => void) {
+  const preference = window.matchMedia("(prefers-color-scheme: dark)");
+  const observer = new MutationObserver(onChange);
+  observer.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+  preference.addEventListener("change", onChange);
+  return () => {
+    observer.disconnect();
+    preference.removeEventListener("change", onChange);
+  };
+}
+
+function defaultReadingTheme(): MarkdownReadingTheme {
+  const appTheme = document.documentElement.dataset.theme;
+  if (appTheme === "dark" || appTheme === "light") return appTheme;
+  return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+}
+
+function MarkdownReadingToggle({ theme }: { theme: MarkdownReadingTheme | null }) {
+  const appTheme = useSyncExternalStore(subscribeReadingThemeDefault, defaultReadingTheme, () => "light" as const);
+  return <Segmented className="file-view-toggle file-reading-toggle" buttonClassName="file-view-option"
+    role="radiogroup" ariaLabel={t("ui.FilePanel.markdown_reading_theme")} options={READING_THEME_OPTIONS}
+    value={theme ?? appTheme} onChange={value => store.setMarkdownReadingTheme(value)} />;
+}
 const ACTION_PATHS = {
   back: "m15 18-6-6 6-6",
   refresh: "M21 4v6h-6 M20.5 10a9 9 0 1 0-2.1 8.4",
@@ -248,6 +276,7 @@ export function FilePanel({ onClose: closeRight, tabId: ownTabId }: { onClose: (
   const tabId = useStore(value => ownTabId ?? value.fileTabId);
   const tab = useStore(value => value.fileTabs.find(item => item.id === tabId));
   const preview = tab?.preview ?? null;
+  const readingTheme = useStore(value => value.markdownReadingTheme);
   const area = tab?.area ?? "right";
   const visible = useStore(value => ownTabId === undefined || (area === "main" ? value.mainFileTabId === tabId && !value.mainTerminalId : value.filesOpen && value.fileTabId === tabId));
   const onClose = area === "main" ? () => store.showMainSession() : closeRight;
@@ -272,6 +301,10 @@ export function FilePanel({ onClose: closeRight, tabId: ownTabId }: { onClose: (
   useEffect(() => () => { copyId.current += 1; }, []);
   const source = preview !== null && sourcePath === preview.target.path;
   const rich = preview?.file && ["markdown", "csv", "tsv", "html"].includes(preview.file.kind);
+  const markdown = preview?.file?.kind === "markdown";
+  const viewToggle = rich && <Segmented className="file-view-toggle" buttonClassName="file-view-option" ariaLabel={t("ui.FilePanel.file_display_mode")}
+    options={["csv", "tsv"].includes(preview.file?.kind ?? "") ? TABLE_OPTIONS : PREVIEW_OPTIONS}
+    value={source ? "source" : "preview"} onChange={value => setSourcePath(value === "source" ? preview.target.path : null)} />;
   const downloadOnly = preview?.file && ["text", "markdown", "csv", "tsv"].includes(preview.file.kind);
   const dirty = preview?.file?.editable && preview.draft !== preview.file.text;
   const confirmDownload = (event: MouseEvent<HTMLAnchorElement>) => {
@@ -374,12 +407,12 @@ export function FilePanel({ onClose: closeRight, tabId: ownTabId }: { onClose: (
             href={downloadOnly ? workFileContentUrl(preview.target, true) : `${workFileContentUrl(preview.target)}&v=${preview.loadId}`}
             download={downloadOnly ? preview.file.name : undefined} target={downloadOnly ? undefined : "_blank"} rel={downloadOnly ? undefined : "noopener noreferrer"} onClick={downloadOnly ? confirmDownload : undefined}>
             <FileActionIcon kind={downloadOnly ? "download" : "open"} /></a>}
-          {rich && <Segmented className="file-view-toggle" buttonClassName="file-view-option" ariaLabel={t("ui.FilePanel.file_display_mode")}
-            options={["csv", "tsv"].includes(preview.file?.kind ?? "") ? TABLE_OPTIONS : PREVIEW_OPTIONS}
-            value={source ? "source" : "preview"} onChange={value => setSourcePath(value === "source" ? preview.target.path : null)} />}
+          {!markdown && viewToggle}
           {preview.file?.editable && <button className="file-action file-action-save" type="button" aria-label={preview.saving ? t("ui.common.saving") : t("ui.FilePanel.save")} title={preview.saving ? t("ui.common.saving") : t("ui.FilePanel.save")} disabled={!dirty || preview.saving} onClick={() => void store.saveFilePreview(tabId)}><FileActionIcon kind="save" /></button>}
           {preview.file?.kind === "html" && <a className="file-action" aria-label={t("ui.FilePanel.download")} title={t("ui.FilePanel.download")} href={workFileContentUrl(preview.target, true)} download={preview.file.name} onClick={confirmDownload}><FileActionIcon kind="download" /></a>}
         </div>}
+        {markdown && viewToggle}
+        {visible && markdown && preview.file?.text !== undefined && <MarkdownReadingToggle theme={readingTheme} />}
         <button type="button" className="btn chrome-icon-btn panel-icon-button panel-collapse" aria-label={t("ui.FilePanel.collapse_file_panel")} title={t("ui.common.collapse_panel")} onClick={onClose}><PanelRightIcon /></button>
       </div>
       {hasTab && notice && <div className="file-notice" role="status">
@@ -387,7 +420,7 @@ export function FilePanel({ onClose: closeRight, tabId: ownTabId }: { onClose: (
         {notice.copied !== null && <p className="dir-copy-status">{notice.copied ? t("ui.FilePanel.path_copied") : <>{t("ui.FilePanel.cannot_copy_automatically_copy_manually")}<span className="mono">{notice.path}</span></>}</p>}
       </div>}
       {area === "right" && (preview || !hasTab) && tabRow}
-      {preview ? <RecoverableLazy key={preview.target.path} load={loadFilePreview} componentProps={{ preview, source, tabId }} label={t("ui.FilePanel.preview")} onClose={onClose} /> : hasTab && visible && <DirectoryContents key={`${tabId}:${session?.id ?? ""}`} initialPath={directoryInitialPath} includeFiles allowWindowsPicker
+      {preview ? <RecoverableLazy key={preview.target.path} load={loadFilePreview} componentProps={{ preview, source, tabId, readingTheme }} label={t("ui.FilePanel.preview")} onClose={onClose} /> : hasTab && visible && <DirectoryContents key={`${tabId}:${session?.id ?? ""}`} initialPath={directoryInitialPath} includeFiles allowWindowsPicker
         refreshPath={session ? undefined : newSessionCwd}
         navigationHistory={directoryHistory} registerBrowserBack={registerBrowserBack} navTarget={navSlot} afterLocation={area === "right" ? tabRow : undefined} showHidden={showHidden}
         onPathChange={path => store.setFileDirectory(path, tabId)}

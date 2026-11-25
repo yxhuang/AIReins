@@ -63,7 +63,7 @@ export function SessionWorkspaceHeader({ session, title, dispatchRuns, backgroun
         <div className="session-head-actions">
           <SessionDispatchLink runs={dispatchRuns} backgroundCount={backgroundCount} desktop />
           <div className="session-panel-controls">
-            <PanelActions dispatchRuns={dispatchRuns} />
+            <PanelActions />
             {mobileTail && <div className="mobile-tail">{mobileTail}</div>}
             <SessionDispatchBadge runs={dispatchRuns} backgroundCount={backgroundCount} />
             <SessionMoreMenu session={session} usage={usage} />

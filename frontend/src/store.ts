@@ -19,6 +19,7 @@ import type {
   UsageSettingsView,
   UsageSummary,
   FilePreviewState,
+  MarkdownReadingTheme,
   TerminalInfo,
   WorkFile,
   WorkFileTarget,
@@ -150,11 +151,29 @@ interface SessionData {
 }
 
 const FOCUS_VIEW_STORAGE_KEY = "workbench-focus-view";
+const MARKDOWN_READING_THEME_KEY = "workbench-markdown-reading-theme";
 function readFocusView(): boolean {
   try { return typeof localStorage !== "undefined" && localStorage.getItem(FOCUS_VIEW_STORAGE_KEY) === "1"; } catch { return false; }
 }
 
+function readMarkdownReadingTheme(): MarkdownReadingTheme | null {
+  try {
+    const value = localStorage.getItem(MARKDOWN_READING_THEME_KEY);
+    if (value === "dark" || value === "light") return value;
+  } catch { /* 存储不可用时跟随外观。 */ }
+  return null;
+}
+
 export class Store {
+  markdownReadingTheme = readMarkdownReadingTheme();
+
+  setMarkdownReadingTheme(theme: MarkdownReadingTheme): void {
+    if (this.markdownReadingTheme === theme) return;
+    this.markdownReadingTheme = theme;
+    try { localStorage.setItem(MARKDOWN_READING_THEME_KEY, theme); } catch { /* 仅本页生效。 */ }
+    this.notify();
+  }
+
   sessions: SessionRecord[] = [];
   private indexedSessions: SessionRecord[] | undefined;
   private sessionsById = new Map<string, SessionRecord>();

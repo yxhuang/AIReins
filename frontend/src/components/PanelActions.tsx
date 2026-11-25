@@ -1,9 +1,10 @@
 import { t } from "../i18n";
-import { useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { useContext, useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { store, type Store } from "../store";
 import { shallowEqual, useStore } from "../useStore";
 import { TerminalIcon } from "./TerminalIcon";
 import { antigravityDispatchModelFamily, type DispatchRun } from "../dispatch-flow";
+import { DispatchOverviewContext } from "./DispatchOverview";
 
 const selectPanelState = (value: Store) => [
   value.filesOpen, value.termOpen, value.dispatchesOpen,
@@ -14,7 +15,7 @@ const folderIcon = <svg width="18" height="18" viewBox="0 0 24 24" fill="none" s
 export const dispatchIcon = <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M4 5h7v6H4zM13 13h7v6h-7zM15 5h5M18 3l2 2-2 2M4 17h5M7 15l2 2-2 2" /></svg>;
 
 /** 派单图标沿用拓扑的执行端或模型色，多种颜色按扇区显示。 */
-export function dispatchBadge(runs: readonly DispatchRun[], backgroundCount = 0) {
+function dispatchBadge(runs: readonly DispatchRun[], backgroundCount: number) {
   const tools = [...new Set(runs.map((run) => run.tool))];
   const colors = [...new Set(runs.map((run) => {
     const family = antigravityDispatchModelFamily(run);
@@ -27,9 +28,15 @@ export function dispatchBadge(runs: readonly DispatchRun[], backgroundCount = 0)
   return { fill, label };
 }
 
-/** 会话、欢迎页、历史预览及手机列表页共用的右侧面板开关；会话页传入派单时派单按钮填身份色。 */
-export function PanelActions({ dispatchRuns = [] }: { dispatchRuns?: readonly DispatchRun[] }) {
-  const badge = dispatchRuns.length ? dispatchBadge(dispatchRuns) : null;
+export function useDispatchBadge(backgroundCount = 0) {
+  const { overview } = useContext(DispatchOverviewContext);
+  const runs = overview?.dispatches.filter(run => run.status === "running");
+  return runs?.length ? dispatchBadge(runs, backgroundCount) : null;
+}
+
+/** 会话、欢迎页和历史预览共用的右侧面板开关。 */
+export function PanelActions() {
+  const badge = useDispatchBadge();
   const [filesOpen, termOpen, dispatchesOpen, terminalCapable] = useStore(selectPanelState, shallowEqual);
   return <div className="panel-actions" role="group" aria-label={t("ui.PanelActions.side_panel")}>
     <button type="button" className="btn chrome-icon-btn" aria-label={t("ui.common.files")} aria-pressed={filesOpen} title={t("ui.PanelActions.browse_files")} onClick={() => store.setFilesOpen(!store.filesOpen)}>
@@ -48,13 +55,16 @@ export function PanelActions({ dispatchRuns = [] }: { dispatchRuns?: readonly Di
 /** 手机会话顶栏只留「⋯」：同样三个开关以菜单项形式放进更多菜单（桌面由 CSS 隐藏）。 */
 export function PanelMenuItems({ onDone, files = true }: { onDone: () => void; files?: boolean }) {
   const [filesOpen, termOpen, dispatchesOpen, terminalCapable] = useStore(selectPanelState, shallowEqual);
-  const item = (label: string, pressed: boolean, icon: ReactNode, toggle: () => void) =>
-    <button type="button" className="btn session-more-item session-more-mobile" role="menuitemcheckbox" aria-checked={pressed} onClick={() => { onDone(); toggle(); }}>
+  const badge = useDispatchBadge();
+  const item = (label: string, pressed: boolean, icon: ReactNode, toggle: () => void, title?: string) =>
+    <button type="button" className="btn session-more-item session-more-mobile" role="menuitemcheckbox" aria-checked={pressed} title={title} onClick={() => { onDone(); toggle(); }}>
       {icon} {label}
     </button>;
   return <>
     {files && item(t("ui.common.files"), filesOpen, folderIcon, () => store.setFilesOpen(!store.filesOpen))}
-    {item(t("ui.common.dispatches"), dispatchesOpen, dispatchIcon, () => store.toggleDispatches())}
+    {item(t("ui.common.dispatches"), dispatchesOpen, badge
+      ? <span className="dispatch-menu-icon" style={{ background: badge.fill }}>{dispatchIcon}</span>
+      : dispatchIcon, () => store.toggleDispatches(), badge?.label)}
     {terminalCapable && item(t("ui.common.terminal"), termOpen, <TerminalIcon />, () => store.setTerminalOpen(!store.termOpen))}
   </>;
 }

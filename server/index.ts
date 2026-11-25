@@ -751,11 +751,11 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
         const parent = url.searchParams.get("parent");
         const agent = url.searchParams.get("agent");
         if (agent !== null && !AGENTS.includes(agent as AgentKind)) throw new DispatchQueryError("agent 必须是 claude、antigravity、codex 或 kimi");
-        const sessions = () => manager.list().map(({ id, agent, cwd, nativeSessionId, config, createdAt, status, title }) =>
-          ({ id, agent, cwd, nativeSessionId, model: config.model, createdAt, status, title }));
+        const sessions = () => manager.list().map(({ id, agent, cwd, nativeSessionId, config, createdAt, status, released, title }) =>
+          ({ id, agent, cwd, nativeSessionId, model: config.model, createdAt, status, released, title }));
         await respond(response, 200, 0, "success", parent !== null
           ? { dispatches: await listParentDispatches(parent, undefined, agent === null ? undefined : agent as AgentKind, sessions) }
-          : await listDispatchOverview(url.searchParams.get("limit"), undefined, sessions), requestId);
+          : await listDispatchOverview(url.searchParams.get("limit"), undefined, sessions, undefined, url.searchParams.get("includeRunning") === "1"), requestId);
       } catch (error) {
         if (error instanceof DispatchQueryError) throw new ApiError(400, 40000, error.message);
         throw error;

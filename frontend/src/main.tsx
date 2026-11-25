@@ -2,6 +2,7 @@ import { getLocale } from "./i18n";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
+import { DispatchOverviewProvider } from "./components/DispatchOverview";
 import { store } from "./store";
 import { applyBodyFontSize, readBodyFontSize } from "./body-font";
 import { initializeHostConnections, workbenchWindowTitle } from "./host-connections";
@@ -36,6 +37,8 @@ void store.init();
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <App />
+    <DispatchOverviewProvider>
+      <App />
+    </DispatchOverviewProvider>
   </StrictMode>,
 );

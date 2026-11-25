@@ -1454,6 +1454,8 @@ body.resizing {
 .session-head .mobile-back, .session-head .btn.session-dispatch-badge, .mobile-title, .mobile-tail, .session-head-actions .session-more-mobile { display: none; }
 .session-more-sep { margin: 4px 6px; border: 0; border-top: 1px solid var(--border); }
 .session-more-menu .page-icon { width: 18px; height: 18px; }
+.dispatch-menu-icon { display: inline-flex; border-radius: 4px; color: light-dark(#fff, var(--bg)); }
+.btn.chrome-icon-btn.has-dispatch-runs { color: light-dark(#fff, var(--bg)); }
 @media (max-width: 720px) {
   .session-head {
     position: relative; z-index: 5; gap: 8px;
@@ -4359,6 +4361,8 @@ body.file-tab-dragging .file-tabs { position: relative; z-index: 31; }
 .file-action-save:not(:disabled) { color: var(--text); }
 .file-view-toggle { flex: 0 0 auto; padding: 2px; gap: 2px; border-radius: 7px; }
 .file-view-option { min-height: 26px; padding: 3px 5px; font-size: 13px; }
+.file-reading-toggle .file-view-option { min-width: 26px; }
+.file-reading-toggle svg { display: block; width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
 @media (pointer: coarse) {
   .file-titlebar { height: 52px; }
   .file-nav-icon { width: 40px; height: 40px; }
@@ -4367,6 +4371,7 @@ body.file-tab-dragging .file-tabs { position: relative; z-index: 31; }
   .file-action svg { width: 20px; height: 20px; }
   .file-view-toggle { padding: 0; }
   .file-view-option { min-height: 42px; }
+  .file-reading-toggle .file-view-option { min-width: 36px; }
 }
 .file-side-panel .dir-contents { padding: 6px 8px 10px; gap: 6px; overflow: hidden; }
 /* 文件标签沿用终端标签外形，换成面板底色（终端面板里的保留终端底色，当前标签才与终端连成一体）；触屏也比地址栏一行矮。 */
@@ -4388,7 +4393,18 @@ body.file-tab-dragging .file-tabs { position: relative; z-index: 31; }
 .file-large > p { margin: 0; }
 .file-preview > .new-hint, .file-preview > .new-error { padding: 6px 8px; }
 .file-preview-body { flex: 1; min-width: 0; min-height: 0; overflow: auto; }
+.file-preview-body[data-markdown-reading] {
+  background: light-dark(#F8EED6, #1F1E1D);
+  color: light-dark(#1F1E1D, #F2F0EA);
+  --text-muted: light-dark(#5C5A54, #A8A59D);
+  --msg-link: light-dark(#075B9F, #73B9EA);
+  --msg-line: light-dark(#C5B696, #555555);
+  --msg-inline-bg: light-dark(#EEE0C1, #343434);
+}
+.file-preview-body[data-markdown-reading="light"] { color-scheme: only light; }
+.file-preview-body[data-markdown-reading="dark"] { color-scheme: only dark; }
 .file-source { display: block; resize: none; width: 100%; height: 100%; min-height: 140px; box-sizing: border-box; border: 1px solid var(--border); background: var(--bg); color: var(--text); padding: 8px; font-size: 13px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; tab-size: 2; }
+[data-markdown-reading] .file-source { background: transparent; color: inherit; border-color: var(--msg-line); }
 .file-image { display: block; flex: none; max-width: 100%; height: auto; margin: auto; }
 /* 图片查看：左右半透明按钮悬停区域才出现、悬到按钮上更亮；触屏没有悬停，常驻淡显。 */
 .file-image-view { position: relative; height: 100%; }
@@ -4401,7 +4417,7 @@ body.file-tab-dragging .file-tabs { position: relative; z-index: 31; }
 .file-image-nav:not(:disabled):hover, .file-image-nav:focus-visible { opacity: 0.95; }
 .file-image-nav:disabled { visibility: hidden; }
 @media (hover: none) { .file-image-nav:not(:disabled), .file-image-count { opacity: 0.55; } }
-.file-markdown { padding: 4px; overflow-wrap: anywhere; }
+.file-markdown { padding: 10px 12px; overflow-wrap: anywhere; }
 .file-markdown pre, .file-markdown code { white-space: pre-wrap; overflow-wrap: anywhere; }
 .file-markdown table { display: block; max-width: 100%; overflow-x: auto; }
 .file-table { border-collapse: collapse; font-size: 13px; }
@@ -4626,8 +4642,6 @@ body.file-tab-dragging .file-tabs { position: relative; z-index: 31; }
   .sidebar-head .brand-mark, .sidebar-head .brand-line { flex-shrink: 0; }
   .sidebar-head .brand-name { overflow: hidden; text-overflow: ellipsis; }
   .chrome-icon-btn:hover:not(:disabled) { background: var(--raised-bg-hover); }
-  /* 有派单时填执行端身份色（同手机 SessionDispatchBadge），图标反色保证对比。 */
-  .btn.chrome-icon-btn.has-dispatch-runs { color: light-dark(#fff, var(--bg)); }
   .session > .session-dispatch-link { display: none; }
   .session-head-actions > .session-dispatch-link {
     display: inline-flex; align-items: center; gap: 4px; padding: 6px 10px;

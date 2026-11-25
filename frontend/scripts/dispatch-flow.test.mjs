@@ -15,7 +15,8 @@ const { Store, store } = await import('../src/store.ts');
 const { App } = await import('../src/App.tsx');
 const { DispatchView, DispatchTree } = await import('../src/components/DispatchView.tsx');
 const { DispatchHistoryRow } = await import('../src/components/DispatchHistory.tsx');
-const { PanelActions } = await import('../src/components/PanelActions.tsx');
+const { PanelActions, PanelMenuItems } = await import('../src/components/PanelActions.tsx');
+const { DispatchOverviewContext } = await import('../src/components/DispatchOverview.tsx');
 const { SessionDispatchBadge } = await import('../src/components/SessionDispatchLink.tsx');
 const { lastWindowsCwd, loadWindowsHistory } = await import('../src/components/DirectoryBrowser.tsx');
 let pass = 0;
@@ -58,17 +59,23 @@ await t('Antigravity Swarm 节点显示 Opus 5.5、模型档位与实时连线',
   assert.match(render({ ...swarm, status: 'stopped', endedAt: iso(now - 1000) }), /已停止/);
 });
 
-await t('桌面派单按钮和手机徽章沿用 Antigravity 执行模型色', () => {
+await t('桌面、手机和拓扑共用全局派单状态，当前会话没有派单仍按模型着色', () => {
   const hydrogen = run({ tool: 'antigravity', native: true, agentType: 'inner-loop', model: 'gemini-flash-worker-agy',
     parent: { agent: 'antigravity', sessionId: 'native', entrypoint: null } });
-  const opus = { ...hydrogen, runId: 'swarm-opus', agentType: 'swarm', model: 'claude-opus-5-5-high' };
-  const desktop = dispatchRuns => renderToStaticMarkup(React.createElement(PanelActions, { dispatchRuns }));
+  const opus = { ...hydrogen, runId: 'swarm-opus', agentType: 'swarm', model: 'claude-opus-5-5-high',
+    parent: { ...hydrogen.parent, sessionId: 'another-session' } };
+  const render = (dispatches, component, props) => renderToStaticMarkup(React.createElement(
+    DispatchOverviewContext.Provider, { value: { overview: { dispatches }, error: '' } }, React.createElement(component, props)));
+  const desktop = dispatches => render(dispatches, PanelActions);
   assert.match(desktop([hydrogen]), /has-dispatch-runs" style="background:var\(--dispatch-hydrogen,/);
   assert.match(desktop([hydrogen, opus]), /conic-gradient\(var\(--dispatch-hydrogen,.*var\(--agent-claude,/);
   assert.match(desktop([{ ...hydrogen, model: null }]), /background:var\(--agent-antigravity,/);
-  assert.doesNotMatch(desktop([]), /has-dispatch-runs/);
-  assert.match(renderToStaticMarkup(React.createElement(SessionDispatchBadge, { runs: [hydrogen], backgroundCount: 0 })),
+  assert.doesNotMatch(desktop([{ ...hydrogen, status: 'OK' }]), /has-dispatch-runs/);
+  assert.match(render([hydrogen], SessionDispatchBadge, { runs: [], backgroundCount: 0 }),
     /session-dispatch-badge" style="background:var\(--dispatch-hydrogen,/);
+  assert.match(render([opus], PanelMenuItems, { onDone() {}, files: false }),
+    /dispatch-menu-icon" style="background:var\(--agent-claude,/);
+  assert.match(render([hydrogen, opus], DispatchView), /<span class="dispatch-panel-stat" data-status="running">[^<]*2/);
 });
 
 await t('Antigravity 内部派单的卡片与连线共用执行模型的颜色', () => {
@@ -511,31 +518,31 @@ await t('派单模型优先匹配 nativeSessionId，外部会话用 parent.model
 await t('只读列表 URL 与现有信封，错误 msg 透传', async () => {
   let url;
   globalThis.fetch = async (input) => { url = input; return { json: async () => ({ code: 0, data: { dispatches: [run()] } }) }; };
-  assert.equal((await fetchDispatches()).dispatches.length, 1); assert.equal(url, '/api/dispatches?limit=50');
+  assert.equal((await fetchDispatches()).dispatches.length, 1); assert.equal(url, '/api/dispatches?limit=50&includeRunning=1');
   globalThis.fetch = async () => ({ json: async () => ({ code: 1, msg: '拒绝访问' }) });
   await assert.rejects(fetchDispatches(), /拒绝访问/);
 });
-await t('轮询 3 秒、走秒 1 秒；隐藏停、恢复立即取、慢请求不重叠、卸载丢弃迟到结果', async () => {
-  let visible = true, change, calls = 0, resolve, signal, ticks = 0, received = 0, errors = [];
+await t('全局快照每 3 秒轮询；隐藏停、恢复立即取、慢请求不重叠、卸载丢弃迟到结果', async () => {
+  let visible = true, change, calls = 0, resolve, signal, received = [], errors = [];
   const timers = new Map();
   const flush = async () => { await Promise.resolve(); await Promise.resolve(); };
-  const stop = startDispatchPolling({ visible: () => visible, now: () => now, every: (fn, ms) => { timers.set(ms, fn); return ms; }, cancel: id => timers.delete(id), onVisibility: fn => { change = fn; return () => { change = null; }; } },
-    s => { calls++; signal = s; return new Promise(r => { resolve = r; }); }, () => received++, msg => errors.push(msg), () => ticks++);
-  assert.equal(calls, 1); assert.deepEqual([...timers.keys()], [3000, 1000]);
-  timers.get(1000)(); assert.equal(ticks, 2);
+  const stop = startDispatchPolling({ visible: () => visible, every: (fn, ms) => { timers.set(ms, fn); return ms; }, cancel: id => timers.delete(id), onVisibility: fn => { change = fn; return () => { change = null; }; } },
+    s => { calls++; signal = s; return new Promise(r => { resolve = r; }); }, overview => received.push(overview), msg => errors.push(msg));
+  assert.equal(calls, 1); assert.deepEqual([...timers.keys()], [3000]);
   timers.get(3000)(); assert.equal(calls, 1);
   visible = false; change(); assert.equal(timers.size, 0); assert.ok(signal.aborted);
-  resolve({ dispatches: [run()] }); await flush(); assert.equal(received, 0);
+  resolve({ dispatches: [run()] }); await flush(); assert.equal(received.length, 0);
   visible = true; change(); assert.equal(calls, 2);
-  resolve({ dispatches: [] }); await flush(); assert.equal(received, 1); assert.deepEqual(errors, ['']);
+  const overview = { dispatches: [], runtimeStates: [{ sessionId: 'native', activePhase: 'planning' }] };
+  resolve(overview); await flush(); assert.deepEqual(received, [overview]); assert.deepEqual(errors, ['']);
   timers.get(3000)(); assert.equal(calls, 3);
   stop(); assert.equal(timers.size, 0); assert.equal(change, null); assert.ok(signal.aborted);
-  resolve({ dispatches: [] }); await flush(); assert.equal(received, 1);
+  resolve({ dispatches: [] }); await flush(); assert.equal(received.length, 1);
 });
 await t('加载失败后可重试；初始隐藏零请求', async () => {
   let visible = false, change, calls = 0, error = '', data = 0;
   const timers = new Map();
-  const stop = startDispatchPolling({ visible: () => visible, now: () => now, every: (fn, ms) => { timers.set(ms, fn); return ms; }, cancel: id => timers.delete(id), onVisibility: fn => { change = fn; return () => {}; } }, async () => { if (++calls === 1) throw new Error('离线'); return { dispatches: [] }; }, () => data++, msg => { error = msg; }, () => {});
+  const stop = startDispatchPolling({ visible: () => visible, every: (fn, ms) => { timers.set(ms, fn); return ms; }, cancel: id => timers.delete(id), onVisibility: fn => { change = fn; return () => {}; } }, async () => { if (++calls === 1) throw new Error('离线'); return { dispatches: [] }; }, () => data++, msg => { error = msg; });
   assert.equal(calls, 0); visible = true; change(); await Promise.resolve(); await Promise.resolve(); assert.equal(error, '离线');
   timers.get(3000)(); await Promise.resolve(); await Promise.resolve(); assert.equal(data, 1); assert.equal(error, ''); stop();
 });
@@ -661,20 +668,7 @@ await t('无子 agent 不新增层/连线；空数组和旧列表都保持原来
     assert.equal((html.match(/class="dispatch-wire /g) || []).length, 3);
   }
 });
-await t('关闭面板或切到终端后停止列表轮询和走秒，清理在途请求', async () => {
-  for (const close of [s => s.closeDispatches(), s => s.setTerminalOpen(true)]) {
-    const s = new Store(); s.navigateDispatches();
-    const timers = new Map(); let signal, resolve, received = 0, ticks = 0;
-    const stop = startDispatchPolling({ visible: () => s.dispatchesOpen, now: () => now,
-      every: (fn, ms) => { timers.set(ms, fn); return ms; }, cancel: id => timers.delete(id), onVisibility: () => () => {},
-    }, value => { signal = value; return new Promise(done => { resolve = done; }); }, () => received++, () => {}, () => ticks++);
-    assert.deepEqual([...timers.keys()], [3000, 1000]);
-    close(s); stop(); // App 的条件渲染在关闭/互斥时卸载 DispatchPanel。
-    assert.equal(timers.size, 0); assert.ok(signal.aborted);
-    const previousTicks = ticks; resolve({ dispatches: [run()] });
-    await Promise.resolve(); await Promise.resolve();
-    assert.equal(received, 0); assert.equal(ticks, previousTicks);
-  }
+await t('关闭面板卸载详情和历史的独立请求与计时器', () => {
   const app = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8');
   assert.ok(app.includes('{dispatchesOpen && <DispatchPanel'));
   const detail = readFileSync(new URL('../src/components/DispatchDetail.tsx', import.meta.url), 'utf8');

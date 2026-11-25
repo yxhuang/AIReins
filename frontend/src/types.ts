@@ -350,6 +350,8 @@ export interface WorkFile {
   /** 大文本未确认，未返回 text；带 large 重新读取。 */
   large?: boolean;
 }
+export type MarkdownReadingTheme = "dark" | "light";
+
 export interface FilePreviewState {
   target: WorkFileTarget; file: WorkFile | null; draft: string;
   loading: boolean; saving: boolean; error: string | null; loadId: number;

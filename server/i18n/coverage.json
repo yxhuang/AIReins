@@ -269,73 +269,73 @@
     },
     {
       "file": "server/dispatches.ts",
-      "line": 790,
+      "line": 794,
       "key": "server.message043",
       "category": "(async () => {\n    try {\n      const transcript = new NativeConversationReader(roots).transcriptPath({ agent: kind, nativeSessionId: sessionId } as SessionRecord);\n      if (!transcript) return null;\n      const path = kind === \"kimi\" ? join(dirname(dirname(dirname(transcript))), \"state.json\") : transcript;\n      const metadata = await new HistoryIndex({ roots }).sessionMetadata(kind, path);\n      return metadata?.nativeSessionId === sessionId && metadata.title !== \"无标题会话\" ? metadata.title : null;\n    } catch { return null; }\n  })"
     },
     {
       "file": "server/dispatches.ts",
-      "line": 862,
+      "line": 866,
       "key": "server.message044",
       "category": "Error"
     },
     {
       "file": "server/dispatches.ts",
-      "line": 864,
+      "line": 868,
       "key": "server.message045",
       "category": "Error"
     },
     {
       "file": "server/dispatches.ts",
-      "line": 910,
+      "line": 914,
       "key": "server.message046",
       "category": "Error"
     },
     {
       "file": "server/dispatches.ts",
-      "line": 912,
+      "line": 916,
       "key": "server.message047",
       "category": "Error"
     },
     {
       "file": "server/dispatches.ts",
-      "line": 974,
+      "line": 978,
       "key": "server.message048",
       "category": "Error"
     },
     {
       "file": "server/dispatches.ts",
-      "line": 1239,
+      "line": 1244,
       "key": "server.message042",
       "category": "other"
     },
     {
       "file": "server/dispatches.ts",
-      "line": 1239,
+      "line": 1244,
       "key": "server.message049",
       "category": "other"
     },
     {
       "file": "server/dispatches.ts",
-      "line": 1375,
+      "line": 1380,
       "key": "server.message050",
       "category": "DispatchQueryError"
     },
     {
       "file": "server/dispatches.ts",
-      "line": 1418,
+      "line": 1423,
       "key": "server.message051",
       "category": "DispatchQueryError"
     },
     {
       "file": "server/dispatches.ts",
-      "line": 1494,
+      "line": 1499,
       "key": "server.message052",
       "category": "DispatchQueryError"
     },
     {
       "file": "server/dispatches.ts",
-      "line": 1497,
+      "line": 1502,
       "key": "server.message053",
       "category": "DispatchQueryError"
     },

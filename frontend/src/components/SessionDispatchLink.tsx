@@ -4,7 +4,7 @@ import { fetchParentDispatches } from "../api";
 import { store } from "../store";
 import { startSessionDispatchPolling } from "../dispatch-polling";
 import type { DispatchRun } from "../dispatch-flow";
-import { dispatchBadge, dispatchIcon } from "./PanelActions";
+import { dispatchIcon, useDispatchBadge } from "./PanelActions";
 
 /** 本会话派出的任务：会话里只轮询一份，顶栏图标和标题下的行共用。 */
 export function useSessionDispatches(nativeId: string | undefined, busy: boolean, agent?: string): DispatchRun[] {
@@ -14,7 +14,7 @@ export function useSessionDispatches(nativeId: string | undefined, busy: boolean
   useEffect(() => {
     if (!nativeId) return;
     return startSessionDispatchPolling({
-      visible: () => document.visibilityState !== "hidden", now: Date.now,
+      visible: () => document.visibilityState !== "hidden",
       every: (callback, ms) => window.setInterval(callback, ms), cancel: (timer) => window.clearInterval(timer as number),
       onVisibility: (callback) => { document.addEventListener("visibilitychange", callback); return () => document.removeEventListener("visibilitychange", callback); },
     }, (signal) => fetchParentDispatches(nativeId, signal, agent), (next) => {
@@ -27,11 +27,10 @@ export function useSessionDispatches(nativeId: string | undefined, busy: boolean
 
 /** 手机顶栏「⋯」左侧的派单图标：填执行端身份色，多家按扇区分色；点开派单流程图。 */
 export function SessionDispatchBadge({ runs, backgroundCount }: { runs: DispatchRun[]; backgroundCount: number }) {
-  if (!runs.length) return null;
-  // 手机上标题下那行有派单时隐藏，后台任务数并进这里。
-  const { fill, label } = dispatchBadge(runs, backgroundCount);
-  return <button type="button" className="btn mobile-round session-dispatch-badge" style={{ background: fill }} aria-label={label} title={label}
-    onClick={() => store.navigateDispatches(runs.map((run) => run.runId), false)}>{dispatchIcon}</button>;
+  const badge = useDispatchBadge(runs.length ? backgroundCount : 0);
+  if (!badge) return null;
+  return <button type="button" className="btn mobile-round session-dispatch-badge" style={{ background: badge.fill }} aria-label={badge.label} title={badge.label}
+    onClick={() => runs.length ? store.navigateDispatches(runs.map(run => run.runId), false) : store.toggleDispatches()}>{dispatchIcon}</button>;
 }
 
 export function SessionDispatchLink({ runs, backgroundCount, desktop = false }: { runs: DispatchRun[]; backgroundCount: number; desktop?: boolean }) {
