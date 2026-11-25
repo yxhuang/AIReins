@@ -129,7 +129,9 @@ export function isAntigravityNativeDispatch(run: DispatchRun): boolean {
   return run.tool === "antigravity" && run.native === true && run.parent?.agent === "antigravity";
 }
 
-function antigravityModelFamily(model: string): string | undefined {
+export function antigravityDispatchModelFamily(run: DispatchRun): string | undefined {
+  const model = run.model;
+  if (!model || !isAntigravityNativeDispatch(run)) return undefined;
   if (model === "gemini-flash-worker-agy") return "hydrogen";
   if (/^gemini-[\d.]+-flash(?:-|$)/u.test(model)) return "flash";
   if (model === "gemini-pro-orchestrator-g1-pro") return "g1-pro";
@@ -164,7 +166,7 @@ export function buildDispatchTree(groups: ReturnType<typeof groupDispatches>, no
   const anchors = new Map<string, { id: string; depth: number }>();
   const agentAnchors = new Map<string, { id: string; depth: number }>();
   const add = (node: DispatchTreeNode, state: DispatchWireState, port?: DispatchTreeEdge["port"]) => {
-    if (node.run?.model && isAntigravityNativeDispatch(node.run)) node.modelFamily = antigravityModelFamily(node.run.model);
+    if (node.run) node.modelFamily = antigravityDispatchModelFamily(node.run);
     if (node.kind === "sidebranch") sidebranches.push(node);
     else (levels[node.depth - 2] ??= []).push(node);
     edges.push({ from: node.parentId, to: node.id, tool: node.tool, state, kind: node.kind,

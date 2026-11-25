@@ -56,7 +56,11 @@ assert.equal(active.dispatches[0]?.status, "running");
 assert.equal(active.dispatches[0]?.promptHead, "read_file");
 assert.equal(active.runtimeStates[0]?.activeModel, worker);
 assert.equal((await overview("idle")).dispatches[0]?.status, "unknown");
-assert.deepEqual(await listParentDispatches("workbench", delegate, "antigravity", () => [session]), []);
+for (const id of ["workbench", "native"]) {
+  assert.deepEqual((await listParentDispatches(id, delegate, "antigravity", () => [session]))
+    .map(run => [run.runId, run.model, run.status]), [["antigravity-inner-native-3", worker, "running"]]);
+}
+assert.deepEqual(await listParentDispatches("workbench", delegate, "codex", () => [session]), []);
 assert.equal((await countActiveDispatchesBySession([session], delegate)).size, 0);
 
 await appendFile(log("native"), jsonl(row(6, 45_000, { type: "TOOL", status: "DONE" })));
@@ -78,6 +82,7 @@ assert.deepEqual(returned.dispatches.map(run => [run.runId, run.status, run.ende
   ["antigravity-inner-native-11", "OK", stamp(31_000)], ["antigravity-inner-native-3", "OK", stamp(39_000)],
 ]);
 assert.deepEqual(returned.dispatches[1]?.parent, { agent: "antigravity", sessionId: "native", model: planner, title: "父会话", entrypoint: null });
+assert.deepEqual(await listParentDispatches("native", delegate, "antigravity", () => [session]), []);
 assert.equal(returned.runtimeStates[0]?.activeModel, planner);
 assert.equal(returned.runtimeStates[0]?.activePhase, "planning");
 assert.equal(returned.runtimeStates[0]?.updatedAt, stamp(31_000));
@@ -179,15 +184,19 @@ await mkdir(dirname(swarmFile), { recursive: true });
 await writeFile(swarmFile, JSON.stringify({ members: { coordinator, reviewer } }));
 await transcript(swarmId, jsonl(row(1, 48_000, response(planner, "swarm", { action: '"add"', name: '"reviewer"', model: JSON.stringify(opus) })),
   row(2, 47_000, swarmResult(46_000, { status: "added", name: "reviewer", model: opus, conversation_id: "opus-child" }))));
-const swarmOverview = (at = now) => listDispatchOverview(null, delegate, () => [{ ...session, status: "idle", nativeSessionId: swarmId }], at);
+const swarmParent: DispatchParentSession = { ...session, status: "idle", nativeSessionId: swarmId };
+const swarmOverview = (at = now) => listDispatchOverview(null, delegate, () => [swarmParent], at);
 const swarmActive = await swarmOverview();
 assert.deepEqual(swarmActive.dispatches.map(run => [run.tool, run.native, run.agentType, run.name, run.model, run.status, run.session, run.startedAt, run.parent?.sessionId]),
   [["antigravity", true, "swarm", "reviewer", opus, "running", "opus-child", stamp(46_000), swarmId]]);
 assert.equal(swarmActive.runtimeStates[0]?.activeModel, planner);
+assert.deepEqual((await listParentDispatches(swarmId, delegate, undefined, () => [swarmParent])).map(run => run.model), [opus]);
+assert.deepEqual(await listParentDispatches("native", delegate, "antigravity", () => [session, { ...swarmParent, id: "other" }]), []);
 await writeFile(swarmFile, JSON.stringify({ members: { coordinator, reviewer: { ...reviewer, phase: "KILLED", killed: true } } }));
 await appendFile(log(swarmId), jsonl(row(3, 35_000, response(planner, "swarm", { action: '"kill"', name: '"reviewer"' })),
   row(4, 34_000, swarmResult(30_000, { status: "killed", name: "reviewer" }))));
 assert.deepEqual((await swarmOverview()).dispatches.map(run => [run.status, run.endedAt, run.elapsedS]), [["stopped", stamp(30_000), 16]]);
+assert.deepEqual(await listParentDispatches(swarmId, delegate, "antigravity", () => [swarmParent]), []);
 assert.deepEqual((await swarmOverview(now + 30 * 60_000)).dispatches, []);
 assert.deepEqual((await listDispatchOverview(null, delegate, () => [], now)).dispatches, []);
 

@@ -13,22 +13,22 @@ const { HistoryTimeline } = await import('../src/components/HistoryTimeline.tsx'
 const { ResumedHistory } = await import('../src/components/ResumedHistory.tsx');
 const flush = async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); };
 
-assert.equal(sessionDispatchInterval(0, 0), 30000);
-assert.equal(sessionDispatchInterval(1, 0), 3000);
-assert.equal(sessionDispatchInterval(0, 1), 3000);
-let visible = true, visibility, requests = 0, links = [], background = 0, delivered = 0;
+assert.equal(sessionDispatchInterval(false, 0), 30000);
+assert.equal(sessionDispatchInterval(true, 0), 3000);
+assert.equal(sessionDispatchInterval(false, 1), 3000);
+let visible = true, visibility, requests = 0, links = [], busy = false, delivered = 0;
 const timers = new Map();
 const stop = startSessionDispatchPolling({
   visible: () => visible, now: Date.now,
   every: (fn, ms) => { timers.set(ms, fn); return ms; }, cancel: (id) => timers.delete(id),
   onVisibility: (fn) => { visibility = fn; return () => { visibility = null; }; },
-}, async () => { requests++; return { dispatches: links }; }, () => delivered++, () => background);
+}, async () => { requests++; return { dispatches: links }; }, () => delivered++, () => busy);
 await flush();
 assert.equal(requests, 1); assert.deepEqual([...timers.keys()], [30000]);
 links = [{ runId: 'one' }]; timers.get(30000)(); await flush();
 assert.deepEqual([...timers.keys()], [3000]);
 links = []; timers.get(3000)(); await flush(); assert.deepEqual([...timers.keys()], [30000]);
-background = 1; visibility(); await flush(); assert.deepEqual([...timers.keys()], [3000]);
+busy = true; visibility(); await flush(); assert.deepEqual([...timers.keys()], [3000]);
 visible = false; visibility(); assert.equal(timers.size, 0);
 const beforeVisible = requests; visible = true; visibility(); await flush(); assert.equal(requests, beforeVisible + 1);
 stop(); assert.equal(timers.size, 0); assert.equal(visibility, null);
@@ -36,7 +36,7 @@ let slowResolve, slowSignal, slowReceived = 0;
 const slowTimers = new Map();
 const stopSlow = startSessionDispatchPolling({ visible: () => true, now: Date.now,
   every: (fn, ms) => { slowTimers.set(ms, fn); return ms; }, cancel: (id) => slowTimers.delete(id), onVisibility: () => () => {},
-}, (signal) => { slowSignal = signal; return new Promise((resolve) => { slowResolve = resolve; }); }, () => slowReceived++, () => 0);
+}, (signal) => { slowSignal = signal; return new Promise((resolve) => { slowResolve = resolve; }); }, () => slowReceived++, () => false);
 stopSlow(); assert.equal(slowSignal.aborted, true);
 slowResolve({ dispatches: [] }); await flush(); assert.equal(slowReceived, 0);
 

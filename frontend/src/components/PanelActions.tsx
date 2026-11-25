@@ -3,7 +3,7 @@ import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { store, type Store } from "../store";
 import { shallowEqual, useStore } from "../useStore";
 import { TerminalIcon } from "./TerminalIcon";
-import type { DispatchRun } from "../dispatch-flow";
+import { antigravityDispatchModelFamily, type DispatchRun } from "../dispatch-flow";
 
 const selectPanelState = (value: Store) => [
   value.filesOpen, value.termOpen, value.dispatchesOpen,
@@ -13,12 +13,16 @@ const selectPanelState = (value: Store) => [
 const folderIcon = <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M3 7V5a1 1 0 0 1 1-1h5l2 3h9a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V7Z" /></svg>;
 export const dispatchIcon = <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M4 5h7v6H4zM13 13h7v6h-7zM15 5h5M18 3l2 2-2 2M4 17h5M7 15l2 2-2 2" /></svg>;
 
-/** 派单图标的执行端身份色：单家实色，多家按扇区分色；手机徽章与桌面按钮共用。 */
+/** 派单图标沿用拓扑的执行端或模型色，多种颜色按扇区显示。 */
 export function dispatchBadge(runs: readonly DispatchRun[], backgroundCount = 0) {
   const tools = [...new Set(runs.map((run) => run.tool))];
-  const color = (tool: string) => `var(--agent-${tool}, var(--busy))`;
-  const fill = tools.length === 1 ? color(tools[0]!)
-    : `conic-gradient(${tools.map((tool, i) => `${color(tool)} ${i / tools.length * 360}deg ${(i + 1) / tools.length * 360}deg`).join(", ")})`;
+  const colors = [...new Set(runs.map((run) => {
+    const family = antigravityDispatchModelFamily(run);
+    const token = family === "opus" ? "agent-claude" : family ? `dispatch-${family}` : `agent-${run.tool}`;
+    return `var(--${token}, var(--busy))`;
+  }))];
+  const fill = colors.length === 1 ? colors[0]!
+    : `conic-gradient(${colors.map((color, i) => `${color} ${i / colors.length * 360}deg ${(i + 1) / colors.length * 360}deg`).join(", ")})`;
   const label = t("ui.PanelActions.dispatches_in_total", { p0: (tools.join("、")), p1: (runs.length), p2: (backgroundCount ? t("ui.PanelActions.background_tasks_detail", { p0: (backgroundCount) }) : "") });
   return { fill, label };
 }

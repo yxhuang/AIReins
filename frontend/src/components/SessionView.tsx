@@ -89,7 +89,8 @@ export function SessionView({ session, mobileTail, usage, headerTarget }: { sess
   const wsState = useStore(selectWsState);
   // 按原生会话身份查询派单；Claude 后台任务与 Antigravity 在途后台工具/续跑共用 backgroundTasks。
   const backgroundCount = session.backgroundTasks?.length ?? 0;
-  const dispatchRuns = useSessionDispatches(session.nativeSessionId ?? session.id, backgroundCount, session.agent);
+  const dispatchRuns = useSessionDispatches(session.nativeSessionId ?? session.id,
+    backgroundCount > 0 || (session.agent === "antigravity" && running), session.agent);
   const renderBuilder = useMemo(() => createRenderItemsBuilder(session.agent), [session.id, session.agent]);
   const items = useMemo(
     () => renderBuilder.update(data?.events ?? [], data?.dropped),

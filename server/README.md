@@ -381,8 +381,8 @@ Claude 额外固定返回四个字段；未显式覆盖时的初始形状如下�
   默认 50 条，上限 200，正数小数向下取整，非法值或小于 1 回退到 50。delegate 根目录不存在或不可读取时不返回工单；已注册会话的原生子代理独立读取。
   除 delegate 记录外，还返回 Claude Code 原生子代理记录（`tool=claude`）：候选父会话 = 注册表里的 Claude 会话（cwd + nativeSessionId）∪ delegate 记录里 `parent.agent=claude` 的 sessionId，只读这些父会话目录下的 `subagents/agent-<id>.jsonl` 与同名 `.meta.json`，不枚举无关项目。默认根目录 `~/.claude/projects`，可用 `WORKBENCH_CLAUDE_PROJECTS_DIR` 覆盖。实际模型取自 assistant `message.model`，类型/任务名取自 meta，生命周期按最终回复与写入新鲜度判定；路径/mtime/size 指纹加两秒共享扫描缓存，头尾读取各限 1 MiB。三家原生子代理进入流程图和父会话徽标，标记 `native:true`，只读展示，不打开 delegate 历史、详情或日志。独立 Codex 会话也按注册表原生 ID 发现子线程（包括 Luna），沿真实 `parentThreadId` 递归并防环。Kimi 只枚举工作空间根目录名，再读指定注册会话的 `state.json` 与其中列出的 `agents/<id>/wire.jsonl`；头尾各限 64 KiB，拒绝符号链接，按文件指纹缓存并重新判断新鲜度。未关联的记录不猜测父会话。
   Antigravity 只观测注册表及当前 delegate 列表里已关联的会话。按原生会话 ID 读取 `~/.gemini/antigravity-cli/brain/<id>/.system_generated/logs/transcript.jsonl`，测试可用 `WORKBENCH_ANTIGRAVITY_BRAIN_DIR` 覆盖根目录。校验 ID 与真实路径，拒绝符号链接逃逸，只读尾部最多 512 KiB 的完整行，按文件指纹缓存解析结果。坏行和异常文件独立跳过。
-  `exit_plan_mode` 或切出规划的系统消息开始一段 `native:true, tool:"antigravity", agentType:"inner-loop"` 记录，`enter_plan_mode`、切回规划的系统消息或新用户输入结束该段。运行中与近 30 分钟的段进入拓扑列表。没有显式交回时，使用父会话状态及执行步骤判断，独立会话未完成且 5 分钟无记录时显示未知。内环仅用于观察，外部派单计数、parent 查询和 7 天历史仍沿用原有范围。
-  同一批已关联会话还读取 `.system_generated/swarm/members.json` 中的 worker，文件限 64 KiB 并沿用路径校验。Swarm 节点为 `native:true, tool:"antigravity", agentType:"swarm"`，用子会话 ID 关联派单，优先显示成员的 `applied_model`，并从 transcript 的 `added` / `killed` 工具结果补充时间。运行状态由成员快照确定，父会话空闲时仍可显示运行中的 worker。确认停止的节点显示 30 分钟，其余外部派单接口与内环一致。
+  `exit_plan_mode` 或切出规划的系统消息开始一段 `native:true, tool:"antigravity", agentType:"inner-loop"` 记录，`enter_plan_mode`、切回规划的系统消息或新用户输入结束该段。运行中与近 30 分钟的段进入拓扑列表。没有显式交回时，使用父会话状态及执行步骤判断，独立会话未完成且 5 分钟无记录时显示未知。内环为拓扑和会话顶栏提供观察数据，外部工单计数和 7 天历史沿用原有范围。
+  同一批已关联会话还读取 `.system_generated/swarm/members.json` 中的 worker，文件限 64 KiB 并沿用路径校验。Swarm 节点为 `native:true, tool:"antigravity", agentType:"swarm"`，用子会话 ID 关联派单，优先显示成员的 `applied_model`，并从 transcript 的 `added` / `killed` 工具结果补充时间。运行状态由成员快照确定，父会话空闲时仍可显示运行中的 worker。确认停止的节点在拓扑显示 30 分钟，运行中的节点同时进入父会话查询。
   `runtimeStates` 按会话返回 `agent`、`sessionId`（优先工作台 ID）、`nativeSessionId`、`configuredModel`、`activeModel`、`activePhase`（`planning`、`executing` 或 `null`）、`plannerModel`、`executorModel` 和 `updatedAt`。模型来自 `PLANNER_RESPONSE.model`。已切入执行但首步未落盘时，执行模型和当前模型均为 `null`。该快照反映本地 transcript 已落盘的内容。
 - `GET /api/dispatches/<runId>` → `data: DispatchDetail`。
 - `GET /api/dispatches/<runId>/log?stream=stdout&offset=0` → `data: DispatchLog`。
@@ -998,6 +998,7 @@ node --import tsx server/scripts/verify-snapshot.mjs '<sessionId>' --probe-messa
   扫描不受普通列表的 200 条上限影响；非负整数 offset 无效时返回 400 / `40000`。
 - `GET /api/dispatches?parent=<会话ID>&agent=claude|antigravity|codex|kimi` → `{dispatches:Dispatch[]}`。
   按执行端和工作台/原生会话 ID 精确匹配，返回该父会话直接或间接派出的 running 工单和原生子代理，不受普通列表条数上限限制；省略 agent 时匹配各家，非法 agent 返回 400。
+  查询 Antigravity 时，复用拓扑的读取逻辑，从匹配的已关联父会话返回运行中的 Orchestrator 内环与 Swarm worker，供顶栏显示执行模型颜色。
   parent 仅接受 1–128 位字母、数字、下划线或连字符；无效返回 400 / `40000`。
 - `GET /api/dispatches/<runId>/messages?cursor=<上次cursor>` →
   `{source:"native"|"stdout",agent?:"codex"|"kimi",messages:HistoryMessage[],replaceFrom:number,cursor:string|null,truncated:boolean}`。

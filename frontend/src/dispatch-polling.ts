@@ -8,8 +8,8 @@ interface PollingEnvironment {
   onVisibility(callback: () => void): () => void;
 }
 
-export function sessionDispatchInterval(backgroundCount: number, linkCount: number): number {
-  return backgroundCount > 0 || linkCount > 0 ? 3000 : 30000;
+export function sessionDispatchInterval(busy: boolean, linkCount: number): number {
+  return busy || linkCount > 0 ? 3000 : 30000;
 }
 
 /** 会话派单链接：可动态退避，隐藏页无定时器，重新可见立即查询。 */
@@ -17,7 +17,7 @@ export function startSessionDispatchPolling(
   env: PollingEnvironment,
   fetchRuns: (signal: AbortSignal) => Promise<{ dispatches: DispatchRun[] }>,
   onRuns: (runs: DispatchRun[]) => void,
-  backgroundCount: () => number,
+  busy: () => boolean,
   initialLinkCount = 0,
 ): () => void {
   let timer: unknown;
@@ -26,7 +26,7 @@ export function startSessionDispatchPolling(
   let links = initialLinkCount;
   let interval = 0;
   const schedule = () => {
-    const next = sessionDispatchInterval(backgroundCount(), links);
+    const next = sessionDispatchInterval(busy(), links);
     if (timer !== undefined && next === interval) return;
     if (timer !== undefined) env.cancel(timer);
     interval = next;

@@ -1383,6 +1383,14 @@ export async function listParentDispatches(parent: string, root = rootDirectory(
     }
   }
   const runs = [...await allDispatches(root), ...await allNativeSubagents(root, sessions)];
+  if (!agent || agent === "antigravity") {
+    const parents = sessions.filter((session) => session.agent === "antigravity"
+      && (session.id === parent || session.nativeSessionId === parent));
+    const linkedRuns = runs.filter((run) => run.parent?.agent === "antigravity"
+      && run.parent.sessionId && aliases.has(run.parent.sessionId));
+    const observation = await readAntigravityOrchestrator(linkedRuns, parents, Date.now());
+    runs.push(...observation.dispatches);
+  }
   return runs.filter((run) => {
     if (run.status !== "running") return false;
     const seen = new Set<string>();

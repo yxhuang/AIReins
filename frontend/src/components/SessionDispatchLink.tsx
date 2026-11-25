@@ -7,7 +7,7 @@ import type { DispatchRun } from "../dispatch-flow";
 import { dispatchBadge, dispatchIcon } from "./PanelActions";
 
 /** 本会话派出的任务：会话里只轮询一份，顶栏图标和标题下的行共用。 */
-export function useSessionDispatches(nativeId: string | undefined, backgroundCount: number, agent?: string): DispatchRun[] {
+export function useSessionDispatches(nativeId: string | undefined, busy: boolean, agent?: string): DispatchRun[] {
   const [runs, setRuns] = useState<DispatchRun[]>([]);
   const linkCount = useRef(0);
   useEffect(() => { setRuns([]); linkCount.current = 0; }, [nativeId, agent]);
@@ -20,8 +20,8 @@ export function useSessionDispatches(nativeId: string | undefined, backgroundCou
     }, (signal) => fetchParentDispatches(nativeId, signal, agent), (next) => {
       linkCount.current = next.length;
       setRuns(next);
-    }, () => backgroundCount, linkCount.current);
-  }, [nativeId, backgroundCount, agent]);
+    }, () => busy, linkCount.current);
+  }, [nativeId, busy, agent]);
   return runs;
 }
 

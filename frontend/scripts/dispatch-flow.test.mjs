@@ -15,6 +15,8 @@ const { Store, store } = await import('../src/store.ts');
 const { App } = await import('../src/App.tsx');
 const { DispatchView, DispatchTree } = await import('../src/components/DispatchView.tsx');
 const { DispatchHistoryRow } = await import('../src/components/DispatchHistory.tsx');
+const { PanelActions } = await import('../src/components/PanelActions.tsx');
+const { SessionDispatchBadge } = await import('../src/components/SessionDispatchLink.tsx');
 const { lastWindowsCwd, loadWindowsHistory } = await import('../src/components/DirectoryBrowser.tsx');
 let pass = 0;
 const t = async (name, fn) => { try { await fn(); pass++; } catch (e) { console.error(`❌ ${name}\n${e.stack}`); process.exitCode = 1; } };
@@ -54,6 +56,19 @@ await t('Antigravity Swarm 节点显示 Opus 5.5、模型档位与实时连线',
   assert.match(render(swarm), /title="claude-opus-5-5-high">Opus 5\.5 · High<\/span>/);
   assert.match(render(swarm), /aria-label="Antigravity 内部派单"/);
   assert.match(render({ ...swarm, status: 'stopped', endedAt: iso(now - 1000) }), /已停止/);
+});
+
+await t('桌面派单按钮和手机徽章沿用 Antigravity 执行模型色', () => {
+  const hydrogen = run({ tool: 'antigravity', native: true, agentType: 'inner-loop', model: 'gemini-flash-worker-agy',
+    parent: { agent: 'antigravity', sessionId: 'native', entrypoint: null } });
+  const opus = { ...hydrogen, runId: 'swarm-opus', agentType: 'swarm', model: 'claude-opus-5-5-high' };
+  const desktop = dispatchRuns => renderToStaticMarkup(React.createElement(PanelActions, { dispatchRuns }));
+  assert.match(desktop([hydrogen]), /has-dispatch-runs" style="background:var\(--dispatch-hydrogen,/);
+  assert.match(desktop([hydrogen, opus]), /conic-gradient\(var\(--dispatch-hydrogen,.*var\(--agent-claude,/);
+  assert.match(desktop([{ ...hydrogen, model: null }]), /background:var\(--agent-antigravity,/);
+  assert.doesNotMatch(desktop([]), /has-dispatch-runs/);
+  assert.match(renderToStaticMarkup(React.createElement(SessionDispatchBadge, { runs: [hydrogen], backgroundCount: 0 })),
+    /session-dispatch-badge" style="background:var\(--dispatch-hydrogen,/);
 });
 
 await t('Antigravity 内部派单的卡片与连线共用执行模型的颜色', () => {

@@ -97,7 +97,7 @@ node frontend/scripts/smoke-ws.mjs  # 需后端；会创建测试会话、批准
 - 从当前 Antigravity 会话打开派单面板时，若没有该运行时的近期工单，显示当前会话及 Codex、Kimi 两条空闲分支。工单出现后沿用同一棵树展示执行状态和详情入口。空闲分支不计入派单统计，Copilot 有工单时才显示在 Antigravity 树中。
 - Antigravity Orchestrator 内环以蓝紫连线挂在派单人右侧，显示计划标题、执行模型、状态与耗时。根节点消费同一次轮询的 `runtimeStates`，优先显示当前 Antigravity 会话的已观测模型和阶段，例如「Neon · 规划」「Hydrogen · 执行」。悬停可看完整模型 ID、落盘时间和所属会话。切入执行后，首条模型记录尚未写入本地 `transcript.jsonl` 时显示「执行模型」和待回报提示。只有内环时仍显示 Codex、Kimi 空闲分支。
 - Antigravity 通过 Swarm 启动的子代理作为独立节点接到派单人，显示子代理名称、实际模型（如「Opus 5.5 · High」）、状态与已知耗时。Swarm 和内环的执行卡片及连线按实际模型家族配色，Opus 为橙色，Hydrogen 为紫色，Sonnet、Neon、Argon、Carbon、Flash 与 G1 Pro 均有各自颜色。不同档位沿用同一家族的颜色，未知型号沿用 Antigravity 身份色。悬停可看完整模型 ID。
-- 列表只读 `/api/dispatches?limit=50`，可见每 3 秒刷新、每秒走时，隐藏暂停、恢复立即刷新，慢请求不重叠；关闭清理请求/计时器，失败保留旧数据并重试。会话内派单链接独立轮询；见 [dispatch-polling.ts](src/dispatch-polling.ts)。
+- 列表只读 `/api/dispatches?limit=50`，可见每 3 秒刷新、每秒走时，隐藏暂停、恢复立即刷新，慢请求不重叠；关闭清理请求/计时器，失败保留旧数据并重试。会话顶栏独立轮询 `?parent=`，有派单、后台任务或 Antigravity 正在跑主回合时每 3 秒刷新，其余每 30 秒。桌面派单按钮和手机徽章按运行中任务着色，Antigravity 的 Orchestrator 内环与 Swarm 沿用拓扑的执行模型颜色，多种颜色按扇区显示。见 [dispatch-polling.ts](src/dispatch-polling.ts)。
 - 图中仅显示运行中及结束 30 分钟内派单；结束时间可由 startedAt + elapsedS 推算，lost 无结束时间用本次首次观察计时，其他结束时间不明者不显示。不读取或清理本机派单目录。
 - 连线运行中为 `flow`，结束 10 分钟内（含边界）为 `finish`，之后为 `idle` 灰色；子 agent 独立按自身 `lastActivityAt` 判断，运行中不受时间影响。`FINISHED_WIRE_MS` 与卡片 30 分钟窗口 `RECENT_DISPATCH_MS` 分开。
 - 详情原文默认前 5 行，可展开；过程复用历史时间线，原生记录不可读退回 stdout 尾部。结束显示 summary、STATUS/ACCEPT、可用 credits 与只复制的续接命令；下方近 7 天结束历史每页 20 单，见 [DispatchDetail.tsx](src/components/DispatchDetail.tsx)、[DispatchHistory.tsx](src/components/DispatchHistory.tsx)。
