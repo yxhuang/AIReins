@@ -15,6 +15,7 @@ export interface DispatchRun {
   session: string | null;
   parent: { agent: string; sessionId: string | null; entrypoint: string | null; model?: string | null; title?: string | null; runId?: string } | null;
   promptHead?: string | null;
+  externalUrl?: string | null;
   agentType?: string | null;
   native?: boolean;
   subagents?: DispatchSubagent[];
@@ -26,7 +27,7 @@ export interface DispatchSubagent {
   startedAt: string | null; lastActivityAt: string; activity?: string;
 }
 
-const DISPATCH_TOOLS = ["codex", "kimi", "copilot", "claude", "antigravity"] as const;
+const DISPATCH_TOOLS = ["codex", "kimi", "copilot", "claude", "antigravity", "muse", "grok-bot"] as const;
 export type DispatchTool = typeof DISPATCH_TOOLS[number];
 export type DispatchWireState = "flow" | "finish" | "idle";
 export const RECENT_DISPATCH_MS = 30 * 60 * 1000;
@@ -70,7 +71,7 @@ export function groupDispatches(runs: readonly DispatchRun[], now: number) {
       wireState: items.some((run) => run.status === "running") ? "flow"
         : items.some((run) => recentWireEnd(dispatchEnd(run), now)) ? "finish" : "idle",
     };
-  }).filter(({ tool, runs }) => runs.length || (tool !== "claude" && tool !== "antigravity"));
+  }).filter(({ tool, runs }) => runs.length || ["codex", "kimi", "copilot"].includes(tool));
 }
 
 export interface DispatchTreeRow { id: string; run: DispatchRun }
@@ -251,7 +252,7 @@ export function dispatchName(run: DispatchRun): string {
   const name = run.name.trim();
   if (name && name !== run.tool) return name;
   const head = (run.promptHead ?? "").split("\n").map((line) => line.replace(/^#+\s*/, "").replace(/^工单[:：]\s*/, "").trim()).find(Boolean);
-  return head || name || run.runId.replace(/^\d{8}-\d{6}-(?:codex|kimi|copilot|claude)-/, "") || run.runId;
+  return head || name || run.runId.replace(/^\d{8}-\d{6}-(?:codex|kimi|copilot|claude|muse|grok-bot)-/, "") || run.runId;
 }
 
 export function dispatchSeconds(run: DispatchRun, now: number): number | null {
@@ -273,6 +274,7 @@ export function dispatchTime(seconds: number | null): string {
 export function dispatchStatus(status: string): { label: string; className: string } {
   if (status === "running") return { label: t("core.021"), className: "" };
   if (status === "OK") return { label: t("core.022"), className: "finished" };
+  if (status === "DISPATCHED") return { label: t("ui.DispatchView.dispatched"), className: "finished" };
   if (status === "stopped") return { label: t("ui.DispatchView.stopped"), className: "finished" };
   if (["TOOL_FAIL", "ACCEPT_FAIL", "TIMEOUT"].includes(status)) return { label: t("core.023"), className: "failed" };
   if (status === "lost") return { label: "lost", className: "failed" };
@@ -282,7 +284,7 @@ export function dispatchStatus(status: string): { label: string; className: stri
 export interface DispatchSessionTitle { id: string; agent?: string; nativeSessionId?: string; title: string; model?: string | null }
 
 export function dispatcherLabel(agent: string): string {
-  return ({ claude: "Claude Code", antigravity: "Antigravity", codex: "Codex", kimi: "Kimi", copilot: "Copilot" } as Record<string, string>)[agent] ?? t("core.025");
+  return ({ claude: "Claude Code", antigravity: "Antigravity", codex: "Codex", kimi: "Kimi", copilot: "Copilot", muse: "Muse", "grok-bot": "Grok Bot" } as Record<string, string>)[agent] ?? t("core.025");
 }
 
 /** Resolve by explicit run ID or matching runtime + native ID, never by task name/cwd/model. */
@@ -294,7 +296,7 @@ export function dispatchParent(run: DispatchRun, runs: readonly DispatchRun[]): 
       || item.subagents?.some((child) => child.threadId === parent.sessionId))));
 }
 
-/** 同主体会话合并；沿完整记录解析祖先，嵌套派单归属原主体。Copilot 只作执行端。 */
+/** 同主体会话合并；沿完整记录解析祖先，嵌套派单归属原主体。Copilot、Muse 和 Grok Bot 只作执行端。 */
 export function dispatchForests(runs: readonly DispatchRun[], sessions: readonly DispatchSessionTitle[],
   ancestry: readonly DispatchRun[] = runs, currentId: string | null = null) {
   const forests = new Map<string, { id: string; agent: string; title: string; runs: DispatchRun[]; idleSession?: DispatchSessionTitle }>();

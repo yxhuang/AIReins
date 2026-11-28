@@ -375,6 +375,9 @@ Claude 额外固定返回四个字段；未显式覆盖时的初始形状如下�
 
 `delegate` 是可选的外部派单工具，AIReins 不要求安装它。实现在 `server/dispatches.ts`，路由在 `server/index.ts`。默认读取 `~/.cache/delegate`，可用
 `WB_DELEGATE_DIR` 覆盖。约定每项工单置于 `YYYYMMDD-HHMMSS-<执行端>-<名称>/`，包含 `run.json`（兼容旧 `meta.json`）及可选日志；目录缺失时仍独立显示已注册会话的原生子代理，不报错。两秒共享扫描缓存，不启动或控制派单进程，不写入数据源。
+
+支持读取 `agent-env` 的 `cloud-bot` 写入的 `muse` 和 `grok-bot` 工单。状态 `DISPATCHED` 表示云端已接单且本地派单进程已结束，有合法结束时间时进入 7 天历史。PID 存活检查、父会话活跃派单查询、释放和关机保护仍只处理 `running`。列表和详情可含 `externalUrl`，只接受无空白或控制字符、可解析的绝对 HTTP(S) URL，无效值返回 `null`。
+
 三个接口均走现有 `/api` 访问控制和 `{code,msg,data,request_id}` 信封：
 
 - `GET /api/dispatches?limit=50` → `data: {dispatches: Dispatch[], runtimeStates?: AntigravityRuntimeState[]}`。有效目录名按字符串倒序；
@@ -702,7 +705,7 @@ AI 用量面板已由 Node 原生实现（`server/usage.ts`），覆盖 `claude`
 
 ## `pages/` 扩展页面
 
-`GET /api/links` 返回 `data: {links: [{name, url, icon?, group?}]}`，与 `/api/pages` 共用请求前置的访问控制。每次请求现读并合并两处：仓库 `pages/links.json`（随 git 同步的共享菜单）在前，用户目录 `${workbenchHome}/pages/links.json`（默认 `~/.workbench/pages/links.json`，本机追加）在后，同一 `url` 以本机条目原位覆盖；改文件后刷新页面或重新打开「直达」即可生效；新增接口本身需重启 AIReins。任一处文件缺失按该处为空；坏 JSON、非法顶层按该处为空并 warn（另一处照常返回），非法条目逐条跳过并 warn，不导致接口 500。`name`、`url` 为必填非空字符串，`icon`、`group` 为可选非空字符串，`icon` 可以是 emoji、`agent:claude` / `agent:codex` / `agent:kimi`（复用界面内置的三家品牌图标），或以 `<svg` 开头的内联 SVG（前端按 HTML 渲染，品牌标识可用 `<image href="data:image/png;base64,…">` 内嵌位图）；支持 http/https 和 `vscode://`、`obsidian://` 等显式 URL scheme，拒绝 `javascript:`、`data:`、`vbscript:`、`file:`、`blob:`、`filesystem:`、`about:` 和含控制字符或未编码空格的 URL。根目录文件不参与 `scanPages` 的子目录扫描。
+`GET /api/links` 返回 `data: {links: [{name, url, icon?, group?, pinned?}]}`，与 `/api/pages` 共用请求前置的访问控制。每次请求现读并合并两处：仓库 `pages/links.json`（随 git 同步的共享菜单）在前，用户目录 `${workbenchHome}/pages/links.json`（默认 `~/.workbench/pages/links.json`，本机追加）在后，同一 `url` 以本机条目原位覆盖整条配置，包括置顶状态。改文件后刷新页面或重新打开「直达」即可生效。任一处文件缺失按该处为空；坏 JSON、非法顶层按该处为空并 warn（另一处照常返回），非法条目逐条跳过并 warn，不导致接口 500。`name`、`url` 为必填非空字符串，`icon`、`group` 为可选非空字符串。`pinned` 可选，必须为布尔值。置顶填 `true`，取消置顶可填 `false` 或省略。接口只返回值为 `true` 的 `pinned` 字段，侧栏底栏按合并顺序显示前两个置顶链接。`icon` 可以是 emoji、`agent:claude` / `agent:antigravity` / `agent:codex` / `agent:kimi` / `agent:grok-bot`（复用界面内置的品牌图标），或以 `<svg` 开头的内联 SVG（前端按 HTML 渲染，品牌标识可用 `<image href="data:image/png;base64,…">` 内嵌位图）；支持 http/https 和 `vscode://`、`obsidian://` 等显式 URL scheme，拒绝 `javascript:`、`data:`、`vbscript:`、`file:`、`blob:`、`filesystem:`、`about:` 和含控制字符或未编码空格的 URL。根目录文件不参与 `scanPages` 的子目录扫描。
 
 ```json
 {"links":[{"name":"示例网站","url":"https://example.com","icon":"🌐","group":"参考"}]}

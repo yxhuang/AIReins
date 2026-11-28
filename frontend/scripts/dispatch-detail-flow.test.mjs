@@ -1,8 +1,27 @@
 import assert from 'node:assert/strict';
+import React from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
+globalThis.React = React;
 globalThis.WebSocket = { CONNECTING: 0, OPEN: 1, CLOSING: 2, CLOSED: 3 };
 globalThis.window = { location: { hash: '#/' }, addEventListener() {} };
 const { Store } = await import('../src/store.ts');
-const { dispatchProcessMessages } = await import('../src/components/DispatchDetail.tsx');
+const { DispatchDetailHeader, dispatchProcessMessages } = await import('../src/components/DispatchDetail.tsx');
+const renderCloud = (externalUrl, acceptResult = null) => renderToStaticMarkup(React.createElement(DispatchDetailHeader, {
+  detail: { runId: '20261001-100000-muse-cloud-task', tool: 'muse', name: '云端任务', status: 'DISPATCHED',
+    model: null, effort: null, elapsedS: 10, parent: null, credits: null, externalUrl, acceptResult },
+  sessions: [], now: Date.parse('2026-10-01T10:01:00Z'),
+}));
+for (const url of ['https://example.com/run', 'http://example.com/run']) {
+  const html = renderCloud(url);
+  assert.ok(html.includes(`<a class="btn" href="${url}" target="_blank" rel="noopener noreferrer">打开云端页面</a>`));
+  assert.match(html, /class="dispatch-badge finished">[^<]*已派发<\/span>/);
+  assert.doesNotMatch(html, /验收/);
+}
+assert.match(renderCloud(null, 'OK ← test'), /验收 OK/);
+for (const url of ['javascript:alert(1)', 'file:///tmp/run', 'https://', 'https:///example.com', '//example.com',
+  'https://exa\tmple.com/', 'https://example.com/a b', 42, null, undefined]) {
+  assert.doesNotMatch(renderCloud(url), /打开云端页面|href=/);
+}
 const user = (text) => ({ role: 'user', text, timestamp: null });
 const tool = { role: 'tool', timestamp: null, tool: { id: 'call', name: 'exec_command', input: {}, status: 'ok' } };
 const repeated = user('  派单原文\n');
@@ -42,4 +61,4 @@ s.navigateDispatches(['run-two']);
 assert.equal(s.dispatchesOpen, true);
 s.navigate('another');
 assert.equal(s.dispatchesOpen, false);
-console.log('✅ dispatch detail prompt filtering, routes, multi-run highlight and return navigation');
+console.log('✅ dispatch detail cloud links, prompt filtering, routes, multi-run highlight and return navigation');

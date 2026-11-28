@@ -263,79 +263,79 @@
     },
     {
       "file": "server/dispatches.ts",
-      "line": 117,
+      "line": 119,
       "key": "server.message042",
       "category": "other"
     },
     {
       "file": "server/dispatches.ts",
-      "line": 794,
+      "line": 796,
       "key": "server.message043",
       "category": "(async () => {\n    try {\n      const transcript = new NativeConversationReader(roots).transcriptPath({ agent: kind, nativeSessionId: sessionId } as SessionRecord);\n      if (!transcript) return null;\n      const path = kind === \"kimi\" ? join(dirname(dirname(dirname(transcript))), \"state.json\") : transcript;\n      const metadata = await new HistoryIndex({ roots }).sessionMetadata(kind, path);\n      return metadata?.nativeSessionId === sessionId && metadata.title !== \"无标题会话\" ? metadata.title : null;\n    } catch { return null; }\n  })"
     },
     {
       "file": "server/dispatches.ts",
-      "line": 866,
+      "line": 868,
       "key": "server.message044",
       "category": "Error"
     },
     {
       "file": "server/dispatches.ts",
-      "line": 868,
+      "line": 870,
       "key": "server.message045",
       "category": "Error"
     },
     {
       "file": "server/dispatches.ts",
-      "line": 914,
+      "line": 916,
       "key": "server.message046",
       "category": "Error"
     },
     {
       "file": "server/dispatches.ts",
-      "line": 916,
+      "line": 918,
       "key": "server.message047",
       "category": "Error"
     },
     {
       "file": "server/dispatches.ts",
-      "line": 978,
+      "line": 980,
       "key": "server.message048",
       "category": "Error"
     },
     {
       "file": "server/dispatches.ts",
-      "line": 1244,
+      "line": 1247,
       "key": "server.message042",
       "category": "other"
     },
     {
       "file": "server/dispatches.ts",
-      "line": 1244,
+      "line": 1247,
       "key": "server.message049",
       "category": "other"
     },
     {
       "file": "server/dispatches.ts",
-      "line": 1380,
+      "line": 1383,
       "key": "server.message050",
       "category": "DispatchQueryError"
     },
     {
       "file": "server/dispatches.ts",
-      "line": 1423,
+      "line": 1426,
       "key": "server.message051",
       "category": "DispatchQueryError"
     },
     {
       "file": "server/dispatches.ts",
-      "line": 1499,
+      "line": 1502,
       "key": "server.message052",
       "category": "DispatchQueryError"
     },
     {
       "file": "server/dispatches.ts",
-      "line": 1502,
+      "line": 1505,
       "key": "server.message053",
       "category": "DispatchQueryError"
     },
@@ -1967,139 +1967,139 @@
     },
     {
       "file": "server/pages.ts",
-      "line": 131,
+      "line": 134,
       "key": "server.message282",
       "category": "Error"
     },
     {
       "file": "server/pages.ts",
-      "line": 153,
+      "line": 156,
       "key": "server.message283",
       "category": "embedReason"
     },
     {
       "file": "server/pages.ts",
-      "line": 155,
+      "line": 158,
       "key": "server.message284",
       "category": "embedReason"
     },
     {
       "file": "server/pages.ts",
-      "line": 157,
+      "line": 160,
       "key": "server.message285",
       "category": "embedReason"
     },
     {
       "file": "server/pages.ts",
-      "line": 163,
+      "line": 166,
       "key": "server.message286",
       "category": "embedReason"
     },
     {
       "file": "server/pages.ts",
-      "line": 168,
+      "line": 171,
       "key": "server.message287",
       "category": "embedReason"
     },
     {
       "file": "server/pages.ts",
-      "line": 171,
+      "line": 174,
       "key": "server.message288",
       "category": "embedReason"
     },
     {
       "file": "server/pages.ts",
-      "line": 173,
+      "line": 176,
       "key": "server.message289",
       "category": "embedReason"
     },
     {
       "file": "server/pages.ts",
-      "line": 175,
+      "line": 178,
       "key": "server.message290",
       "category": "embedReason"
     },
     {
       "file": "server/pages.ts",
-      "line": 257,
+      "line": 260,
       "key": "server.message291",
       "category": "Error"
     },
     {
       "file": "server/pages.ts",
-      "line": 261,
+      "line": 264,
       "key": "server.message292",
       "category": "Error"
     },
     {
       "file": "server/pages.ts",
-      "line": 264,
+      "line": 267,
       "key": "server.message293",
       "category": "Error"
     },
     {
       "file": "server/pages.ts",
-      "line": 265,
+      "line": 268,
       "key": "server.message294",
       "category": "Error"
     },
     {
       "file": "server/pages.ts",
-      "line": 276,
+      "line": 279,
       "key": "server.message295",
       "category": "Error"
     },
     {
       "file": "server/pages.ts",
-      "line": 280,
+      "line": 283,
       "key": "server.message296",
       "category": "Error"
     },
     {
       "file": "server/pages.ts",
-      "line": 301,
+      "line": 304,
       "key": "server.message297",
       "category": "Error"
     },
     {
       "file": "server/pages.ts",
-      "line": 307,
+      "line": 310,
       "key": "server.message298",
       "category": "Error"
     },
     {
       "file": "server/pages.ts",
-      "line": 317,
+      "line": 320,
       "key": "server.message299",
       "category": "Error"
     },
     {
       "file": "server/pages.ts",
-      "line": 320,
+      "line": 323,
       "key": "server.message300",
       "category": "Error"
     },
     {
       "file": "server/pages.ts",
-      "line": 334,
+      "line": 337,
       "key": "server.message301",
       "category": "other"
     },
     {
       "file": "server/pages.ts",
-      "line": 342,
+      "line": 345,
       "key": "server.message302",
       "category": "other"
     },
     {
       "file": "server/pages.ts",
-      "line": 343,
+      "line": 346,
       "key": "server.message303",
       "category": "other"
     },
     {
       "file": "server/pages.ts",
-      "line": 344,
+      "line": 347,
       "key": "server.message304",
       "category": "other"
     },

@@ -49,6 +49,8 @@
   --agent-kimi-ink:   light-dark(#1663C6, #5AA9FF);   /* 作文字用：#1A73E8 在象牙白上仅 4.28 */
   --agent-copilot:    light-dark(#8053C8, #B69AEB);
   --agent-copilot-ink: light-dark(#7042B6, #B69AEB);
+  --agent-muse:       light-dark(#982854, #F58FB9);
+  --agent-grok-bot:   light-dark(#78530D, #E8C270);
   --dispatch-hydrogen: light-dark(#8A4EC8, #C5A0FA);
   --dispatch-hydrogen-ink: light-dark(#6F35A6, #D3B8FF);
   --dispatch-sonnet: light-dark(#B94B86, #F18AC0);
@@ -2920,7 +2922,7 @@ body.resizing {
 }
 .app:not(.sidebar-collapsed) .sidebar-foot-pages > .page-nav:only-child::after { content: none; }
 .sidebar-foot-pages > .page-nav-skipped { flex: 1 0 100%; }
-.app:not(.sidebar-collapsed) .sidebar-foot .settings-gear {
+.app:not(.sidebar-collapsed) .sidebar-foot :is(.settings-gear, .launcher-pinned-button) {
   width: var(--foot-round); height: var(--foot-round); border: none; border-radius: 50%; color: var(--text);
   background: var(--raised-bg); box-shadow: var(--raised-shadow);
   margin-block: calc((var(--foot-btn) - var(--foot-round)) / 2);
@@ -2947,25 +2949,28 @@ body.resizing {
 .app:not(.sidebar-collapsed) .sidebar-foot .sidebar-panel-head > .icon-btn { display: none; }
 .app:not(.sidebar-collapsed) .sidebar-foot .sidebar-panel-open .page-nav-item { padding-right: 10px; }
 .app:not(.sidebar-collapsed) .sidebar-foot .settings-panel { left: -10px; }
-.app:not(.sidebar-collapsed) .sidebar-foot .settings-gear:hover, .launcher-button:hover { background: var(--raised-bg-hover); }
-/* 收起态从下到上 = 展开态从左到右：设置 · 历史 · 扩展页面 · 直达（用户 10-13） */
+.app:not(.sidebar-collapsed) .sidebar-foot :is(.settings-gear, .launcher-pinned-button):hover, .launcher-button:hover { background: var(--raised-bg-hover); }
+/* 收起态从下到上 = 展开态从左到右：设置 · 历史 · 扩展页面 · 置顶 · 直达 */
 .app.sidebar-collapsed .sidebar-foot { flex-direction: column-reverse; }
 .app.sidebar-collapsed .sidebar-foot-pages, .app.sidebar-collapsed .sidebar-foot-actions { display: contents; }
 .app.sidebar-collapsed .sidebar-foot .settings { order: 1; }
 .app.sidebar-collapsed .sidebar-foot-pages > .page-nav:first-child { order: 2; }
 .app.sidebar-collapsed .sidebar-foot-pages > .page-nav:not(:first-child) { order: 3; }
-.app.sidebar-collapsed .sidebar-foot .launcher { order: 4; }
+.app.sidebar-collapsed .sidebar-foot .launcher { order: 4; flex-direction: column-reverse; gap: 8px; }
 .app.sidebar-collapsed .launcher-button { width: 32px; padding: 0; }
-/* 收起态底栏四钮同顶部刷新/展开圆钮：32px 圆形浮起、图标 20px（用户 10-13） */
-.app.sidebar-collapsed .sidebar-foot :is(.page-nav-item, .settings-gear, .launcher-button) {
+/* 收起态底栏圆钮同顶部刷新/展开：32px 圆形浮起、图标 20px（用户 10-13） */
+.app.sidebar-collapsed .sidebar-foot :is(.page-nav-item, .settings-gear, .launcher-button, .launcher-pinned-button) {
   width: 32px; height: 32px; min-height: 32px; padding: 0; border: 0; border-radius: 50%;
   color: var(--text); background: var(--raised-bg); box-shadow: var(--raised-shadow);
 }
-.app.sidebar-collapsed .sidebar-foot :is(.page-nav-item, .settings-gear, .launcher-button):hover { background: var(--raised-bg-hover); }
+.app.sidebar-collapsed .sidebar-foot :is(.page-nav-item, .settings-gear, .launcher-button, .launcher-pinned-button):hover { background: var(--raised-bg-hover); }
 .app.sidebar-collapsed .sidebar-foot :is(.page-nav-item.active, .settings-gear[aria-expanded="true"], .launcher-button[aria-expanded="true"]) { background: var(--sunk-bg); box-shadow: var(--sunk-shadow); }
-.app.sidebar-collapsed .sidebar-foot :is(.page-nav-item .page-icon, .page-nav-item .page-icon svg, .settings-gear svg, .launcher-button svg) { width: 20px; height: 20px; flex: 0 0 20px; }
-.launcher { position: relative; }
+.app.sidebar-collapsed .sidebar-foot :is(.page-nav-item .page-icon, .page-nav-item .page-icon svg, .settings-gear svg, .launcher-button svg, .launcher-pinned-button svg) { width: 20px; height: 20px; flex: 0 0 20px; }
+.launcher { position: relative; display: flex; align-items: center; gap: var(--sidebar-controls-gap); }
 .launcher-button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; cursor: pointer; font: inherit; font-size: 13px; }
+.launcher-pinned-button { display: inline-grid; place-items: center; flex: 0 0 auto; text-decoration: none; }
+.launcher-pinned-button .launcher-link-icon { display: grid; place-items: center; }
+.launcher-pinned-button svg { width: 22px; height: 22px; }
 /* 浮层锚定直达按钮上方，向左展开以容纳200px菜单。 */
 .app:not(.sidebar-collapsed) .sidebar-foot .launcher-panel { left: auto; right: 0; }
 @media (min-width: 721px) {
@@ -3031,6 +3036,8 @@ body.resizing {
   /* 32px 视觉高度，用命中区补足 44px；换行时留 12px 间距避免重叠。 */
   .sidebar-foot .page-nav-item, .sidebar-foot .settings-gear, .launcher-button { position: relative; }
   .sidebar-foot .page-nav-item::before, .sidebar-foot .settings-gear::before, .launcher-button::before { content: ""; position: absolute; inset: 50% 0 auto; transform: translateY(-50%); min-width: 44px; min-height: 44px; }
+  .launcher-pinned-button { position: relative; }
+  .launcher-pinned-button::before { content: ""; position: absolute; inset: 50% auto auto 50%; transform: translate(-50%, -50%); width: 44px; height: 44px; }
   .launcher-link { min-height: 44px; }
 }
 
@@ -3477,13 +3484,18 @@ body.resizing {
   body.sidebar-resizing, body.sidebar-resizing * { cursor: col-resize !important; user-select: none; }
   body.sidebar-resizing iframe { pointer-events: none; }
 
-  /* 按钮以默认宽度排版，额外空间留在额度与靠右的直达之间。 */
+  /* 按钮以默认宽度排版，额外空间留在额度与靠右的直达组之间。 */
   /* 底栏放不下一行时先收起历史/额度胶囊的图标、保留文字，底栏高度不变；设置与直达尺寸不动。
      阈值按实测（含最小字号 14，容器宽 = 侧栏宽 - 21px）：带图标时英文需 ≥282px、中文需 ≥234px。 */
   @container sidebar-foot (max-width: 281px) {
     :root[data-locale="en"] .app:not(.sidebar-collapsed) .sidebar-foot-pages > .page-nav .page-nav-item:not(.active) { padding-inline: 10px; }
     :root[data-locale="en"] .app:not(.sidebar-collapsed) .sidebar-foot-pages > .page-nav .page-nav-item.active { padding-inline: 8px; gap: 3px; }
     :root[data-locale="en"] .app:not(.sidebar-collapsed) .sidebar-foot-pages .page-nav-item:not(.active) .page-icon { display: none; }
+  }
+  /* 置顶圆钮和间距多占 42px，英文胶囊在默认宽度也先保留文字。 */
+  @container sidebar-foot (max-width: 323px) {
+    :root[data-locale="en"] .app:not(.sidebar-collapsed) .sidebar-foot:has(.launcher-pinned-button) .sidebar-foot-pages > .page-nav .page-nav-item:not(.active) { padding-inline: 10px; }
+    :root[data-locale="en"] .app:not(.sidebar-collapsed) .sidebar-foot:has(.launcher-pinned-button) .sidebar-foot-pages .page-nav-item:not(.active) .page-icon { display: none; }
   }
   @container sidebar-foot (max-width: 233px) {
     .app:not(.sidebar-collapsed) .sidebar-foot-pages > .page-nav .page-nav-item:not(.active) { padding-inline: 10px; }
@@ -4143,8 +4155,12 @@ body.resizing {
   .app:not(.sidebar-collapsed) .new-session-label { display: none; }
   /* 手机底栏按钮统一 40px；行高按 34px 计，上下各 3px 负外边距吃进内边距，底栏只比原来高 2px（用户 10-16） */
   .app:not(.sidebar-collapsed) .sidebar-foot { --foot-btn: 34px; --foot-round: 40px; }
-  /* 底栏两行并一行，从左到右：设置 · 历史会话 · 扩展页面（AI 用量）· 直达 */
-  .app:not(.sidebar-collapsed) .sidebar-foot { flex-direction: row; flex-wrap: wrap; align-items: center; justify-content: flex-start; gap: clamp(8px, calc(8px + (100vw - 320px) / 10), 12px); padding-inline: 2px; position: relative; }
+  /* 底栏从左到右：设置 · 历史 · 扩展页面 · 置顶 · 直达 */
+  .app:not(.sidebar-collapsed) .sidebar-foot {
+    --sidebar-controls-gap: clamp(8px, calc(8px + (100vw - 320px) / 10), 12px);
+    flex-direction: row; flex-wrap: wrap; align-items: center; justify-content: flex-start;
+    gap: var(--sidebar-controls-gap); padding-inline: 2px; position: relative;
+  }
   /* 胶囊质感（设置齿轮不动）：上亮下暗的微渐变 + 1px 细描边 + 顶部内高光 + 轻投影；图标退一档灰，文字保持正文色 */
   .app:not(.sidebar-collapsed) .sidebar-foot-pages > .page-nav .page-nav-item,
   .app:not(.sidebar-collapsed) .sidebar-foot .launcher-button {
@@ -4173,11 +4189,13 @@ body.resizing {
   .app:not(.sidebar-collapsed) .sidebar-foot .settings { order: 1; flex: 0 0 auto; }
   .app:not(.sidebar-collapsed) .sidebar-foot-pages > .page-nav:first-child { order: 2; }
   .app:not(.sidebar-collapsed) .sidebar-foot-pages > .page-nav:not(:first-child) { order: 3; flex-direction: row; gap: 6px; }
-  .app:not(.sidebar-collapsed) .sidebar-foot .launcher { order: 4; flex: 0 0 auto; position: relative; }
+  .app:not(.sidebar-collapsed) .sidebar-foot .launcher { order: 4; flex: 0 0 auto; }
   .app:not(.sidebar-collapsed) .sidebar-foot-pages > .page-nav:first-child::after { content: none; }
   .app:not(.sidebar-collapsed) .sidebar-foot-pages > .page-nav-skipped { display: none; }
   /* 手机同样锚定按钮右边缘，向上、向左展开。 */
   .app:not(.sidebar-collapsed) .sidebar-foot .launcher-panel { left: auto; right: 0; }
+  /* 置顶组可能换到左下角，菜单贴底栏右边缘，避免向左超出视口。 */
+  .app:not(.sidebar-collapsed) .sidebar-foot .launcher:has(.launcher-pinned-button) { position: static; }
   .settings-panel { max-width: calc((100vw - 24px) / var(--font-scale)); max-height: calc(70dvh / var(--font-scale)); }
   /* 历史/额度图标 18px；直达与设置齿轮保持 22px */
   .app:not(.sidebar-collapsed) .sidebar-foot-pages .page-nav-item .page-icon,
@@ -4192,10 +4210,19 @@ body.resizing {
   .app:not(.sidebar-collapsed) .sidebar-foot-pages .page-nav-item .page-icon,
   .app:not(.sidebar-collapsed) .sidebar-foot-pages .page-nav-item .page-icon svg { width: 20px; height: 20px; flex: 0 0 20px; }
   .app:not(.sidebar-collapsed) .sidebar-foot .launcher-button svg,
+  .app:not(.sidebar-collapsed) .sidebar-foot .launcher-pinned-button svg,
   .app:not(.sidebar-collapsed) .sidebar-foot .settings-gear svg { width: 24px; height: 24px; flex: 0 0 24px; }
   /* 窄手机英文放不下一行时收起历史/额度图标（同桌面窄侧栏规则）；14px 字号下 ≥410px 才放得下图标 */
   @media (max-width: 409px) {
     :root[data-locale="en"] .app:not(.sidebar-collapsed) .sidebar-foot-pages .page-nav-item:not(.active) .page-icon { display: none; }
+    .app:not(.sidebar-collapsed) .sidebar-foot .launcher:has(.launcher-pinned-button) .launcher-button {
+      width: var(--foot-round); padding: 0; border-radius: 50%;
+    }
+    .app:not(.sidebar-collapsed) .sidebar-foot .launcher:has(.launcher-pinned-button) .launcher-button::before { inset-inline: -2px; }
+    .app:not(.sidebar-collapsed) .sidebar-foot .launcher:has(.launcher-pinned-button) .launcher-button > span { display: none; }
+  }
+  @media (max-width: 359px) {
+    .app:not(.sidebar-collapsed) .sidebar-foot:has(.launcher-pinned-button) .sidebar-foot-pages .page-nav-item { padding-inline: 9px; }
   }
   /* 终端在窄屏不做左右分栏：打开时占满主区（列表与会话主区都让位），「‹ 返回」回原视图 */
   .app.term-open .sidebar,
@@ -4331,7 +4358,7 @@ body.file-tab-dragging .file-tabs { position: relative; z-index: 31; }
   .workspace.term-open > .file-main-panel, .workspace.term-open > .terminal-main-panel { display: none; }
   .file-main-panel { flex: 1 1 auto; width: auto; }
 }
-.file-titlebar { gap: 4px; padding: 4px 6px; height: 44px; box-sizing: border-box; flex-wrap: nowrap; }
+.file-titlebar { position: relative; gap: 4px; padding: 4px 6px; height: 44px; box-sizing: border-box; flex-wrap: nowrap; }
 .file-side-title { flex: 0 0 auto; font-size: 14px; font-weight: 600; }
 .term-titlebar.file-titlebar > .panel-collapse { margin-left: auto; }
 .file-titlebar:has(.file-actions) > .panel-collapse { display: none; }
@@ -4384,9 +4411,27 @@ body.file-tab-dragging .file-tabs { position: relative; z-index: 31; }
   .file-tabs .term-tab-select { min-height: 36px; }
   .file-tabs .term-tab-close, .file-tabs .term-tab-new { min-width: 36px; min-height: 36px; }
 }
-.file-notice { flex: 0 1 auto; min-height: 0; overflow-y: auto; padding: 8px; font-size: 13px; }
+.file-notice {
+  position: absolute;
+  z-index: 5;
+  inset-block-start: calc(100% + 6px);
+  inset-inline-end: 8px;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  box-sizing: border-box;
+  max-inline-size: min(34rem, calc(100% - 16px));
+  padding: 4px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: var(--shadow-pop);
+  font-size: 13px;
+}
+.file-notice-message { min-width: 0; max-height: 30dvh; overflow: auto; overflow-wrap: anywhere; padding: 6px; user-select: text; }
 .file-notice p { margin: 0; }
-.file-notice .dir-copy-status { margin-top: 4px; }
+.file-notice-close { font-size: 18px; }
 .file-preview { display: flex; flex: 1; flex-direction: column; gap: 8px; min-width: 0; min-height: 0; overflow: hidden; }
 .file-preview > p { margin: 0; overflow-wrap: anywhere; }
 .file-large { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; padding: 6px 8px; }
@@ -4456,6 +4501,8 @@ body.file-tab-dragging .file-tabs { position: relative; z-index: 31; }
 .dispatch-node { --identity: var(--agent-codex); --ink: var(--agent-codex-ink); position: relative; z-index: 1; box-sizing: border-box; width: min(148px, calc((100cqi - 24px - (var(--dispatch-columns) - 1) * 8px) / var(--dispatch-columns))); min-width: 0; border: 1px solid var(--border); border-top: 3px solid var(--identity); border-radius: 10px; padding: 8px; background: var(--surface); box-shadow: var(--dispatch-shadow); color: var(--text); text-align: left; font: 13px/1.4 var(--font-ui); transition: border-color 150ms, background-color 150ms, box-shadow 150ms, translate 150ms; }
 .dispatch-node[data-tool="kimi"] { --identity: var(--agent-kimi); --ink: var(--agent-kimi-ink); }
 .dispatch-node[data-tool="copilot"] { --identity: var(--agent-copilot); --ink: var(--agent-copilot-ink); }
+.dispatch-node[data-tool="muse"] { --identity: var(--agent-muse); --ink: var(--agent-muse); }
+.dispatch-node[data-tool="grok-bot"] { --identity: var(--agent-grok-bot); --ink: var(--agent-grok-bot); }
 .dispatch-node[data-tool="claude"], .dispatch-source[data-source-agent="claude"] { --identity: var(--agent-claude); --ink: var(--agent-claude-ink); }
 .dispatch-node[data-tool="antigravity"], .dispatch-source[data-source-agent="antigravity"] { --identity: var(--model-accent, var(--agent-antigravity)); --ink: var(--model-ink, var(--agent-antigravity-ink)); }
 .dispatch-tree [data-dispatch-model="opus"] { --model-accent: var(--agent-claude); --model-ink: var(--agent-claude-ink); }
@@ -4570,6 +4617,8 @@ body.file-tab-dragging .file-tabs { position: relative; z-index: 31; }
 .dispatch-detail-head[data-tool="copilot"] { border-left-color: var(--agent-copilot); }
 .dispatch-detail-head[data-tool="claude"] { border-left-color: var(--agent-claude); }
 .dispatch-detail-head[data-tool="antigravity"] { border-left-color: var(--agent-antigravity); }
+.dispatch-detail-head[data-tool="muse"] { border-left-color: var(--agent-muse); }
+.dispatch-detail-head[data-tool="grok-bot"] { border-left-color: var(--agent-grok-bot); }
 .dispatch-detail-source { margin: 0 0 10px; color: var(--text-muted); overflow-wrap: anywhere; }
 .dispatch-detail h1 { font-size: 20px; line-height: 1.35; margin: 0 0 16px; overflow-wrap: anywhere; }
 .dispatch-detail h2 { font-size: 16px; margin: 0; }
@@ -4606,6 +4655,8 @@ body.file-tab-dragging .file-tabs { position: relative; z-index: 31; }
 .dispatch-history-task { display: flex; align-items: start; gap: 8px; min-width: 0; }
 .dispatch-history-task .agent-icon { width: 15px; height: 15px; flex: 0 0 15px; margin-top: 3px; }
 .dispatch-history-row[data-tool="copilot"] .agent-icon { color: var(--agent-copilot-ink); }
+.dispatch-history-row[data-tool="muse"] .agent-icon { color: var(--agent-muse); }
+.dispatch-history-row[data-tool="grok-bot"] .agent-icon { color: var(--agent-grok-bot); }
 .dispatch-history-name { min-width: 0; overflow-wrap: anywhere; font-weight: 600; }
 .dispatch-history-model { display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font: 12px/1.5 var(--font-mono); }
 .dispatch-history-model, .dispatch-history-row > .mono, .dispatch-history-row time { color: var(--text-muted); font-size: 12px; font-variant-numeric: tabular-nums; }
@@ -4722,7 +4773,7 @@ body.file-tab-dragging .file-tabs { position: relative; z-index: 31; }
 }
 /* 禁用态不凸起，免得看着可点（各处按钮选择器优先级不一，这里统一兜底） */
 button:disabled { box-shadow: none !important; }
-.btn:active:not(:disabled), .chrome-icon-btn:active:not(:disabled), .settings-gear:active, .launcher-button:active { transform: scale(0.96); }
+.btn:active:not(:disabled), .chrome-icon-btn:active:not(:disabled), .settings-gear:active, .launcher-button:active, .launcher-pinned-button:active { transform: scale(0.96); }
 /* 菜单条目、透明底按钮、描边型危险按钮不做凸起 */
 .session-more-menu .session-more-item, .slash-toggle, .btn-danger,
 .session-head-actions .btn:not(.chrome-icon-btn):not(.session-dispatch-link) {
@@ -4757,7 +4808,7 @@ button:disabled { box-shadow: none !important; }
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  .btn:active, .chrome-icon-btn:active, .settings-gear:active, .launcher-button:active { transform: none; }
+  .btn:active, .chrome-icon-btn:active, .settings-gear:active, .launcher-button:active, .launcher-pinned-button:active { transform: none; }
 }
 
 /* 重置事件收在额度面板底部，展开内容独立滚动。 */

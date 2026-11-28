@@ -18,6 +18,7 @@ export interface LauncherLink {
   url: string;
   icon?: string;
   group?: string;
+  pinned?: boolean;
 }
 
 /** 根目录配置按请求现读；坏配置只影响本次链接列表，不影响扩展页面。 */
@@ -58,6 +59,8 @@ export function readLinks(root = DEFAULT_PAGES_ROOT): LauncherLink[] {
           link[key] = fields[key].trim();
         }
       }
+      if (fields.pinned !== undefined && typeof fields.pinned !== "boolean") throw new Error("pinned must be a boolean");
+      if (fields.pinned === true) link.pinned = true;
       links.push(link);
     } catch (error) {
       log("warn", "invalid link skipped", { path, index, reason: errorMessage(error) });

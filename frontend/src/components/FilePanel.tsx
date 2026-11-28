@@ -414,11 +414,14 @@ export function FilePanel({ onClose: closeRight, tabId: ownTabId }: { onClose: (
         {markdown && viewToggle}
         {visible && markdown && preview.file?.text !== undefined && <MarkdownReadingToggle theme={readingTheme} />}
         <button type="button" className="btn chrome-icon-btn panel-icon-button panel-collapse" aria-label={t("ui.FilePanel.collapse_file_panel")} title={t("ui.common.collapse_panel")} onClick={onClose}><PanelRightIcon /></button>
+        {hasTab && notice && <div className="file-notice">
+          <div className="file-notice-message" role="status">
+            {notice.reason && <p>{notice.reason}</p>}
+            {notice.copied !== null && <p>{notice.copied ? t("ui.FilePanel.path_copied") : <>{t("ui.FilePanel.cannot_copy_automatically_copy_manually")}<span className="mono">{notice.path}</span></>}</p>}
+          </div>
+          <button type="button" className="file-action file-notice-close" aria-label={t("ui.common.close")} title={t("ui.common.close")} onClick={() => setNotice(null)}>×</button>
+        </div>}
       </div>
-      {hasTab && notice && <div className="file-notice" role="status">
-        {notice.reason && <p>{notice.reason}</p>}
-        {notice.copied !== null && <p className="dir-copy-status">{notice.copied ? t("ui.FilePanel.path_copied") : <>{t("ui.FilePanel.cannot_copy_automatically_copy_manually")}<span className="mono">{notice.path}</span></>}</p>}
-      </div>}
       {area === "right" && (preview || !hasTab) && tabRow}
       {preview ? <RecoverableLazy key={preview.target.path} load={loadFilePreview} componentProps={{ preview, source, tabId, readingTheme }} label={t("ui.FilePanel.preview")} onClose={onClose} /> : hasTab && visible && <DirectoryContents key={`${tabId}:${session?.id ?? ""}`} initialPath={directoryInitialPath} includeFiles allowWindowsPicker
         refreshPath={session ? undefined : newSessionCwd}

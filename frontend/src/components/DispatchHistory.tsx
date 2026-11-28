@@ -9,22 +9,27 @@ export function DispatchToolIcon({ tool }: { tool: string }) {
   if (tool === "copilot") {
     return <svg className="agent-icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M8 3h8l2 4h2a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2h-2l-2 3H8l-2-3H4a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2h2z" /><rect x="5" y="8" width="6" height="6" rx="2" /><rect x="13" y="8" width="6" height="6" rx="2" /></svg>;
   }
-  if (tool === "codex" || tool === "kimi" || tool === "claude" || tool === "antigravity") {
+  if (tool === "muse") {
+    return <svg className="agent-icon agent-muse" viewBox="0 0 24 24" role="img" aria-label={dispatcherLabel(tool)} fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+      <title>{dispatcherLabel(tool)}</title><path d="M4 18V7l8 8 8-8v11" />
+    </svg>;
+  }
+  if (tool === "codex" || tool === "kimi" || tool === "claude" || tool === "antigravity" || tool === "grok-bot") {
     return <AgentIcon agent={tool} label={dispatcherLabel(tool)} />;
   }
   return null;
 }
 
 export function DispatchHistoryRow({ run }: { run: DispatchRun }) {
-  const status = dispatchStatus(run.status).className;
-  return <button type="button" className="dispatch-history-row" data-tool={run.tool} data-status={status}
+  const status = dispatchStatus(run.status);
+  return <button type="button" className="dispatch-history-row" data-tool={run.tool} data-status={status.className}
     onClick={() => store.navigateDispatches([run.runId])}>
     <span className="dispatch-history-task"><DispatchToolIcon tool={run.tool} />
       <span className="dispatch-history-name">{dispatchName(run)}
         <span className="dispatch-history-model" title={run.model ?? undefined}>{run.model ? dispatchModelName(run.model) : t("ui.common.model_unknown")}</span>
       </span>
     </span>
-    <span className={`dispatch-badge ${status}`}>{run.status}</span>
+    <span className={`dispatch-badge ${status.className}`}>{run.status === "DISPATCHED" ? status.label : run.status}</span>
     <span className="mono">{dispatchTime(run.elapsedS)}</span>
     <time>{new Date(run.endedAt || (Date.parse(run.startedAt || "") + (run.elapsedS || 0) * 1000)).toLocaleString(getLocale(), { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })}</time>
     <span aria-hidden="true">›</span>

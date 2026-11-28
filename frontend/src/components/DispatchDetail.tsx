@@ -1,5 +1,6 @@
 import { t, formatNumber } from "../i18n";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { dispatchExternalUrl } from "../../../shared/dispatch-url";
 import { fetchDispatchDetail, fetchDispatchLog, fetchDispatchMessages } from "../api";
 import { dispatchName, dispatchModelName, dispatchSeconds, dispatchStatus, dispatchTime, dispatcherLabel, dispatcherTitle } from "../dispatch-flow";
 import type { DispatchSessionTitle } from "../dispatch-flow";
@@ -21,6 +22,29 @@ export function dispatchProcessMessages(messages: HistoryMessage[], prompt: stri
     if (text === original || text.startsWith(prefix)) return messages.slice(index + 1);
   }
   return messages;
+}
+
+export function DispatchDetailHeader({ detail, sessions, now }: { detail: Detail; sessions: DispatchSessionTitle[]; now: number }) {
+  const parent = detail.parent;
+  const dispatcher = parent?.agent === "claude" ? dispatcherTitle([detail], sessions)
+    : parent ? t("ui.DispatchDetail.message", { p0: parent.agent, p1: parent.sessionId || parent.runId || t("ui.DispatchDetail.source_unknown_detail") }) : t("ui.DispatchDetail.dispatch_source_unknown");
+  const status = dispatchStatus(detail.status);
+  const statusLabel = detail.status === "running" ? t("ui.common.running") : detail.status === "DISPATCHED" ? status.label : detail.status;
+  const acceptance = detail.acceptResult?.split("←")[0]?.trim();
+  const externalUrl = dispatchExternalUrl(detail.externalUrl);
+  return <header className="dispatch-detail-head" data-tool={detail.tool}>
+    <p className="dispatch-detail-source">{dispatcher} → {dispatcherLabel(detail.tool)}</p>
+    <h1>{dispatchName(detail)}</h1>
+    <div className="dispatch-detail-meta">
+      <span className="mono" title={detail.model ?? undefined}>{detail.model ? dispatchModelName(detail.model) : t("ui.common.model_unknown")} / {detail.effort || t("ui.DispatchDetail.inherit")}</span>
+      <span className="mono" aria-label={t("ui.DispatchDetail.elapsed_time")}>{dispatchTime(dispatchSeconds(detail, now))}</span>
+      <span className={`dispatch-badge ${detail.status === "running" ? "running" : status.className}`}>{t("ui.DispatchDetail.status_value", { status: statusLabel })}</span>
+      {detail.status !== "running" && acceptance && <span title={detail.acceptResult || undefined} className={`dispatch-badge ${detail.status === "ACCEPT_FAIL" ? "failed" : ""}`}>{t("ui.DispatchDetail.acceptance_value", { result: acceptance })}</span>}
+      {detail.credits !== null && <span className="dispatch-badge">{t("ui.DispatchDetail.credits_value", { credits: formatNumber(detail.credits, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) })}</span>}
+      {externalUrl && <a className="btn" href={externalUrl} target="_blank" rel="noopener noreferrer">{t("ui.DispatchDetail.open_in_cloud")}</a>}
+    </div>
+    <p className="dispatch-detail-id mono">{detail.runId}</p>
+  </header>;
 }
 
 export function DispatchDetail({ runId, sessions, terminalOpen }: { runId: string; sessions: DispatchSessionTitle[]; terminalOpen: boolean }) {
@@ -110,26 +134,13 @@ export function DispatchDetail({ runId, sessions, terminalOpen }: { runId: strin
       copyTimer.current = setTimeout(() => setCopied(false), 2000);
     } catch { setError(t("ui.DispatchDetail.copy_failed_select_and_copy_the_resume")); }
   };
-  const parent = detail?.parent;
-  const dispatcher = detail ? parent?.agent === "claude" ? dispatcherTitle([detail], sessions)
-    : parent ? t("ui.DispatchDetail.message", { p0: (parent.agent), p1: (parent.sessionId || parent.runId || t("ui.DispatchDetail.source_unknown_detail")) }) : t("ui.DispatchDetail.dispatch_source_unknown") : "";
   const prompt = detail?.prompt ?? t("ui.DispatchDetail.dispatch_prompt_is_not_available_yet");
   const processMessages = useMemo(() => dispatchProcessMessages(messages, detail?.prompt), [messages, detail?.prompt]);
   return <section className={`dispatch-view dispatch-detail agent-${detail?.tool || "codex"}`} aria-label={t("ui.DispatchDetail.dispatch_details")}>
     <div className="dispatch-detail-nav"><PanelBackButton label={t("ui.DispatchDetail.back_to_dispatches")} onClick={() => store.navigateDispatches()} /><span>{t("ui.DispatchDetail.read_only_details")}</span></div>
     {error && <p className="dispatch-error" role="alert">{error}</p>}
     {!detail ? <p className="dispatch-empty">{t("ui.common.loading_dispatch")}</p> : <>
-      <header className="dispatch-detail-head" data-tool={detail.tool}>
-        <p className="dispatch-detail-source">{dispatcher} → {dispatcherLabel(detail.tool)}</p>
-        <h1>{dispatchName(detail)}</h1>
-        <div className="dispatch-detail-meta"><span className="mono" title={detail.model ?? undefined}>{detail.model ? dispatchModelName(detail.model) : t("ui.common.model_unknown")} / {detail.effort || t("ui.DispatchDetail.inherit")}</span>
-          <span className="mono" aria-label={t("ui.DispatchDetail.elapsed_time")}>{dispatchTime(dispatchSeconds(detail, now))}</span>
-          <span className={`dispatch-badge ${detail.status === "running" ? "running" : dispatchStatus(detail.status).className}`}>{t("ui.DispatchDetail.status_value", { status: detail.status === "running" ? t("ui.common.running") : detail.status })}</span>
-          {detail.status !== "running" && <span title={detail.acceptResult || undefined} className={`dispatch-badge ${detail.status === "ACCEPT_FAIL" ? "failed" : ""}`}>{t("ui.DispatchDetail.acceptance_value", { result: detail.acceptResult?.split("←")[0]?.trim() || t("ui.common.unknown") })}</span>}
-          {detail.credits !== null && <span className="dispatch-badge">{t("ui.DispatchDetail.credits_value", { credits: formatNumber(detail.credits, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) })}</span>}
-        </div>
-        <p className="dispatch-detail-id mono">{detail.runId}</p>
-      </header>
+      <DispatchDetailHeader detail={detail} sessions={sessions} now={now} />
       <section className="dispatch-detail-section"><div className="dispatch-section-head"><h2>{t("ui.DispatchDetail.dispatch_prompt")}</h2>
         <button className="btn" aria-expanded={expanded} onClick={() => setExpanded(!expanded)}>{expanded ? t("ui.common.collapse") : t("ui.DispatchDetail.expand_full_text")}</button></div>
         <pre className={`dispatch-prompt${expanded ? "" : " collapsed"}`}>{expanded ? prompt : prompt.split("\n").slice(0, 5).join("\n")}</pre>

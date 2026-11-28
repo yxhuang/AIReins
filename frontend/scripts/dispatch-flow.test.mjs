@@ -14,7 +14,7 @@ globalThis.window = { location: { hash: '#/', href: 'http://127.0.0.1:8790/' }, 
 const { Store, store } = await import('../src/store.ts');
 const { App } = await import('../src/App.tsx');
 const { DispatchView, DispatchTree } = await import('../src/components/DispatchView.tsx');
-const { DispatchHistoryRow } = await import('../src/components/DispatchHistory.tsx');
+const { DispatchHistoryRow, DispatchToolIcon } = await import('../src/components/DispatchHistory.tsx');
 const { PanelActions, PanelMenuItems } = await import('../src/components/PanelActions.tsx');
 const { DispatchOverviewContext } = await import('../src/components/DispatchOverview.tsx');
 const { SessionDispatchBadge } = await import('../src/components/SessionDispatchLink.tsx');
@@ -28,6 +28,30 @@ const run = (over = {}) => ({ runId: '20261001-100000-codex-task-name', tool: 'c
 const child = (threadId, parentThreadId, depth = 1) => ({ threadId, parentThreadId, depth,
   nickname: threadId, role: 'sol', status: 'running', startedAt: iso(now - 1000), lastActivityAt: iso(now) });
 const treeFor = (runs, expanded = new Set()) => flow.buildDispatchTree(groupDispatches(runs, now), now, expanded);
+await t('云端派单有任务才显示，已派发使用完成连线和品牌图标', () => {
+  assert.deepEqual(groupDispatches([], now).map(group => group.tool), ['codex', 'kimi', 'copilot']);
+  assert.deepEqual(dispatchStatus('DISPATCHED'), { label: '已派发', className: 'finished' });
+  const parent = { agent: 'codex', sessionId: 'cloud-parent', entrypoint: 'cli' };
+  for (const [tool, label] of [['muse', 'Muse'], ['grok-bot', 'Grok Bot']]) {
+    const job = run({ tool, name: '', runId: `20261001-100000-${tool}-cloud-task`, parent,
+      status: 'DISPATCHED', endedAt: iso(now - 1000) });
+    const groups = groupDispatches([job], now);
+    assert.equal(dispatchName(job), 'cloud-task');
+    assert.equal(flow.dispatcherLabel(tool), label);
+    assert.equal(groups.find(group => group.tool === tool)?.runs[0], job);
+    assert.deepEqual(treeFor([job]).edges.find(edge => edge.tool === tool)?.state, 'finish');
+    assert.equal(groupDispatches([job], now + RECENT_DISPATCH_MS).some(group => group.tool === tool), false);
+    assert.deepEqual(flow.dispatchForests([job], []).map(forest => forest.agent), ['codex']);
+    assert.deepEqual(flow.dispatchForests([{ ...job, parent: { ...parent, agent: tool } }], []), []);
+
+    const icon = renderToStaticMarkup(React.createElement(DispatchToolIcon, { tool }));
+    assert.match(icon, new RegExp(`class="agent-icon agent-${tool}" viewBox="0 0 24 24"[^>]*role="img" aria-label="${label}"`));
+    assert.ok(icon.includes(`<title>${label}</title>`));
+    assert.match(icon, tool === 'muse' ? /stroke="currentColor".*d="M4 18V7l8 8 8-8v11"/ : /<path[^>]*fill="currentColor"/);
+    const history = renderToStaticMarkup(React.createElement(DispatchHistoryRow, { run: job }));
+    assert.match(history, /class="dispatch-badge finished">已派发<\/span>/);
+  }
+});
 await t('Antigravity 内环在侧支显示真实模型与计划标题，执行层保留 Codex 和 Kimi', () => {
   const inner = run({ tool: 'antigravity', native: true, agentType: 'inner-loop', effort: null,
     name: '核对结果', model: 'gemini-flash-worker-agy', parent: { agent: 'antigravity', sessionId: 'native', entrypoint: null } });

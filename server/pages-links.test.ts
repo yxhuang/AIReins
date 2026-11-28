@@ -17,15 +17,18 @@ assert.deepEqual(readLinks(root), [], "配置缺失时为空");
 await writeFile(join(root, "links.json"), "{bad JSON");
 assert.deepEqual(readLinks(root), [], "坏 JSON 不抛错");
 await writeFile(join(root, "links.json"), JSON.stringify({ links: [
-  { name: "网页", url: "https://x.com/thsottiaux?lang=en", icon: "𝕏", group: "关注" },
-  { name: "编辑器", url: "vscode://file/home/project" },
+  { name: "网页", url: "https://x.com/thsottiaux?lang=en", icon: "𝕏", group: "关注", pinned: true },
+  { name: "编辑器", url: "vscode://file/home/project", pinned: false },
   { name: "笔记", url: "obsidian://open?vault=work" },
   null, [], { name: "", url: "https://example.com" },
   { name: "bad", url: "javascript:alert(1)" }, { name: "bad", url: "DATA:text/html,test" },
   { name: "bad", url: "java\nscript:alert(1)" }, { name: "bad", url: "/relative" },
   { name: "bad", url: "https://example.com", icon: 1 }, { name: "bad", url: "https://example.com", group: [] },
+  ...["true", 1, null, [], {}].map((pinned) => ({ name: "bad", url: "https://example.com", pinned })),
 ] }));
-assert.deepEqual(readLinks(root).map((link) => link.name), ["网页", "编辑器", "笔记"], "保留合法条目及 scheme，跳过坏字段");
+const validLinks = readLinks(root);
+assert.deepEqual(validLinks.map((link) => link.name), ["网页", "编辑器", "笔记"], "保留合法条目及 scheme，跳过坏字段");
+assert.deepEqual(validLinks.map((link) => link.pinned), [true, undefined, undefined], "只输出 true，接受 false 和缺省");
 assert.deepEqual(scanPages(root).map((p) => p.id), ["ok"], "根目录 links.json 不参与页面扫描");
 await writeFile(join(root, "links.json"), JSON.stringify({ links: [{ name: "更新", url: "https://example.com" }] }));
 assert.equal(readLinks(root)[0]?.name, "更新", "再次读取立即看到改动");
@@ -38,14 +41,20 @@ const repo = await mkdtemp(join(tmpdir(), "wb-links-repo-"));
 const local = await mkdtemp(join(tmpdir(), "wb-links-local-"));
 assert.deepEqual(readLauncherLinks(repo, local), [], "两处都缺失时为空");
 await writeFile(join(repo, "links.json"), JSON.stringify({ links: [
-  { name: "共享A", url: "https://a.example" }, { name: "共享B", url: "https://b.example", group: "参考" },
+  { name: "共享A", url: "https://a.example" }, { name: "共享B", url: "https://b.example", group: "参考", pinned: true },
+  { name: "共享D", url: "https://d.example" },
 ] }));
-assert.deepEqual(readLauncherLinks(repo, local).map((link) => link.name), ["共享A", "共享B"], "本机缺失时用仓库菜单");
+const defaults = readLauncherLinks(repo, local);
+assert.deepEqual(defaults.map((link) => link.name), ["共享A", "共享B", "共享D"], "本机缺失时用仓库菜单");
+assert.equal(defaults[1]?.pinned, true, "仓库置顶默认生效");
 await writeFile(join(local, "links.json"), JSON.stringify({ links: [
-  { name: "本机B", url: "https://b.example", icon: "🔥" }, { name: "本机C", url: "https://c.example" },
+  { name: "本机A", url: "https://a.example", pinned: true },
+  { name: "本机B", url: "https://b.example", icon: "🔥", pinned: false }, { name: "本机C", url: "https://c.example" },
 ] }));
-assert.deepEqual(readLauncherLinks(repo, local).map((link) => link.name), ["共享A", "本机B", "本机C"], "同 URL 本机覆盖原位，其余追加");
+const merged = readLauncherLinks(repo, local);
+assert.deepEqual(merged.map((link) => link.name), ["本机A", "本机B", "共享D", "本机C"], "同 URL 本机覆盖原位，其余追加");
+assert.deepEqual(merged.map((link) => link.pinned), [true, undefined, undefined, undefined], "本机可置顶或取消置顶同 URL 条目");
 await writeFile(join(repo, "links.json"), "{bad JSON");
-assert.deepEqual(readLauncherLinks(repo, local).map((link) => link.name), ["本机B", "本机C"], "仓库菜单损坏不影响本机条目");
+assert.deepEqual(readLauncherLinks(repo, local).map((link) => link.name), ["本机A", "本机B", "本机C"], "仓库菜单损坏不影响本机条目");
 
 console.log("✅ links 配置容错、scheme 校验和实时读取全过");

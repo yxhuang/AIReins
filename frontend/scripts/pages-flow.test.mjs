@@ -7,14 +7,19 @@
 // 浏览器依赖（window / WebSocket / fetch）全部打桩，不需要真实 server。
 // 运行：npx tsx frontend/scripts/pages-flow.test.mjs
 import { strict as assert } from "node:assert";
+import { readFileSync } from "node:fs";
+import React from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 
 // --- 浏览器全局打桩（须在 import store 之前） ---
 globalThis.WebSocket = { CONNECTING: 0, OPEN: 1, CLOSING: 2, CLOSED: 3 };
 globalThis.window = { location: { hash: "#/" }, addEventListener() {} };
+globalThis.React = React;
 
 const { isInlineSvg, isLoopbackUrl, partitionPages, pageRenderMode } = await import("../src/pages.ts");
 const { fetchPageHealth } = await import("../src/api.ts");
 const { Store } = await import("../src/store.ts");
+const { LauncherPinnedLinks } = await import("../src/components/LauncherMenu.tsx");
 
 let pass = 0;
 const t = async (name, fn) => {
@@ -23,6 +28,23 @@ const t = async (name, fn) => {
 };
 
 const envelope = (data) => ({ json: async () => ({ code: 0, msg: "", data, request_id: "t" }) });
+
+await t("直达置顶：只接受 true，依列表顺序最多两个，Grok Bot 复用品牌图标", () => {
+  const { links } = JSON.parse(readFileSync(new URL("../../pages/links.json", import.meta.url), "utf8"));
+  const [muse, grok, aws] = ["Muse", "Grok Bot", "AWS Quick"].map((name) => links.find((link) => link.name === name));
+  assert.equal(muse.pinned, true);
+  assert.equal(grok.pinned, undefined);
+  const renderPins = (items) => renderToStaticMarkup(React.createElement(LauncherPinnedLinks, { links: items, onNavigate() {} }));
+  const html = renderPins([
+    { ...aws, pinned: false }, { ...aws, pinned: "true" }, grok,
+    muse, { ...grok, pinned: true }, { ...aws, pinned: true },
+  ]);
+  assert.deepEqual([...html.matchAll(/<a [^>]*aria-label="([^"]+)"/g)].map((match) => match[1]), ["Muse", "Grok Bot"]);
+  assert.match(html, /href="https:\/\/muse\.ai\/" target="_blank" rel="noopener noreferrer"/);
+  assert.match(html, /<svg[^>]*stroke="currentColor"/, "保留 Muse 内联 SVG");
+  assert.match(html, /<svg class="agent-icon agent-grok-bot"[^>]*>.*<path/, "复用 AgentIcon 的 Grok 图标");
+  assert.match(renderPins([{ name: "No icon", url: "https://example.com", pinned: true }]), /<svg/, "无图标的置顶链接仍有通用图标");
+});
 
 const AI_USAGE = {
   id: "ai-usage", name: "AI 用量", icon: "📊", type: "iframe",

@@ -4,13 +4,14 @@ import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { StringDecoder } from "node:string_decoder";
 import { createHash } from "node:crypto";
+import { dispatchExternalUrl } from "../shared/dispatch-url.js";
 import { HistoryIndex, mergeHistoryMessages, parseHistoryMessages, type HistoryMessage } from "./history.js";
 import { boundExternalMessages, NativeConversationReader } from "./native-conversation.js";
 import type { AgentKind, SessionRecord, SessionStatus } from "./types.js";
 
-const RUN_ID = /^(\d{8})-(\d{6})-(codex|kimi|copilot|claude)-(.*)$/u;
+const RUN_ID = /^(\d{8})-(\d{6})-(codex|kimi|copilot|claude|muse|grok-bot)-(.*)$/u;
 const CHUNK_SIZE = 64 * 1024;
-const STATUSES = new Set(["running", "OK", "TOOL_FAIL", "ACCEPT_FAIL", "TIMEOUT"]);
+const STATUSES = new Set(["running", "OK", "DISPATCHED", "TOOL_FAIL", "ACCEPT_FAIL", "TIMEOUT"]);
 
 export interface Dispatch {
   runId: string;
@@ -28,6 +29,7 @@ export interface Dispatch {
   session: string | null;
   parent: { agent: string; sessionId: string | null; entrypoint: string | null; model: string | null; title?: string | null; runId?: string } | null;
   promptHead: string | null;
+  externalUrl?: string | null;
   subagents?: CodexSubagent[];
   agentType?: string | null;
   /** Native child records have no delegate prompt/log files and are display-only. */
@@ -989,6 +991,7 @@ async function readDispatch(runId: string, directory: string, includePrompt = tr
       result.exit = numberValue(data.exit);
       result.files = numberValue(data.files);
       result.session = stringValue(data.session);
+      if ("externalUrl" in data) result.externalUrl = dispatchExternalUrl(data.externalUrl);
       const parent = data.parent;
       if (parent && typeof parent === "object" && !Array.isArray(parent)) {
         const input = parent as Record<string, unknown>;

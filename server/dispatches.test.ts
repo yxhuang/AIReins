@@ -3,7 +3,7 @@ import { spawn } from "node:child_process";
 import { appendFile, chmod, mkdir, mkdtemp, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { DispatchQueryError, dispatchSessionMap, getDispatch, getDispatchLog, listDispatches, listDispatchOverview, readClaudeTranscriptModel, readClaudeParentModel } from "./dispatches.js";
+import { countActiveDispatchesBySession, DispatchQueryError, dispatchSessionMap, getDispatch, getDispatchLog, listDispatches, listDispatchHistory, listDispatchOverview, listParentDispatches, readClaudeTranscriptModel, readClaudeParentModel } from "./dispatches.js";
 
 const realNow = Date.now;
 let cacheNow = realNow();
@@ -15,8 +15,8 @@ const previousHistory = process.env.WORKBENCH_CODEX_HISTORY_DIR;
 process.env.WB_DELEGATE_DIR = root;
 process.env.WORKBENCH_CODEX_HISTORY_DIR = join(root, "codex-history");
 
-async function fixture(id: string, files: Record<string, unknown> = {}): Promise<string> {
-  const directory = join(root, id);
+async function fixture(id: string, files: Record<string, unknown> = {}, fixtureRoot = root): Promise<string> {
+  const directory = join(fixtureRoot, id);
   await mkdir(directory);
   cacheNow += 2001;
   for (const [name, value] of Object.entries(files)) {
@@ -251,6 +251,41 @@ try {
     await writeFile(join(manyRoot, runId, "run.json"), JSON.stringify({ schema: 1, session: `id-${i}` }));
   }
   assert.equal((await dispatchSessionMap(manyRoot)).size, 205, "遍历全部目录，不套用列表 200 条上限");
+
+  const cloudRoot = join(root, "cloud-runs");
+  await mkdir(cloudRoot);
+  const cloudParent = { agent: "codex", sessionId: "cloud-parent", entrypoint: "cli" };
+  const cloudRun = {
+    schema: 1, status: "DISPATCHED", pid: deadPid, parent: cloudParent,
+    startedAt: "2026-10-01T12:00:00Z", elapsed_s: 60,
+  };
+  const cloudIds = [];
+  for (const [tool, externalUrl] of [["muse", "https://example.com/muse/run"], ["grok-bot", "http://example.com/grok/run"]]) {
+    const runId = `20261001-120000-${tool}-cloud-task`;
+    cloudIds.push(runId);
+    await fixture(runId, { "run.json": { ...cloudRun, externalUrl } }, cloudRoot);
+    const cloudDetail = await getDispatch(runId, cloudRoot);
+    assert.equal(cloudDetail?.tool, tool);
+    assert.equal(cloudDetail?.name, "cloud-task");
+    assert.equal(cloudDetail?.status, "DISPATCHED", "无 endedAt 的云端派单也不会检查已退出的 PID");
+    assert.equal(cloudDetail?.externalUrl, externalUrl);
+  }
+  const cloudSession = { id: "cloud-parent", agent: "codex" as const, cwd: "/project" };
+  const counts = await countActiveDispatchesBySession([cloudSession], cloudRoot, { fresh: true });
+  assert.equal(counts.has(cloudSession.id), false);
+  assert.deepEqual(await listParentDispatches(cloudSession.id, cloudRoot, "codex"), []);
+  const history = await listDispatchHistory(null, cloudRoot, Date.parse("2026-10-01T13:00:00Z"));
+  assert.deepEqual(history.dispatches.filter((item) => item.status === "DISPATCHED").map((item) => item.runId).sort(), cloudIds.sort());
+
+  const invalidUrls = ["javascript:alert(1)", "file:///tmp/run", "https://", "https:///example.com",
+    "https://exa\tmple.com/", "https://example.com/a b", "https://example.com/\u0000run", 42, null];
+  for (const [index, externalUrl] of invalidUrls.entries()) {
+    const runId = `20261001-120001-muse-invalid-${index}`;
+    await fixture(runId, { "run.json": { ...cloudRun, externalUrl } }, cloudRoot);
+    const cloudDetail = await getDispatch(runId, cloudRoot);
+    assert.equal(cloudDetail?.status, "DISPATCHED");
+    assert.equal(cloudDetail?.externalUrl, null);
+  }
   console.log("✅ dispatches 只读接口及全量缓存会话映射测试全过");
 } finally {
   Date.now = realNow;

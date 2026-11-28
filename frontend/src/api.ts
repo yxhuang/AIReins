@@ -471,7 +471,7 @@ export function fetchPages(): Promise<PageManifest[]> {
   return call<{ pages: PageManifest[] }>("/api/pages").then((data) => data.pages);
 }
 
-export interface LauncherLink { name: string; url: string; icon?: string; group?: string }
+export interface LauncherLink { name: string; url: string; icon?: string; group?: string; pinned?: boolean }
 
 export function fetchLinks(): Promise<LauncherLink[]> {
   return call<{ links: LauncherLink[] }>("/api/links", { cache: "no-store" }).then((data) => data.links);
